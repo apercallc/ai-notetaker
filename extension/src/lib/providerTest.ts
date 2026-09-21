@@ -16,11 +16,35 @@ export interface WebappHealthResult {
   message: string;
 }
 
+/**
+ * Normalize a user-owned webapp URL and reject destinations that could send
+ * its bearer token over an unsafe scheme or through embedded credentials.
+ * Plain HTTP remains available for loopback development only.
+ */
+export function normalizeWebappUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw.trim());
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return null;
+    if (url.username || url.password) return null;
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
 export async function testWebappHealth(
   url: string,
   fetchImpl: Fetcher = fetch,
 ): Promise<WebappHealthResult> {
-  const normalized = url.replace(/\/+$/, "");
+  const normalized = normalizeWebappUrl(url);
+  if (!normalized) {
+    return {
+      healthy: false,
+      message: "Use an HTTPS webapp URL (HTTP is allowed only for localhost).",
+    };
+  }
   try {
     const response = await fetchImpl(`${normalized}/api/health`);
     if (response.ok) {

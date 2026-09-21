@@ -20,6 +20,7 @@ const HOST_NAME = "com.ainotetaker.helper";
 const TEST_PROVIDER_KEY_TIMEOUT_MS = 10_000;
 const MIN_NOT_FOUND_BACKOFF_MS = 1_000;
 const MAX_NOT_FOUND_BACKOFF_MS = 30_000;
+const HELPER_RETRY_ALARM = "ai-notetaker-helper-retry";
 
 type Listener<T> = (message: T) => void;
 type IncomingMessageType = IncomingMessage["type"];
@@ -125,7 +126,18 @@ export class NativeMessagingClient {
     this.setStatus("helper_not_found");
     const delay = this.notFoundBackoffMs;
     this.notFoundBackoffMs = Math.min(this.notFoundBackoffMs * 2, MAX_NOT_FOUND_BACKOFF_MS);
-    setTimeout(() => void this.connect(), delay);
+    if (chrome.alarms?.create) {
+      void chrome.alarms.create(HELPER_RETRY_ALARM, { delayInMinutes: delay / 60_000 });
+    } else {
+      // The fallback keeps the client usable in non-Chrome test harnesses and
+      // older Chromium variants; production MV3 uses the alarm above so a
+      // suspended service worker is woken for the retry.
+      setTimeout(() => void this.connect(), delay);
+    }
+  }
+
+  retryFromAlarm(): void {
+    void this.connect();
   }
 
   private handleMessage(raw: unknown): void {
@@ -221,7 +233,12 @@ export class NativeMessagingClient {
         resolve(result);
       };
       this.on("provider_key_test_result", handler);
-      this.send({ type: "test_provider_key", provider, key });
+      try {
+        this.send({ type: "test_provider_key", provider, key });
+      } catch {
+        settle({ valid: false, message: "The helper is not connected. Install and start it, then try again." });
+        return;
+      }
       setTimeout(
         () => settle({ valid: false, message: "Timed out waiting for the helper to respond. Is it running?" }),
         TEST_PROVIDER_KEY_TIMEOUT_MS,

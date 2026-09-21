@@ -1,6 +1,7 @@
 import { getSettings } from "../lib/storage";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { DEFAULT_SETTINGS, type NotetakerSettings } from "../types";
+import { escapeHtml } from "../lib/html";
 
 const app = document.getElementById("app")!;
 const TOTAL_STEPS = 4;
@@ -58,14 +59,21 @@ function renderStep2(): string {
       Huddles — any of them), choose <strong>"AI Notetaker"</strong> as both
       your microphone and your speaker.
     </p>
-    <div class="screenshot-placeholder">
-      <p><strong>macOS:</strong> open your meeting app's Preferences/Settings
-      → Audio, and set both Microphone and Speaker to "AI Notetaker."</p>
-      <p><strong>Windows:</strong> open your meeting app's audio settings and
-      choose "AI Notetaker (VB-Cable)" for both Microphone and Speaker.</p>
-      <p><strong>Linux:</strong> in your system sound settings or your
-      meeting app's audio settings, select the "AI Notetaker" input and
-      output device.</p>
+    <div class="device-guide" aria-label="Audio device setup by operating system">
+      <section class="platform-card">
+        <h2>macOS</h2>
+        <p>In Audio MIDI Setup, create a Multi-Output Device containing BlackHole and your headphones or speakers. Choose it as Speaker and BlackHole as Microphone in the meeting app.</p>
+      </section>
+      <section class="platform-card">
+        <h2>Windows</h2>
+        <p>Enable “Listen to this device” for CABLE Output and choose your normal headphones as playback. Choose CABLE Input as Speaker and CABLE Output as Microphone in the meeting app.</p>
+      </section>
+      <section class="platform-card">
+        <h2>Linux</h2>
+        <p>Choose “AI Notetaker” (the PulseAudio/PipeWire virtual device) for input and output in the meeting app. Keep your normal speakers as system output so loopback remains audible.</p>
+      </section>
+      <p class="text-secondary setup-note">Device names vary by OS and meeting app. See the helper packaging guide for troubleshooting and uninstall steps.</p>
+      <a class="setup-link" href="https://github.com/ai-notetaker/ai-notetaker/blob/main/docs/helper-packaging.md" target="_blank" rel="noreferrer">Open the full setup and uninstall guide</a>
     </div>
     <label class="checkbox-row">
       <input type="checkbox" id="device-selected" />
@@ -84,11 +92,11 @@ function renderStep3(): string {
     </p>
     <div class="field">
       <label for="onboarding-deepgram-key">Deepgram API key (transcription)</label>
-      <input type="password" id="onboarding-deepgram-key" value="${settings.apiKeys.deepgram ?? ""}" />
+      <input type="password" id="onboarding-deepgram-key" value="${escapeHtml(settings.apiKeys.deepgram ?? "")}" />
     </div>
     <div class="field">
       <label for="onboarding-claude-key">Claude API key (summarization)</label>
-      <input type="password" id="onboarding-claude-key" value="${settings.apiKeys.claude ?? ""}" />
+      <input type="password" id="onboarding-claude-key" value="${escapeHtml(settings.apiKeys.claude ?? "")}" />
     </div>
     <button type="button" class="secondary" id="test-onboarding-keys">Test keys</button>
     <p class="test-result" id="onboarding-key-result"></p>

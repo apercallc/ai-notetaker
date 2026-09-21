@@ -35,7 +35,7 @@ Messaging host — that's built separately in `../helper/`.
 
 ## What's implemented vs. not yet verified live
 
-Implemented and unit-tested (42 tests, all passing): local storage
+Implemented and unit-tested (55 tests, all passing): local storage
 (settings/meetings, `chrome.storage.local` only, never `.sync`), the
 Native Messaging client and reconnect behavior, the background
 orchestration logic (transcript/summary handling, webapp sync, crash

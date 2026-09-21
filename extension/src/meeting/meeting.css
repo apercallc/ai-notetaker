@@ -21,7 +21,7 @@ section {
 }
 
 section h2 {
-  font-size: 14px;
+  font-size: 0.875rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-secondary);
@@ -50,7 +50,7 @@ section h2 {
 
 .transcript-line .timestamp {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 0.75rem;
   margin-left: var(--space-1);
 }
 

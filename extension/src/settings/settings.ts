@@ -1,6 +1,8 @@
 import { getSettings } from "../lib/storage";
-import { testWebappHealth } from "../lib/providerTest";
+import { normalizeWebappUrl, testWebappHealth } from "../lib/providerTest";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
+import { escapeHtml } from "../lib/html";
+import { estimateMeetingCost } from "../lib/costEstimate";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
 
 const app = document.getElementById("app")!;
@@ -27,6 +29,12 @@ function render(): void {
         <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}">Budget (lowest cost)</button>
       </div>
 
+      <div class="cost-estimator">
+        <label for="meeting-minutes">Estimated meeting length (minutes)</label>
+        <input type="number" id="meeting-minutes" min="1" max="480" step="1" value="45" />
+        <p class="field-hint text-secondary" id="cost-estimate" aria-live="polite"></p>
+      </div>
+
       ${!budget ? renderDefaultTierFields() : renderBudgetTierFields()}
     </fieldset>
 
@@ -38,12 +46,12 @@ function render(): void {
       </p>
       <div class="field">
         <label for="webapp-url">Webapp URL</label>
-        <input type="url" id="webapp-url" placeholder="https://your-app.up.railway.app" value="${settings.webapp?.url ?? ""}" />
+        <input type="url" id="webapp-url" placeholder="https://your-app.up.railway.app" value="${escapeHtml(settings.webapp?.url ?? "")}" />
       </div>
       <div class="field">
         <label for="webapp-token">Access token</label>
         <div class="key-row">
-          <input type="password" id="webapp-token" value="${settings.webapp?.token ?? ""}" />
+          <input type="password" id="webapp-token" value="${escapeHtml(settings.webapp?.token ?? "")}" />
           <button type="button" class="secondary" id="test-webapp">Test connection</button>
         </div>
         <p class="test-result" id="webapp-test-result"></p>
@@ -85,7 +93,7 @@ function renderKeyField(provider: keyof NotetakerSettings["apiKeys"], label: str
     <div class="field">
       <label for="key-${provider}">${label}</label>
       <div class="key-row">
-        <input type="password" id="key-${provider}" data-provider="${provider}" value="${settings.apiKeys[provider] ?? ""}" />
+        <input type="password" id="key-${provider}" data-provider="${provider}" value="${escapeHtml(settings.apiKeys[provider] ?? "")}" />
         <button type="button" class="secondary test-key" data-provider="${provider}">Test</button>
       </div>
       <p class="field-hint text-secondary">${hint}</p>
@@ -114,6 +122,18 @@ function readFormIntoSettings(): void {
 }
 
 function wireEvents(): void {
+  const minutesInput = document.getElementById("meeting-minutes") as HTMLInputElement | null;
+  const costEstimate = document.getElementById("cost-estimate");
+  const updateCostEstimate = () => {
+    if (!minutesInput || !costEstimate) return;
+    const minutes = Number(minutesInput.value);
+    const estimate = estimateMeetingCost(budgetTier(), minutes);
+    costEstimate.textContent = `Approx. $${estimate.toFixed(2)} in provider fees. Your providers bill you directly; verify current pricing before relying on this estimate.`;
+  };
+  const budgetTier = () => (isBudgetTier(settings) ? "budget" : "default") as "budget" | "default";
+  minutesInput?.addEventListener("input", updateCostEstimate);
+  updateCostEstimate();
+
   document.getElementById("tier-default")?.addEventListener("click", () => {
     readFormIntoSettings();
     settings.transcriptionProvider = "deepgram";
@@ -162,6 +182,11 @@ function wireEvents(): void {
   document.getElementById("save-settings")?.addEventListener("click", async () => {
     readFormIntoSettings();
     const statusEl = document.getElementById("save-status")!;
+    if (settings.webapp && !normalizeWebappUrl(settings.webapp.url)) {
+      statusEl.textContent = "Use an HTTPS webapp URL (HTTP is allowed only for localhost).";
+      statusEl.className = "test-result invalid";
+      return;
+    }
     await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
     statusEl.textContent = "Saved.";
     setTimeout(() => {

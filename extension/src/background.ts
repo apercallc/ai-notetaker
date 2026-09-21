@@ -12,6 +12,10 @@ import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/interna
 const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
 
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name === "ai-notetaker-helper-retry") client.retryFromAlarm();
+});
+
 // The onboarding wizard (helper install → select device → API key(s)) is
 // the architecture's whole "simple, straightforward install" pillar — it
 // did nothing on its own until this listener existed, since nothing else

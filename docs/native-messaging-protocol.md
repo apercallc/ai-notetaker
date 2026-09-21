@@ -49,8 +49,12 @@ Native Messaging already restricts the channel to this extension ID at the
 OS level, but we add one more layer: on first connection ever, the helper
 generates a random pairing token and sends it to the extension in a
 `paired` message. The extension stores it in `chrome.storage.local` and
-includes it in every subsequent message. The helper rejects any message
-missing or mismatching the token once pairing has happened once.
+presents it in the first `hello` frame of every subsequent connection. The
+helper rejects a connection whose first frame is not `hello`, and rejects the
+connection when that token is missing or mismatched. All later frames inherit
+that connection-level authentication; the token is intentionally not copied
+into each settings/audio-control message. The token is stored in a mode-0600
+file on Unix-like systems.
 
 ## Messages: extension → helper
 

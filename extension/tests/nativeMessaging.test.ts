@@ -327,5 +327,13 @@ describe("NativeMessagingClient", () => {
         message: "Timed out waiting for the helper to respond. Is it running?",
       });
     });
+
+    it("returns a useful result instead of rejecting when the helper is disconnected", async () => {
+      const client = new NativeMessagingClient();
+      await expect(client.testProviderKey("groq", "some-key")).resolves.toEqual({
+        valid: false,
+        message: "The helper is not connected. Install and start it, then try again.",
+      });
+    });
   });
 });

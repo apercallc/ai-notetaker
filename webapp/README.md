@@ -84,7 +84,7 @@ parallel would let one file's cleanup race another's assertions.
 
 ## What's verified vs. not (as of this build)
 
-Verified directly against a real Postgres and a real running server (not
+Verified locally against a real Postgres for the data-layer/API tests (not
 just unit tests against mocks):
 
 - All CRUD operations (`upsertMeeting`/`listMeetings`/`getMeeting`/
@@ -92,13 +92,8 @@ just unit tests against mocks):
 - The auth proxy: every `/api/*` route rejects missing/wrong tokens except
   `/api/health`; UI routes redirect to `/login` without a valid session
   cookie.
-- The full browser flow via Playwright against a live `next build` +
-  `next start`-equivalent dev server: login → meeting list → search →
-  meeting detail → delete (with a confirmation dialog, both cancel and
-  confirm paths) → empty state.
-- Dark mode rendering (screenshot-verified).
-- Production build (`npm run build`) is clean — no type errors, no
-  warnings, 0 `npm audit` vulnerabilities.
+- Production build (`npm run build`) is clean with no type errors. Browser
+  rendering and screenshot proof still require a real browser pass.
 
 Not verified in this build (needs a real deploy to confirm):
 

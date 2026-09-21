@@ -1,13 +1,8 @@
 import { deleteMeeting, getMeeting } from "../lib/storage";
+import { escapeHtml } from "../lib/html";
 import { speakerLabel } from "../types";
 
 const app = document.getElementById("app")!;
-
-function escapeHtml(value: string): string {
-  const div = document.createElement("div");
-  div.textContent = value;
-  return div.innerHTML;
-}
 
 function exportAsMarkdown(meeting: NonNullable<Awaited<ReturnType<typeof getMeeting>>>): string {
   const lines = [
@@ -66,7 +61,7 @@ async function render(): Promise<void> {
       ${meeting.transcript
         .map(
           (segment) =>
-            `<p class="transcript-line"><span class="speaker">${speakerLabel(segment.speaker)}:</span>${escapeHtml(segment.text)}</p>`,
+            `<p class="transcript-line"><span class="speaker">${escapeHtml(speakerLabel(segment.speaker))}:</span>${escapeHtml(segment.text)}</p>`,
         )
         .join("")}
     </section>

@@ -16,7 +16,7 @@ header.app-header {
 }
 
 header.app-header h1 {
-  font-size: 15px;
+  font-size: 0.9375rem;
   margin: 0;
 }
 
@@ -41,6 +41,11 @@ header.app-header button.icon-button:hover {
   margin-bottom: var(--space-3);
 }
 
+.banner-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .banner.recoverable,
 .banner.missing-helper {
   border: 1px solid var(--color-warning);
@@ -59,7 +64,7 @@ button.record-toggle {
   width: 88px;
   height: 88px;
   border-radius: 50%;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
 }
 
@@ -70,7 +75,7 @@ button.record-toggle {
   border-radius: var(--radius);
   padding: var(--space-2);
   margin-top: var(--space-2);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .transcript-line {
@@ -83,7 +88,7 @@ button.record-toggle {
 }
 
 .history-section h2 {
-  font-size: 12px;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-secondary);
@@ -111,7 +116,7 @@ button.record-toggle {
 }
 
 .history-item .meeting-meta {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .empty-state {

@@ -30,7 +30,7 @@ legend {
 }
 
 .field-hint {
-  font-size: 12px;
+  font-size: 0.75rem;
   margin-top: var(--space-1);
 }
 
@@ -59,8 +59,24 @@ legend {
   color: var(--color-accent-text);
 }
 
+.cost-estimator {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.cost-estimator input[type="number"] {
+  width: 8rem;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
+
 .test-result {
-  font-size: 12px;
+  font-size: 0.75rem;
   margin-top: var(--space-1);
 }
 

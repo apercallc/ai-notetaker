@@ -116,11 +116,22 @@ export interface ListMeetingsOptions {
   offset?: number;
 }
 
+const MAX_SEARCH_LENGTH = 200;
+
 export async function listMeetings(
   options: ListMeetingsOptions
 ): Promise<{ meetings: MeetingSummaryResponse[]; total: number }> {
+  if (options.query && options.query.length > MAX_SEARCH_LENGTH) {
+    throw new ValidationError(`query must be ${MAX_SEARCH_LENGTH} characters or fewer`);
+  }
+  if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 0)) {
+    throw new ValidationError("limit must be a non-negative integer");
+  }
+  if (options.offset !== undefined && (!Number.isSafeInteger(options.offset) || options.offset < 0)) {
+    throw new ValidationError("offset must be a non-negative integer");
+  }
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
-  const offset = Math.max(options.offset ?? 0, 0);
+  const offset = options.offset ?? 0;
 
   const where = {
     userId: LOCAL_USER_ID,

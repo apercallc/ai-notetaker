@@ -64,6 +64,22 @@ describe("BackgroundController", () => {
     expect(stored?.status).toBe("recording");
   });
 
+  it("does not leave a phantom recording when the helper send fails", async () => {
+    const client = createFakeClient();
+    vi.spyOn(client, "startRecording").mockImplementation(() => {
+      throw new Error("not connected");
+    });
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+
+    const meetingId = await controller.startRecording();
+
+    expect(controller.getState().activeMeeting).toBeNull();
+    expect((await getMeeting(meetingId))?.status).toBe("error");
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", meetingId }));
+  });
+
   it("appends transcript_partial segments to the active meeting and persists them", async () => {
     const client = createFakeClient();
     const broadcast = vi.fn();
@@ -176,6 +192,26 @@ describe("BackgroundController", () => {
 
     const stored = await getMeeting(meetingId);
     expect(stored?.errorMessage).toBe("Key rejected");
+  });
+
+  it("keeps the meeting active when a failed chunk is queued for retry", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    client.emit("error", {
+      meetingId,
+      code: "provider_unreachable",
+      message: "transcription failed, queued for retry: temporary outage",
+    });
+
+    await vi.waitFor(async () => {
+      expect((await getMeeting(meetingId))?.status).toBe("recording");
+      expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "PROCESSING_WARNING" }));
+    });
+    expect(controller.getState().activeMeeting).toEqual({ id: meetingId });
   });
 
   it("marks the meeting as processing and reflects no active meeting once stopped", async () => {

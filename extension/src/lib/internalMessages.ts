@@ -26,6 +26,7 @@ export type BackgroundToUiMessage =
   | { type: "STATE"; state: BackgroundState }
   | { type: "TRANSCRIPT_UPDATE"; meetingId: string; speaker: Speaker; text: string; isFinal: boolean }
   | { type: "SUMMARY_READY"; meetingId: string; summary: string; actionItems: ActionItem[] }
+  | { type: "PROCESSING_WARNING"; meetingId: string; message: string }
   | { type: "RECORDING_ERROR"; meetingId: string | null; message: string }
   | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
   | { type: "HELPER_STATUS"; status: HelperConnectionStatus };

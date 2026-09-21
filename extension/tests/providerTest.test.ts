@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { testWebappHealth } from "../src/lib/providerTest";
+import { normalizeWebappUrl, testWebappHealth } from "../src/lib/providerTest";
+
+describe("normalizeWebappUrl", () => {
+  it("normalizes HTTPS URLs and removes fragments", () => {
+    expect(normalizeWebappUrl("https://notes.example.com/app/#settings")).toBe("https://notes.example.com/app");
+  });
+
+  it("allows HTTP only for loopback development", () => {
+    expect(normalizeWebappUrl("http://localhost:3000")).toBe("http://localhost:3000");
+    expect(normalizeWebappUrl("http://notes.example.com")).toBeNull();
+  });
+
+  it("rejects embedded credentials and non-web schemes", () => {
+    expect(normalizeWebappUrl("https://user:pass@notes.example.com")).toBeNull();
+    expect(normalizeWebappUrl("file:///tmp/notes")).toBeNull();
+  });
+});
 
 describe("testWebappHealth", () => {
   it("returns healthy when /api/health responds ok, with no auth header required", async () => {

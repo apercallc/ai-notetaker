@@ -1,17 +1,12 @@
 import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
 import { speakerLabel, type MeetingRecord, type Speaker } from "../types";
+import { escapeHtml } from "../lib/html";
 
 const app = document.getElementById("app")!;
 
 async function sendToBackground<T>(message: unknown): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
-}
-
-function escapeHtml(value: string): string {
-  const div = document.createElement("div");
-  div.textContent = value;
-  return div.innerHTML;
 }
 
 function formatRelativeDate(iso: string): string {
@@ -31,7 +26,7 @@ const SETTINGS_ICON_SVG = `
 function renderHeader(showSettings: boolean): string {
   return `
     <header class="app-header">
-      <h1>AI Notetaker</h1>
+      <h1 tabindex="-1" data-view-heading>AI Notetaker</h1>
       ${showSettings ? `<button class="icon-button" id="open-settings" aria-label="Open settings">${SETTINGS_ICON_SVG}</button>` : ""}
     </header>
   `;
@@ -55,7 +50,7 @@ async function renderRecoverableBanner(recoverableMeeting: NonNullable<Backgroun
   container.className = "banner recoverable";
   container.innerHTML = `
     <p><strong>Unfinished recording found.</strong> It looks like the helper was interrupted while recording a meeting started ${formatRelativeDate(recoverableMeeting.startedAt)}.</p>
-    <div style="display:flex; gap: 8px;">
+    <div class="banner-actions">
       <button class="primary" id="resume-recording">Resume</button>
       <button class="secondary" id="discard-recording">Discard</button>
     </div>
@@ -129,6 +124,10 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
       chrome.runtime.onMessage.removeListener(liveListener);
       void render();
     }
+    if (message.type === "PROCESSING_WARNING" && message.meetingId === meetingId) {
+      const status = document.getElementById("status");
+      if (status) status.textContent = "A transcription chunk will be retried automatically.";
+    }
   });
 }
 
@@ -140,7 +139,7 @@ function renderHistoryItem(meeting: MeetingRecord): string {
         ? " · Failed"
         : "";
   return `
-    <button class="history-item" data-meeting-id="${meeting.id}">
+    <button class="history-item" data-meeting-id="${escapeHtml(meeting.id)}">
       <span class="meeting-title">${escapeHtml(meeting.title)}</span>
       <span class="meeting-meta text-secondary">${formatRelativeDate(meeting.startedAt)}${statusLabel}</span>
     </button>
@@ -156,7 +155,7 @@ async function renderIdleState(): Promise<void> {
       <p class="text-secondary">Make sure this device is selected as your mic/speaker in your meeting app.</p>
     </div>
     <div class="history-section">
-      <h2>Recent meetings</h2>
+      <h2 tabindex="-1" data-view-heading>Recent meetings</h2>
       ${
         meetings.length > 0
           ? meetings.map(renderHistoryItem).join("")
@@ -203,6 +202,10 @@ async function render(): Promise<void> {
   if (state.helperStatus === "helper_not_found" && !state.activeMeeting) {
     renderHelperMissingBanner();
   }
+
+  // Each render replaces the entire view. Move focus to the new view's
+  // heading instead of leaving keyboard users at document.body.
+  app.querySelector<HTMLElement>("[data-view-heading]")?.focus({ preventScroll: true });
 }
 
 void render();

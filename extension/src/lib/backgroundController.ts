@@ -8,6 +8,7 @@
 import type { BackgroundState, BackgroundToUiMessage } from "./internalMessages";
 import type { HelperConnectionStatus } from "./nativeMessaging";
 import { getMeeting, getSettings, saveMeeting, saveSettings } from "./storage";
+import { normalizeWebappUrl } from "./providerTest";
 import type { IncomingMessage, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
 
 export interface NativeClientLike {
@@ -88,7 +89,15 @@ export class BackgroundController {
     };
     await saveMeeting(meeting);
     this.activeMeetingId = meetingId;
-    this.client.startRecording(meetingId);
+    try {
+      this.client.startRecording(meetingId);
+    } catch {
+      meeting.status = "error";
+      meeting.errorMessage = "The desktop helper is not connected. Install and start it, then try again.";
+      await saveMeeting(meeting);
+      this.activeMeetingId = null;
+      this.broadcast({ type: "RECORDING_ERROR", meetingId, message: meeting.errorMessage });
+    }
     return meetingId;
   }
 
@@ -182,6 +191,15 @@ export class BackgroundController {
     if (msg.meetingId) {
       const meeting = await getMeeting(msg.meetingId);
       if (meeting) {
+        // A failed transcription chunk is already durable and queued by the
+        // helper. It is not a failed meeting: keep the recording active so a
+        // later retry can append the recovered transcript and the user can
+        // still stop normally.
+        if (msg.message.startsWith("transcription failed, queued for retry:")) {
+          await saveMeeting(meeting);
+          this.broadcast({ type: "PROCESSING_WARNING", meetingId: msg.meetingId, message: msg.message });
+          return;
+        }
         meeting.status = "error";
         meeting.errorMessage = msg.message;
         await saveMeeting(meeting);
@@ -205,7 +223,15 @@ export class BackgroundController {
   private async syncToWebapp(meeting: MeetingRecord): Promise<void> {
     const webapp = this.settings?.webapp;
     if (!webapp) return;
-    const normalized = webapp.url.replace(/\/+$/, "");
+    const normalized = normalizeWebappUrl(webapp.url);
+    if (!normalized) {
+      this.broadcast({
+        type: "RECORDING_ERROR",
+        meetingId: meeting.id,
+        message: "Meeting saved locally, but the configured webapp URL is invalid or not HTTPS.",
+      });
+      return;
+    }
     try {
       await this.fetchImpl(`${normalized}/api/meetings`, {
         method: "POST",

@@ -41,7 +41,7 @@ use interprocess::local_socket::tokio::{prelude::*, Stream as LocalStream};
 use interprocess::local_socket::{
     GenericFilePath, GenericNamespaced, ListenerOptions, ToFsName, ToNsName,
 };
-use notetaker_core::native_messaging::{ExtensionToHelper, HelperToExtension};
+use notetaker_core::native_messaging::{ExtensionToHelper, HelperToExtension, MAX_MESSAGE_BYTES};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const SOCKET_NAME: &str = "ai-notetaker.sock";
@@ -73,6 +73,12 @@ pub async fn relay_one_frame<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         Err(e) => return Err(e),
     }
     let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_MESSAGE_BYTES as usize {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("IPC frame exceeds {MAX_MESSAGE_BYTES}-byte limit"),
+        ));
+    }
     let mut payload = vec![0u8; len];
     r.read_exact(&mut payload).await?;
     w.write_all(&len_buf).await?;
@@ -95,7 +101,7 @@ pub type OutSender = tokio::sync::mpsc::UnboundedSender<HelperToExtension>;
 pub async fn run_ipc_server<F, Fut>(handler: F) -> std::io::Result<()>
 where
     F: Fn(ExtensionToHelper, OutSender) -> Fut + Clone + Send + 'static,
-    Fut: std::future::Future<Output = ()> + Send,
+    Fut: std::future::Future<Output = bool> + Send,
 {
     let listener = ListenerOptions::new().name(socket_name()?).create_tokio()?;
     loop {
@@ -112,7 +118,7 @@ where
 async fn handle_connection<F, Fut>(conn: LocalStream, handler: F) -> std::io::Result<()>
 where
     F: Fn(ExtensionToHelper, OutSender) -> Fut,
-    Fut: std::future::Future<Output = ()>,
+    Fut: std::future::Future<Output = bool>,
 {
     let (mut read_half, mut write_half) = tokio::io::split(conn);
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<HelperToExtension>();
@@ -136,6 +142,7 @@ where
         }
     });
 
+    let mut authenticated = false;
     loop {
         let mut len_buf = [0u8; 4];
         match read_half.read_exact(&mut len_buf).await {
@@ -144,10 +151,29 @@ where
             Err(e) => return Err(e),
         }
         let len = u32::from_le_bytes(len_buf) as usize;
+        if len > MAX_MESSAGE_BYTES as usize {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("IPC frame exceeds {MAX_MESSAGE_BYTES}-byte limit"),
+            ));
+        }
         let mut payload = vec![0u8; len];
         read_half.read_exact(&mut payload).await?;
         let msg: ExtensionToHelper = serde_json::from_slice(&payload)?;
-        handler(msg, out_tx.clone()).await;
+        if !authenticated {
+            if !matches!(&msg, ExtensionToHelper::Hello { .. }) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "first IPC message must be hello",
+                ));
+            }
+            authenticated = handler(msg, out_tx.clone()).await;
+            if !authenticated {
+                break;
+            }
+        } else {
+            handler(msg, out_tx.clone()).await;
+        }
     }
 
     drop(out_tx);

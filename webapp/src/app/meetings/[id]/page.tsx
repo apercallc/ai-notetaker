@@ -32,7 +32,7 @@ export default async function MeetingDetailPage({
       <div className="page-header">
         <h1>{meeting.title}</h1>
       </div>
-      <p className="meta" style={{ color: "var(--color-text-muted)", marginTop: "-16px" }}>
+      <p className="meeting-date">
         {formatDate(meeting.startedAt)}
       </p>
 
@@ -42,12 +42,12 @@ export default async function MeetingDetailPage({
       {meeting.actionItems.length > 0 && (
         <>
           <h2 className="section-title">Action items</h2>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <ul className="action-list">
             {meeting.actionItems.map((item, i) => (
               <li key={i} className="action-item">
                 {item.text}
                 {item.owner && (
-                  <span style={{ color: "var(--color-text-muted)" }}> — {item.owner}</span>
+                  <span className="meeting-owner"> — {item.owner}</span>
                 )}
               </li>
             ))}
@@ -71,7 +71,7 @@ export default async function MeetingDetailPage({
         </>
       )}
 
-      <div style={{ marginTop: "32px" }}>
+      <div className="detail-actions">
         <DeleteButton meetingId={meeting.id} meetingTitle={meeting.title} />
       </div>
     </div>

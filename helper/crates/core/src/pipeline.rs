@@ -10,7 +10,7 @@
 use crate::native_messaging::{ActionItem, ErrorCode, HelperToExtension};
 use crate::providers::{AudioChannel, AudioChunk, SummarizationProvider, TranscriptionProvider};
 use crate::resilience::RetryQueue;
-use crate::storage::{MeetingStore, MIC_FILE, SPEAKER_FILE};
+use crate::storage::{MeetingState, MeetingStore, MIC_FILE, SPEAKER_FILE};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -184,6 +184,125 @@ impl Pipeline {
     pub fn retry_queue_len(&self) -> usize {
         self.retry_queue.len()
     }
+
+    /// Consume retry jobs whose backoff has elapsed. The audio range was
+    /// persisted before the original provider call, so a retry reads the
+    /// exact durable bytes rather than relying on an in-memory frame.
+    pub async fn process_due_retries(
+        &mut self,
+        now: chrono::DateTime<Utc>,
+    ) -> Vec<HelperToExtension> {
+        let jobs: Vec<_> = self
+            .retry_queue
+            .due_jobs(now)
+            .into_iter()
+            .map(|job| (job.id, job.payload.clone()))
+            .collect();
+        let mut messages = Vec::new();
+
+        for (job_id, job) in jobs {
+            let RetryAudioRef::FileRange {
+                channel_file,
+                start,
+                end,
+            } = &job.audio_ref;
+            let pcm16 =
+                match self
+                    .store
+                    .read_audio_range(job.meeting_id, channel_file, *start, *end)
+                {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        let _ = self.retry_queue.record_failure(job_id, now);
+                        messages.push(HelperToExtension::Error {
+                            meeting_id: Some(job.meeting_id),
+                            code: ErrorCode::DeviceNotFound,
+                            message: format!("retry could not read saved audio: {error}"),
+                        });
+                        continue;
+                    }
+                };
+
+            let chunk = AudioChunk {
+                channel: job.channel,
+                pcm16,
+                sample_rate_hz: job.sample_rate_hz,
+            };
+            match self.transcription_provider.transcribe_chunk(&chunk).await {
+                Ok(segments) => {
+                    for segment in &segments {
+                        let _ = self
+                            .store
+                            .append_transcript_segment(job.meeting_id, segment);
+                        messages.push(HelperToExtension::TranscriptPartial {
+                            meeting_id: job.meeting_id,
+                            speaker: segment.speaker.clone(),
+                            text: segment.text.clone(),
+                            is_final: segment.is_final,
+                        });
+                    }
+                    if !segments.is_empty() {
+                        if let Some(summary_message) =
+                            self.resummarize_if_finalized(job.meeting_id).await
+                        {
+                            messages.push(summary_message);
+                        }
+                    }
+                    let _ = self.retry_queue.record_success(job_id);
+                }
+                Err(error) => {
+                    if let Ok(Some(_exhausted)) = self.retry_queue.record_failure(job_id, now) {
+                        messages.push(HelperToExtension::Error {
+                            meeting_id: Some(job.meeting_id),
+                            code: error.to_error_code(),
+                            message: format!("transcription retry exhausted: {error}"),
+                        });
+                    }
+                }
+            }
+        }
+
+        messages
+    }
+
+    async fn resummarize_if_finalized(&self, meeting_id: Uuid) -> Option<HelperToExtension> {
+        let meta = self.store.load_meta(meeting_id).ok()?;
+        if meta.state == MeetingState::Recording {
+            return None;
+        }
+        let transcript = match self.store.load_transcript(meeting_id) {
+            Ok(transcript) => transcript,
+            Err(error) => {
+                return Some(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: format!("could not reload transcript after retry: {error}"),
+                });
+            }
+        };
+        match self.summarization_provider.summarize(&transcript).await {
+            Ok(summary) => {
+                let _ = self.store.mark_processed(meeting_id);
+                Some(HelperToExtension::SummaryReady {
+                    meeting_id,
+                    summary: summary.summary,
+                    action_items: summary
+                        .action_items
+                        .into_iter()
+                        .map(|item| ActionItem {
+                            text: item.text,
+                            owner: item.owner,
+                        })
+                        .collect(),
+                })
+            }
+            Err(error) => Some(HelperToExtension::Error {
+                meeting_id: Some(meeting_id),
+                code: error.to_error_code(),
+                message: format!("summarization failed after transcription retry: {error}"),
+            }),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -312,6 +431,45 @@ mod tests {
         let bytes = std::fs::read(pipeline.store.audio_path(id, SPEAKER_FILE)).unwrap();
         assert_eq!(bytes, vec![9, 9, 9]);
         assert_eq!(pipeline.retry_queue_len(), 1);
+    }
+
+    #[tokio::test]
+    async fn due_retry_replays_saved_audio_and_clears_the_job() {
+        let (_dir, mut pipeline) = build_pipeline(1);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[9, 8, 7], 16000)
+            .await;
+
+        let messages = pipeline.process_due_retries(Utc::now()).await;
+        assert!(matches!(
+            &messages[0],
+            HelperToExtension::TranscriptPartial { speaker, text, .. }
+                if speaker == "you" && text == "fake transcript"
+        ));
+        assert_eq!(pipeline.retry_queue_len(), 0);
+        assert_eq!(pipeline.store.load_transcript(id).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn late_retry_resummarizes_a_meeting_that_was_already_stopped() {
+        let (_dir, mut pipeline) = build_pipeline(1);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[9, 8, 7], 16000)
+            .await;
+        pipeline.stop_recording(id).await.unwrap();
+
+        let messages = pipeline.process_due_retries(Utc::now()).await;
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::TranscriptPartial { .. })));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
     }
 
     #[tokio::test]

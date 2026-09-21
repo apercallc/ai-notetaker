@@ -20,7 +20,7 @@ use crate::providers::TranscriptSegment;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -176,6 +176,37 @@ impl MeetingStore {
     pub fn audio_path(&self, id: Uuid, channel_file: &str) -> PathBuf {
         self.meeting_dir(id).join(channel_file)
     }
+
+    /// Read the exact byte range captured for a retry job. Only the two
+    /// channel files can be addressed; retry metadata is persisted on disk,
+    /// so accepting an arbitrary filename here would turn it into a path
+    /// traversal primitive.
+    pub fn read_audio_range(
+        &self,
+        id: Uuid,
+        channel_file: &str,
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<u8>, StorageError> {
+        if !matches!(channel_file, MIC_FILE | SPEAKER_FILE) || end < start {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid audio retry range",
+            )));
+        }
+        let length = end - start;
+        let mut file = fs::File::open(self.audio_path(id, channel_file))?;
+        if end as u64 > file.metadata()?.len() {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "saved audio is shorter than the retry range",
+            )));
+        }
+        file.seek(SeekFrom::Start(start as u64))?;
+        let mut bytes = vec![0u8; length];
+        file.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
 }
 
 pub const MIC_FILE: &str = "mic.pcm";
@@ -311,5 +342,27 @@ mod tests {
         let (_dir, store) = temp_store();
         let err = store.load_meta(Uuid::new_v4()).unwrap_err();
         assert!(matches!(err, StorageError::NotFound(_)));
+    }
+
+    #[test]
+    fn reads_only_the_requested_audio_range() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store.append_audio(id, MIC_FILE, &[1, 2, 3, 4, 5]).unwrap();
+
+        assert_eq!(
+            store.read_audio_range(id, MIC_FILE, 1, 4).unwrap(),
+            vec![2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn rejects_an_arbitrary_retry_filename() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+
+        assert!(store.read_audio_range(id, "../meta.json", 0, 1).is_err());
     }
 }

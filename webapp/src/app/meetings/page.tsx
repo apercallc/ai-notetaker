@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { listMeetings } from "@/lib/meetings";
 import { logout } from "@/app/login/actions";
+import { SearchForm } from "./SearchForm";
+
+const PAGE_SIZE = 50;
+const MAX_PAGE = 1_000_000;
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -12,30 +16,37 @@ function formatDate(iso: string): string {
 export default async function MeetingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
-  const { q } = await searchParams;
-  const { meetings, total } = await listMeetings({ query: q, limit: 50 });
+  const { q, page: rawPage } = await searchParams;
+  const parsedPage = Number(rawPage ?? "1");
+  const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 && parsedPage <= MAX_PAGE ? parsedPage : 1;
+  let result = await listMeetings({ query: q, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  const { total } = result;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  if (currentPage !== page) {
+    result = await listMeetings({ query: q, limit: PAGE_SIZE, offset: (currentPage - 1) * PAGE_SIZE });
+  }
+  const { meetings } = result;
+
+  function pageHref(nextPage: number): string {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    params.set("page", String(nextPage));
+    return `/meetings?${params.toString()}`;
+  }
 
   return (
     <div className="container">
       <div className="page-header">
         <h1>Meetings</h1>
-        <span style={{ color: "var(--color-text-muted)", fontSize: "0.9375rem" }}>
+        <span className="total-count">
           {total} total
         </span>
       </div>
 
-      <form method="get" role="search">
-        <input
-          type="search"
-          name="q"
-          defaultValue={q ?? ""}
-          placeholder="Search meetings…"
-          className="search-input"
-          aria-label="Search meetings"
-        />
-      </form>
+      <SearchForm initialQuery={q ?? ""} />
 
       {meetings.length === 0 ? (
         <p className="empty-state">
@@ -55,7 +66,15 @@ export default async function MeetingsPage({
         </ul>
       )}
 
-      <form action={logout} style={{ marginTop: "var(--space-5)" }}>
+      {totalPages > 1 && (
+        <nav className="pagination" aria-label="Meeting pages">
+          {currentPage > 1 ? <Link href={pageHref(currentPage - 1)}>← Newer</Link> : <span aria-hidden="true" />}
+          <span aria-current="page">Page {currentPage} of {totalPages}</span>
+          {currentPage < totalPages ? <Link href={pageHref(currentPage + 1)}>Older →</Link> : <span aria-hidden="true" />}
+        </nav>
+      )}
+
+      <form action={logout} className="signout-form">
         <button type="submit" className="text-link-muted">
           Sign out
         </button>

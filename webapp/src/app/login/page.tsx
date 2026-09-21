@@ -1,4 +1,6 @@
 import { login } from "./actions";
+import { SubmitButton } from "./SubmitButton";
+import { safeNextPath } from "@/lib/navigation";
 
 export default async function LoginPage({
   searchParams,
@@ -11,10 +13,10 @@ export default async function LoginPage({
     <div className="container">
       <form className="login-form" action={login}>
         <h1>AI Notetaker</h1>
-        <p style={{ color: "var(--color-text-muted)" }}>
+        <p className="muted-copy">
           Enter the access token you set when you deployed this instance.
         </p>
-        <input type="hidden" name="next" value={next} />
+        <input type="hidden" name="next" value={safeNextPath(next)} />
         {/* Hidden username field: this app has no username, only a shared
             token, but browsers/password managers expect one alongside a
             password-type field for their autofill heuristics to work. */}
@@ -37,9 +39,7 @@ export default async function LoginPage({
           autoComplete="current-password"
         />
         {error && <p className="error-text" role="alert">That token isn&apos;t correct.</p>}
-        <button type="submit" className="button button-primary">
-          Continue
-        </button>
+        <SubmitButton />
       </form>
     </div>
   );

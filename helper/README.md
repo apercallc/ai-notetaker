@@ -27,7 +27,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-As of this implementation pass: **79 tests passing (74 in `core`, 5 in
+As of this implementation pass: **83 tests passing (78 in `core`, 5 in
 `audio`), zero compiler warnings, zero clippy warnings**, verified in a
 Linux dev environment with the full Rust toolchain, ALSA dev headers, and
 the Tauri v2 WebKitGTK/libayatana-appindicator dependencies.
@@ -44,7 +44,7 @@ filesystem I/O via `tempfile`, no live credentials or hardware needed):
 - Local storage (`core::storage`) — meeting lifecycle, dual-channel audio
   file separation, transcript accumulation, crash-recovery scan.
 - Retry queue (`core::resilience`) — exponential backoff math, persistence
-  across reloads, exhaustion handling.
+  across reloads, durable PCM-range replay, and exhaustion handling.
 - Pipeline orchestration (`core::pipeline`) — audio-persisted-before-
   transcription ordering, failure → retry-queue path, recoverable-meeting
   detection, using fake in-memory providers (the real providers are tested
@@ -92,12 +92,12 @@ toolchain or target-OS SDKs in this environment:
   note/folder opening, opt-in launch-at-login, and quit. The helper has no
   main window; Tauri owns the process main thread and the IPC server starts
   from `.setup()`.
-- **Re-transcribing the raw-audio tail after crash recovery** — `resume_recording`
-  currently finalizes whatever transcript existed before the crash rather
-  than reprocessing any audio captured but never sent to the transcription
-  provider before the interruption. The raw audio itself is never lost
-  (that's the resilience guarantee, and it holds), but resuming doesn't yet
-  recover the *processing* of that last unsent segment.
+- **Re-transcribing the raw-audio tail after crash recovery** — pending retry
+  queue files are reloaded after the next authenticated settings handshake,
+  but `resume_recording` still finalizes whatever transcript existed before
+  the crash rather than reconstructing a final chunk that was captured but
+  never reached the transcription provider. The raw audio itself is never
+  lost (that's the resilience guarantee, and it holds).
 - **Tauri auto-updater configuration** — plugin and artifact shape are wired,
   but updater keys/endpoints are owner-generated release placeholders. See
   `../docs/helper-packaging.md`.

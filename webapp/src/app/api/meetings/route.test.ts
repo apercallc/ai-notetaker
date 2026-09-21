@@ -76,6 +76,18 @@ describe("GET /api/meetings", () => {
     expect(body.total).toBe(1);
     expect(body.meetings[0].id).toBe("33333333-3333-3333-3333-333333333333");
   });
+
+  it("returns 400 for invalid pagination instead of passing NaN to Prisma", async () => {
+    const res = await GET(new NextRequest("http://localhost/api/meetings?limit=not-a-number"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "limit must be a non-negative integer" });
+  });
+
+  it("returns 400 for an overlong search query", async () => {
+    const query = "x".repeat(201);
+    const res = await GET(new NextRequest(`http://localhost/api/meetings?query=${query}`));
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("GET /api/meetings/:id", () => {

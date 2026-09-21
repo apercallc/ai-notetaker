@@ -1,17 +1,32 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listMeetings, upsertMeeting, ValidationError } from "@/lib/meetings";
 
-// Auth is enforced globally by src/middleware.ts for every /api/* route —
+// Auth is enforced globally by src/proxy.ts for every /api/* route —
 // this handler doesn't re-check it, by design (one enforcement point).
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const query = searchParams.get("query") ?? undefined;
-  const limit = searchParams.get("limit") ? Number(searchParams.get("limit")) : undefined;
-  const offset = searchParams.get("offset") ? Number(searchParams.get("offset")) : undefined;
+  try {
+    const limit = parseIntegerParam(searchParams.get("limit"), "limit");
+    const offset = parseIntegerParam(searchParams.get("offset"), "offset");
+    const result = await listMeetings({ query, limit, offset });
+    return NextResponse.json(result);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    throw err;
+  }
+}
 
-  const result = await listMeetings({ query, limit, offset });
-  return NextResponse.json(result);
+function parseIntegerParam(value: string | null, name: string): number | undefined {
+  if (value === null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new ValidationError(`${name} must be a non-negative integer`);
+  }
+  return parsed;
 }
 
 export async function POST(request: NextRequest) {
