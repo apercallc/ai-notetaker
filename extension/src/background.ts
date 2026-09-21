@@ -1,0 +1,62 @@
+/**
+ * MV3 service worker entry point. Thin by design — all real logic lives in
+ * backgroundController.ts (unit tested there); this file only wires that
+ * logic to actual chrome.* APIs and re-runs on every wake, since MV3 kills
+ * this worker after ~30s idle and re-executes top-level code on the next
+ * event (see extension/CLAUDE.md and the architecture spec §3.2).
+ */
+import { BackgroundController } from "./lib/backgroundController";
+import { NativeMessagingClient } from "./lib/nativeMessaging";
+import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/internalMessages";
+
+const client = new NativeMessagingClient();
+const controller = new BackgroundController(client, broadcastToUi);
+
+function broadcastToUi(message: BackgroundToUiMessage): void {
+  // No listener (e.g. popup closed) rejects this silently — that's fine,
+  // the UI reads persisted state from storage when it next opens.
+  chrome.runtime.sendMessage(message).catch(() => {});
+
+  // A recording failure is exactly the moment the user is *not* looking at
+  // the popup (they're in the call it just failed to capture) — without a
+  // toolbar badge, the only trace was a passive label buried in history,
+  // discoverable only if they happened to reopen the popup and scroll down
+  // (design review finding, see TODO.md). The badge is cleared the next
+  // time the popup actually opens (see GET_STATE below).
+  if (message.type === "RECORDING_ERROR") {
+    void chrome.action.setBadgeBackgroundColor({ color: "#c62828" }); // matches --color-danger-solid
+    void chrome.action.setBadgeText({ text: "!" });
+  }
+}
+
+const readyPromise = controller.init();
+
+chrome.runtime.onMessage.addListener((message: UiToBackgroundMessage, _sender, sendResponse) => {
+  void handleUiMessage(message).then(sendResponse);
+  return true; // keep the message channel open for the async response
+});
+
+async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown> {
+  await readyPromise;
+  switch (message.type) {
+    case "GET_STATE":
+      void chrome.action.setBadgeText({ text: "" });
+      return controller.getState();
+    case "START_RECORDING":
+      return { meetingId: await controller.startRecording() };
+    case "STOP_RECORDING":
+      await controller.stopRecording(message.meetingId);
+      return {};
+    case "SAVE_SETTINGS":
+      await controller.saveSettings(message.settings);
+      return {};
+    case "RESUME_RECORDING":
+      controller.resumeRecording(message.meetingId);
+      return {};
+    case "DISCARD_RECORDING":
+      controller.discardRecording(message.meetingId);
+      return {};
+    case "TEST_PROVIDER_KEY":
+      return controller.testProviderKey(message.provider, message.key);
+  }
+}

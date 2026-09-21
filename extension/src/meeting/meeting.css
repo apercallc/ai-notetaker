@@ -1,0 +1,61 @@
+body {
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+#app {
+  padding: var(--space-5) var(--space-3);
+}
+
+h1 {
+  margin-bottom: 0;
+}
+
+.meeting-meta {
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+section {
+  margin-bottom: var(--space-4);
+}
+
+section h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.action-items {
+  list-style: none;
+  padding: 0;
+}
+
+.action-items li {
+  padding: var(--space-2);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-1);
+}
+
+.transcript-line {
+  margin-bottom: var(--space-2);
+}
+
+.transcript-line .speaker {
+  font-weight: 600;
+  margin-right: var(--space-1);
+}
+
+.transcript-line .timestamp {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  margin-left: var(--space-1);
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}

@@ -104,6 +104,13 @@ the AI pipeline**, not the extension.
   an in-progress recording left behind by an unclean shutdown (crash, forced
   quit, OS restart) and offers to resume processing it from the raw audio,
   rather than silently losing or orphaning it.
+- **Ships as two binaries, not one**: a tiny `notetaker-nm-host` relay that
+  Chrome spawns/kills per connection (Native Messaging hosts aren't
+  long-lived processes), and the persistent `notetaker-helper` tray app
+  that actually owns the pipeline, connected via a local Unix
+  socket/named pipe. Discovered during implementation, not anticipated in
+  the original design — see `docs/native-messaging-protocol.md` for the
+  full reasoning.
 - **Driver install friction is expected and documented, not hidden.**
   Installing a system audio device can require a reboot or re-login before
   it appears as a selectable device (a known BlackHole/VB-Cable behavior,

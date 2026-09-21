@@ -1,0 +1,120 @@
+body {
+  width: 360px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+#app {
+  padding: var(--space-3);
+}
+
+header.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+header.app-header h1 {
+  font-size: 15px;
+  margin: 0;
+}
+
+header.app-header button.icon-button {
+  background: transparent;
+  border: none;
+  padding: var(--space-1);
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+header.app-header button.icon-button:hover {
+  color: var(--color-text);
+}
+
+.banner {
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.banner.recoverable {
+  border: 1px solid var(--color-warning);
+}
+
+.record-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  text-align: center;
+}
+
+button.record-toggle {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.transcript-view {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: 13px;
+}
+
+.transcript-line {
+  margin-bottom: var(--space-1);
+}
+
+.transcript-line .speaker {
+  font-weight: 600;
+  margin-right: var(--space-1);
+}
+
+.history-section h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) 0;
+  color: var(--color-text);
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-item .meeting-title {
+  font-weight: 600;
+  display: block;
+}
+
+.history-item .meeting-meta {
+  font-size: 12px;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--color-text-secondary);
+  padding: var(--space-4) var(--space-2);
+}

@@ -1,0 +1,168 @@
+/*
+ * Shared design tokens across every surface (popup, settings, onboarding).
+ * Dark mode is a requirement, not an enhancement (see the notetaker-design-
+ * review skill) — every color reference in this extension should resolve
+ * through these variables rather than a hardcoded value.
+ */
+:root {
+  /* Native form controls (checkboxes, <select>) render with the browser's
+     dark widget chrome instead of defaulting to light, matching the
+     custom-styled UI around them. Without this, onboarding's checkboxes and
+     settings' budget-tier <select> stay bright white against a dark page. */
+  color-scheme: light dark;
+
+  --color-bg: #ffffff;
+  --color-bg-elevated: #f5f5f7;
+  --color-text: #1d1d1f;
+  --color-text-secondary: #6e6e73;
+  --color-border: #d2d2d7;
+  --color-accent: #0071e3;
+  --color-accent-text: #ffffff;
+  /* #ff3b30 (Apple's systemRed) reads as ~3.55:1 against white — below the
+     4.5:1 AA minimum for normal-size text, whether it's used as the
+     recording-indicator label or as button/test-result text. #c62828 holds
+     the same hue family at ~5.6:1, both as text-on-page-bg and as this same
+     value with white text on it (solid buttons), since contrast is
+     symmetric between a color pair. */
+  --color-recording: #c62828;
+  --color-success: #34c759;
+  --color-danger: #c62828;
+  /* A separate token for solid/filled buttons: needs white text on it to
+     clear 4.5:1 in its own right, not just be legible as plain text on the
+     page background — see button.danger below. */
+  --color-danger-solid: #c62828;
+  /* Advisory/caution states (a warning callout, a "recoverable recording"
+     banner) borrowed --color-recording/--color-danger, collapsing "this is
+     recording right now" and "heads up" into one meaning. Amber keeps red
+     unambiguous. */
+  --color-warning: #a15c00;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+
+  --radius: 10px;
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1c1c1e;
+    --color-bg-elevated: #2c2c2e;
+    --color-text: #f5f5f7;
+    --color-text-secondary: #98989d;
+    --color-border: #38383a;
+    --color-accent: #0a84ff;
+    --color-accent-text: #ffffff;
+    /* #ff453a passes fine as plain text against this dark background
+       (~5:1) but fails as a solid-fill button with white text on it
+       (~3.4:1) — hence the separate --color-danger-solid below, darker
+       specifically so white text on it clears 4.5:1 too. */
+    --color-recording: #ff453a;
+    --color-success: #30d158;
+    --color-danger: #ff453a;
+    --color-danger-solid: #8b1a1a;
+    --color-warning: #ffa426;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  /* Respect the user's OS/browser text-size preference — rem sizing below
+     scales with this rather than being pinned to a fixed pixel value. */
+  font-size: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  padding: var(--space-2) var(--space-3);
+}
+
+button.primary {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+
+button.secondary {
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+button.danger {
+  /* Filled, not outlined: the recording-toggle button uses this class
+     while a recording is live, and the outlined style it replaces went
+     thin/quiet at exactly the moment state needed to read at a glance. */
+  background: var(--color-danger-solid);
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="url"] {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  width: 100%;
+}
+
+.recording-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-recording);
+  font-weight: 600;
+}
+
+.recording-indicator::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-recording);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording-indicator::before {
+    animation: none;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.text-secondary {
+  color: var(--color-text-secondary);
+}

@@ -1,0 +1,59 @@
+// AI Notetaker webapp schema.
+//
+// Every model carries userId/workspaceId from day one even though v1 auth
+// is a single shared deploy-time token with no real multi-user concept yet.
+// This is deliberate forward-compatibility (see architecture spec §3.5, §7)
+// so that team/workspace sharing later doesn't require a schema migration.
+// v1 always writes/reads with userId = "local" (see src/lib/constants.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Meeting {
+  id          String    @id @default(uuid())
+  userId      String
+  workspaceId String?
+  title       String
+  startedAt   DateTime
+  endedAt     DateTime
+  summary     String    @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  transcript  TranscriptSegment[]
+  actionItems ActionItem[]
+
+  @@index([userId, startedAt])
+}
+
+model TranscriptSegment {
+  id        String   @id @default(uuid())
+  meetingId String
+  userId    String
+  speaker   String
+  text      String   @db.Text
+  timestamp DateTime
+  order     Int
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId, order])
+}
+
+model ActionItem {
+  id        String  @id @default(uuid())
+  meetingId String
+  userId    String
+  text      String  @db.Text
+  owner     String?
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId])
+}
