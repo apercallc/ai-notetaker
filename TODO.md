@@ -194,8 +194,9 @@ accessibility failures):*
 - [x] Local meeting history list + note/action-items detail view
 - [x] `chrome.storage.local` only, never `.sync` — confirmed by
       `notetaker-guardrails-reviewer`
-- [x] First-run onboarding wizard — per-OS setup cards are included;
-      rendered screenshots remain a release-artifact task
+- [x] First-run onboarding wizard — per-OS setup cards and rendered UI
+      screenshots are included; native-OS screenshots and execution remain
+      release-owner validation
 - [x] One-time consent-law disclosure
 - [x] Dark mode support
 - [x] Design pass — reviewed independently by `notetaker-design-reviewer`
@@ -365,9 +366,10 @@ scope:
 
 ### Documentation
 
-- [x] Per-OS install + setup guide — `docs/helper-packaging.md` plus the
-      extension onboarding device cards; native-OS execution/screenshots
-      remain release-owner validation
+- [x] Per-OS install + setup guide — `docs/getting-started.md`,
+      `docs/helper-packaging.md`, and the extension onboarding device cards;
+      rendered UI screenshots are in `docs/screenshots/`, while native-OS
+      execution/screenshots remain release-owner validation
 - [x] Webapp self-hosting/deploy guide — `webapp/README.md` documents local,
       Railway, auth-token, migration, and verification setup
 - [ ] `CONTRIBUTING.md` (how to build locally, PR expectations, which

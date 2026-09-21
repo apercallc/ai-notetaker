@@ -4,16 +4,19 @@ Optional companion to the AI Notetaker extension/helper. Entirely additive
 — the extension works with zero setup using local storage. Deploy this only
 if you want persistent, cross-device access to your past meetings.
 
+Most users should begin with the [main getting-started guide](../docs/getting-started.md)
+and skip this component. The webapp is an optional server you deploy and own;
+it is never required for recording or local meeting history.
+
 You deploy and own this instance yourself. Nothing here is run by the
 AI Notetaker project — your meeting notes never touch a server anyone else
 controls.
 
 ## Deploy on Railway (recommended)
 
-1. Click the Railway template link (see the project's main README once
-   published), or manually: create a new Railway project, add this repo's
-   `webapp/` directory as a service, and add a Postgres database to the
-   same project.
+1. If a published Railway template link is available, open it. Otherwise,
+   create a new Railway project, add this repo's `webapp/` directory as a
+   service, and add a Postgres database to the same project.
 2. Railway links `DATABASE_URL` from its Postgres addon automatically.
 3. Set one environment variable yourself: `AUTH_TOKEN` — a long random
    string. Generate one with `openssl rand -hex 32`. This is the token

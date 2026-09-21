@@ -4,6 +4,13 @@ Tauri/Rust desktop capture helper. See the architecture spec at
 `../docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md` and
 `CLAUDE.md` in this directory for the design this implements.
 
+For a first-time user, use the [complete getting-started guide](../docs/getting-started.md).
+This file explains the helper workspace and contributor verification. In
+particular, `cargo build` creates binaries but does not register Chrome's
+Native Messaging host; use the packaged installer flow in
+[`../docs/helper-packaging.md`](../docs/helper-packaging.md) when you need a
+working extension-to-helper install.
+
 ## Workspace layout
 
 ```

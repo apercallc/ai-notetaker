@@ -9,6 +9,10 @@ recording/transcription/summarization logic lives in the desktop helper
 contract between them, and `CLAUDE.md` in this directory for the conventions
 this package follows.
 
+For the user-facing install and recording flow, start with
+[`../docs/getting-started.md`](../docs/getting-started.md). This package guide
+is for building and loading the extension during development.
+
 ## Develop
 
 ```sh
@@ -33,6 +37,10 @@ from the committed `key` field in `manifest.json` — see the architecture
 spec §3.2 for why this has to stay stable). It won't function fully without
 a running helper process registered as the `com.ainotetaker.helper` Native
 Messaging host — that's built separately in `../helper/`.
+
+Loading `dist/` is only the browser half of the setup. The desktop helper must
+also be running, and Chrome must have the Native Messaging manifest installed;
+see the complete [source-build and registration steps](../docs/getting-started.md#build-from-source).
 
 ## What's implemented vs. not yet verified live
 

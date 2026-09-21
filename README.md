@@ -1,77 +1,197 @@
 # AI Notetaker
 
-An open-source, self-hosted alternative to Krisp-style AI meeting
-notetakers — no required subscription, works with any meeting app (Zoom,
-Google Meet, Microsoft Teams, Slack Huddles), and you bring your own AI API
-key.
+Private meeting notes from the desktop you already use.
 
-## Why
+AI Notetaker records the microphone and meeting audio, turns the conversation
+into a transcript, and produces a summary with action items. It is open
+source, local-first, and uses your own AI provider keys. There is no account,
+subscription, or project-operated backend.
 
-Commercial meeting notetakers charge a recurring subscription for
-transcription and summarization that, at real-world usage, costs cents per
-meeting in underlying API fees. This project pays that cost directly instead
-— you plug in your own API key(s), pay the provider at cost, and own all of
-your data.
+<p align="center">
+  <img src="docs/screenshots/recording-ready.png" alt="AI Notetaker popup with audio ready and a Record button" width="360" />
+</p>
 
-## How it works
+## Start here
 
-1. A small desktop helper app creates a virtual microphone/speaker, the same
-   trick tools like Krisp use — you select it as your mic + speaker in your
-   meeting app's settings, and it transparently passes audio through while
-   capturing a copy.
-2. A Chrome extension is your control surface: guided audio preflight, start/
-   stop recording, a live transcript, meeting modes/custom vocabulary, and a
-   cross-meeting action-item inbox.
-3. Recordings are transcribed and summarized using your own API key(s) —
-   no account, no backend billing, no subscription.
-4. Optionally, deploy your own history web app (one click on Railway) if you
-   want persistent, cross-device access to past meetings. It's entirely
-   optional — the extension works standalone with local storage. The webapp
-   adds an authenticated action-item inbox and due-date tracking.
+The normal user flow is:
 
-## Status
+1. Install and start the desktop helper.
+2. Install the Chrome extension.
+3. Follow the four-step setup wizard.
+4. Select the AI Notetaker audio devices in your meeting app.
+5. Check audio, click **Record**, and stop when the meeting ends.
 
-Core capture, Native Messaging, CI, Tauri tray/packaging, and Linux/Windows
-installer registration are implemented; native signing, the macOS post-copy
-registration step, and live OS/audio validation remain. See
-[`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md)
-for the current design and remaining roadmap.
+The full, copy-and-paste setup is in [`docs/getting-started.md`](docs/getting-started.md).
+It covers source builds, per-OS audio routing, provider keys, recording,
+troubleshooting, and the optional history webapp.
 
-## Repo structure
+> **Current project status:** the helper packages and installer registration
+> are implemented, but signed public installers and a live cross-OS meeting
+> validation pass are still release-owner work. If no release is published
+> yet, use the source-build path in the setup guide.
 
+## What it feels like
+
+The first-run wizard keeps setup in one place. It tells you what to install,
+checks that both microphone and meeting audio are visible, lets you add and
+test your provider keys, and asks you to acknowledge recording consent.
+
+![AI Notetaker first-run setup wizard](docs/screenshots/onboarding-step-1.png)
+
+Once setup is complete, the extension popup is the everyday control surface.
+The **Record** button stays disabled until the helper and both audio channels
+are ready. You can choose a meeting mode, run a two-second audio test, see
+recent meetings, and open the action-item inbox.
+
+![AI Notetaker audio-ready recording popup](docs/screenshots/recording-ready.png)
+
+These screenshots show the built extension UI and its documented states. A
+real provider call, OS audio driver, and live meeting still need to be tested
+on the machine where you use the app.
+
+## What you get
+
+- A live transcript while you record.
+- A meeting summary and action items after you stop.
+- Meeting history and detail pages stored locally by default.
+- Custom meeting modes, vocabulary, and summary instructions.
+- Crash recovery and a retry queue for provider interruptions.
+- An optional self-hosted webapp for authenticated, cross-device history.
+
+## How the pieces fit together
+
+AI Notetaker has two required pieces and one optional piece:
+
+| Piece | What it does |
+| --- | --- |
+| Desktop helper | A Rust/Tauri tray app that owns audio capture, local storage, transcription, summarization, retries, and recovery. |
+| Chrome extension | A small UI for setup, audio checks, recording, live transcript, settings, meetings, and action items. |
+| Self-hosted webapp (optional) | Your own history and action-item view. The extension works without it. |
+
+The extension talks to the helper through Chrome Native Messaging and a local
+Unix socket or Windows named pipe. It does not open a TCP/localhost server.
+Provider keys stay in `chrome.storage.local`; provider calls are made by the
+helper using the keys you supplied.
+
+## Before you begin
+
+You need:
+
+- Chrome or another Chromium browser that supports the extension APIs.
+- A desktop OS with a supported virtual-audio setup: BlackHole on macOS,
+  base VB-CABLE on Windows, or a PulseAudio/PipeWire null sink on Linux.
+- One transcription key and one summarization key. The default tier uses
+  Deepgram + Claude; the budget tier uses Groq + Gemini or DeepSeek.
+- A meeting app that lets you choose its microphone and speaker separately.
+- Permission from the people you record, where required by local law.
+
+AI Notetaker does not bundle a custom audio driver. Follow the platform cards
+in the wizard and the detailed [audio setup guide](docs/helper-packaging.md).
+
+## Quick start
+
+### 1. Build or install the helper
+
+If a release is available, install the helper for your OS and launch **AI
+Notetaker** once so its tray process is running.
+
+For the current source-build path, follow [Build from source](docs/getting-started.md#build-from-source).
+The important detail is to install a packaged helper or register the Native
+Messaging manifest; running `cargo build` alone does not make Chrome find the
+helper.
+
+### 2. Build and load the extension
+
+```sh
+cd extension
+npm install
+npm run build
 ```
-ai-notetaker/
-├── extension/     # Chrome extension (Manifest V3)
-├── helper/        # Tauri/Rust desktop capture helper, per-OS audio modules
-├── webapp/        # Optional Next.js + Postgres history app, Railway template
-├── docs/          # Setup guides, architecture specs
-└── LICENSE         # MIT
+
+Then open `chrome://extensions`, turn on **Developer mode**, choose **Load
+unpacked**, and select `extension/dist/`.
+
+The extension ID is intentionally stable:
+`jidooookkdbbbhkkdmcajnnnhhphodok`. Do not replace the committed `key` in
+`extension/manifest.json`; the helper allowlists this ID.
+
+### 3. Complete setup once
+
+Click the AI Notetaker icon and choose **Start setup**. The wizard walks you
+through:
+
+1. Confirming the helper is installed and running.
+2. Selecting separate microphone and meeting-audio devices for your OS.
+3. Adding and testing provider keys.
+4. Acknowledging the recording-consent disclosure.
+
+After the wizard, return to the popup, click **Check audio**, run the
+two-second test, and wait for **Audio ready**.
+
+### 4. Record a meeting
+
+1. In Zoom, Google Meet, Microsoft Teams, Slack Huddles, or another meeting
+   app, choose the AI Notetaker devices shown by the wizard.
+2. Open the extension popup and choose a meeting mode.
+3. Confirm the audio status is ready.
+4. Click **Record**.
+5. Keep the helper running while you meet.
+6. Click **Stop recording** when the meeting ends.
+
+The transcript updates while you record. After processing finishes, open the
+meeting from **Recent meetings** to read the summary, transcript, and action
+items.
+
+## Provider costs and privacy
+
+You bring the keys and pay the providers directly. The settings page shows an
+estimate, but provider pricing changes—check the provider's current pricing
+before relying on it.
+
+Raw microphone and speaker audio are persisted locally before provider calls
+so interrupted requests can be retried. The project does not receive your
+audio, transcripts, provider keys, or telemetry. See [`docs/data-handling.md`](docs/data-handling.md)
+for the storage and deletion details.
+
+## Optional: history on your own server
+
+The extension already keeps local meeting history. If you also want
+authenticated, cross-device history, deploy the optional webapp yourself and
+paste its URL plus access token into the extension Settings page.
+
+This is not required for recording, and the webapp never needs your AI
+provider keys. See [`webapp/README.md`](webapp/README.md) for local and
+Railway deployment instructions.
+
+## If something is not working
+
+- **Helper not detected:** launch the tray helper and reload the extension.
+  If you built from source, install the helper package or register its Native
+  Messaging manifest; the two binaries are `notetaker-helper` and
+  `notetaker-nm-host`.
+- **Audio needs attention:** choose the AI Notetaker microphone and speaker
+  in the meeting app, keep your normal speakers connected, then run the
+  audio check again. Restart the meeting app after installing a new driver.
+- **Provider test fails:** verify that the key belongs to the selected
+  provider tier and test it again in Settings. Do not put provider keys in
+  the webapp.
+- **A recording was interrupted:** use the popup's **Resume** or **Discard**
+  banner. The helper keeps the raw audio locally for recovery.
+
+The detailed troubleshooting flow is in [`docs/getting-started.md`](docs/getting-started.md#troubleshooting).
+
+## For contributors
+
+```sh
+cd helper && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+cd ../extension && npm run typecheck && npm test && npm run build
+cd ../webapp && npx prisma generate && npm test && npm run build
 ```
 
-## Supported platforms (planned)
-
-- **Desktop capture**: macOS, Windows, Linux (Linux as a fast-follow)
-- **Meeting apps**: anything that lets you choose a system mic/speaker —
-  Zoom, Google Meet, Microsoft Teams, Slack Huddles, and more
-- **Mobile**: not in scope yet — see the architecture doc for why cellular
-  call recording isn't feasible on iOS/Android, and what is
-
-## AI providers (bring your own key)
-
-| Tier | Transcription | Summarization | Cost / 45-min meeting |
-|---|---|---|---|
-| Default | Deepgram | Claude Haiku | ~$0.21 |
-| Budget | Groq (Whisper) | Gemini Flash / DeepSeek | ~$0.03 |
-
-You can use any provider you have a key for — these are the recommended
-defaults for quality-per-dollar.
+Package-specific notes live in [`extension/README.md`](extension/README.md),
+[`helper/README.md`](helper/README.md), and [`webapp/README.md`](webapp/README.md).
+Architecture decisions are recorded in [`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md).
 
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
-
-## Contributing
-
-This project is fully open source. Contributions welcome once the initial
-implementation plan lands — see the architecture doc linked above for the
-current design and roadmap.

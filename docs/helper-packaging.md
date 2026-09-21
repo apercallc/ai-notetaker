@@ -6,6 +6,12 @@ Tauri-free Native Messaging relay that Chrome starts per connection. The
 placeholder icon set under `helper/crates/app/icons/` was generated from
 `placeholder.svg`; replace it with real branding art before release.
 
+For the user path, start with [`docs/getting-started.md`](getting-started.md).
+This document is the packaging and uninstall reference. A raw `cargo build`
+does not register the Native Messaging manifest, so a source build is not
+complete until the package is installed or the manifest is registered
+manually.
+
 ## Build artifacts
 
 From `helper/crates/app/`:
