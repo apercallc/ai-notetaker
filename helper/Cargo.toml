@@ -20,3 +20,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 bytes = "1"
+
+# Tauri 2.11.6 still resolves the GTK 3 stack to glib 0.18.x, while the
+# upstream UB fix is released only in glib 0.20. Keep the stable GTK/Tauri
+# API surface and apply that one upstream fix to the otherwise unchanged
+# 0.18.5 source until Tauri's stable Linux stack moves forward.
+[patch.crates-io]
+glib = { path = "vendor/glib-0.18.5" }
