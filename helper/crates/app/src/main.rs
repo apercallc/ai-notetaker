@@ -51,43 +51,66 @@ fn pairing_token_path(root: &std::path::Path) -> std::path::PathBuf {
     root.join("pairing_token.txt")
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
 
-    let root = data_dir();
-    std::fs::create_dir_all(&root)?;
-    let store = Arc::new(MeetingStore::new(&root)?);
+    tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))?;
 
-    let existing_token = std::fs::read_to_string(pairing_token_path(&root)).ok();
+            let root = data_dir();
+            std::fs::create_dir_all(&root)
+                .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
+            let store = Arc::new(
+                MeetingStore::new(&root)
+                    .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?,
+            );
+            let existing_token = std::fs::read_to_string(pairing_token_path(&root)).ok();
+            let state = Arc::new(AppState {
+                store,
+                data_dir: root.clone(),
+                pairing_token: Mutex::new(existing_token),
+                settings: Mutex::new(None),
+                active: Mutex::new(HashMap::new()),
+                pipelines: Mutex::new(HashMap::new()),
+            });
+            let tray = tray::initialize(app.handle(), root.clone())?;
+            let ipc_state = state.clone();
+            let ipc_tray = tray.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = ipc::run_ipc_server(move |msg, out_tx| {
+                    let state = ipc_state.clone();
+                    let tray = ipc_tray.clone();
+                    async move {
+                        handle_message(state, tray, msg, out_tx).await;
+                    }
+                })
+                .await
+                {
+                    tracing::error!("IPC server stopped: {error}");
+                }
+            });
 
-    let state = Arc::new(AppState {
-        store,
-        data_dir: root.clone(),
-        pairing_token: Mutex::new(existing_token),
-        settings: Mutex::new(None),
-        active: Mutex::new(HashMap::new()),
-        pipelines: Mutex::new(HashMap::new()),
-    });
-
-    tray::spawn_tray_icon(); // no-op stub in headless/CI environments, see tray.rs
-
-    tracing::info!("notetaker-helper starting, data dir: {}", root.display());
-
-    ipc::run_ipc_server(move |msg, out_tx| {
-        let state = state.clone();
-        async move {
-            handle_message(state, msg, out_tx).await;
-        }
-    })
-    .await?;
-
-    Ok(())
+            tracing::info!("notetaker-helper starting, data dir: {}", root.display());
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running AI Notetaker helper");
 }
 
-async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ipc::OutSender) {
+async fn handle_message(
+    state: Arc<AppState>,
+    tray: Arc<tray::TrayController>,
+    msg: ExtensionToHelper,
+    out_tx: ipc::OutSender,
+) {
     match msg {
         ExtensionToHelper::Hello { pairing_token } => {
             let mut current = state.pairing_token.lock().await;
@@ -193,8 +216,10 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
             match pipeline.start_recording(meeting_id) {
                 Ok(started_msg) => {
                     let _ = out_tx.send(started_msg);
+                    tray.set_recording(true);
                 }
                 Err(e) => {
+                    tray.set_recording(false);
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
                         code: ErrorCode::DeviceNotFound,
@@ -245,6 +270,7 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
                         .insert(meeting_id, ActiveRecording { audio });
                 }
                 Err(e) => {
+                    tray.set_recording(false);
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
                         code: ErrorCode::DeviceNotFound,
@@ -260,6 +286,7 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
             }
             if let Some(pipeline) = state.pipelines.lock().await.remove(&meeting_id) {
                 let messages = pipeline.lock().await.stop_recording(meeting_id).await;
+                tray.set_recording(false);
                 match messages {
                     Ok(messages) => {
                         for m in messages {

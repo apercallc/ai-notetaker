@@ -3,6 +3,9 @@ name = "notetaker-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
+default-run = "notetaker-helper"
+description = "Self-hosted AI meeting notetaker tray helper and Native Messaging relay"
 
 [[bin]]
 name = "notetaker-helper"
@@ -12,9 +15,6 @@ path = "src/main.rs"
 name = "notetaker-nm-host"
 path = "src/nm_host_main.rs"
 
-# NOTE: `tauri` + `tauri-build` are deliberately not yet dependencies here.
-# The tray icon isn't wired up in this pass (see src/tray.rs) — add them
-# back, plus tauri.conf.json / app icons / build.rs, when that lands.
 [dependencies]
 notetaker-core = { path = "../core" }
 notetaker-audio = { path = "../audio" }
@@ -28,3 +28,21 @@ uuid.workspace = true
 chrono.workspace = true
 dirs = "5"
 interprocess = { version = "2", features = ["tokio"] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[package.metadata.deb]
+maintainer = "AI Notetaker contributors"
+copyright = "2026 AI Notetaker contributors"
+section = "sound"
+priority = "optional"
+depends = "libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2"
+assets = [
+  ["target/release/notetaker-helper", "usr/lib/ai-notetaker/notetaker-helper", "755"],
+  ["target/release/notetaker-nm-host", "usr/lib/ai-notetaker/notetaker-nm-host", "755"],
+  ["../../native-messaging-host-manifest/com.ainotetaker.helper.json.template", "usr/share/ai-notetaker/com.ainotetaker.helper.json.template", "644"],
+]

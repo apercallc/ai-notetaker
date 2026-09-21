@@ -17,7 +17,7 @@
 //!
 //! Both the Native Messaging wire format (stdin/stdout, per
 //! `notetaker_core::native_messaging`) and this internal bridge use
-//! identical 4-byte-length-prefixed JSON framing on purpose: it means
+//! identical 4-byte little-endian-length-prefixed JSON framing on purpose: it means
 //! `notetaker-nm-host` doesn't need to understand message schemas at all —
 //! it just relays raw frames between stdio and the socket. Only
 //! `notetaker-helper`, which actually runs the pipeline, needs to
@@ -72,7 +72,7 @@ pub async fn relay_one_frame<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
         Err(e) => return Err(e),
     }
-    let len = u32::from_ne_bytes(len_buf) as usize;
+    let len = u32::from_le_bytes(len_buf) as usize;
     let mut payload = vec![0u8; len];
     r.read_exact(&mut payload).await?;
     w.write_all(&len_buf).await?;
@@ -123,7 +123,7 @@ where
                 continue;
             };
             if write_half
-                .write_all(&(bytes.len() as u32).to_ne_bytes())
+                .write_all(&(bytes.len() as u32).to_le_bytes())
                 .await
                 .is_err()
             {
@@ -143,7 +143,7 @@ where
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(e),
         }
-        let len = u32::from_ne_bytes(len_buf) as usize;
+        let len = u32::from_le_bytes(len_buf) as usize;
         let mut payload = vec![0u8; len];
         read_half.read_exact(&mut payload).await?;
         let msg: ExtensionToHelper = serde_json::from_slice(&payload)?;

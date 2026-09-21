@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AI Notetaker",
+  "version": "0.1.0",
+  "identifier": "com.ainotetaker.helper",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "dmg", "msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "resources": [
+      "../../native-messaging-host-manifest/com.ainotetaker.helper.json.template"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_OWNER_GENERATED_TAURI_UPDATER_PUBLIC_KEY",
+      "endpoints": [
+        "https://updates.example.invalid/ai-notetaker/{{target}}/{{arch}}/{{current_version}}"
+      ]
+    }
+  }
+}

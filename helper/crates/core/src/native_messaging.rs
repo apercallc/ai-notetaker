@@ -1,11 +1,8 @@
 //! Wire protocol for extension <-> helper, per docs/native-messaging-protocol.md.
 //!
 //! Framing follows Chrome's Native Messaging spec: each message is a JSON
-//! object preceded by a 4-byte message length in *native* byte order. The
-//! protocol doc says "little-endian" — that's what native byte order
-//! resolves to on every realistic desktop target (x86_64, aarch64), so we
-//! implement with `to_ne_bytes`/`from_ne_bytes` rather than hardcoding LE,
-//! which is the precisely-correct match for Chrome's own spec.
+//! object preceded by a 4-byte little-endian message length, matching the
+//! protocol contract in `docs/native-messaging-protocol.md`.
 
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
@@ -36,7 +33,7 @@ pub fn read_message<R: Read>(reader: &mut R) -> Result<ExtensionToHelper, Framin
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Err(FramingError::Eof),
         Err(e) => return Err(e.into()),
     }
-    let len = u32::from_ne_bytes(len_buf);
+    let len = u32::from_le_bytes(len_buf);
     if len > MAX_MESSAGE_BYTES {
         return Err(FramingError::TooLarge(len));
     }
@@ -54,7 +51,7 @@ pub fn write_message<W: Write>(
     if payload.len() as u64 > MAX_MESSAGE_BYTES as u64 {
         return Err(FramingError::TooLarge(payload.len() as u32));
     }
-    writer.write_all(&(payload.len() as u32).to_ne_bytes())?;
+    writer.write_all(&(payload.len() as u32).to_le_bytes())?;
     writer.write_all(&payload)?;
     writer.flush()?;
     Ok(())
@@ -228,7 +225,7 @@ mod tests {
         };
         let json = serde_json::to_vec(&msg).unwrap();
         let mut framed = Vec::new();
-        framed.extend_from_slice(&(json.len() as u32).to_ne_bytes());
+        framed.extend_from_slice(&(json.len() as u32).to_le_bytes());
         framed.extend_from_slice(&json);
 
         let mut cursor = Cursor::new(framed);
@@ -255,7 +252,7 @@ mod tests {
         };
         let json = serde_json::to_vec(&msg).unwrap();
         let mut framed = Vec::new();
-        framed.extend_from_slice(&(json.len() as u32).to_ne_bytes());
+        framed.extend_from_slice(&(json.len() as u32).to_le_bytes());
         framed.extend_from_slice(&json);
         let mut cursor = Cursor::new(framed);
         let decoded = read_message(&mut cursor).unwrap();
@@ -275,7 +272,7 @@ mod tests {
 
         // Manually parse it back using the extension-side framing rules to
         // prove both directions agree on the wire format.
-        let len = u32::from_ne_bytes(buf[0..4].try_into().unwrap());
+        let len = u32::from_le_bytes(buf[0..4].try_into().unwrap());
         assert_eq!(len as usize, buf.len() - 4);
         let decoded: HelperToExtension = serde_json::from_slice(&buf[4..]).unwrap();
         assert_eq!(decoded, msg);
@@ -284,7 +281,7 @@ mod tests {
     #[test]
     fn rejects_oversized_message_length_prefix() {
         let mut framed = Vec::new();
-        framed.extend_from_slice(&(MAX_MESSAGE_BYTES + 1).to_ne_bytes());
+        framed.extend_from_slice(&(MAX_MESSAGE_BYTES + 1).to_le_bytes());
         let mut cursor = Cursor::new(framed);
         let err = read_message(&mut cursor).unwrap_err();
         assert!(matches!(err, FramingError::TooLarge(_)));
@@ -305,7 +302,7 @@ mod tests {
         };
         let json = serde_json::to_vec(&msg).unwrap();
         let mut framed = Vec::new();
-        framed.extend_from_slice(&(json.len() as u32).to_ne_bytes());
+        framed.extend_from_slice(&(json.len() as u32).to_le_bytes());
         framed.extend_from_slice(&json);
         let mut cursor = Cursor::new(framed);
         assert_eq!(read_message(&mut cursor).unwrap(), msg);
