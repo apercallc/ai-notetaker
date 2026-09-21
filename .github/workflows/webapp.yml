@@ -1,0 +1,69 @@
+# Webapp (Next.js + Prisma + Postgres) — generate client, migrate a
+# throwaway Postgres, run the integration test suite, build.
+#
+# The tests are real integration tests against a live database (see
+# webapp/vitest.config.ts — fileParallelism is off for exactly this
+# reason), so this job gets its own Postgres service container and runs
+# `prisma migrate deploy` before `npm test`. DATABASE_URL/AUTH_TOKEN are
+# required env for both tests and build (webapp/.env.example documents
+# the same pair).
+
+name: Webapp
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: webapp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: notetaker
+          POSTGRES_PASSWORD: notetaker
+          POSTGRES_DB: ainotetaker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notetaker"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://notetaker:notetaker@localhost:5432/ainotetaker_test
+      AUTH_TOKEN: ci-only-test-token-not-a-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

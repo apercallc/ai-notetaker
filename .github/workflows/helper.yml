@@ -1,0 +1,56 @@
+# Helper (Rust) — fmt + clippy + tests on all three target OSes.
+#
+# The workspace lives in helper/, so every cargo step runs with
+# working-directory: helper and the cache maps the workspace explicitly.
+# Linux needs the ALSA dev headers for cpal (see helper/crates/audio);
+# macOS/Windows build their platform modules with no extra system deps.
+
+name: Helper
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: helper-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: helper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Linux audio dev headers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: helper
+
+      # fmt is OS-independent but cheap; clippy is genuinely per-OS because
+      # the audio crate compiles a different platform module on each.
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
