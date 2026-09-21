@@ -20,7 +20,7 @@
 //! as automatic.
 
 use crate::device_matching::{find_matching_device, MACOS_DEVICE_HINT};
-use crate::{AudioCapture, AudioError, CapturedFrame, DriverStatus};
+use crate::{AudioCapture, AudioDiagnostics, AudioError, CapturedFrame, DriverStatus};
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
@@ -65,6 +65,28 @@ impl AudioCapture for MacosAudioCapture {
                 install_guidance: format!(
                     "BlackHole isn't installed yet. Download it from {BLACKHOLE_DOWNLOAD_URL}, install it, then come back here — you may need to log out and back in before it appears as a selectable device."
                 ),
+            },
+        }
+    }
+
+    fn diagnostics(&self) -> AudioDiagnostics {
+        let speaker = self.installed_device_name();
+        let microphone = cpal::default_host()
+            .default_input_device()
+            .and_then(|device| device.name().ok());
+        let driver_installed = speaker.is_some();
+        let ready = driver_installed && microphone.is_some();
+        AudioDiagnostics {
+            platform: "macos".to_string(),
+            driver: "BlackHole".to_string(),
+            driver_installed,
+            microphone,
+            speaker,
+            ready,
+            guidance: if ready {
+                "BlackHole and a microphone are available. Confirm your Multi-Output Device keeps meeting audio audible, then run the test.".to_string()
+            } else {
+                format!("BlackHole is not ready. Download it from {BLACKHOLE_DOWNLOAD_URL}, install it, and create a Multi-Output Device with your normal speakers or headphones.")
             },
         }
     }

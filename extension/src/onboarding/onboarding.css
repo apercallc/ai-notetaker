@@ -72,6 +72,25 @@ body {
   color: var(--color-accent);
 }
 
+.audio-preflight {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg-elevated);
+}
+
+.audio-preflight p {
+  margin: 0 0 var(--space-2);
+  line-height: 1.45;
+}
+
+.audio-preflight-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .step-nav {
   display: flex;
   justify-content: space-between;

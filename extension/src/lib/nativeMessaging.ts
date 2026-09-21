@@ -12,12 +12,16 @@ import { getPairingToken, savePairingToken } from "./storage";
 import {
   isIncomingMessage,
   type IncomingMessage,
+  type AudioProbeResult,
+  type AudioStatus,
+  type MeetingMode,
   type NotetakerSettings,
   type ProviderKind,
 } from "../types";
 
 const HOST_NAME = "com.ainotetaker.helper";
 const TEST_PROVIDER_KEY_TIMEOUT_MS = 10_000;
+const AUDIO_DIAGNOSTICS_TIMEOUT_MS = 8_000;
 const MIN_NOT_FOUND_BACKOFF_MS = 1_000;
 const MAX_NOT_FOUND_BACKOFF_MS = 30_000;
 const HELPER_RETRY_ALARM = "ai-notetaker-helper-retry";
@@ -177,7 +181,7 @@ export class NativeMessagingClient {
     this.port.postMessage(message);
   }
 
-  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp">): void {
+  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions">): void {
     // State sync, not a one-shot command. The helper holds settings in
     // memory only for its process lifetime and the controller re-pushes
     // whenever the connection is (re)established, so dropping the push
@@ -191,11 +195,14 @@ export class NativeMessagingClient {
       summarizationProvider: settings.summarizationProvider,
       apiKeys: settings.apiKeys,
       webapp: settings.webapp,
+      defaultMeetingMode: settings.defaultMeetingMode,
+      customVocabulary: settings.customVocabulary,
+      customSummaryInstructions: settings.customSummaryInstructions,
     });
   }
 
-  startRecording(meetingId: string): void {
-    this.send({ type: "start_recording", meetingId });
+  startRecording(meetingId: string, meetingMode: MeetingMode): void {
+    this.send({ type: "start_recording", meetingId, meetingMode });
   }
 
   stopRecording(meetingId: string): void {
@@ -208,6 +215,71 @@ export class NativeMessagingClient {
 
   discardRecording(meetingId: string): void {
     this.send({ type: "discard_recording", meetingId });
+  }
+
+  getAudioPreflight(): Promise<AudioStatus> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const fallback: AudioStatus = {
+        platform: "unknown",
+        driver: "Desktop helper",
+        driverInstalled: false,
+        microphone: null,
+        speaker: null,
+        ready: false,
+        guidance: "The helper did not respond. Install and start it, then check audio again.",
+      };
+      const handler = (message: Extract<IncomingMessage, { type: "audio_status" }>): void => {
+        settle(message);
+      };
+      const settle = (result: AudioStatus): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        this.off("audio_status", handler);
+        resolve(result);
+      };
+      this.on("audio_status", handler);
+      try {
+        this.send({ type: "audio_preflight" });
+      } catch {
+        settle(fallback);
+        return;
+      }
+      timeoutId = setTimeout(() => settle(fallback), AUDIO_DIAGNOSTICS_TIMEOUT_MS);
+    });
+  }
+
+  runAudioProbe(): Promise<AudioProbeResult> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const fallback: AudioProbeResult = {
+        micFrames: 0,
+        speakerFrames: 0,
+        passed: false,
+        message: "The helper did not respond. Install and start it, then try again.",
+      };
+      const handler = (message: Extract<IncomingMessage, { type: "audio_probe_result" }>): void => {
+        settle(message);
+      };
+      const settle = (result: AudioProbeResult): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        this.off("audio_probe_result", handler);
+        resolve(result);
+      };
+      this.on("audio_probe_result", handler);
+      try {
+        this.send({ type: "audio_probe" });
+      } catch {
+        settle(fallback);
+        return;
+      }
+      timeoutId = setTimeout(() => settle(fallback), AUDIO_DIAGNOSTICS_TIMEOUT_MS);
+    });
   }
 
   /**

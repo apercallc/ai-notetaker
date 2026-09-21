@@ -9,10 +9,13 @@
 mod ipc;
 mod tray;
 
-use notetaker_audio::AudioCapture;
-use notetaker_core::native_messaging::{ErrorCode, ExtensionToHelper, HelperToExtension};
+use notetaker_audio::{AudioCapture, AudioDiagnostics};
+use notetaker_core::native_messaging::{
+    ErrorCode, ExtensionToHelper, HelperToExtension, MeetingMode,
+};
 use notetaker_core::pipeline::{Pipeline, RetryableChunk};
 use notetaker_core::providers::test_provider_key;
+use notetaker_core::providers::SummaryOptions;
 use notetaker_core::resilience::RetryQueue;
 use notetaker_core::storage::MeetingStore;
 use notetaker_core::{
@@ -38,6 +41,7 @@ struct ActiveRecording {
 struct AppState {
     store: Arc<MeetingStore>,
     data_dir: std::path::PathBuf,
+    audio: Arc<dyn AudioCapture>,
     pairing_token: Mutex<Option<String>>,
     settings: Mutex<Option<Settings>>,
     active: Mutex<HashMap<Uuid, ActiveRecording>>,
@@ -119,9 +123,11 @@ fn main() {
                     .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?,
             );
             let existing_token = std::fs::read_to_string(pairing_token_path(&root)).ok();
+            let audio: Arc<dyn AudioCapture> = build_audio_backend();
             let state = Arc::new(AppState {
                 store,
                 data_dir: root.clone(),
+                audio,
                 pairing_token: Mutex::new(existing_token),
                 settings: Mutex::new(None),
                 active: Mutex::new(HashMap::new()),
@@ -214,7 +220,10 @@ async fn handle_message(
             true
         }
 
-        ExtensionToHelper::StartRecording { meeting_id } => {
+        ExtensionToHelper::StartRecording {
+            meeting_id,
+            meeting_mode,
+        } => {
             let settings_guard = state.settings.lock().await;
             let Some(settings) = settings_guard.clone() else {
                 let _ = out_tx.send(HelperToExtension::Error {
@@ -230,6 +239,8 @@ async fn handle_message(
                 transcription_provider,
                 summarization_provider,
                 api_keys,
+                custom_vocabulary,
+                custom_summary_instructions,
                 ..
             } = settings.inner
             else {
@@ -269,7 +280,12 @@ async fn handle_message(
                 build_transcription_provider(transcription_provider, transcription_key),
                 build_summarization_provider(summarization_provider, summarization_key),
                 retry_queue,
-            );
+            )
+            .with_summary_options(summary_options(
+                meeting_mode,
+                custom_vocabulary,
+                custom_summary_instructions,
+            ));
 
             match pipeline.start_recording(meeting_id) {
                 Ok(started_msg) => {
@@ -300,7 +316,7 @@ async fn handle_message(
                 .await
                 .insert(meeting_id, retry_task);
 
-            let audio: Arc<dyn AudioCapture> = build_audio_backend();
+            let audio = state.audio.clone();
             let out_tx_for_audio = out_tx.clone();
             let pipeline_for_audio = pipeline.clone();
             let result = audio
@@ -421,6 +437,59 @@ async fn handle_message(
             });
             true
         }
+
+        ExtensionToHelper::AudioPreflight => {
+            let audio = state.audio.clone();
+            let prepare_error = audio.prepare().err().map(|error| error.to_string());
+            let diagnostics = audio.diagnostics();
+            let _ = out_tx.send(audio_status_message(diagnostics, prepare_error));
+            true
+        }
+
+        ExtensionToHelper::AudioProbe => {
+            let audio = state.audio.clone();
+            match audio.probe().await {
+                Ok(result) => {
+                    let _ = out_tx.send(HelperToExtension::AudioProbeResult {
+                        mic_frames: result.mic_frames,
+                        speaker_frames: result.speaker_frames,
+                        passed: result.passed,
+                        message: result.message,
+                    });
+                }
+                Err(error) => {
+                    let _ = out_tx.send(HelperToExtension::AudioProbeResult {
+                        mic_frames: 0,
+                        speaker_frames: 0,
+                        passed: false,
+                        message: format!("Audio test could not start: {error}"),
+                    });
+                }
+            }
+            true
+        }
+    }
+}
+
+fn audio_status_message(
+    diagnostics: AudioDiagnostics,
+    prepare_error: Option<String>,
+) -> HelperToExtension {
+    let (ready, guidance) = match prepare_error {
+        Some(error) => (
+            false,
+            format!("The helper could not prepare the audio devices: {error}"),
+        ),
+        None => (diagnostics.ready, diagnostics.guidance),
+    };
+    HelperToExtension::AudioStatus {
+        platform: diagnostics.platform,
+        driver: diagnostics.driver,
+        driver_installed: diagnostics.driver_installed,
+        microphone: diagnostics.microphone,
+        speaker: diagnostics.speaker,
+        ready,
+        guidance,
     }
 }
 
@@ -524,6 +593,9 @@ fn build_retry_pipeline(
         transcription_provider,
         summarization_provider,
         api_keys,
+        default_meeting_mode,
+        custom_vocabulary,
+        custom_summary_instructions,
         ..
     } = settings.inner.clone()
     else {
@@ -540,7 +612,32 @@ fn build_retry_pipeline(
         build_transcription_provider(transcription_provider, transcription_key),
         build_summarization_provider(summarization_provider, summarization_key),
         retry_queue,
-    ))
+    )
+    .with_summary_options(summary_options(
+        default_meeting_mode,
+        custom_vocabulary,
+        custom_summary_instructions,
+    )))
+}
+
+fn summary_options(
+    mode: MeetingMode,
+    vocabulary: Vec<String>,
+    instructions: Option<String>,
+) -> SummaryOptions {
+    SummaryOptions {
+        mode,
+        vocabulary: vocabulary
+            .into_iter()
+            .map(|term| term.trim().to_string())
+            .filter(|term| !term.is_empty())
+            .map(|term| term.chars().take(100).collect())
+            .take(100)
+            .collect(),
+        custom_instructions: instructions
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| value.chars().take(4_000).collect()),
+    }
 }
 
 fn resolve_keys(

@@ -1,12 +1,13 @@
 # AI Notetaker — Chrome Extension
 
-The UI layer of AI Notetaker: popup (start/stop + live transcript), a
-settings page (BYOK provider keys, optional self-hosted webapp), a
-first-run onboarding wizard, and a meeting detail/history view. All
+The UI layer of AI Notetaker: popup (audio preflight, meeting mode, start/stop
+and live transcript), a settings page (BYOK provider keys, vocabulary, custom
+summary instructions, optional self-hosted webapp), a first-run onboarding
+wizard, meeting detail/history, and a cross-meeting action-item inbox. All
 recording/transcription/summarization logic lives in the desktop helper
 (`../helper/`) — see `../docs/native-messaging-protocol.md` for the wire
-contract between them, and `CLAUDE.md` in this directory for the
-conventions this package follows.
+contract between them, and `CLAUDE.md` in this directory for the conventions
+this package follows.
 
 ## Develop
 
@@ -35,7 +36,7 @@ Messaging host — that's built separately in `../helper/`.
 
 ## What's implemented vs. not yet verified live
 
-Implemented and unit-tested (55 tests, all passing): local storage
+Implemented and unit-tested (61 tests, all passing): local storage
 (settings/meetings, `chrome.storage.local` only, never `.sync`), the
 Native Messaging client and reconnect behavior, the background
 orchestration logic (transcript/summary handling, webapp sync, crash
@@ -44,7 +45,7 @@ recovery state), and API-key/webapp health validation.
 **Not verified in this environment** (no real Chrome browser or running
 helper process was available to test against): actually loading the
 unpacked extension in Chrome, the real Native Messaging handshake against
-a live helper, and real provider API calls (the "test key" buttons make
-real HTTP requests to each provider's API — untested against real keys
+a live helper, and real provider API calls (the "test key" buttons are
+helper-routed but still need real credentials — untested against real keys
 here). These need a manual pass once `helper/` is built and both are
 loaded together on a real machine.

@@ -32,11 +32,19 @@ with the same `id` upserts rather than duplicating).
 {
   "id": "<uuid, same as the meetingId used in the Native Messaging protocol>",
   "title": "string, optional (e.g. calendar event title, or a default like 'Meeting on <date>')",
+  "mode": "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom",
   "startedAt": "<ISO 8601>",
   "endedAt": "<ISO 8601>",
   "transcript": [{ "speaker": "you" | "them" | "them-2", "text": "...", "timestamp": "<ISO 8601>" }],
   "summary": "string",
-  "actionItems": [{ "text": "...", "owner": "string, optional" }]
+  "actionItems": [{
+    "id": "stable action id, optional for older clients",
+    "text": "...",
+    "owner": "string, optional",
+    "status": "open" | "done",
+    "dueAt": "<ISO 8601> | null",
+    "completedAt": "<ISO 8601> | null"
+  }]
 }
 
 // Response: 201 Created, body echoes the stored record
@@ -50,12 +58,17 @@ defaults to 0. Both must be non-negative integers when provided.
 
 ```jsonc
 // Response
-{ "meetings": [{ "id": "...", "title": "...", "startedAt": "...", "summaryPreview": "..." }], "total": 42 }
+{ "meetings": [{ "id": "...", "title": "...", "startedAt": "...", "summaryPreview": "...", "openActionItems": 3 }], "total": 42 }
 ```
 
 ### `GET /api/meetings/:id`
 
 Full detail for one meeting (transcript, summary, action items).
+
+The browser UI also exposes `/actions`, an authenticated cross-meeting inbox
+where the user can filter open/completed items, mark them done, and set due
+dates. Those edits remain in the self-hosted webapp and are reflected on the
+meeting detail page.
 
 ### `DELETE /api/meetings/:id`
 

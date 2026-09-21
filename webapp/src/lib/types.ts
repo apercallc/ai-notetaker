@@ -8,13 +8,20 @@ export interface TranscriptSegmentInput {
 }
 
 export interface ActionItemInput {
+  id?: string;
   text: string;
   owner?: string;
+  status?: "open" | "done";
+  dueAt?: string | null;
+  completedAt?: string | null;
 }
+
+export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
 
 export interface CreateMeetingRequest {
   id: string;
   title?: string;
+  mode?: MeetingMode;
   startedAt: string; // ISO 8601
   endedAt: string; // ISO 8601
   transcript: TranscriptSegmentInput[];
@@ -27,6 +34,7 @@ export interface MeetingSummaryResponse {
   title: string;
   startedAt: string;
   summaryPreview: string;
+  openActionItems: number;
 }
 
 export interface MeetingDetailResponse {
@@ -35,6 +43,16 @@ export interface MeetingDetailResponse {
   startedAt: string;
   endedAt: string;
   summary: string;
+  mode: MeetingMode;
   transcript: { speaker: string; text: string; timestamp: string }[];
-  actionItems: { text: string; owner: string | null }[];
+  actionItems: {
+    id: string;
+    text: string;
+    owner: string | null;
+    status: "open" | "done";
+    dueAt: string | null;
+    completedAt: string | null;
+    meetingId?: string;
+    meetingTitle?: string;
+  }[];
 }

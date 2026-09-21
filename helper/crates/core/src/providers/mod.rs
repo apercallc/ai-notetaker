@@ -25,7 +25,7 @@ pub mod gemini;
 pub mod groq;
 
 use crate::native_messaging::{
-    ActionItem, ProviderKind, SummarizationProviderId, TranscriptionProviderId,
+    ActionItem, MeetingMode, ProviderKind, SummarizationProviderId, TranscriptionProviderId,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,23 @@ pub struct TranscriptSegment {
 pub struct Summary {
     pub summary: String,
     pub action_items: Vec<ActionItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SummaryOptions {
+    pub mode: MeetingMode,
+    pub vocabulary: Vec<String>,
+    pub custom_instructions: Option<String>,
+}
+
+impl Default for SummaryOptions {
+    fn default() -> Self {
+        Self {
+            mode: MeetingMode::General,
+            vocabulary: vec![],
+            custom_instructions: None,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -113,7 +130,11 @@ pub trait TranscriptionProvider: Send + Sync {
 #[async_trait]
 pub trait SummarizationProvider: Send + Sync {
     fn id(&self) -> SummarizationProviderId;
-    async fn summarize(&self, transcript: &[TranscriptSegment]) -> Result<Summary, ProviderError>;
+    async fn summarize(
+        &self,
+        transcript: &[TranscriptSegment],
+        options: &SummaryOptions,
+    ) -> Result<Summary, ProviderError>;
 }
 
 /// A GET request with `Authorization: Bearer <key>`, treated as a pure key
@@ -237,11 +258,38 @@ pub fn parse_summary_json(text: &str) -> Result<Summary, ProviderError> {
     })
 }
 
-pub const SUMMARIZATION_SYSTEM_PROMPT: &str = "You are summarizing a meeting transcript. \
-Produce a concise summary of what was discussed, followed by a list of concrete action items. \
-Each action item should name an owner when the transcript makes one clear, and be phrased as a \
-specific task, not a vague topic. Respond ONLY with JSON matching this shape: \
-{\"summary\": string, \"action_items\": [{\"text\": string, \"owner\": string | null}]}";
+pub fn summary_system_prompt(options: &SummaryOptions) -> String {
+    let mode = match options.mode {
+        MeetingMode::General => "general meeting",
+        MeetingMode::Standup => "standup: emphasize progress, blockers, and next steps",
+        MeetingMode::Sales => {
+            "sales call: emphasize customer needs, objections, commitments, and follow-up"
+        }
+        MeetingMode::OneOnOne => {
+            "one-on-one: emphasize goals, feedback, decisions, and support needed"
+        }
+        MeetingMode::Interview => {
+            "interview: emphasize evidence, strengths, risks, and unanswered questions"
+        }
+        MeetingMode::Custom => "custom meeting format; follow the additional instructions closely",
+    };
+    let vocabulary = if options.vocabulary.is_empty() {
+        "No custom vocabulary provided.".to_string()
+    } else {
+        format!(
+            "Prefer these exact spellings when supported: {}.",
+            options.vocabulary.join(", ")
+        )
+    };
+    let custom = options
+        .custom_instructions
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or("No additional instructions provided.");
+    format!(
+        "You are summarizing a {mode}. {vocabulary} Additional instructions: {custom} Produce a concise, useful summary followed by concrete action items. Each action item should name an owner when the transcript makes one clear, and be phrased as a specific task, not a vague topic. Respond ONLY with JSON matching this shape: {{\"summary\": string, \"action_items\": [{{\"text\": string, \"owner\": string | null}}]}}"
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -274,6 +322,18 @@ mod tests {
         assert_eq!(provider_label(ProviderKind::Claude), "Claude");
         assert_eq!(provider_label(ProviderKind::Gemini), "Gemini");
         assert_eq!(provider_label(ProviderKind::Deepseek), "DeepSeek");
+    }
+
+    #[test]
+    fn summary_prompt_includes_mode_vocabulary_and_custom_instructions() {
+        let prompt = summary_system_prompt(&SummaryOptions {
+            mode: MeetingMode::Sales,
+            vocabulary: vec!["Acme".into(), "QBR".into()],
+            custom_instructions: Some("Call out objections separately.".into()),
+        });
+        assert!(prompt.contains("sales call"));
+        assert!(prompt.contains("Acme, QBR"));
+        assert!(prompt.contains("Call out objections separately."));
     }
 
     #[test]

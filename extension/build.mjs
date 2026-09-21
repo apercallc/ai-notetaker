@@ -10,6 +10,7 @@ const entryPoints = [
   "src/settings/settings.ts",
   "src/onboarding/onboarding.ts",
   "src/meeting/meeting.ts",
+  "src/actions/actions.ts",
 ];
 
 const buildOptions = {
@@ -27,7 +28,7 @@ async function copyStatic() {
   await mkdir("dist", { recursive: true });
   await cp("manifest.json", "dist/manifest.json");
   await cp("icons", "dist/icons", { recursive: true });
-  for (const page of ["popup", "settings", "onboarding", "meeting"]) {
+  for (const page of ["popup", "settings", "onboarding", "meeting", "actions"]) {
     await cp(`src/${page}/${page}.html`, `dist/${page}/${page}.html`);
     await cp(`src/${page}/${page}.css`, `dist/${page}/${page}.css`);
   }

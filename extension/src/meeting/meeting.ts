@@ -1,5 +1,6 @@
-import { deleteMeeting, getMeeting } from "../lib/storage";
+import { deleteMeeting, getMeeting, getSettings, updateMeeting } from "../lib/storage";
 import { escapeHtml } from "../lib/html";
+import { syncMeetingToWebapp } from "../lib/webappSync";
 import { speakerLabel } from "../types";
 
 const app = document.getElementById("app")!;
@@ -15,7 +16,7 @@ function exportAsMarkdown(meeting: NonNullable<Awaited<ReturnType<typeof getMeet
     "",
     "## Action Items",
     ...(meeting.actionItems.length > 0
-      ? meeting.actionItems.map((item) => `- [ ] ${item.text}${item.owner ? ` (${item.owner})` : ""}`)
+      ? meeting.actionItems.map((item) => `- [${item.status === "done" ? "x" : " "}] ${item.text}${item.owner ? ` (${item.owner})` : ""}${item.dueAt ? ` — due ${item.dueAt.slice(0, 10)}` : ""}`)
       : ["_None_"]),
     "",
     "## Transcript",
@@ -51,7 +52,14 @@ async function render(): Promise<void> {
       <h2>Action items</h2>
       ${
         meeting.actionItems.length > 0
-          ? `<ul class="action-items">${meeting.actionItems.map((item) => `<li>${escapeHtml(item.text)}${item.owner ? ` <span class="text-secondary">(${escapeHtml(item.owner)})</span>` : ""}</li>`).join("")}</ul>`
+          ? `<ul class="action-items">${meeting.actionItems.map((item, index) => {
+              const id = item.id ?? `${meeting.id}-${index}`;
+              return `<li class="action-item ${item.status === "done" ? "done" : ""}">
+                <input type="checkbox" class="action-toggle" data-action-id="${escapeHtml(id)}" ${item.status === "done" ? "checked" : ""} aria-label="Mark action item ${escapeHtml(item.text)} complete" />
+                <span>${escapeHtml(item.text)}${item.owner ? ` <span class="text-secondary">(${escapeHtml(item.owner)})</span>` : ""}</span>
+                <input type="date" class="action-due" data-action-id="${escapeHtml(id)}" value="${escapeHtml(item.dueAt?.slice(0, 10) ?? "")}" aria-label="Due date for ${escapeHtml(item.text)}" />
+              </li>`;
+            }).join("")}</ul>`
           : `<p class="text-secondary">None.</p>`
       }
     </section>
@@ -87,6 +95,36 @@ async function render(): Promise<void> {
     await deleteMeeting(id);
     window.close();
   });
+
+  for (const input of document.querySelectorAll<HTMLInputElement>(".action-toggle")) {
+    input.addEventListener("change", async () => {
+      const current = await getMeeting(id);
+      if (!current) return;
+      const updated = await updateMeeting(id, (meeting) => ({
+        ...meeting,
+        actionItems: meeting.actionItems.map((item, index) =>
+          (item.id ?? `${meeting.id}-${index}`) === input.dataset.actionId
+            ? { ...item, id: input.dataset.actionId, status: input.checked ? "done" : "open", completedAt: input.checked ? new Date().toISOString() : null }
+            : item,
+        ),
+      }));
+      if (updated) await syncMeetingToWebapp(updated, await getSettings());
+      await render();
+    });
+  }
+  for (const input of document.querySelectorAll<HTMLInputElement>(".action-due")) {
+    input.addEventListener("change", async () => {
+      const updated = await updateMeeting(id, (meeting) => ({
+        ...meeting,
+        actionItems: meeting.actionItems.map((item, index) =>
+          (item.id ?? `${meeting.id}-${index}`) === input.dataset.actionId
+            ? { ...item, id: input.dataset.actionId, dueAt: input.value ? new Date(`${input.value}T00:00:00.000Z`).toISOString() : null }
+            : item,
+        ),
+      }));
+      if (updated) await syncMeetingToWebapp(updated, await getSettings());
+    });
+  }
 }
 
 void render();

@@ -33,6 +33,25 @@ describe("settings storage", () => {
     expect(settings.apiKeys.groq).toBe("test-key");
   });
 
+  it("backfills new meeting-intelligence settings for older installs", async () => {
+    await chrome.storage.local.set({
+      "notetaker.settings": {
+        transcriptionProvider: "deepgram",
+        summarizationProvider: "claude",
+        apiKeys: { deepgram: "legacy-key" },
+        webapp: null,
+        onboardingComplete: true,
+        consentDisclosureAcknowledged: true,
+      },
+    });
+
+    const settings = await getSettings();
+    expect(settings.defaultMeetingMode).toBe("general");
+    expect(settings.customVocabulary).toEqual([]);
+    expect(settings.customSummaryInstructions).toBe("");
+    expect(settings.apiKeys.deepgram).toBe("legacy-key");
+  });
+
   it("never writes settings (or API keys) to chrome.storage.sync", async () => {
     await saveSettings({ ...DEFAULT_SETTINGS, apiKeys: { claude: "secret" } });
     expect(chromeMock.storage.sync.set).not.toHaveBeenCalled();

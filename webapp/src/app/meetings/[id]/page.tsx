@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMeeting } from "@/lib/meetings";
 import { DeleteButton } from "./DeleteButton";
+import { updateActionItemAction } from "./actions";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -33,7 +34,7 @@ export default async function MeetingDetailPage({
         <h1>{meeting.title}</h1>
       </div>
       <p className="meeting-date">
-        {formatDate(meeting.startedAt)}
+        {formatDate(meeting.startedAt)} · {meeting.mode.replaceAll("_", " ")}
       </p>
 
       <h2 className="section-title">Summary</h2>
@@ -43,12 +44,25 @@ export default async function MeetingDetailPage({
         <>
           <h2 className="section-title">Action items</h2>
           <ul className="action-list">
-            {meeting.actionItems.map((item, i) => (
-              <li key={i} className="action-item">
-                {item.text}
-                {item.owner && (
-                  <span className="meeting-owner"> — {item.owner}</span>
-                )}
+            {meeting.actionItems.map((item) => (
+              <li key={item.id} className={`action-item ${item.status === "done" ? "is-done" : ""}`}>
+                <form action={updateActionItemAction} className="detail-action-form">
+                  <input type="hidden" name="id" value={item.id} />
+                  <input type="hidden" name="meetingId" value={meeting.id} />
+                  <label className="action-checkbox">
+                    <span className="sr-only">Mark “{item.text}” {item.status === "done" ? "open" : "done"}</span>
+                    <input type="checkbox" name="done" value="1" defaultChecked={item.status === "done"} />
+                  </label>
+                  <span className="action-text">
+                    {item.text}
+                    {item.owner && <span className="meeting-owner"> — {item.owner}</span>}
+                  </span>
+                  <label className="action-due-label">
+                    <span>Due</span>
+                    <input type="date" name="dueAt" defaultValue={item.dueAt?.slice(0, 10) ?? ""} aria-label={`Due date for ${item.text}`} />
+                  </label>
+                  <button type="submit" className="text-link-muted">Save</button>
+                </form>
               </li>
             ))}
           </ul>

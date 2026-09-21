@@ -10,12 +10,27 @@ Check items off as they land. If a decision here turns out wrong once
 you're building, update the spec doc first, then this file — don't let
 them drift apart.
 
+## Workflow improvements (2026-09-21)
+
+- [x] Guided audio preflight and short mic/speaker probe in onboarding and the
+      popup; the helper reports platform-specific device guidance without
+      sending audio over Native Messaging.
+- [x] Meeting modes, bounded custom vocabulary, and custom summary
+      instructions flow from extension settings into the helper prompt and
+      are persisted with each local meeting.
+- [x] Stable local action-item IDs, completion/due-date tracking, and a
+      cross-meeting action inbox in both the extension and optional webapp;
+      webapp updates remain authenticated and self-hosted.
+- [ ] Validate the audio probe and complete meeting workflow on real macOS,
+      Windows, and Linux devices with each supported meeting app; local tests
+      cannot prove OS routing or provider behavior.
+
 ---
 
 ## Sub-project 1: Core capture + notes pipeline (MVP)
 
 **Status (2026-09-21): first implementation pass landed, then reviewed and
-fixed.** 83 Rust tests + 55 extension tests + 44 webapp tests, all
+fixed.** 86 Rust tests + 61 extension tests + 48 webapp tests, all
 independently re-run and verified green by the coordinator (not just taken
 on the implementers' word) — see `docs/native-messaging-protocol.md` for a
 real cross-package
@@ -328,8 +343,8 @@ scope:
 ### Testing & QA
 
 - [x] Unit tests per package (helper Rust modules, extension logic, webapp
-      API routes) — focused suites currently cover 83 Rust, 55 extension,
-      and 44 webapp tests
+      API routes) — focused suites currently cover 86 Rust, 61 extension,
+      and 48 webapp tests
 - [ ] Integration test for the full pipeline using recorded fixture audio
       against both default and budget provider tiers (mocked provider
       responses in CI, no live API calls required)

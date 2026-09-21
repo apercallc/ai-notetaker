@@ -9,9 +9,8 @@ import type { BackgroundState, BackgroundToUiMessage } from "./internalMessages"
 import type { HelperConnectionStatus } from "./nativeMessaging";
 import { getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
-import type { IncomingMessage, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
-
-const WEBAPP_SYNC_TIMEOUT_MS = 15_000;
+import { syncMeetingToWebapp } from "./webappSync";
+import type { AudioProbeResult, AudioStatus, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -20,12 +19,14 @@ export interface NativeClientLike {
     handler: (message: Extract<IncomingMessage, { type: T }>) => void,
   ): void;
   onStatusChange(handler: (status: HelperConnectionStatus) => void): void;
-  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp">): void;
-  startRecording(meetingId: string): void;
+  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions">): void;
+  startRecording(meetingId: string, meetingMode: MeetingMode): void;
   stopRecording(meetingId: string): void;
   resumeRecording(meetingId: string): void;
   discardRecording(meetingId: string): void;
   testProviderKey(provider: ProviderKind, key: string): Promise<{ valid: boolean; message: string }>;
+  getAudioPreflight(): Promise<AudioStatus>;
+  runAudioProbe(): Promise<AudioProbeResult>;
 }
 
 function generateMeetingId(): string {
@@ -68,6 +69,9 @@ export class BackgroundController {
       summarizationProvider: this.settings.summarizationProvider,
       apiKeys: this.settings.apiKeys,
       webapp: this.settings.webapp,
+      defaultMeetingMode: this.settings.defaultMeetingMode,
+      customVocabulary: this.settings.customVocabulary,
+      customSummaryInstructions: this.settings.customSummaryInstructions,
     });
   }
 
@@ -77,7 +81,7 @@ export class BackgroundController {
     this.pushCurrentSettings();
   }
 
-  async startRecording(): Promise<string> {
+  async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general"): Promise<string> {
     const meetingId = generateMeetingId();
     const meeting: MeetingRecord = {
       id: meetingId,
@@ -87,12 +91,13 @@ export class BackgroundController {
       transcript: [],
       summary: null,
       actionItems: [],
+      mode: meetingMode,
       status: "recording",
     };
     await saveMeeting(meeting);
     this.activeMeetingId = meetingId;
     try {
-      this.client.startRecording(meetingId);
+      this.client.startRecording(meetingId, meetingMode);
     } catch {
       meeting.status = "error";
       meeting.errorMessage = "The desktop helper is not connected. Install and start it, then try again.";
@@ -124,6 +129,14 @@ export class BackgroundController {
 
   testProviderKey(provider: ProviderKind, key: string): Promise<{ valid: boolean; message: string }> {
     return this.client.testProviderKey(provider, key);
+  }
+
+  getAudioPreflight(): Promise<AudioStatus> {
+    return this.client.getAudioPreflight();
+  }
+
+  runAudioProbe(): Promise<AudioProbeResult> {
+    return this.client.runAudioProbe();
   }
 
   getState(): BackgroundState {
@@ -176,7 +189,19 @@ export class BackgroundController {
     const meeting = await updateMeeting(msg.meetingId, (current) => {
       current.status = "complete";
       current.summary = msg.summary;
-      current.actionItems = msg.actionItems;
+      const previousByFingerprint = new Map(
+        current.actionItems.map((item) => [`${item.text}\u0000${item.owner ?? ""}`, item]),
+      );
+      current.actionItems = msg.actionItems.map((item) => {
+        const previous = previousByFingerprint.get(`${item.text}\u0000${item.owner ?? ""}`);
+        return {
+          ...item,
+          id: previous?.id ?? crypto.randomUUID(),
+          status: previous?.status ?? "open",
+          dueAt: previous?.dueAt ?? null,
+          completedAt: previous?.completedAt ?? null,
+        };
+      });
       current.endedAt = new Date().toISOString();
       return current;
     });
@@ -237,35 +262,6 @@ export class BackgroundController {
       });
       return;
     }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), WEBAPP_SYNC_TIMEOUT_MS);
-    try {
-      const response = await this.fetchImpl(`${normalized}/api/meetings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${webapp.token}`,
-        },
-        body: JSON.stringify({
-          id: meeting.id,
-          title: meeting.title,
-          startedAt: meeting.startedAt,
-          endedAt: meeting.endedAt,
-          transcript: meeting.transcript,
-          summary: meeting.summary,
-          actionItems: meeting.actionItems,
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`webapp returned HTTP ${response.status}`);
-    } catch {
-      // Local save already succeeded (per the raw-audio/local-first
-      // resilience guarantee this mirrors) — a webapp sync failure is
-      // logged, not fatal. A retry-on-next-sync pass is a fast-follow, not
-      // required for the local-first experience to work.
-      console.warn(`Failed to sync meeting ${meeting.id} to webapp`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    await syncMeetingToWebapp(meeting, { webapp }, this.fetchImpl);
   }
 }

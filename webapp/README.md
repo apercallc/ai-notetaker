@@ -81,6 +81,9 @@ parallel would let one file's cleanup race another's assertions.
 - This app never calls transcription/LLM provider APIs and never needs the
   user's Deepgram/Claude/etc. keys — it only stores and serves finished
   notes the extension/helper already produced.
+- The authenticated `/actions` page is a cross-meeting action-item inbox. It
+  supports open/completed filtering, completion toggles, and due dates, while
+  keeping the meeting detail page as the source context for each item.
 
 ## What's verified vs. not (as of this build)
 

@@ -4,8 +4,8 @@
 //! VB-CABLE (never the A+B/C+D variants), provided vb-cable.com
 //! attribution and the donation option stay visible in our installer UI —
 //! that attribution display is an app-layer/installer-UI concern, not this
-//! crate's; this module only handles detection and invoking the silent
-//! install.
+//! crate's. The actual download/install step remains an explicit release
+//! task; this module currently handles detection and truthful guidance.
 //!
 //! **Known gap, flagged rather than faked:** same issue as macOS — routing
 //! a meeting app's output to CABLE Input means the user stops hearing the
@@ -20,7 +20,7 @@
 //! claim.
 
 use crate::device_matching::{find_matching_device, WINDOWS_DEVICE_HINT};
-use crate::{AudioCapture, AudioError, CapturedFrame, DriverStatus};
+use crate::{AudioCapture, AudioDiagnostics, AudioError, CapturedFrame, DriverStatus};
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
@@ -55,7 +55,8 @@ impl WindowsAudioCapture {
         find_matching_device(&names, WINDOWS_DEVICE_HINT).map(String::from)
     }
 
-    /// Downloads (if needed) and silently installs base VB-CABLE. The
+    /// Intended release hook to download (if needed) and silently install
+    /// base VB-CABLE. The
     /// installer UI calling this must display `VB_CABLE_ATTRIBUTION_TEXT`
     /// and a link to vb-cable.com, per VB-Audio's bundling terms — that
     /// display is the caller's responsibility.
@@ -88,8 +89,30 @@ impl AudioCapture for WindowsAudioCapture {
             Some(_) => DriverStatus::Installed,
             None => DriverStatus::NotInstalled {
                 install_guidance:
-                    "VB-CABLE will be installed automatically — click continue to proceed."
+                    "Install the base VB-CABLE package from vb-cable.com, then return here and check again."
                         .to_string(),
+            },
+        }
+    }
+
+    fn diagnostics(&self) -> AudioDiagnostics {
+        let speaker = self.installed_device_name();
+        let microphone = cpal::default_host()
+            .default_input_device()
+            .and_then(|device| device.name().ok());
+        let driver_installed = speaker.is_some();
+        let ready = driver_installed && microphone.is_some();
+        AudioDiagnostics {
+            platform: "windows".to_string(),
+            driver: "VB-CABLE".to_string(),
+            driver_installed,
+            microphone,
+            speaker,
+            ready,
+            guidance: if ready {
+                format!("VB-CABLE is available. Confirm Listen to this device is enabled so you can hear the meeting, then run the test. {}", VB_CABLE_ATTRIBUTION_TEXT)
+            } else {
+                format!("VB-CABLE is not ready. Install the base VB-CABLE package, enable Listen to this device, and try again. {}", VB_CABLE_ATTRIBUTION_TEXT)
             },
         }
     }

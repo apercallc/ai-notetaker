@@ -8,7 +8,9 @@
 //! transport (native_messaging) or a provider implementation detail.
 
 use crate::native_messaging::{ActionItem, ErrorCode, HelperToExtension};
-use crate::providers::{AudioChannel, AudioChunk, SummarizationProvider, TranscriptionProvider};
+use crate::providers::{
+    AudioChannel, AudioChunk, SummarizationProvider, SummaryOptions, TranscriptionProvider,
+};
 use crate::resilience::RetryQueue;
 use crate::storage::{MeetingState, MeetingStore, MIC_FILE, SPEAKER_FILE};
 use chrono::Utc;
@@ -53,6 +55,7 @@ pub struct Pipeline {
     store: MeetingStore,
     transcription_provider: Box<dyn TranscriptionProvider>,
     summarization_provider: Box<dyn SummarizationProvider>,
+    summary_options: SummaryOptions,
     retry_queue: RetryQueue<RetryableChunk>,
     accepting_audio: bool,
     pending_mic: Option<PendingAudio>,
@@ -70,6 +73,7 @@ impl Pipeline {
             store,
             transcription_provider,
             summarization_provider,
+            summary_options: SummaryOptions::default(),
             retry_queue,
             accepting_audio: false,
             pending_mic: None,
@@ -77,11 +81,21 @@ impl Pipeline {
         }
     }
 
+    pub fn with_summary_options(mut self, options: SummaryOptions) -> Self {
+        self.summary_options = options;
+        self
+    }
+
     pub fn start_recording(
         &mut self,
         meeting_id: Uuid,
     ) -> Result<HelperToExtension, PipelineError> {
-        self.store.create_meeting(meeting_id, Utc::now())?;
+        self.store.create_meeting_with_options(
+            meeting_id,
+            Utc::now(),
+            self.summary_options.mode,
+            self.summary_options.clone(),
+        )?;
         self.accepting_audio = true;
         Ok(HelperToExtension::RecordingStarted { meeting_id })
     }
@@ -245,7 +259,11 @@ impl Pipeline {
         messages.extend(self.flush_pending_audio(meeting_id).await);
 
         let transcript = self.store.load_transcript(meeting_id)?;
-        match self.summarization_provider.summarize(&transcript).await {
+        match self
+            .summarization_provider
+            .summarize(&transcript, &self.summary_options)
+            .await
+        {
             Ok(summary) => {
                 self.store.mark_processed(meeting_id)?;
                 messages.push(HelperToExtension::SummaryReady {
@@ -386,7 +404,16 @@ impl Pipeline {
                 });
             }
         };
-        match self.summarization_provider.summarize(&transcript).await {
+        let summary_options = self
+            .store
+            .load_meta(meeting_id)
+            .map(|meta| meta.summary_options)
+            .unwrap_or_else(|_| self.summary_options.clone());
+        match self
+            .summarization_provider
+            .summarize(&transcript, &summary_options)
+            .await
+        {
             Ok(summary) => {
                 let _ = self.store.mark_processed(meeting_id);
                 Some(HelperToExtension::SummaryReady {
@@ -469,6 +496,7 @@ mod tests {
         async fn summarize(
             &self,
             _transcript: &[TranscriptSegment],
+            _options: &SummaryOptions,
         ) -> Result<Summary, ProviderError> {
             Ok(Summary {
                 summary: "fake summary".into(),

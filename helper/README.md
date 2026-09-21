@@ -27,7 +27,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-As of this implementation pass: **83 tests passing (78 in `core`, 5 in
+As of this implementation pass: **86 tests passing (80 in `core`, 6 in
 `audio`), zero compiler warnings, zero clippy warnings**, verified in a
 Linux dev environment with the full Rust toolchain, ALSA dev headers, and
 the Tauri v2 WebKitGTK/libayatana-appindicator dependencies.

@@ -20,6 +20,7 @@ model Meeting {
   userId      String
   workspaceId String?
   title       String
+  mode        String    @default("general")
   startedAt   DateTime
   endedAt     DateTime
   summary     String    @db.Text
@@ -52,8 +53,12 @@ model ActionItem {
   userId    String
   text      String  @db.Text
   owner     String?
+  status    String   @default("open")
+  dueAt     DateTime?
+  completedAt DateTime?
 
   meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@index([meetingId])
+  @@index([userId, status, dueAt])
 }

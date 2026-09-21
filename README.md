@@ -19,13 +19,15 @@ your data.
    trick tools like Krisp use — you select it as your mic + speaker in your
    meeting app's settings, and it transparently passes audio through while
    capturing a copy.
-2. A Chrome extension is your control surface: start/stop recording, watch
-   a live transcript, and browse past meetings' notes and action items.
+2. A Chrome extension is your control surface: guided audio preflight, start/
+   stop recording, a live transcript, meeting modes/custom vocabulary, and a
+   cross-meeting action-item inbox.
 3. Recordings are transcribed and summarized using your own API key(s) —
    no account, no backend billing, no subscription.
 4. Optionally, deploy your own history web app (one click on Railway) if you
    want persistent, cross-device access to past meetings. It's entirely
-   optional — the extension works standalone with local storage.
+   optional — the extension works standalone with local storage. The webapp
+   adds an authenticated action-item inbox and due-date tracking.
 
 ## Status
 

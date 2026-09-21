@@ -16,6 +16,8 @@ pub mod windows;
 
 use async_trait::async_trait;
 use notetaker_core::providers::AudioChannel;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -45,11 +47,30 @@ pub enum DriverStatus {
     /// Not installed. `install_guidance` is what the onboarding wizard
     /// shows the user — for macOS this is a deep link to Existential
     /// Audio's official download (never a bundled binary, see
-    /// `helper/CLAUDE.md`); for Windows, bundling is what actually runs
-    /// here since VB-Audio's terms permit it.
+    /// `helper/CLAUDE.md`); a future Windows installer may bundle base
+    /// VB-CABLE after its attribution/release checks are complete.
     NotInstalled {
         install_guidance: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDiagnostics {
+    pub platform: String,
+    pub driver: String,
+    pub driver_installed: bool,
+    pub microphone: Option<String>,
+    pub speaker: Option<String>,
+    pub ready: bool,
+    pub guidance: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AudioProbe {
+    pub mic_frames: u64,
+    pub speaker_frames: u64,
+    pub passed: bool,
+    pub message: String,
 }
 
 #[async_trait]
@@ -57,6 +78,17 @@ pub trait AudioCapture: Send + Sync {
     /// Checks whether the platform's virtual audio device is installed and
     /// ready to select as a mic/speaker in a meeting app.
     fn driver_status(&self) -> DriverStatus;
+
+    /// Returns a non-invasive snapshot of the devices the backend would use.
+    /// This is deliberately separate from `start_capture`: preflight must be
+    /// useful before a meeting and must not call a provider or create a note.
+    fn diagnostics(&self) -> AudioDiagnostics;
+
+    /// Gives a platform backend a chance to create its existing virtual
+    /// devices. It must not download or invent a custom audio driver.
+    fn prepare(&self) -> Result<(), AudioError> {
+        Ok(())
+    }
 
     /// Begins capturing both channels. Frames are delivered to `on_frame`
     /// as they arrive — the caller (the pipeline) is responsible for
@@ -68,6 +100,33 @@ pub trait AudioCapture: Send + Sync {
     ) -> Result<(), AudioError>;
 
     async fn stop_capture(&self) -> Result<(), AudioError>;
+
+    /// Exercises both capture callbacks for a short bounded interval. The
+    /// default implementation is backend-neutral and intentionally reports
+    /// only frame counts; raw frames never leave the helper.
+    async fn probe(&self) -> Result<AudioProbe, AudioError> {
+        let counts = Arc::new(Mutex::new(AudioProbe::default()));
+        let callback_counts = counts.clone();
+        self.start_capture(Box::new(move |frame| {
+            if let Ok(mut result) = callback_counts.lock() {
+                match frame.channel {
+                    AudioChannel::Mic => result.mic_frames += 1,
+                    AudioChannel::Speaker => result.speaker_frames += 1,
+                }
+            }
+        }))
+        .await?;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        self.stop_capture().await?;
+        let mut result = counts.lock().map(|value| value.clone()).unwrap_or_default();
+        result.passed = result.mic_frames > 0 && result.speaker_frames > 0;
+        result.message = if result.passed {
+            "Both microphone and meeting-audio channels produced test frames.".to_string()
+        } else {
+            "The test did not receive audio on both channels. Check the meeting app's mic/speaker selection and try again.".to_string()
+        };
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
@@ -85,5 +144,13 @@ mod tests {
             }
             DriverStatus::Installed => panic!("expected NotInstalled"),
         }
+    }
+
+    #[test]
+    fn probe_defaults_to_a_failed_empty_result() {
+        let result = AudioProbe::default();
+        assert_eq!(result.mic_frames, 0);
+        assert_eq!(result.speaker_frames, 0);
+        assert!(!result.passed);
     }
 }

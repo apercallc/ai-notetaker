@@ -257,9 +257,9 @@ describe("NativeMessagingClient", () => {
     const client = new NativeMessagingClient();
     await client.connect();
 
-    client.startRecording("meeting-42");
+    client.startRecording("meeting-42", "general");
 
-    expect(port.postMessage).toHaveBeenCalledWith({ type: "start_recording", meetingId: "meeting-42" });
+    expect(port.postMessage).toHaveBeenCalledWith({ type: "start_recording", meetingId: "meeting-42", meetingMode: "general" });
   });
 
   it("pushes current settings down to the helper", async () => {
@@ -273,6 +273,9 @@ describe("NativeMessagingClient", () => {
       summarizationProvider: "claude",
       apiKeys: { deepgram: "dg-key", claude: "cl-key" },
       webapp: null,
+      defaultMeetingMode: "general",
+      customVocabulary: [],
+      customSummaryInstructions: "",
     });
 
     expect(port.postMessage).toHaveBeenCalledWith({
@@ -281,6 +284,9 @@ describe("NativeMessagingClient", () => {
       summarizationProvider: "claude",
       apiKeys: { deepgram: "dg-key", claude: "cl-key" },
       webapp: null,
+      defaultMeetingMode: "general",
+      customVocabulary: [],
+      customSummaryInstructions: "",
     });
   });
 

@@ -56,8 +56,12 @@ async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown>
     case "GET_STATE":
       void chrome.action.setBadgeText({ text: "" });
       return controller.getState();
+    case "GET_AUDIO_PREFLIGHT":
+      return { status: await controller.getAudioPreflight() };
+    case "RUN_AUDIO_PROBE":
+      return { result: await controller.runAudioProbe() };
     case "START_RECORDING":
-      return { meetingId: await controller.startRecording() };
+      return { meetingId: await controller.startRecording(message.meetingMode) };
     case "STOP_RECORDING":
       await controller.stopRecording(message.meetingId);
       return {};

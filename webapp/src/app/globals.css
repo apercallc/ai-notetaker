@@ -80,6 +80,24 @@ a {
   font-size: 0.9375rem;
 }
 
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.filter-links {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.filter-links a[aria-current="page"] {
+  font-weight: 700;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
 .meeting-date {
   margin-top: -16px;
 }
@@ -176,6 +194,10 @@ a {
   margin-bottom: var(--space-1);
 }
 
+.open-actions {
+  color: var(--color-accent);
+}
+
 .meeting-card .preview {
   color: var(--color-text-muted);
   font-size: 0.9375rem;
@@ -233,6 +255,80 @@ a {
 .action-item {
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--color-border);
+}
+
+.action-item.is-done .action-text,
+.action-inbox-row.is-done .action-title {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.detail-action-form,
+.action-inbox-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action-checkbox {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.action-text,
+.action-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.action-inbox {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.action-inbox-row {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+.action-title {
+  font-weight: 600;
+}
+
+.action-context {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-due-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.action-due-label input {
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-1);
+}
+
+.action-save {
+  font-size: 0.875rem;
+  padding: var(--space-1) var(--space-2);
 }
 
 .button {
@@ -298,5 +394,32 @@ a {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .header-links,
+  .detail-action-form,
+  .action-inbox-form {
+    align-items: flex-start;
+  }
+
+  .header-links {
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .detail-action-form,
+  .action-inbox-form {
+    flex-wrap: wrap;
+  }
+
+  .action-content,
+  .action-text {
+    flex-basis: calc(100% - 32px);
+  }
+
+  .action-due-label {
+    margin-left: 32px;
   }
 }

@@ -39,6 +39,29 @@ function render(): void {
     </fieldset>
 
     <fieldset>
+      <legend>Meeting intelligence</legend>
+      <p class="text-secondary field-hint">
+        Pick the summary shape you use most. These preferences stay on this
+        device and are sent to your chosen provider only through the helper.
+      </p>
+      <div class="field">
+        <label for="default-meeting-mode">Default meeting mode</label>
+        <select id="default-meeting-mode">
+          ${meetingModeOptions(settings.defaultMeetingMode)}
+        </select>
+      </div>
+      <div class="field">
+        <label for="custom-vocabulary">Custom vocabulary</label>
+        <textarea id="custom-vocabulary" rows="4" placeholder="One name, product, or acronym per line">${escapeHtml(settings.customVocabulary.join("\n"))}</textarea>
+        <p class="field-hint text-secondary">Names and terms the transcript or summary should spell correctly.</p>
+      </div>
+      <div class="field">
+        <label for="custom-summary-instructions">Custom summary instructions</label>
+        <textarea id="custom-summary-instructions" rows="4" placeholder="For example: always call out launch risks and unanswered questions.">${escapeHtml(settings.customSummaryInstructions)}</textarea>
+      </div>
+    </fieldset>
+
+    <fieldset>
       <legend>Self-hosted history webapp (optional)</legend>
       <p class="text-secondary field-hint">
         Deploy your own instance for persistent, cross-device history. Not
@@ -65,6 +88,18 @@ function render(): void {
   `;
 
   wireEvents();
+}
+
+function meetingModeOptions(selected: NotetakerSettings["defaultMeetingMode"]): string {
+  const options = [
+    ["general", "General"],
+    ["standup", "Standup"],
+    ["sales", "Sales call"],
+    ["one_on_one", "1:1"],
+    ["interview", "Interview"],
+    ["custom", "Custom template"],
+  ] as const;
+  return options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
 }
 
 function renderDefaultTierFields(): string {
@@ -119,6 +154,13 @@ function readFormIntoSettings(): void {
   const webappUrl = (document.getElementById("webapp-url") as HTMLInputElement)?.value.trim();
   const webappToken = (document.getElementById("webapp-token") as HTMLInputElement)?.value.trim();
   settings.webapp = webappUrl && webappToken ? { url: webappUrl, token: webappToken } : null;
+  settings.defaultMeetingMode = (document.getElementById("default-meeting-mode") as HTMLSelectElement)?.value as NotetakerSettings["defaultMeetingMode"];
+  settings.customVocabulary = (document.getElementById("custom-vocabulary") as HTMLTextAreaElement)?.value
+    .split(/\r?\n/)
+    .map((term) => term.trim())
+    .filter(Boolean)
+    .slice(0, 100);
+  settings.customSummaryInstructions = (document.getElementById("custom-summary-instructions") as HTMLTextAreaElement)?.value.trim().slice(0, 4000) ?? "";
 }
 
 function wireEvents(): void {

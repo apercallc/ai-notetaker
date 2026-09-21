@@ -32,6 +32,22 @@ section h2 {
   padding: 0;
 }
 
+.action-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action-item.done > span {
+  color: var(--color-text-secondary);
+  text-decoration: line-through;
+}
+
+.action-due {
+  margin-left: auto;
+  font: inherit;
+}
+
 .action-items li {
   padding: var(--space-2);
   background: var(--color-bg-elevated);

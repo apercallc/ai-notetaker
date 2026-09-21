@@ -43,9 +43,10 @@ export default async function MeetingsPage({
     <div className="container">
       <div className="page-header">
         <h1>Meetings</h1>
-        <span className="total-count">
-          {total} total
-        </span>
+        <div className="header-links">
+          <Link href="/actions">Action items</Link>
+          <span className="total-count">{total} total</span>
+        </div>
       </div>
 
       <SearchForm initialQuery={q ?? ""} />
@@ -60,7 +61,10 @@ export default async function MeetingsPage({
             <li key={meeting.id}>
               <Link href={`/meetings/${meeting.id}`} className="meeting-card">
                 <div className="title">{meeting.title}</div>
-                <div className="meta">{formatDate(meeting.startedAt)}</div>
+                <div className="meta">
+                  {formatDate(meeting.startedAt)}
+                  {meeting.openActionItems > 0 ? <span className="open-actions"> · {meeting.openActionItems} open action{meeting.openActionItems === 1 ? "" : "s"}</span> : null}
+                </div>
                 <div className="preview">{meeting.summaryPreview}</div>
               </Link>
             </li>

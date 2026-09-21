@@ -12,7 +12,7 @@
 //! default input device.
 
 use crate::device_matching::{find_matching_device, LINUX_DEVICE_HINT};
-use crate::{AudioCapture, AudioError, CapturedFrame, DriverStatus};
+use crate::{AudioCapture, AudioDiagnostics, AudioError, CapturedFrame, DriverStatus};
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
@@ -86,6 +86,42 @@ impl AudioCapture for LinuxAudioCapture {
                 install_guidance: "AI Notetaker sets up its virtual audio devices automatically on Linux via PulseAudio/PipeWire — if this still shows as missing, ensure `pactl` is installed and PulseAudio or PipeWire is running.".to_string(),
             },
         }
+    }
+
+    fn diagnostics(&self) -> AudioDiagnostics {
+        let driver_installed = matches!(self.driver_status(), DriverStatus::Installed);
+        let host = cpal::default_host();
+        let microphone = host
+            .default_input_device()
+            .and_then(|device| device.name().ok());
+        let speaker = host.input_devices().ok().and_then(|mut devices| {
+            devices.find_map(|device| {
+                let name = device.name().ok()?;
+                name.to_lowercase()
+                    .contains(&format!("{SINK_NAME}.monitor"))
+                    .then_some(name)
+            })
+        });
+        let ready = driver_installed && microphone.is_some() && speaker.is_some();
+        AudioDiagnostics {
+            platform: "linux".to_string(),
+            driver: SINK_DESCRIPTION.to_string(),
+            driver_installed,
+            microphone,
+            speaker,
+            ready,
+            guidance: if ready {
+                "Audio devices are ready. Choose AI Notetaker for your meeting app's microphone and speaker.".to_string()
+            } else if !driver_installed {
+                "AI Notetaker will create its PulseAudio/PipeWire devices when you check again. Make sure pactl and PulseAudio/PipeWire are available.".to_string()
+            } else {
+                "The virtual device exists, but the microphone or monitor is not available yet. Check the system audio service and try again.".to_string()
+            },
+        }
+    }
+
+    fn prepare(&self) -> Result<(), AudioError> {
+        self.ensure_virtual_devices()
     }
 
     async fn start_capture(

@@ -95,3 +95,10 @@ legend {
   padding: var(--space-3) 0;
   border-top: 1px solid var(--color-border);
 }
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+  font: inherit;
+}

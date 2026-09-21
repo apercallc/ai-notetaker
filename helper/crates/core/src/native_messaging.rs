@@ -72,10 +72,18 @@ pub enum ExtensionToHelper {
         #[serde(rename = "apiKeys")]
         api_keys: ApiKeys,
         webapp: Option<WebappConfig>,
+        #[serde(rename = "defaultMeetingMode", default)]
+        default_meeting_mode: MeetingMode,
+        #[serde(default)]
+        custom_vocabulary: Vec<String>,
+        #[serde(rename = "customSummaryInstructions", default)]
+        custom_summary_instructions: Option<String>,
     },
     StartRecording {
         #[serde(rename = "meetingId")]
         meeting_id: Uuid,
+        #[serde(rename = "meetingMode", default)]
+        meeting_mode: MeetingMode,
     },
     StopRecording {
         #[serde(rename = "meetingId")]
@@ -93,6 +101,8 @@ pub enum ExtensionToHelper {
         provider: ProviderKind,
         key: String,
     },
+    AudioPreflight,
+    AudioProbe,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -142,6 +152,36 @@ pub enum HelperToExtension {
         valid: bool,
         message: String,
     },
+    AudioStatus {
+        platform: String,
+        driver: String,
+        #[serde(rename = "driverInstalled")]
+        driver_installed: bool,
+        microphone: Option<String>,
+        speaker: Option<String>,
+        ready: bool,
+        guidance: String,
+    },
+    AudioProbeResult {
+        #[serde(rename = "micFrames")]
+        mic_frames: u64,
+        #[serde(rename = "speakerFrames")]
+        speaker_frames: u64,
+        passed: bool,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingMode {
+    #[default]
+    General,
+    Standup,
+    Sales,
+    OneOnOne,
+    Interview,
+    Custom,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -249,6 +289,9 @@ mod tests {
                 url: "https://example.com".into(),
                 token: "tok".into(),
             }),
+            default_meeting_mode: MeetingMode::General,
+            custom_vocabulary: vec![],
+            custom_summary_instructions: None,
         };
         let json = serde_json::to_vec(&msg).unwrap();
         let mut framed = Vec::new();

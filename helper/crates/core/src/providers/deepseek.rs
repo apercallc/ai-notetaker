@@ -2,8 +2,8 @@
 //! OpenAI-compatible chat completions API.
 
 use super::{
-    parse_summary_json, provider_client, render_transcript, ProviderError, SummarizationProvider,
-    Summary, TranscriptSegment, SUMMARIZATION_SYSTEM_PROMPT,
+    parse_summary_json, provider_client, render_transcript, summary_system_prompt, ProviderError,
+    SummarizationProvider, Summary, SummaryOptions, TranscriptSegment,
 };
 use crate::native_messaging::SummarizationProviderId;
 use async_trait::async_trait;
@@ -52,11 +52,15 @@ impl SummarizationProvider for DeepSeekProvider {
         SummarizationProviderId::Deepseek
     }
 
-    async fn summarize(&self, transcript: &[TranscriptSegment]) -> Result<Summary, ProviderError> {
+    async fn summarize(
+        &self,
+        transcript: &[TranscriptSegment],
+        options: &SummaryOptions,
+    ) -> Result<Summary, ProviderError> {
         let body = json!({
             "model": MODEL,
             "messages": [
-                { "role": "system", "content": SUMMARIZATION_SYSTEM_PROMPT },
+                { "role": "system", "content": summary_system_prompt(options) },
                 { "role": "user", "content": render_transcript(transcript) }
             ]
         });
@@ -173,7 +177,10 @@ mod tests {
             text: "hi".into(),
             is_final: true,
         }];
-        let summary = provider.summarize(&transcript).await.unwrap();
+        let summary = provider
+            .summarize(&transcript, &SummaryOptions::default())
+            .await
+            .unwrap();
         assert_eq!(summary.summary, "mocked");
     }
 
@@ -192,7 +199,10 @@ mod tests {
             is_final: true,
         }];
         assert!(matches!(
-            provider.summarize(&transcript).await.unwrap_err(),
+            provider
+                .summarize(&transcript, &SummaryOptions::default())
+                .await
+                .unwrap_err(),
             ProviderError::AuthFailed(_)
         ));
     }

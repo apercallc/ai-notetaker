@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { LOCAL_USER_ID } from "./auth";
-import type { CreateMeetingRequest, MeetingDetailResponse, MeetingSummaryResponse } from "./types";
+import { randomUUID } from "node:crypto";
+import type { CreateMeetingRequest, MeetingDetailResponse, MeetingMode, MeetingSummaryResponse } from "./types";
 
 export class ValidationError extends Error {}
 
@@ -13,6 +14,7 @@ const MAX_SPEAKER_LENGTH = 100;
 const MAX_ACTION_ITEMS = 1_000;
 const MAX_ACTION_TEXT_LENGTH = 2_000;
 const MAX_OWNER_LENGTH = 200;
+const MAX_ACTION_ID_LENGTH = 128;
 const MAX_OFFSET = 100_000;
 
 function assertValid(input: unknown): CreateMeetingRequest {
@@ -35,6 +37,9 @@ function assertValid(input: unknown): CreateMeetingRequest {
   }
   if (typeof body.summary !== "string") {
     throw new ValidationError("summary is required");
+  }
+  if (body.mode !== undefined && !["general", "standup", "sales", "one_on_one", "interview", "custom"].includes(body.mode as string)) {
+    throw new ValidationError("mode is invalid");
   }
   if (body.summary.length > MAX_SUMMARY_LENGTH) {
     throw new ValidationError(`summary must be ${MAX_SUMMARY_LENGTH} characters or fewer`);
@@ -65,9 +70,23 @@ function assertValid(input: unknown): CreateMeetingRequest {
       item === null ||
       typeof (item as Record<string, unknown>).text !== "string" ||
       (item as Record<string, string>).text.length > MAX_ACTION_TEXT_LENGTH ||
+      ((item as Record<string, unknown>).id !== undefined &&
+        (typeof (item as Record<string, unknown>).id !== "string" ||
+          (item as Record<string, string>).id.length === 0 ||
+          (item as Record<string, string>).id.length > MAX_ACTION_ID_LENGTH)) ||
+      ((item as Record<string, unknown>).status !== undefined &&
+        !["open", "done"].includes((item as Record<string, unknown>).status as string)) ||
       ((item as Record<string, unknown>).owner !== undefined &&
         (typeof (item as Record<string, unknown>).owner !== "string" ||
-          (item as Record<string, string>).owner.length > MAX_OWNER_LENGTH))
+          (item as Record<string, string>).owner.length > MAX_OWNER_LENGTH)) ||
+      ((item as Record<string, unknown>).dueAt !== undefined &&
+        (item as Record<string, unknown>).dueAt !== null &&
+        (typeof (item as Record<string, unknown>).dueAt !== "string" ||
+          Number.isNaN(Date.parse((item as Record<string, string>).dueAt)))) ||
+      ((item as Record<string, unknown>).completedAt !== undefined &&
+        (item as Record<string, unknown>).completedAt !== null &&
+        (typeof (item as Record<string, unknown>).completedAt !== "string" ||
+          Number.isNaN(Date.parse((item as Record<string, string>).completedAt))))
     ) {
       throw new ValidationError("each action item needs text");
     }
@@ -96,12 +115,14 @@ export async function upsertMeeting(rawInput: unknown): Promise<{ id: string; ti
         id: input.id,
         userId: LOCAL_USER_ID,
         title,
+        mode: input.mode ?? "general",
         startedAt: new Date(input.startedAt),
         endedAt: new Date(input.endedAt),
         summary: input.summary,
       },
       update: {
         title,
+        mode: input.mode ?? "general",
         startedAt: new Date(input.startedAt),
         endedAt: new Date(input.endedAt),
         summary: input.summary,
@@ -125,10 +146,14 @@ export async function upsertMeeting(rawInput: unknown): Promise<{ id: string; ti
       ? [
           prisma.actionItem.createMany({
             data: input.actionItems.map((item) => ({
+              id: item.id ?? randomUUID(),
               meetingId: input.id,
               userId: LOCAL_USER_ID,
               text: item.text,
               owner: item.owner ?? null,
+              status: item.status ?? "open",
+              dueAt: item.dueAt ? new Date(item.dueAt) : null,
+              completedAt: item.completedAt ? new Date(item.completedAt) : null,
             })),
           }),
         ]
@@ -181,6 +206,7 @@ export async function listMeetings(
       orderBy: { startedAt: "desc" },
       take: limit,
       skip: offset,
+      include: { actionItems: { where: { status: "open" }, select: { id: true } } },
     }),
     prisma.meeting.count({ where }),
   ]);
@@ -191,6 +217,7 @@ export async function listMeetings(
       title: row.title,
       startedAt: row.startedAt.toISOString(),
       summaryPreview: row.summary.length > 200 ? `${row.summary.slice(0, 200)}…` : row.summary,
+      openActionItems: row.actionItems.length,
     })),
     total,
   };
@@ -212,13 +239,47 @@ export async function getMeeting(id: string): Promise<MeetingDetailResponse | nu
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt.toISOString(),
     summary: row.summary,
+    mode: row.mode as MeetingMode,
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,
       timestamp: segment.timestamp.toISOString(),
     })),
-    actionItems: row.actionItems.map((item) => ({ text: item.text, owner: item.owner })),
+    actionItems: row.actionItems.map((item) => ({
+      id: item.id,
+      text: item.text,
+      owner: item.owner,
+      status: item.status as "open" | "done",
+      dueAt: item.dueAt?.toISOString() ?? null,
+      completedAt: item.completedAt?.toISOString() ?? null,
+    })),
   };
+}
+
+export async function listActionItems(status?: "open" | "done") {
+  return prisma.actionItem.findMany({
+    where: { userId: LOCAL_USER_ID, ...(status ? { status } : {}) },
+    orderBy: [{ status: "asc" }, { dueAt: "asc" }, { id: "asc" }],
+    include: { meeting: { select: { id: true, title: true, startedAt: true } } },
+  });
+}
+
+export async function updateActionItem(
+  id: string,
+  changes: { status?: "open" | "done"; dueAt?: string | null },
+): Promise<boolean> {
+  if (!id || id.length > MAX_ACTION_ID_LENGTH) throw new ValidationError("action item id is invalid");
+  if (changes.dueAt !== undefined && changes.dueAt !== null && Number.isNaN(Date.parse(changes.dueAt))) {
+    throw new ValidationError("dueAt must be an ISO 8601 string");
+  }
+  const result = await prisma.actionItem.updateMany({
+    where: { id, userId: LOCAL_USER_ID },
+    data: {
+      ...(changes.status ? { status: changes.status, completedAt: changes.status === "done" ? new Date() : null } : {}),
+      ...(changes.dueAt !== undefined ? { dueAt: changes.dueAt ? new Date(changes.dueAt) : null } : {}),
+    },
+  });
+  return result.count > 0;
 }
 
 export async function deleteMeeting(id: string): Promise<void> {

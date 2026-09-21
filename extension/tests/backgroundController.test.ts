@@ -20,6 +20,16 @@ function createFakeClient(): NativeClientLike & {
     stopRecording: vi.fn(),
     resumeRecording: vi.fn(),
     discardRecording: vi.fn(),
+    getAudioPreflight: vi.fn(async () => ({
+      platform: "test",
+      driver: "test",
+      driverInstalled: true,
+      microphone: "test microphone",
+      speaker: "test speaker",
+      ready: true,
+      guidance: "ready",
+    })),
+    runAudioProbe: vi.fn(async () => ({ micFrames: 1, speakerFrames: 1, passed: true, message: "ok" })),
     testProviderKey: vi.fn(async () => ({ valid: true, message: "ok" })),
     onStatusChange: vi.fn((handler: (status: string) => void) => {
       if (!handlers.has("__status__")) handlers.set("__status__", []);
@@ -59,9 +69,21 @@ describe("BackgroundController", () => {
 
     const meetingId = await controller.startRecording();
 
-    expect(client.startRecording).toHaveBeenCalledWith(meetingId);
+    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "general");
     const stored = await getMeeting(meetingId);
     expect(stored?.status).toBe("recording");
+  });
+
+  it("uses the saved default meeting mode for new recordings", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, defaultMeetingMode: "standup" });
+
+    const meetingId = await controller.startRecording();
+
+    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "standup");
+    expect((await getMeeting(meetingId))?.mode).toBe("standup");
   });
 
   it("does not leave a phantom recording when the helper send fails", async () => {
@@ -140,13 +162,21 @@ describe("BackgroundController", () => {
     const stored = await getMeeting(meetingId);
     expect(stored?.status).toBe("complete");
     expect(stored?.summary).toBe("Talked about the roadmap.");
-    expect(stored?.actionItems).toEqual([{ text: "Follow up" }]);
+    expect(stored?.actionItems).toEqual([
+      expect.objectContaining({
+        id: expect.any(String),
+        text: "Follow up",
+        status: "open",
+        dueAt: null,
+        completedAt: null,
+      }),
+    ]);
   });
 
   it("POSTs the finished meeting to the webapp when one is configured", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
-    const fetchImpl = vi.fn(async () => ({ ok: true, status: 201 }) as Response);
+    const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) => ({ ok: true, status: 201 }) as Response);
     controller.setFetchImpl(fetchImpl);
     await controller.init();
     await controller.saveSettings({
@@ -168,6 +198,29 @@ describe("BackgroundController", () => {
         headers: expect.objectContaining({ Authorization: "Bearer tok123" }),
       }),
     );
+  });
+
+  it("syncs stable action metadata to the webapp", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) => ({ ok: true, status: 201 }) as Response);
+    controller.setFetchImpl(fetchImpl);
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, webapp: { url: "https://notes.example.com", token: "tok123" } });
+    const meetingId = await controller.startRecording();
+
+    client.emit("summary_ready", {
+      meetingId,
+      summary: "s",
+      actionItems: [{ text: "Send proposal", owner: "you", id: "action-1", status: "open", dueAt: "2026-09-25T00:00:00.000Z" }],
+    });
+
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    const request = vi.mocked(fetchImpl).mock.calls[0]?.[1];
+    expect(JSON.parse(String(request?.body))).toMatchObject({
+      mode: "general",
+      actionItems: [{ id: expect.any(String), status: "open", dueAt: null }],
+    });
   });
 
   it("does not call fetch at all when no webapp is configured", async () => {

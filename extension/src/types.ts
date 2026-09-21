@@ -6,6 +6,8 @@
 export type TranscriptionProvider = "deepgram" | "groq";
 export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
+export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
+export type ActionItemStatus = "open" | "done";
 
 export interface ProviderApiKeys {
   deepgram?: string;
@@ -20,11 +22,31 @@ export interface WebappConfig {
   token: string;
 }
 
+export interface AudioStatus {
+  platform: string;
+  driver: string;
+  driverInstalled: boolean;
+  microphone: string | null;
+  speaker: string | null;
+  ready: boolean;
+  guidance: string;
+}
+
+export interface AudioProbeResult {
+  micFrames: number;
+  speakerFrames: number;
+  passed: boolean;
+  message: string;
+}
+
 export interface NotetakerSettings {
   transcriptionProvider: TranscriptionProvider;
   summarizationProvider: SummarizationProvider;
   apiKeys: ProviderApiKeys;
   webapp: WebappConfig | null;
+  defaultMeetingMode: MeetingMode;
+  customVocabulary: string[];
+  customSummaryInstructions: string;
   onboardingComplete: boolean;
   consentDisclosureAcknowledged: boolean;
 }
@@ -34,6 +56,9 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   summarizationProvider: "claude",
   apiKeys: {},
   webapp: null,
+  defaultMeetingMode: "general",
+  customVocabulary: [],
+  customSummaryInstructions: "",
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
 };
@@ -61,8 +86,12 @@ export interface TranscriptSegment {
 }
 
 export interface ActionItem {
+  id?: string;
   text: string;
   owner?: string;
+  status?: ActionItemStatus;
+  dueAt?: string | null;
+  completedAt?: string | null;
 }
 
 export interface MeetingRecord {
@@ -73,6 +102,7 @@ export interface MeetingRecord {
   transcript: TranscriptSegment[];
   summary: string | null;
   actionItems: ActionItem[];
+  mode?: MeetingMode;
   status: "recording" | "processing" | "complete" | "error";
   errorMessage?: string;
 }
@@ -87,12 +117,17 @@ export type OutgoingMessage =
       summarizationProvider: SummarizationProvider;
       apiKeys: ProviderApiKeys;
       webapp: WebappConfig | null;
+      defaultMeetingMode: MeetingMode;
+      customVocabulary: string[];
+      customSummaryInstructions: string;
     }
-  | { type: "start_recording"; meetingId: string }
+  | { type: "start_recording"; meetingId: string; meetingMode: MeetingMode }
   | { type: "stop_recording"; meetingId: string }
   | { type: "resume_recording"; meetingId: string }
   | { type: "discard_recording"; meetingId: string }
-  | { type: "test_provider_key"; provider: ProviderKind; key: string };
+  | { type: "test_provider_key"; provider: ProviderKind; key: string }
+  | { type: "audio_preflight" }
+  | { type: "audio_probe" };
 
 // ---- Native Messaging: helper -> extension ----
 
@@ -115,7 +150,18 @@ export type IncomingMessage =
     }
   | { type: "error"; meetingId: string | null; code: string; message: string }
   | { type: "recovered_recording"; meetingId: string; startedAt: string }
-  | { type: "provider_key_test_result"; provider: ProviderKind; valid: boolean; message: string };
+  | { type: "provider_key_test_result"; provider: ProviderKind; valid: boolean; message: string }
+  | {
+      type: "audio_status";
+      platform: string;
+      driver: string;
+      driverInstalled: boolean;
+      microphone: string | null;
+      speaker: string | null;
+      ready: boolean;
+      guidance: string;
+    }
+  | { type: "audio_probe_result"; micFrames: number; speakerFrames: number; passed: boolean; message: string };
 
 export function isIncomingMessage(value: unknown): value is IncomingMessage {
   if (typeof value !== "object" || value === null || !("type" in value)) {
@@ -130,6 +176,8 @@ export function isIncomingMessage(value: unknown): value is IncomingMessage {
     "error",
     "recovered_recording",
     "provider_key_test_result",
+    "audio_status",
+    "audio_probe_result",
   ];
   return validTypes.includes((value as { type: string }).type as IncomingMessage["type"]);
 }

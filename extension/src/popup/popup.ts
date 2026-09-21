@@ -1,6 +1,6 @@
 import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
-import { speakerLabel, type MeetingRecord, type Speaker } from "../types";
+import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
 
 const app = document.getElementById("app")!;
@@ -155,7 +155,49 @@ function renderHistoryItem(meeting: MeetingRecord): string {
   `;
 }
 
-async function renderIdleState(helperStatus: BackgroundState["helperStatus"]): Promise<void> {
+function meetingModeOptions(selected: MeetingMode): string {
+  const options = [
+    ["general", "General"],
+    ["standup", "Standup"],
+    ["sales", "Sales call"],
+    ["one_on_one", "1:1"],
+    ["interview", "Interview"],
+    ["custom", "Custom template"],
+  ] as const;
+  return options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
+}
+
+async function renderAudioStatus(): Promise<void> {
+  const statusEl = document.getElementById("audio-status");
+  const checkButton = document.getElementById("check-audio") as HTMLButtonElement | null;
+  const probeButton = document.getElementById("test-audio") as HTMLButtonElement | null;
+  if (!statusEl) return;
+  statusEl.textContent = "Checking audio devices…";
+  statusEl.className = "text-secondary";
+  const response = await sendToBackground<{ status: AudioStatus }>({ type: "GET_AUDIO_PREFLIGHT" });
+  const status = response.status;
+  const deviceLine = [status.microphone ? `Mic: ${status.microphone}` : "Mic: missing", status.speaker ? `Meeting audio: ${status.speaker}` : "Meeting audio: missing"].join(" · ");
+  statusEl.textContent = `${status.ready ? "Audio ready." : "Audio needs attention."} ${deviceLine} ${status.guidance}`;
+  statusEl.className = status.ready ? "text-success" : "text-warning";
+  if (checkButton) checkButton.textContent = status.ready ? "Refresh audio check" : "Check audio again";
+  if (probeButton) probeButton.disabled = !status.ready;
+  const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
+  if (startButton) startButton.disabled = !status.ready;
+}
+
+async function runAudioProbe(): Promise<void> {
+  const statusEl = document.getElementById("audio-status");
+  const probeButton = document.getElementById("test-audio") as HTMLButtonElement | null;
+  if (!statusEl) return;
+  if (probeButton) probeButton.disabled = true;
+  statusEl.textContent = "Listening for microphone and meeting audio for 2 seconds…";
+  const response = await sendToBackground<{ result: AudioProbeResult }>({ type: "RUN_AUDIO_PROBE" });
+  statusEl.textContent = response.result.message;
+  statusEl.className = response.result.passed ? "text-success" : "text-warning";
+  if (probeButton) probeButton.disabled = false;
+}
+
+async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
   const meetings = await listMeetings(5);
   const helperStatusCopy =
     helperStatus === "connecting"
@@ -167,11 +209,23 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"]): P
     ${renderHeader(true)}
     ${helperStatusCopy ? `<p class="text-secondary" role="status">${helperStatusCopy}</p>` : ""}
     <div class="record-controls">
-      <button class="primary record-toggle" id="start-recording">Record</button>
-      <p class="text-secondary">Make sure this device is selected as your mic/speaker in your meeting app.</p>
+      <button class="primary record-toggle" id="start-recording" disabled>Record</button>
+      <label class="meeting-mode-picker" for="meeting-mode">Meeting mode
+        <select id="meeting-mode">${meetingModeOptions(settings.defaultMeetingMode)}</select>
+      </label>
+      <div class="audio-check" aria-live="polite">
+        <p id="audio-status" class="text-secondary">Checking audio devices…</p>
+        <div class="audio-check-actions">
+          <button type="button" class="secondary" id="check-audio">Check audio</button>
+          <button type="button" class="secondary" id="test-audio" disabled>Run 2-second test</button>
+        </div>
+      </div>
     </div>
     <div class="history-section">
-      <h2 tabindex="-1" data-view-heading>Recent meetings</h2>
+      <div class="history-heading">
+        <h2 tabindex="-1" data-view-heading>Recent meetings</h2>
+        <button type="button" class="text-link" id="open-action-inbox">Action inbox</button>
+      </div>
       ${
         meetings.length > 0
           ? meetings.map(renderHistoryItem).join("")
@@ -180,8 +234,14 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"]): P
     </div>
   `;
   document.getElementById("start-recording")?.addEventListener("click", async () => {
-    await sendToBackground({ type: "START_RECORDING" });
+    const meetingMode = (document.getElementById("meeting-mode") as HTMLSelectElement).value as MeetingMode;
+    await sendToBackground({ type: "START_RECORDING", meetingMode });
     await render();
+  });
+  document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus());
+  document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());
+  document.getElementById("open-action-inbox")?.addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("actions/actions.html") });
   });
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
   for (const button of document.querySelectorAll<HTMLButtonElement>(".history-item")) {
@@ -190,6 +250,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"]): P
       chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(id)}`) });
     });
   }
+  void renderAudioStatus();
 }
 
 async function render(): Promise<void> {
@@ -205,7 +266,7 @@ async function render(): Promise<void> {
   if (state.activeMeeting) {
     await renderActiveRecording(state.activeMeeting.id);
   } else {
-    await renderIdleState(state.helperStatus);
+    await renderIdleState(state.helperStatus, settings);
   }
 
   if (state.recoverableMeeting) {

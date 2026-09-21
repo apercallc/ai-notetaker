@@ -1,6 +1,6 @@
 import { getSettings } from "../lib/storage";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
-import { DEFAULT_SETTINGS, type NotetakerSettings } from "../types";
+import { DEFAULT_SETTINGS, type AudioProbeResult, type AudioStatus, type NotetakerSettings } from "../types";
 import { escapeHtml } from "../lib/html";
 
 const app = document.getElementById("app")!;
@@ -8,6 +8,8 @@ const TOTAL_STEPS = 4;
 let step = 1;
 let settings: NotetakerSettings = DEFAULT_SETTINGS;
 let consentAcknowledged = false;
+let audioStatus: AudioStatus | null = null;
+let audioProbe: AudioProbeResult | null = null;
 
 function detectPlatform(): "mac" | "windows" | "linux" | "unknown" {
   const platform = navigator.userAgent.toLowerCase();
@@ -53,16 +55,16 @@ function renderStep1(): string {
 
 function renderStep2(): string {
   return `
-    <h1>2. Select it as your mic and speaker</h1>
+    <h1>2. Check your audio</h1>
     <p>
-      In your meeting app's audio settings (Zoom, Google Meet, Teams, Slack
-      Huddles — any of them), choose <strong>"AI Notetaker"</strong> as both
-      your microphone and your speaker.
+      First select the AI Notetaker device in your meeting app, then use the
+      checks below. Recording stays disabled until both microphone and meeting
+      audio are visible.
     </p>
     <div class="device-guide" aria-label="Audio device setup by operating system">
       <section class="platform-card">
         <h2>macOS</h2>
-        <p>In Audio MIDI Setup, create a Multi-Output Device containing BlackHole and your headphones or speakers. Choose it as Speaker and BlackHole as Microphone in the meeting app.</p>
+        <p>In Audio MIDI Setup, create a Multi-Output Device containing BlackHole and your headphones or speakers. Choose the Multi-Output Device as Speaker and BlackHole as Microphone.</p>
       </section>
       <section class="platform-card">
         <h2>Windows</h2>
@@ -75,11 +77,21 @@ function renderStep2(): string {
       <p class="text-secondary setup-note">Device names vary by OS and meeting app. See the helper packaging guide for troubleshooting and uninstall steps.</p>
       <a class="setup-link" href="https://github.com/ai-notetaker/ai-notetaker/blob/main/docs/helper-packaging.md" target="_blank" rel="noreferrer">Open the full setup and uninstall guide</a>
     </div>
-    <label class="checkbox-row">
-      <input type="checkbox" id="device-selected" />
-      I've selected it in my meeting app
-    </label>
+    <div class="audio-preflight" aria-live="polite">
+      <p id="audio-preflight-result" class="${audioStatus?.ready ? "valid" : "text-secondary"}">${renderAudioStatusCopy()}</p>
+      <div class="audio-preflight-actions">
+        <button type="button" class="secondary" id="check-audio-setup">${audioStatus?.ready ? "Refresh device check" : "Check devices"}</button>
+        <button type="button" class="secondary" id="probe-audio-setup" ${audioStatus?.ready ? "" : "disabled"}>Run 2-second test</button>
+      </div>
+    </div>
   `;
+}
+
+function renderAudioStatusCopy(): string {
+  if (!audioStatus) return "Check the devices after selecting them in your meeting app.";
+  const devices = `${audioStatus.microphone ?? "microphone missing"} · ${audioStatus.speaker ?? "meeting audio missing"}`;
+  const probe = audioProbe ? ` ${audioProbe.message}` : "";
+  return `${audioStatus.ready ? "Devices ready." : "Devices need attention."} ${devices} ${audioStatus.guidance}${probe}`;
 }
 
 function renderStep3(): string {
@@ -142,7 +154,7 @@ function renderStep(): string {
 
 function canAdvance(): boolean {
   if (step === 1) return !!(document.getElementById("helper-installed") as HTMLInputElement)?.checked;
-  if (step === 2) return !!(document.getElementById("device-selected") as HTMLInputElement)?.checked;
+  if (step === 2) return !!audioStatus?.ready && !!audioProbe?.passed;
   if (step === 4) return !!(document.getElementById("consent-ack") as HTMLInputElement)?.checked;
   return true;
 }
@@ -190,6 +202,19 @@ function wireEvents(): void {
     // Points at the repo's releases page — the actual per-OS installer
     // artifacts are built by sub-project 1's helper/ package.
     chrome.tabs.create({ url: "https://github.com/ai-notetaker/ai-notetaker/releases" });
+  });
+
+  document.getElementById("check-audio-setup")?.addEventListener("click", async () => {
+    const result = (await chrome.runtime.sendMessage({ type: "GET_AUDIO_PREFLIGHT" })) as { status: AudioStatus };
+    audioStatus = result.status;
+    audioProbe = null;
+    render();
+  });
+
+  document.getElementById("probe-audio-setup")?.addEventListener("click", async () => {
+    const result = (await chrome.runtime.sendMessage({ type: "RUN_AUDIO_PROBE" })) as { result: AudioProbeResult };
+    audioProbe = result.result;
+    render();
   });
 
   document.getElementById("test-onboarding-keys")?.addEventListener("click", async () => {

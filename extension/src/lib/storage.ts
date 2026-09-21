@@ -55,7 +55,20 @@ function storageRemove(keys: string | string[]): Promise<void> {
 
 export async function getSettings(): Promise<NotetakerSettings> {
   const stored = await storageGet<NotetakerSettings>(KEYS.settings);
-  return stored ? { ...DEFAULT_SETTINGS, ...stored } : DEFAULT_SETTINGS;
+  if (!stored) return DEFAULT_SETTINGS;
+  return {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...(stored.apiKeys ?? {}) },
+    defaultMeetingMode: stored.defaultMeetingMode ?? DEFAULT_SETTINGS.defaultMeetingMode,
+    customVocabulary: Array.isArray(stored.customVocabulary)
+      ? stored.customVocabulary.filter((term): term is string => typeof term === "string").slice(0, 100)
+      : DEFAULT_SETTINGS.customVocabulary,
+    customSummaryInstructions:
+      typeof stored.customSummaryInstructions === "string"
+        ? stored.customSummaryInstructions.slice(0, 4_000)
+        : DEFAULT_SETTINGS.customSummaryInstructions,
+  };
 }
 
 export async function saveSettings(settings: NotetakerSettings): Promise<void> {

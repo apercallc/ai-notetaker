@@ -16,7 +16,8 @@
 //!   summary.json      - Summary, written once after finalize
 //! ```
 
-use crate::providers::TranscriptSegment;
+use crate::native_messaging::MeetingMode;
+use crate::providers::{SummaryOptions, TranscriptSegment};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -38,6 +39,8 @@ pub struct MeetingMeta {
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub state: MeetingState,
+    #[serde(default)]
+    pub summary_options: SummaryOptions,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,9 +76,30 @@ impl MeetingStore {
             started_at,
             ended_at: None,
             state: MeetingState::Recording,
+            summary_options: SummaryOptions::default(),
         };
         self.write_meta(&meta)?;
         Ok(())
+    }
+
+    pub fn create_meeting_with_options(
+        &self,
+        id: Uuid,
+        started_at: DateTime<Utc>,
+        mode: MeetingMode,
+        mut summary_options: SummaryOptions,
+    ) -> Result<(), StorageError> {
+        summary_options.mode = mode;
+        let dir = self.meeting_dir(id);
+        fs::create_dir_all(&dir)?;
+        let meta = MeetingMeta {
+            id,
+            started_at,
+            ended_at: None,
+            state: MeetingState::Recording,
+            summary_options,
+        };
+        self.write_meta(&meta)
     }
 
     fn write_meta(&self, meta: &MeetingMeta) -> Result<(), StorageError> {

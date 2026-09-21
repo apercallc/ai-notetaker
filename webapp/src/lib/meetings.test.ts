@@ -5,6 +5,8 @@ import {
   listMeetings,
   getMeeting,
   deleteMeeting,
+  listActionItems,
+  updateActionItem,
   ValidationError,
 } from "./meetings";
 import type { CreateMeetingRequest } from "./types";
@@ -55,6 +57,31 @@ describe("upsertMeeting", () => {
     expect(detail?.transcript).toHaveLength(2);
     expect(detail?.actionItems).toHaveLength(1);
     expect(detail?.actionItems[0].owner).toBe("you");
+    expect(detail?.mode).toBe("general");
+    expect(detail?.actionItems[0].status).toBe("open");
+    expect(detail?.actionItems[0].id).toEqual(expect.any(String));
+  });
+
+  it("persists meeting modes and lets the action inbox update status and due dates", async () => {
+    await upsertMeeting(
+      sampleMeeting({
+        mode: "sales",
+        actionItems: [{ id: "action-1", text: "Send proposal", owner: "you", dueAt: "2026-09-25T00:00:00.000Z" }],
+      }),
+    );
+
+    const openItems = await listActionItems("open");
+    expect(openItems).toHaveLength(1);
+    expect(openItems[0]?.id).toBe("action-1");
+    expect(openItems[0]?.meeting.title).toBe("Weekly sync");
+
+    expect(await updateActionItem("action-1", { status: "done", dueAt: null })).toBe(true);
+    const detail = await getMeeting("11111111-1111-1111-1111-111111111111");
+    expect(detail?.mode).toBe("sales");
+    expect(detail?.actionItems[0]).toMatchObject({ status: "done", dueAt: null });
+    expect(detail?.actionItems[0].completedAt).toEqual(expect.any(String));
+    expect(await listActionItems("open")).toHaveLength(0);
+    expect(await listActionItems("done")).toHaveLength(1);
   });
 
   it("defaults the title when none is provided", async () => {
