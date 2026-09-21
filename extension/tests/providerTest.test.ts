@@ -43,4 +43,15 @@ describe("testWebappHealth", () => {
     const result = await testWebappHealth("https://unreachable.example.com", fetchImpl);
     expect(result.healthy).toBe(false);
   });
+
+  it("passes an abort signal so a stalled health check cannot hang the settings page", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      return { ok: true, status: 200 } as Response;
+    }) as unknown as typeof fetch;
+    await expect(testWebappHealth("https://notes.example.com", fetchImpl)).resolves.toEqual({
+      healthy: true,
+      message: "Connected to your self-hosted webapp.",
+    });
+  });
 });

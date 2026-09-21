@@ -79,6 +79,14 @@ describe("meeting storage", () => {
     expect(meetings.map((m) => m.id)).toEqual(["m2", "m1"]);
   });
 
+  it("can list only the newest meetings without reading the whole archive", async () => {
+    await saveMeeting({ ...meeting, id: "m1", startedAt: "2026-09-21T09:00:00.000Z" });
+    await saveMeeting({ ...meeting, id: "m2", startedAt: "2026-09-21T10:00:00.000Z" });
+    await saveMeeting({ ...meeting, id: "m3", startedAt: "2026-09-21T11:00:00.000Z" });
+
+    expect((await listMeetings(2)).map((item) => item.id)).toEqual(["m3", "m2"]);
+  });
+
   it("deletes a meeting", async () => {
     await saveMeeting(meeting);
     await deleteMeeting("m1");

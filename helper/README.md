@@ -77,6 +77,11 @@ toolchain or target-OS SDKs in this environment:
   WebSocket endpoint** the spec names as the default — see the scope note
   at the top of `crates/core/src/providers/mod.rs`. Same `TranscriptionProvider`
   trait either way; swapping later touches only `deepgram.rs`.
+- Batch providers receive roughly five seconds of audio per request. Capture
+  frames are written locally as they arrive, then coalesced to avoid turning
+  every sound-card callback into a provider request; the final partial batch
+  is flushed before summarization. This keeps the batch-tier latency/cost
+  trade-off explicit.
 - **VB-CABLE's actual silent-install download+run step** — the licensing-
   permitted bundling logic exists in `audio::windows::install_if_missing`,
   but it currently returns an explicit error rather than fetching and

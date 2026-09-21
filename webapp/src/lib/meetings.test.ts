@@ -103,6 +103,22 @@ describe("upsertMeeting", () => {
     });
     await expect(upsertMeeting(input)).rejects.toThrow(ValidationError);
   });
+
+  it("rejects oversized payloads before they reach Prisma", async () => {
+    await expect(upsertMeeting(sampleMeeting({ summary: "x".repeat(100_001) }))).rejects.toThrow(ValidationError);
+    await expect(
+      upsertMeeting(sampleMeeting({ actionItems: Array.from({ length: 1_001 }, () => ({ text: "too many" })) })),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it("rejects invalid meeting chronology and malformed optional owners", async () => {
+    await expect(
+      upsertMeeting(sampleMeeting({ startedAt: "2026-09-21T16:00:00.000Z" })),
+    ).rejects.toThrow("endedAt must not be before startedAt");
+    await expect(
+      upsertMeeting(sampleMeeting({ actionItems: [{ text: "Follow up", owner: 42 as unknown as string }] })),
+    ).rejects.toThrow(ValidationError);
+  });
 });
 
 describe("listMeetings", () => {
@@ -145,6 +161,10 @@ describe("listMeetings", () => {
     expect(page2.meetings).toHaveLength(2);
     expect(page1.total).toBe(5);
     expect(page1.meetings[0].id).not.toBe(page2.meetings[0].id);
+  });
+
+  it("rejects an offset that would force an unbounded deep scan", async () => {
+    await expect(listMeetings({ offset: 100_001 })).rejects.toThrow(ValidationError);
   });
 });
 

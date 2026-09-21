@@ -4,6 +4,12 @@ import { speakerLabel, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
 
 const app = document.getElementById("app")!;
+let removeLiveListener: (() => void) | null = null;
+
+function clearLiveListener(): void {
+  removeLiveListener?.();
+  removeLiveListener = null;
+}
 
 async function sendToBackground<T>(message: unknown): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
@@ -95,6 +101,7 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
       <span class="recording-indicator">Recording</span>
       <button class="danger record-toggle" id="stop-recording">Stop</button>
     </div>
+    <p id="status" class="text-secondary" role="status" aria-live="polite"></p>
     <div class="transcript-view" id="transcript-view" role="log" aria-label="Live transcript"></div>
   `;
   const transcriptView = document.getElementById("transcript-view")!;
@@ -107,12 +114,12 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
   });
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
-  chrome.runtime.onMessage.addListener(function liveListener(message: BackgroundToUiMessage) {
+  function liveListener(message: BackgroundToUiMessage): void {
     if (message.type === "TRANSCRIPT_UPDATE" && message.meetingId === meetingId) {
       appendTranscriptLine(transcriptView, message.speaker, message.text);
     }
     if (message.type === "SUMMARY_READY" && message.meetingId === meetingId) {
-      chrome.runtime.onMessage.removeListener(liveListener);
+      clearLiveListener();
       void render();
     }
     // A failed recording used to leave this exact view showing a "live"
@@ -121,14 +128,16 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
     // the case where the popup is closed when this happens; re-rendering
     // out of the dead "recording" view covers the case where it's open.
     if (message.type === "RECORDING_ERROR" && message.meetingId === meetingId) {
-      chrome.runtime.onMessage.removeListener(liveListener);
+      clearLiveListener();
       void render();
     }
     if (message.type === "PROCESSING_WARNING" && message.meetingId === meetingId) {
       const status = document.getElementById("status");
       if (status) status.textContent = "A transcription chunk will be retried automatically.";
     }
-  });
+  }
+  chrome.runtime.onMessage.addListener(liveListener);
+  removeLiveListener = () => chrome.runtime.onMessage.removeListener(liveListener);
 }
 
 function renderHistoryItem(meeting: MeetingRecord): string {
@@ -146,10 +155,17 @@ function renderHistoryItem(meeting: MeetingRecord): string {
   `;
 }
 
-async function renderIdleState(): Promise<void> {
-  const meetings = (await listMeetings()).slice(0, 5);
+async function renderIdleState(helperStatus: BackgroundState["helperStatus"]): Promise<void> {
+  const meetings = await listMeetings(5);
+  const helperStatusCopy =
+    helperStatus === "connecting"
+      ? "Connecting to the desktop helper…"
+      : helperStatus === "disconnected"
+        ? "Desktop helper disconnected — start it before recording."
+        : "";
   app.innerHTML = `
     ${renderHeader(true)}
+    ${helperStatusCopy ? `<p class="text-secondary" role="status">${helperStatusCopy}</p>` : ""}
     <div class="record-controls">
       <button class="primary record-toggle" id="start-recording">Record</button>
       <p class="text-secondary">Make sure this device is selected as your mic/speaker in your meeting app.</p>
@@ -177,6 +193,7 @@ async function renderIdleState(): Promise<void> {
 }
 
 async function render(): Promise<void> {
+  clearLiveListener();
   const settings = await getSettings();
   if (!settings.onboardingComplete) {
     await renderOnboardingPrompt();
@@ -188,7 +205,7 @@ async function render(): Promise<void> {
   if (state.activeMeeting) {
     await renderActiveRecording(state.activeMeeting.id);
   } else {
-    await renderIdleState();
+    await renderIdleState(state.helperStatus);
   }
 
   if (state.recoverableMeeting) {

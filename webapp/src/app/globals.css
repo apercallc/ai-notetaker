@@ -216,7 +216,12 @@ a {
   display: flex;
   gap: var(--space-3);
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-border);
+  /* Long transcripts read as a conversation, not a spreadsheet. Avoid a
+     full-width rule for every segment and let the speaker column provide the
+     visual rhythm instead. Off-screen lines can also stay out of layout and
+     paint work for unusually long meetings. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
 }
 
 .transcript-line .speaker {

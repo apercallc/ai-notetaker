@@ -29,6 +29,7 @@ use crate::native_messaging::{
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioChannel {
@@ -67,6 +68,18 @@ pub enum ProviderError {
     Unreachable(String),
     #[error("unexpected response shape: {0}")]
     BadResponse(String),
+}
+
+/// Provider calls must not be able to hold the pipeline forever when a
+/// network, DNS, or upstream service stalls. The timeout is deliberately long
+/// enough for a normal five-second audio batch and a summary request while
+/// still allowing the retry queue to make progress.
+pub(crate) fn provider_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(120))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
 impl ProviderError {
@@ -114,7 +127,7 @@ pub(crate) async fn bearer_auth_test_key(
     key: &str,
     provider_name: &str,
 ) -> Result<(), ProviderError> {
-    let client = reqwest::Client::new();
+    let client = provider_client();
     let response = client
         .get(url)
         .header("Authorization", format!("Bearer {key}"))

@@ -5,7 +5,10 @@
 //! architecture spec's cost table: cheaper, but no per-speaker labeling on
 //! the "them" side and no true live partials.
 
-use super::{AudioChannel, AudioChunk, ProviderError, TranscriptSegment, TranscriptionProvider};
+use super::{
+    provider_client, AudioChannel, AudioChunk, ProviderError, TranscriptSegment,
+    TranscriptionProvider,
+};
 use crate::native_messaging::TranscriptionProviderId;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -31,7 +34,7 @@ impl GroqProvider {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url: GROQ_TRANSCRIPTIONS_URL.to_string(),
         }
     }
@@ -40,7 +43,7 @@ impl GroqProvider {
     fn with_base_url(api_key: String, base_url: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url,
         }
     }

@@ -2,8 +2,8 @@
 //! OpenAI-compatible chat completions API.
 
 use super::{
-    parse_summary_json, render_transcript, ProviderError, SummarizationProvider, Summary,
-    TranscriptSegment, SUMMARIZATION_SYSTEM_PROMPT,
+    parse_summary_json, provider_client, render_transcript, ProviderError, SummarizationProvider,
+    Summary, TranscriptSegment, SUMMARIZATION_SYSTEM_PROMPT,
 };
 use crate::native_messaging::SummarizationProviderId;
 use async_trait::async_trait;
@@ -31,7 +31,7 @@ impl DeepSeekProvider {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url: DEEPSEEK_URL.to_string(),
         }
     }
@@ -40,7 +40,7 @@ impl DeepSeekProvider {
     fn with_base_url(api_key: String, base_url: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url,
         }
     }

@@ -1,8 +1,8 @@
 //! Claude (Anthropic Messages API) summarization provider — default tier.
 
 use super::{
-    parse_summary_json, render_transcript, ProviderError, SummarizationProvider, Summary,
-    TranscriptSegment, SUMMARIZATION_SYSTEM_PROMPT,
+    parse_summary_json, provider_client, render_transcript, ProviderError, SummarizationProvider,
+    Summary, TranscriptSegment, SUMMARIZATION_SYSTEM_PROMPT,
 };
 use crate::native_messaging::SummarizationProviderId;
 use async_trait::async_trait;
@@ -18,7 +18,7 @@ pub async fn test_key(key: &str) -> Result<(), ProviderError> {
 }
 
 async fn test_key_at(url: &str, key: &str) -> Result<(), ProviderError> {
-    let client = reqwest::Client::new();
+    let client = provider_client();
     let response = client
         .get(url)
         .header("x-api-key", key)
@@ -50,7 +50,7 @@ impl ClaudeProvider {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url: ANTHROPIC_MESSAGES_URL.to_string(),
         }
     }
@@ -59,7 +59,7 @@ impl ClaudeProvider {
     fn with_base_url(api_key: String, base_url: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url,
         }
     }

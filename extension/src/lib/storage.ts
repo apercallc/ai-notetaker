@@ -15,20 +15,41 @@ const KEYS = {
 } as const;
 
 function storageGet<T>(key: string): Promise<T | undefined> {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(key, (items) => resolve(items[key] as T | undefined));
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(key, (items) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      resolve(items[key] as T | undefined);
+    });
   });
 }
 
 function storageSet(items: Record<string, unknown>): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.storage.local.set(items, () => resolve());
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(items, () => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      resolve();
+    });
   });
 }
 
 function storageRemove(keys: string | string[]): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.storage.local.remove(keys, () => resolve());
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.remove(keys, () => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      resolve();
+    });
   });
 }
 
@@ -50,9 +71,15 @@ export async function savePairingToken(token: string): Promise<void> {
   await storageSet({ [KEYS.pairingToken]: token });
 }
 
-export async function listMeetings(): Promise<MeetingRecord[]> {
+/**
+ * The index is append-ordered because meetings are created chronologically.
+ * Reading only its tail keeps the popup cheap even after a year of notes.
+ * Callers that need the complete archive can omit the limit.
+ */
+export async function listMeetings(limit?: number): Promise<MeetingRecord[]> {
   const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-  const meetings = await Promise.all(index.map((id) => getMeeting(id)));
+  const ids = limit === undefined ? index : index.slice(-Math.max(0, limit));
+  const meetings = await Promise.all(ids.map((id) => getMeeting(id)));
   return meetings
     .filter((m): m is MeetingRecord => m !== null)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -63,7 +90,23 @@ export async function getMeeting(id: string): Promise<MeetingRecord | null> {
   return record ?? null;
 }
 
-export async function saveMeeting(meeting: MeetingRecord): Promise<void> {
+type MeetingMutation<T> = () => Promise<T>;
+const meetingWriteQueues = new Map<string, Promise<void>>();
+
+function enqueueMeetingMutation<T>(id: string, mutation: MeetingMutation<T>): Promise<T> {
+  const previous = meetingWriteQueues.get(id) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(mutation);
+  const tracked = current.then(
+    () => undefined,
+    () => undefined,
+  );
+  meetingWriteQueues.set(id, tracked);
+  return current.finally(() => {
+    if (meetingWriteQueues.get(id) === tracked) meetingWriteQueues.delete(id);
+  });
+}
+
+async function saveMeetingUnlocked(meeting: MeetingRecord): Promise<void> {
   const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
   const nextIndex = index.includes(meeting.id) ? index : [...index, meeting.id];
   await storageSet({
@@ -72,8 +115,28 @@ export async function saveMeeting(meeting: MeetingRecord): Promise<void> {
   });
 }
 
+export function saveMeeting(meeting: MeetingRecord): Promise<void> {
+  return enqueueMeetingMutation(meeting.id, () => saveMeetingUnlocked(meeting));
+}
+
+/** Apply a read-modify-write update without losing concurrent transcript events. */
+export function updateMeeting(
+  id: string,
+  updater: (meeting: MeetingRecord) => MeetingRecord | Promise<MeetingRecord>,
+): Promise<MeetingRecord | null> {
+  return enqueueMeetingMutation(id, async () => {
+    const meeting = await getMeeting(id);
+    if (!meeting) return null;
+    const updated = await updater(meeting);
+    await saveMeetingUnlocked(updated);
+    return updated;
+  });
+}
+
 export async function deleteMeeting(id: string): Promise<void> {
-  const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-  await storageSet({ [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id) });
-  await storageRemove(KEYS.meetingPrefix + id);
+  return enqueueMeetingMutation(id, async () => {
+    const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
+    await storageSet({ [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id) });
+    await storageRemove(KEYS.meetingPrefix + id);
+  });
 }

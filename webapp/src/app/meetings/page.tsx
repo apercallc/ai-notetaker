@@ -4,7 +4,9 @@ import { logout } from "@/app/login/actions";
 import { SearchForm } from "./SearchForm";
 
 const PAGE_SIZE = 50;
-const MAX_PAGE = 1_000_000;
+// The data layer caps offsets at 100,000; keeping the UI bound aligned avoids
+// issuing an expensive, guaranteed-to-fail query for a crafted page number.
+const MAX_PAGE = 2_000;
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {

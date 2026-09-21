@@ -6,7 +6,10 @@
 //! in `providers/mod.rs` for why, and what swapping to streaming later
 //! would touch (only this file).
 
-use super::{AudioChannel, AudioChunk, ProviderError, TranscriptSegment, TranscriptionProvider};
+use super::{
+    provider_client, AudioChannel, AudioChunk, ProviderError, TranscriptSegment,
+    TranscriptionProvider,
+};
 use crate::native_messaging::TranscriptionProviderId;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -24,7 +27,7 @@ impl DeepgramProvider {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url: DEEPGRAM_LISTEN_URL.to_string(),
         }
     }
@@ -36,7 +39,7 @@ impl DeepgramProvider {
     fn with_base_url(api_key: String, base_url: String) -> Self {
         Self {
             api_key,
-            client: reqwest::Client::new(),
+            client: provider_client(),
             base_url,
         }
     }
@@ -113,7 +116,7 @@ pub async fn test_key(key: &str) -> Result<(), ProviderError> {
 }
 
 async fn test_key_at(url: &str, key: &str) -> Result<(), ProviderError> {
-    let client = reqwest::Client::new();
+    let client = provider_client();
     let response = client
         .get(url)
         .header("Authorization", format!("Token {key}"))

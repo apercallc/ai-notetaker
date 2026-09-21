@@ -15,6 +15,19 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Batch callback-sized audio frames before calling a batch transcription
+/// provider. cpal commonly delivers 10–100 ms frames; sending each one to an
+/// HTTP API creates hundreds of requests during a meeting without improving
+/// transcript quality. Five seconds keeps rolling updates useful while
+/// keeping request volume sane.
+const TRANSCRIPTION_BATCH_SECONDS: usize = 5;
+
+struct PendingAudio {
+    pcm16: Vec<u8>,
+    sample_rate_hz: u32,
+    start: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryableChunk {
     pub meeting_id: Uuid,
@@ -41,6 +54,9 @@ pub struct Pipeline {
     transcription_provider: Box<dyn TranscriptionProvider>,
     summarization_provider: Box<dyn SummarizationProvider>,
     retry_queue: RetryQueue<RetryableChunk>,
+    accepting_audio: bool,
+    pending_mic: Option<PendingAudio>,
+    pending_speaker: Option<PendingAudio>,
 }
 
 impl Pipeline {
@@ -55,18 +71,24 @@ impl Pipeline {
             transcription_provider,
             summarization_provider,
             retry_queue,
+            accepting_audio: false,
+            pending_mic: None,
+            pending_speaker: None,
         }
     }
 
-    pub fn start_recording(&self, meeting_id: Uuid) -> Result<HelperToExtension, PipelineError> {
+    pub fn start_recording(
+        &mut self,
+        meeting_id: Uuid,
+    ) -> Result<HelperToExtension, PipelineError> {
         self.store.create_meeting(meeting_id, Utc::now())?;
+        self.accepting_audio = true;
         Ok(HelperToExtension::RecordingStarted { meeting_id })
     }
 
-    /// Handles one chunk of captured audio: write it to disk first (the
-    /// resilience guarantee), then attempt transcription. On failure, the
-    /// chunk is queued for retry rather than dropped — the audio is
-    /// already safe regardless of what happens next.
+    /// Persists every callback frame immediately, then batches it for a
+    /// provider call. A crash can therefore lose at most the in-memory
+    /// transcription batch, never the raw audio.
     pub async fn handle_audio_chunk(
         &mut self,
         meeting_id: Uuid,
@@ -74,6 +96,11 @@ impl Pipeline {
         pcm16: &[u8],
         sample_rate_hz: u32,
     ) -> Vec<HelperToExtension> {
+        if !self.accepting_audio {
+            // Audio callbacks already queued while stop_recording was waiting
+            // for the capture device must not reopen a finalized meeting.
+            return vec![];
+        }
         let channel_file = match channel {
             AudioChannel::Mic => MIC_FILE,
             AudioChannel::Speaker => SPEAKER_FILE,
@@ -91,16 +118,93 @@ impl Pipeline {
             }];
         }
 
+        let mut messages = Vec::new();
+        let previous = match channel {
+            AudioChannel::Mic
+                if self
+                    .pending_mic
+                    .as_ref()
+                    .is_some_and(|audio| audio.sample_rate_hz != sample_rate_hz) =>
+            {
+                self.pending_mic.take()
+            }
+            AudioChannel::Speaker
+                if self
+                    .pending_speaker
+                    .as_ref()
+                    .is_some_and(|audio| audio.sample_rate_hz != sample_rate_hz) =>
+            {
+                self.pending_speaker.take()
+            }
+            _ => None,
+        };
+        if let Some(previous) = previous {
+            messages.extend(
+                self.transcribe_pending(meeting_id, channel, channel_file, previous)
+                    .await,
+            );
+        }
+        let pending = match channel {
+            AudioChannel::Mic => &mut self.pending_mic,
+            AudioChannel::Speaker => &mut self.pending_speaker,
+        };
+        let pending_audio = pending.get_or_insert_with(|| PendingAudio {
+            pcm16: Vec::new(),
+            sample_rate_hz,
+            start: existing_len,
+        });
+        pending_audio.pcm16.extend_from_slice(pcm16);
+
+        let batch_bytes = sample_rate_hz
+            .saturating_mul(2)
+            .saturating_mul(TRANSCRIPTION_BATCH_SECONDS as u32) as usize;
+        if pending_audio.pcm16.len() >= batch_bytes {
+            if let Some(batch) = pending.take() {
+                messages.extend(
+                    self.transcribe_pending(meeting_id, channel, channel_file, batch)
+                        .await,
+                );
+            }
+        }
+        messages
+    }
+
+    /// Flushes any sub-threshold audio before final summarization.
+    pub async fn flush_pending_audio(&mut self, meeting_id: Uuid) -> Vec<HelperToExtension> {
+        let mut messages = Vec::new();
+        if let Some(batch) = self.pending_mic.take() {
+            messages.extend(
+                self.transcribe_pending(meeting_id, AudioChannel::Mic, MIC_FILE, batch)
+                    .await,
+            );
+        }
+        if let Some(batch) = self.pending_speaker.take() {
+            messages.extend(
+                self.transcribe_pending(meeting_id, AudioChannel::Speaker, SPEAKER_FILE, batch)
+                    .await,
+            );
+        }
+        messages
+    }
+
+    async fn transcribe_pending(
+        &mut self,
+        meeting_id: Uuid,
+        channel: AudioChannel,
+        channel_file: &str,
+        pending: PendingAudio,
+    ) -> Vec<HelperToExtension> {
+        let end = pending.start + pending.pcm16.len();
         let chunk = AudioChunk {
             channel,
-            pcm16: pcm16.to_vec(),
-            sample_rate_hz,
+            pcm16: pending.pcm16,
+            sample_rate_hz: pending.sample_rate_hz,
         };
         match self.transcription_provider.transcribe_chunk(&chunk).await {
             Ok(segments) => {
                 let mut messages = Vec::new();
+                let _ = self.store.append_transcript_segments(meeting_id, &segments);
                 for segment in &segments {
-                    let _ = self.store.append_transcript_segment(meeting_id, segment);
                     messages.push(HelperToExtension::TranscriptPartial {
                         meeting_id,
                         speaker: segment.speaker.clone(),
@@ -114,11 +218,11 @@ impl Pipeline {
                 let retryable = RetryableChunk {
                     meeting_id,
                     channel,
-                    sample_rate_hz,
+                    sample_rate_hz: chunk.sample_rate_hz,
                     audio_ref: RetryAudioRef::FileRange {
                         channel_file: channel_file.to_string(),
-                        start: existing_len,
-                        end: existing_len + pcm16.len(),
+                        start: pending.start,
+                        end,
                     },
                 };
                 let _ = self.retry_queue.enqueue(retryable, Utc::now());
@@ -132,11 +236,13 @@ impl Pipeline {
     }
 
     pub async fn stop_recording(
-        &self,
+        &mut self,
         meeting_id: Uuid,
     ) -> Result<Vec<HelperToExtension>, PipelineError> {
+        self.accepting_audio = false;
         self.store.mark_stopped(meeting_id, Utc::now())?;
         let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
+        messages.extend(self.flush_pending_audio(meeting_id).await);
 
         let transcript = self.store.load_transcript(meeting_id)?;
         match self.summarization_provider.summarize(&transcript).await {
@@ -230,10 +336,10 @@ impl Pipeline {
             };
             match self.transcription_provider.transcribe_chunk(&chunk).await {
                 Ok(segments) => {
+                    let _ = self
+                        .store
+                        .append_transcript_segments(job.meeting_id, &segments);
                     for segment in &segments {
-                        let _ = self
-                            .store
-                            .append_transcript_segment(job.meeting_id, segment);
                         messages.push(HelperToExtension::TranscriptPartial {
                             meeting_id: job.meeting_id,
                             speaker: segment.speaker.clone(),
@@ -389,7 +495,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_recording_creates_meeting_and_emits_started() {
-        let (_dir, pipeline) = build_pipeline(0);
+        let (_dir, mut pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();
         let msg = pipeline.start_recording(id).unwrap();
         assert!(
@@ -407,6 +513,9 @@ mod tests {
             .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3, 4], 16000)
             .await;
 
+        assert!(messages.is_empty(), "short frames stay buffered");
+        let messages = pipeline.flush_pending_audio(id).await;
+
         // Transcript arrived successfully...
         assert!(
             matches!(&messages[0], HelperToExtension::TranscriptPartial { speaker, .. } if speaker == "you")
@@ -414,6 +523,29 @@ mod tests {
         // ...and the raw audio is genuinely on disk regardless.
         let bytes = std::fs::read(pipeline.store.audio_path(id, MIC_FILE)).unwrap();
         assert_eq!(bytes, vec![1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn batches_callback_audio_until_the_request_window_is_full() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+
+        let batch = vec![0_u8; 16_000 * 2 * TRANSCRIPTION_BATCH_SECONDS];
+        let messages = pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &batch, 16_000)
+            .await;
+
+        assert!(matches!(
+            messages.as_slice(),
+            [HelperToExtension::TranscriptPartial { speaker, .. }] if speaker == "you"
+        ));
+        assert_eq!(
+            std::fs::metadata(pipeline.store.audio_path(id, MIC_FILE))
+                .unwrap()
+                .len(),
+            batch.len() as u64
+        );
     }
 
     #[tokio::test]
@@ -425,6 +557,8 @@ mod tests {
         let messages = pipeline
             .handle_audio_chunk(id, AudioChannel::Speaker, &[9, 9, 9], 16000)
             .await;
+        assert!(messages.is_empty(), "short frames stay buffered");
+        let messages = pipeline.flush_pending_audio(id).await;
 
         assert!(matches!(&messages[0], HelperToExtension::Error { .. }));
         // Audio still safely on disk despite the transcription failure.
@@ -441,6 +575,7 @@ mod tests {
         pipeline
             .handle_audio_chunk(id, AudioChannel::Mic, &[9, 8, 7], 16000)
             .await;
+        pipeline.flush_pending_audio(id).await;
 
         let messages = pipeline.process_due_retries(Utc::now()).await;
         assert!(matches!(
@@ -460,6 +595,7 @@ mod tests {
         pipeline
             .handle_audio_chunk(id, AudioChannel::Mic, &[9, 8, 7], 16000)
             .await;
+        pipeline.flush_pending_audio(id).await;
         pipeline.stop_recording(id).await.unwrap();
 
         let messages = pipeline.process_due_retries(Utc::now()).await;
@@ -486,14 +622,15 @@ mod tests {
         assert!(
             matches!(&messages[0], HelperToExtension::RecordingStopped { meeting_id } if *meeting_id == id)
         );
-        assert!(
-            matches!(&messages[1], HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary")
-        );
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
     }
 
     #[tokio::test]
     async fn interrupted_meeting_is_found_as_recoverable_before_stop() {
-        let (_dir, pipeline) = build_pipeline(0);
+        let (_dir, mut pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
 
@@ -506,7 +643,7 @@ mod tests {
 
     #[tokio::test]
     async fn stopped_meeting_is_not_flagged_as_recoverable() {
-        let (_dir, pipeline) = build_pipeline(0);
+        let (_dir, mut pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
         pipeline.stop_recording(id).await.unwrap();

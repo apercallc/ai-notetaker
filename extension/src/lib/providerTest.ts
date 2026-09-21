@@ -10,6 +10,7 @@
  * per docs/native-messaging-protocol.md's `test_provider_key` message.
  */
 type Fetcher = typeof fetch;
+const HEALTH_CHECK_TIMEOUT_MS = 8_000;
 
 export interface WebappHealthResult {
   healthy: boolean;
@@ -45,8 +46,10 @@ export async function testWebappHealth(
       message: "Use an HTTPS webapp URL (HTTP is allowed only for localhost).",
     };
   }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(`${normalized}/api/health`);
+    const response = await fetchImpl(`${normalized}/api/health`, { signal: controller.signal });
     if (response.ok) {
       return { healthy: true, message: "Connected to your self-hosted webapp." };
     }
@@ -56,5 +59,7 @@ export async function testWebappHealth(
       healthy: false,
       message: "Couldn't reach that URL. Check it's correct and the deployment is running.",
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

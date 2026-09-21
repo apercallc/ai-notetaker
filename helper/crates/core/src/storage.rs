@@ -129,8 +129,22 @@ impl MeetingStore {
         id: Uuid,
         segment: &TranscriptSegment,
     ) -> Result<(), StorageError> {
+        self.append_transcript_segments(id, std::slice::from_ref(segment))
+    }
+
+    /// Appends a provider response in one read/write cycle. Provider results
+    /// often contain several diarized segments; rewriting transcript.json for
+    /// every segment made long meetings increasingly expensive on disk.
+    pub fn append_transcript_segments(
+        &self,
+        id: Uuid,
+        new_segments: &[TranscriptSegment],
+    ) -> Result<(), StorageError> {
+        if new_segments.is_empty() {
+            return Ok(());
+        }
         let mut segments = self.load_transcript(id).unwrap_or_default();
-        segments.push(segment.clone());
+        segments.extend_from_slice(new_segments);
         let path = self.meeting_dir(id).join("transcript.json");
         fs::write(path, serde_json::to_vec_pretty(&segments)?)?;
         Ok(())

@@ -7,9 +7,11 @@
  */
 import type { BackgroundState, BackgroundToUiMessage } from "./internalMessages";
 import type { HelperConnectionStatus } from "./nativeMessaging";
-import { getMeeting, getSettings, saveMeeting, saveSettings } from "./storage";
+import { getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import type { IncomingMessage, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
+
+const WEBAPP_SYNC_TIMEOUT_MS = 15_000;
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -149,15 +151,16 @@ export class BackgroundController {
   private async handleTranscriptPartial(
     msg: Extract<IncomingMessage, { type: "transcript_partial" }>,
   ): Promise<void> {
-    const meeting = await getMeeting(msg.meetingId);
-    if (!meeting) return;
-    meeting.transcript.push({
-      speaker: msg.speaker,
-      text: msg.text,
-      isFinal: msg.isFinal,
-      timestamp: new Date().toISOString(),
+    const meeting = await updateMeeting(msg.meetingId, (current) => {
+      current.transcript.push({
+        speaker: msg.speaker,
+        text: msg.text,
+        isFinal: msg.isFinal,
+        timestamp: new Date().toISOString(),
+      });
+      return current;
     });
-    await saveMeeting(meeting);
+    if (!meeting) return;
     this.broadcast({
       type: "TRANSCRIPT_UPDATE",
       meetingId: msg.meetingId,
@@ -170,13 +173,14 @@ export class BackgroundController {
   private async handleSummaryReady(
     msg: Extract<IncomingMessage, { type: "summary_ready" }>,
   ): Promise<void> {
-    const meeting = await getMeeting(msg.meetingId);
+    const meeting = await updateMeeting(msg.meetingId, (current) => {
+      current.status = "complete";
+      current.summary = msg.summary;
+      current.actionItems = msg.actionItems;
+      current.endedAt = new Date().toISOString();
+      return current;
+    });
     if (!meeting) return;
-    meeting.status = "complete";
-    meeting.summary = msg.summary;
-    meeting.actionItems = msg.actionItems;
-    meeting.endedAt = new Date().toISOString();
-    await saveMeeting(meeting);
     if (this.activeMeetingId === msg.meetingId) this.activeMeetingId = null;
     this.broadcast({
       type: "SUMMARY_READY",
@@ -196,13 +200,14 @@ export class BackgroundController {
         // later retry can append the recovered transcript and the user can
         // still stop normally.
         if (msg.message.startsWith("transcription failed, queued for retry:")) {
-          await saveMeeting(meeting);
           this.broadcast({ type: "PROCESSING_WARNING", meetingId: msg.meetingId, message: msg.message });
           return;
         }
-        meeting.status = "error";
-        meeting.errorMessage = msg.message;
-        await saveMeeting(meeting);
+        await updateMeeting(msg.meetingId, (current) => {
+          current.status = "error";
+          current.errorMessage = msg.message;
+          return current;
+        });
       }
       if (this.activeMeetingId === msg.meetingId) this.activeMeetingId = null;
     }
@@ -232,8 +237,10 @@ export class BackgroundController {
       });
       return;
     }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), WEBAPP_SYNC_TIMEOUT_MS);
     try {
-      await this.fetchImpl(`${normalized}/api/meetings`, {
+      const response = await this.fetchImpl(`${normalized}/api/meetings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -248,13 +255,17 @@ export class BackgroundController {
           summary: meeting.summary,
           actionItems: meeting.actionItems,
         }),
+        signal: controller.signal,
       });
+      if (!response.ok) throw new Error(`webapp returned HTTP ${response.status}`);
     } catch {
       // Local save already succeeded (per the raw-audio/local-first
       // resilience guarantee this mirrors) — a webapp sync failure is
       // logged, not fatal. A retry-on-next-sync pass is a fast-follow, not
       // required for the local-first experience to work.
       console.warn(`Failed to sync meeting ${meeting.id} to webapp`);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 }

@@ -264,7 +264,7 @@ async fn handle_message(
                 };
             let store =
                 MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
-            let pipeline = Pipeline::new(
+            let mut pipeline = Pipeline::new(
                 store,
                 build_transcription_provider(transcription_provider, transcription_key),
                 build_summarization_provider(summarization_provider, summarization_key),

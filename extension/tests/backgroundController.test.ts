@@ -106,6 +106,20 @@ describe("BackgroundController", () => {
     ]);
   });
 
+  it("serializes concurrent transcript updates instead of dropping one", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    client.emit("transcript_partial", { meetingId, speaker: "you", text: "first", isFinal: true });
+    client.emit("transcript_partial", { meetingId, speaker: "them", text: "second", isFinal: true });
+
+    await vi.waitFor(async () => {
+      expect((await getMeeting(meetingId))?.transcript).toHaveLength(2);
+    });
+  });
+
   it("marks the meeting complete and stores the summary on summary_ready", async () => {
     const client = createFakeClient();
     const broadcast = vi.fn();

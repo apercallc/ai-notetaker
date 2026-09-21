@@ -4,13 +4,24 @@ import type { CreateMeetingRequest, MeetingDetailResponse, MeetingSummaryRespons
 
 export class ValidationError extends Error {}
 
+const MAX_ID_LENGTH = 128;
+const MAX_TITLE_LENGTH = 200;
+const MAX_SUMMARY_LENGTH = 100_000;
+const MAX_TRANSCRIPT_SEGMENTS = 25_000;
+const MAX_SEGMENT_TEXT_LENGTH = 20_000;
+const MAX_SPEAKER_LENGTH = 100;
+const MAX_ACTION_ITEMS = 1_000;
+const MAX_ACTION_TEXT_LENGTH = 2_000;
+const MAX_OWNER_LENGTH = 200;
+const MAX_OFFSET = 100_000;
+
 function assertValid(input: unknown): CreateMeetingRequest {
   if (typeof input !== "object" || input === null) {
     throw new ValidationError("Request body must be an object");
   }
   const body = input as Record<string, unknown>;
 
-  if (typeof body.id !== "string" || body.id.length === 0) {
+  if (typeof body.id !== "string" || body.id.length === 0 || body.id.length > MAX_ID_LENGTH) {
     throw new ValidationError("id is required");
   }
   if (typeof body.startedAt !== "string" || Number.isNaN(Date.parse(body.startedAt))) {
@@ -19,10 +30,16 @@ function assertValid(input: unknown): CreateMeetingRequest {
   if (typeof body.endedAt !== "string" || Number.isNaN(Date.parse(body.endedAt))) {
     throw new ValidationError("endedAt must be an ISO 8601 string");
   }
+  if (new Date(body.endedAt).getTime() < new Date(body.startedAt).getTime()) {
+    throw new ValidationError("endedAt must not be before startedAt");
+  }
   if (typeof body.summary !== "string") {
     throw new ValidationError("summary is required");
   }
-  if (!Array.isArray(body.transcript)) {
+  if (body.summary.length > MAX_SUMMARY_LENGTH) {
+    throw new ValidationError(`summary must be ${MAX_SUMMARY_LENGTH} characters or fewer`);
+  }
+  if (!Array.isArray(body.transcript) || body.transcript.length > MAX_TRANSCRIPT_SEGMENTS) {
     throw new ValidationError("transcript must be an array");
   }
   for (const segment of body.transcript) {
@@ -31,20 +48,31 @@ function assertValid(input: unknown): CreateMeetingRequest {
       segment === null ||
       typeof (segment as Record<string, unknown>).speaker !== "string" ||
       typeof (segment as Record<string, unknown>).text !== "string" ||
-      typeof (segment as Record<string, unknown>).timestamp !== "string"
+      typeof (segment as Record<string, unknown>).timestamp !== "string" ||
+      (segment as Record<string, string>).speaker.length > MAX_SPEAKER_LENGTH ||
+      (segment as Record<string, string>).text.length > MAX_SEGMENT_TEXT_LENGTH ||
+      Number.isNaN(Date.parse((segment as Record<string, string>).timestamp))
     ) {
       throw new ValidationError("each transcript segment needs speaker, text, and timestamp");
     }
   }
-  if (!Array.isArray(body.actionItems)) {
+  if (!Array.isArray(body.actionItems) || body.actionItems.length > MAX_ACTION_ITEMS) {
     throw new ValidationError("actionItems must be an array");
   }
   for (const item of body.actionItems) {
-    if (typeof item !== "object" || item === null || typeof (item as Record<string, unknown>).text !== "string") {
+    if (
+      typeof item !== "object" ||
+      item === null ||
+      typeof (item as Record<string, unknown>).text !== "string" ||
+      (item as Record<string, string>).text.length > MAX_ACTION_TEXT_LENGTH ||
+      ((item as Record<string, unknown>).owner !== undefined &&
+        (typeof (item as Record<string, unknown>).owner !== "string" ||
+          (item as Record<string, string>).owner.length > MAX_OWNER_LENGTH))
+    ) {
       throw new ValidationError("each action item needs text");
     }
   }
-  if (body.title !== undefined && typeof body.title !== "string") {
+  if (body.title !== undefined && (typeof body.title !== "string" || body.title.length > MAX_TITLE_LENGTH)) {
     throw new ValidationError("title must be a string if provided");
   }
 
@@ -57,7 +85,7 @@ function defaultTitle(startedAt: string): string {
 
 export async function upsertMeeting(rawInput: unknown): Promise<{ id: string; title: string }> {
   const input = assertValid(rawInput);
-  const title = input.title?.trim() ? input.title : defaultTitle(input.startedAt);
+  const title = input.title?.trim() ? input.title.trim() : defaultTitle(input.startedAt);
 
   await prisma.$transaction([
     prisma.transcriptSegment.deleteMany({ where: { meetingId: input.id } }),
@@ -121,13 +149,14 @@ const MAX_SEARCH_LENGTH = 200;
 export async function listMeetings(
   options: ListMeetingsOptions
 ): Promise<{ meetings: MeetingSummaryResponse[]; total: number }> {
-  if (options.query && options.query.length > MAX_SEARCH_LENGTH) {
+  const query = options.query?.trim();
+  if (query && query.length > MAX_SEARCH_LENGTH) {
     throw new ValidationError(`query must be ${MAX_SEARCH_LENGTH} characters or fewer`);
   }
   if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 0)) {
     throw new ValidationError("limit must be a non-negative integer");
   }
-  if (options.offset !== undefined && (!Number.isSafeInteger(options.offset) || options.offset < 0)) {
+  if (options.offset !== undefined && (!Number.isSafeInteger(options.offset) || options.offset < 0 || options.offset > MAX_OFFSET)) {
     throw new ValidationError("offset must be a non-negative integer");
   }
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
@@ -135,12 +164,12 @@ export async function listMeetings(
 
   const where = {
     userId: LOCAL_USER_ID,
-    ...(options.query
+    ...(query
       ? {
           OR: [
-            { title: { contains: options.query, mode: "insensitive" as const } },
-            { summary: { contains: options.query, mode: "insensitive" as const } },
-            { transcript: { some: { text: { contains: options.query, mode: "insensitive" as const } } } },
+            { title: { contains: query, mode: "insensitive" as const } },
+            { summary: { contains: query, mode: "insensitive" as const } },
+            { transcript: { some: { text: { contains: query, mode: "insensitive" as const } } } },
           ],
         }
       : {}),

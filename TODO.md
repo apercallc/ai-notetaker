@@ -93,6 +93,20 @@ accessibility failures):*
   service-worker suspension does not cancel retries; non-Chrome test harnesses
   retain a `setTimeout` fallback.
 
+*Efficiency pass (2026-09-21):*
+- **Helper:** callback-sized audio is persisted immediately but sent to batch
+  transcription in five-second windows, avoiding an HTTP request per cpal
+  callback while flushing the final partial window before summarization.
+- **Helper:** provider clients now have bounded connect/request timeouts, and
+  provider responses append transcript batches in one disk rewrite.
+- **Extension:** popup history reads only its newest five records, concurrent
+  transcript updates are serialized, stale live listeners are removed, and
+  webapp health/sync requests cannot hang indefinitely.
+- **Webapp:** inbound meeting payloads and deep pagination are bounded before
+  Prisma work, meeting chronology is validated, and titles are normalized.
+- **Webapp:** transcript detail rows no longer form a dense full-width grid,
+  and off-screen rows use browser content-visibility for long meetings.
+
 ### Desktop helper (`helper/`)
 
 - [x] Scaffold Tauri project, shared Rust core + per-OS audio modules —

@@ -222,6 +222,7 @@ export class NativeMessagingClient {
   testProviderKey(provider: ProviderKind, key: string): Promise<{ valid: boolean; message: string }> {
     return new Promise((resolve) => {
       let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       const handler = (msg: Extract<IncomingMessage, { type: "provider_key_test_result" }>): void => {
         if (msg.provider !== provider || settled) return;
         settle({ valid: msg.valid, message: msg.message });
@@ -229,6 +230,7 @@ export class NativeMessagingClient {
       const settle = (result: { valid: boolean; message: string }): void => {
         if (settled) return;
         settled = true;
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
         this.off("provider_key_test_result", handler);
         resolve(result);
       };
@@ -239,7 +241,7 @@ export class NativeMessagingClient {
         settle({ valid: false, message: "The helper is not connected. Install and start it, then try again." });
         return;
       }
-      setTimeout(
+      timeoutId = setTimeout(
         () => settle({ valid: false, message: "Timed out waiting for the helper to respond. Is it running?" }),
         TEST_PROVIDER_KEY_TIMEOUT_MS,
       );
