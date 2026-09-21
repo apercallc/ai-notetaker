@@ -55,6 +55,29 @@ for these specific regressions:
    null-sink module (Linux). New low-level audio-driver code in `helper/`
    is a red flag worth a direct question to the author about why the
    existing drivers didn't work for their case.
+8a. **BlackHole's compiled binary being bundled into the macOS installer.**
+   Its source is GPLv3, but Existential Audio's official binary and
+   branding are separately all-rights-reserved — the installer should
+   detect-if-missing and deep-link to their official download, never embed
+   their `.pkg`. If you see a BlackHole installer binary checked into the
+   repo or fetched-and-embedded at build time, flag it.
+8b. **VB-CABLE bundled without visible attribution, or the wrong variant
+   bundled.** VB-Audio's terms permit silently bundling *base* VB-CABLE
+   only, conditioned on the vb-cable.com attribution and donation option
+   staying visible in the installer UI. Flag either the A+B/C+D variants
+   being bundled, or attribution/donation UI being removed or hidden.
+9. **A missing or regenerated `key` field in `extension/manifest.json`.**
+   The Native Messaging host allowlist is keyed to the ID that field
+   derives — if it's absent or changed, every installed helper's handshake
+   breaks silently for users on the next extension update.
+10. **A webapp route (especially a read/GET route) with no auth-token
+    check.** Every route needs one — there is no legitimately public page
+    in this app, since it always sits on a URL the user's own meeting notes
+    live behind.
+11. **Audio sent to a transcription API with no corresponding startup-time
+    recovery path for an interrupted recording.** If `helper/` gains a new
+    entry point into the capture flow, confirm it still leaves the
+    in-progress recording in a state the startup recovery check can find.
 
 ## How to report findings
 

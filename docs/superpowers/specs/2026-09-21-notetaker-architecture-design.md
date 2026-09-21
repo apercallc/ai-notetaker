@@ -29,6 +29,10 @@ decision below:
   engineering risk when mature open-source drivers already exist per OS.
 - Team/workspace collaboration features (CRISP's "Workspaces") — noted as a
   forward-compatibility concern in the data model (§7), not built now.
+- **Multiple simultaneous recordings.** v1 supports one active recording
+  session at a time per helper instance. Concurrent meetings would need a
+  session-management design (which virtual device feeds which recording?)
+  that isn't worth building until someone actually needs it.
 
 ## 2. Sub-project Roadmap
 
@@ -62,10 +66,26 @@ the AI pipeline**, not the extension.
   ships a built-in updater — resolving the "how do users get security
   patches" gap.
 - **Virtual audio device**, built on existing open-source drivers rather
-  than a custom one:
-  - macOS: [BlackHole](https://github.com/ExistentialAudio/BlackHole)
-  - Windows: [VB-Cable](https://vb-audio.com/Cable/)
-  - Linux: a PulseAudio/PipeWire null-sink module
+  than a custom one — but the two proprietary-adjacent ones have different
+  redistribution terms, verified directly against their licenses (not
+  assumed):
+  - **macOS — [BlackHole](https://github.com/ExistentialAudio/BlackHole)**:
+    the source is GPLv3, but Existential Audio's official compiled
+    installer and the BlackHole name/branding are separately
+    all-rights-reserved — that combination means we do **not** bundle their
+    binary inside our installer. Instead, the onboarding wizard detects if
+    it's missing and deep-links to Existential Audio's official download
+    with clear steps, rather than silently installing it ourselves.
+  - **Windows — [VB-Cable](https://vb-audio.com/Cable/)**: VB-Audio's own
+    licensing terms explicitly *permit* silent bundling inside another
+    installer, free or commercial, provided the end user can still identify
+    it as VB-Audio's VB-CABLE and see the donation option/attribution to
+    vb-cable.com — so our Windows installer **does** bundle and silently
+    install base VB-CABLE, with that attribution kept visible in the
+    installer UI. Only the base VB-CABLE may be bundled this way; VB-Audio's
+    terms explicitly exclude the VB-CABLE A+B/C+D variants from bundling.
+  - **Linux**: a PulseAudio/PipeWire null-sink module — no third-party
+    binary involved, nothing to clear here.
 - **Dual-channel capture**: the helper captures the user's own mic input and
   the remote speaker/meeting-app output as **two separate streams**, not one
   mixed blob. This gives free "you vs. everyone else" diarization before the
@@ -79,6 +99,17 @@ the AI pipeline**, not the extension.
   transcription API (Deepgram live-streaming endpoint by default) and, once
   a meeting ends, sends the assembled transcript to the LLM (Claude Haiku by
   default) for summary + action items.
+- **Crash recovery**: because raw audio is written incrementally to disk
+  during capture (not just at meeting-end), the helper checks on startup for
+  an in-progress recording left behind by an unclean shutdown (crash, forced
+  quit, OS restart) and offers to resume processing it from the raw audio,
+  rather than silently losing or orphaning it.
+- **Driver install friction is expected and documented, not hidden.**
+  Installing a system audio device can require a reboot or re-login before
+  it appears as a selectable device (a known BlackHole/VB-Cable behavior,
+  not something our installer can paper over). The onboarding wizard says
+  this plainly up front rather than leaving the user to wonder why the
+  device isn't showing up yet.
 
 ### 3.2 Chrome Extension
 
@@ -99,6 +130,15 @@ for a 45+ minute meeting.
 - Persistent on-screen recording indicator while active, plus a one-time
   onboarding note about consent-law obligations (one/two-party consent laws
   vary by jurisdiction — the product surfaces this, it does not gate on it).
+- **Stable extension ID from day one**: Chrome derives an extension's ID by
+  hashing the public key embedded in its manifest. Native Messaging's host
+  manifest must allowlist that ID, which creates a chicken-and-egg problem
+  if the ID isn't fixed until a later Chrome Web Store submission. Resolved
+  by generating the extension's key pair immediately and committing the
+  public key in `manifest.json`'s `key` field — the ID is stable across
+  local dev, CI, and the eventual Web Store listing (uploading the same
+  key-derived package preserves it), so the Native Messaging host manifest
+  never needs to change later.
 
 ### 3.3 AI Pipeline (BYOK)
 
@@ -141,6 +181,10 @@ For persistent/cross-device history, additive to local storage.
 - Extension POSTs a finished meeting note to the configured webapp URL+token
   after local save, if configured. Default behavior with no webapp
   configured: local-only.
+- **Every route requires the auth token, including reads.** A self-hosted
+  instance on a public Railway URL with an unauthenticated read path would
+  expose meeting notes to anyone who finds the URL — there is no
+  "public by default" route in this app, ever.
 
 ## 4. Data Flow
 
@@ -213,6 +257,14 @@ ai-notetaker/
   either; they use the phone mic for ambient recording or a server-side bot
   that joins the meeting independently — a fundamentally different (heavier)
   architecture than the BYOK/local-first approach chosen here.
+- **Sync model resolved**: mobile has no equivalent of the desktop
+  helper — there's no separate "helper process" on a phone, since
+  `AudioPlaybackCapture`/ReplayKit both capture in-app, directly. So the
+  mobile app simply runs its own small capture-and-pipeline loop (same BYOK
+  provider calls the helper makes) and, for cross-device history, POSTs to
+  the *same* self-hosted webapp ingestion API the extension already uses —
+  no new sync mechanism needed, just another authenticated client of the
+  existing API.
 
 ## 10. Testing Approach
 

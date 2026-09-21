@@ -25,3 +25,8 @@ needs to run for a 45-minute meeting.
 - Keep it a standard WebExtension where the API allows, even though Chrome
   is the primary target — an Edge/Brave/Firefox port later shouldn't
   require a rewrite (see spec §7).
+- **`manifest.json` must carry a committed `key` field** so the extension's
+  ID is stable across local dev, CI, and the eventual Web Store listing.
+  Never regenerate this key casually — the Native Messaging host manifest
+  is allowlisted to the ID it derives from, and changing it breaks every
+  installed helper's handshake.

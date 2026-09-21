@@ -25,6 +25,12 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
 - **Don't build a custom virtual-audio driver.** Use existing open-source
   ones: BlackHole (macOS), VB-Cable (Windows), a PulseAudio/PipeWire
   null-sink module (Linux).
+- **BlackHole and VB-Cable have different, verified redistribution terms.**
+  Never bundle BlackHole's compiled installer (link out to Existential
+  Audio's official download instead — their binary/branding are
+  all-rights-reserved despite GPL source). Base VB-CABLE (never A+B/C+D)
+  may be bundled/silently installed on Windows, but only with vb-cable.com
+  attribution and the donation option kept visible in our installer.
 - **Capture mic and speaker as separate channels**, not one mixed blob —
   this is what makes "you vs. everyone else" diarization free.
 - **Raw audio is always saved locally first**, independent of any API call
@@ -32,6 +38,14 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
 - **API keys live in `chrome.storage.local` only** — never `.sync`.
 - **Helper is built on Tauri (Rust)**, not Electron — smaller install, one
   shared codebase across OSes, built-in updater.
+- **Extension `manifest.json` carries a committed, stable `key` field.**
+  Native Messaging's host allowlist is keyed to the extension ID that field
+  derives — regenerating it breaks every installed helper's handshake.
+- **Every webapp route checks the auth token, including reads.** No
+  "public by default" page — it sits on a public Railway URL.
+- **Helper checks for and offers to resume an in-progress recording on
+  startup** — an unclean shutdown must not silently orphan raw audio
+  that's already on disk.
 
 ## Repo structure
 

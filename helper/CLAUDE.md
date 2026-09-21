@@ -16,6 +16,14 @@ for the full rationale.
   (Linux). A new low-level audio driver in this package is almost certainly
   the wrong move; if you think you need one, that's a decision to raise
   explicitly, not build quietly.
+- **BlackHole and VB-Cable have different, verified redistribution terms —
+  don't treat them the same.** macOS: never bundle Existential Audio's
+  compiled BlackHole installer (GPL source, but the official binary and
+  branding are separately all-rights-reserved) — detect-if-missing and
+  deep-link to their official download instead. Windows: base VB-CABLE
+  (never the A+B/C+D variants) may be bundled and silently installed, but
+  VB-Audio's terms require the vb-cable.com attribution and donation option
+  to stay visible in our installer UI.
 - **Capture mic and speaker as separate channels/streams, always.** Never
   merge them into one blob before sending to the transcription API — the
   dual-channel split is what gives "you vs. everyone else" diarization for
@@ -30,3 +38,7 @@ for the full rationale.
   streaming-vs-batch labeling, and cost documentation.
 - **Native Messaging host, not an open port**, for talking to the
   extension.
+- **Detect and offer to resume an in-progress recording on startup.**
+  Because raw audio is written incrementally during capture, an unclean
+  shutdown (crash, forced quit, OS restart) leaves recoverable audio behind
+  — check for it on launch rather than leaving it orphaned.

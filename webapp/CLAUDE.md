@@ -27,3 +27,7 @@ exists to avoid.
 - **Auth token, not the user's AI API keys, is what secures this app.**
   Never design a flow where a Deepgram/Claude/etc. key would need to reach
   the webapp.
+- **Every route checks the auth token, including reads.** There is no
+  "public by default" page or API route — a self-hosted instance sits on a
+  public Railway URL, and an unauthenticated read path would expose a
+  user's meeting notes to anyone who finds that URL.
