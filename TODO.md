@@ -241,9 +241,11 @@ here for a follow-up pass, ranked by the reviewers' own priority order):*
 - [x] First-run helper detection from the extension — the actionable
       not-found state landed in `b8e5270` and remains covered by extension
       tests.
-- [ ] Final per-OS installer registration of the Native Messaging manifest —
-      package inputs and exact Chrome locations are documented, but token
-      substitution/Windows registry setup still needs installer implementation.
+- [x] Final per-OS installer registration of the Native Messaging manifest —
+      Debian postinst/postrm scripts, Windows NSIS/PowerShell hooks, and
+      guarded macOS app-bundled install/uninstall helpers are implemented;
+      macOS DMG still requires the owner to run the helper after copying the
+      app because DMG has no post-install phase.
 - [ ] Generate and publish the owner-controlled Tauri updater key/endpoint —
       config placeholders are intentional until the release owner supplies
       signing credentials.

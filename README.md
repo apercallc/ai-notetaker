@@ -29,9 +29,9 @@ your data.
 
 ## Status
 
-Core capture, Native Messaging, CI, and the first Tauri tray/packaging pass
-are implemented; native signing, installer registration, and live OS/audio
-validation remain. See
+Core capture, Native Messaging, CI, Tauri tray/packaging, and Linux/Windows
+installer registration are implemented; native signing, the macOS post-copy
+registration step, and live OS/audio validation remain. See
 [`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md)
 for the current design and remaining roadmap.
 

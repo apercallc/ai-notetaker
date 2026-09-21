@@ -79,9 +79,10 @@ the one for whichever package you're touching in addition to this file.
 ## Current status
 
 Core capture, provider pipeline, Native Messaging, extension helper-detection
-UX, CI, and the first Tauri tray/packaging pass are implemented and tracked
-in `TODO.md`. Native installer registration, OS signing/notarization, live
-provider/meeting validation, and the remaining polish items are still open.
+UX, CI, Tauri tray/packaging, and per-OS Native Messaging installer hooks are
+implemented and tracked in `TODO.md`. OS signing/notarization, the macOS
+post-copy registration step, live provider/meeting validation, and the
+remaining polish items are still open.
 
 ## Out of scope for now
 

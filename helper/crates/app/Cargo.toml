@@ -42,7 +42,8 @@ section = "sound"
 priority = "optional"
 depends = "libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2"
 assets = [
-  ["target/release/notetaker-helper", "usr/lib/ai-notetaker/notetaker-helper", "755"],
-  ["target/release/notetaker-nm-host", "usr/lib/ai-notetaker/notetaker-nm-host", "755"],
+  ["target/release/notetaker-helper", "usr/bin/notetaker-helper", "755"],
+  ["target/release/notetaker-nm-host", "usr/bin/notetaker-nm-host", "755"],
   ["../../native-messaging-host-manifest/com.ainotetaker.helper.json.template", "usr/share/ai-notetaker/com.ainotetaker.helper.json.template", "644"],
 ]
+maintainer-scripts = "scripts/debian"

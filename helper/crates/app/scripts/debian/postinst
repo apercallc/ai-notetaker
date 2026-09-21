@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+host_name='com.ainotetaker.helper'
+extension_id='jidooookkdbbbhkkdmcajnnnhhphodok'
+host_binary='/usr/bin/notetaker-nm-host'
+
+write_manifest() {
+    manifest_dir=$1
+    manifest_path="$manifest_dir/$host_name.json"
+
+    install -d -m 755 "$manifest_dir"
+
+    # Do not overwrite an unrelated host installed by another application.
+    # An existing manifest created by this package is safe to refresh on upgrade.
+    if [ -e "$manifest_path" ] && {
+        ! grep -Fq "chrome-extension://$extension_id/" "$manifest_path" ||
+        ! grep -Fq '"path": "/usr/bin/notetaker-nm-host"' "$manifest_path";
+    }; then
+        echo "notetaker: leaving unrelated Native Messaging manifest unchanged: $manifest_path" >&2
+        return 0
+    fi
+
+    temporary_path="$manifest_dir/.$host_name.json.$$"
+    trap 'rm -f "$temporary_path"' EXIT HUP INT TERM
+    umask 022
+    printf '%s\n' "{\"name\":\"$host_name\",\"description\":\"AI Notetaker desktop helper Native Messaging relay\",\"path\":\"$host_binary\",\"type\":\"stdio\",\"allowed_origins\":[\"chrome-extension://$extension_id/\"]}" > "$temporary_path"
+    chmod 644 "$temporary_path"
+    mv -f "$temporary_path" "$manifest_path"
+    trap - EXIT HUP INT TERM
+}
+
+write_manifest '/etc/opt/chrome/native-messaging-hosts'
+write_manifest '/etc/chromium/native-messaging-hosts'

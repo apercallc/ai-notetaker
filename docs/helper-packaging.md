@@ -26,17 +26,40 @@ cargo deb --manifest-path helper/crates/app/Cargo.toml
 Linux CI installs the Tauri v2 WebKitGTK, GTK, Ayatana AppIndicator, and
 librsvg development packages in addition to the ALSA headers.
 
-The packaged Native Messaging template still contains
-`__NM_HOST_BINARY_PATH__`. Each installer must replace that token with the
-absolute installed path to `notetaker-nm-host`, install the manifest in the
-Chrome location for that OS, and register the Windows per-user registry key.
-That final installer registration is intentionally not faked by a local build.
+## Native Messaging installer registration
+
+The checked-in template remains useful for manual installs, but release
+packages now register the real installed relay instead of shipping the token
+unchanged:
+
+- Debian packages run `scripts/debian/postinst` and `postrm`. They write the
+  system-wide manifest to both `/etc/opt/chrome/native-messaging-hosts/` and
+  `/etc/chromium/native-messaging-hosts/`, and only remove a manifest that
+  still contains this extension ID and `/usr/bin/notetaker-nm-host`.
+- Windows NSIS runs `windows/hooks.nsh` after install and before uninstall.
+  The PowerShell hooks write the manifest beside the installed binaries and
+  register it under the per-user Chrome key
+  `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.ainotetaker.helper`.
+  They refuse to remove a changed or unrelated manifest.
+- macOS DMG has no post-install hook. The app bundles
+  `Contents/Resources/scripts/install-native-messaging.sh` and its guarded
+  uninstall counterpart. Run the installer helper after copying the app to
+  `/Applications` (or pass the actual `.app` path) so it can write the
+  per-user Chrome manifest, for example:
+  `sh "/Applications/AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh"`.
+
+AppImages are portable artifacts and cannot safely point Chrome at a relay
+inside a transient AppImage mount; use the Debian package for automatic Linux
+registration, or perform an explicit manual install with a stable extracted
+relay path.
 
 ## Updater signing
 
-The updater plugin and artifact configuration are wired, but the public key
-and endpoint in `tauri.conf.json` are placeholders. The owner must generate
-and protect the key pair:
+The updater plugin and endpoint shape are wired, but the public key and
+endpoint in `tauri.conf.json` are placeholders. Artifact generation is
+disabled until the owner supplies a real signing key; enable
+`bundle.createUpdaterArtifacts` only in the release configuration after
+generating and protecting the key pair:
 
 ```sh
 npx --yes @tauri-apps/cli@latest signer generate -w ~/.tauri/ai-notetaker.key
@@ -57,7 +80,8 @@ pairing state, and retry queues; copy it first if it must be kept.
 ### Linux
 
 Remove the `.deb` package (the exact package name may be shown by `dpkg -l`)
-or remove the AppImage. Then remove the manifest from
+or remove the AppImage. The Debian maintainer script removes the two
+system-wide manifests it owns. For an AppImage/manual install, remove
 `~/.config/google-chrome/NativeMessagingHosts/com.ainotetaker.helper.json`
 (and the Chromium-equivalent directory) and `~/.local/share/ai-notetaker`.
 
@@ -69,7 +93,9 @@ Restarting the user audio session removes any remaining transient modules.
 
 ### macOS
 
-Remove **AI Notetaker** from Applications, delete
+Run the bundled `Contents/Resources/scripts/uninstall-native-messaging.sh`
+helper before removing **AI Notetaker** from Applications (pass the `.app`
+path if it is not in `/Applications`). Then delete
 `~/Library/Application Support/ai-notetaker`, and remove
 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.ainotetaker.helper.json`.
 If launch-at-login was enabled, disable it from the tray menu before
@@ -83,7 +109,9 @@ closed.
 
 ### Windows
 
-Uninstall **AI Notetaker** from Installed apps, then remove
+Uninstall **AI Notetaker** from Installed apps. The NSIS pre-uninstall hook
+removes the manifest and per-user registry value only when they still point to
+this installation. If the hook could not run, remove
 `%LOCALAPPDATA%\ai-notetaker`, the installed Native Messaging manifest, and
 the per-user registry value at
 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.ainotetaker.helper`.
@@ -97,8 +125,8 @@ variants.
 
 ## Release-only prerequisites
 
-macOS Developer ID signing/notarization, Windows Authenticode signing, real
-Native Messaging registration, updater key generation, and uninstall runs on
-each native OS remain release-owner validation. The Linux build and config
+macOS Developer ID signing/notarization, Windows Authenticode signing,
+macOS installer-helper execution, updater key generation, and uninstall runs
+on each native OS remain release-owner validation. The Linux build and config
 are locally compilable here; that is not proof of macOS/Windows signing or
 hardware audio behavior.

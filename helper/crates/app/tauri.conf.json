@@ -21,10 +21,29 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
-    "resources": [
-      "../../native-messaging-host-manifest/com.ainotetaker.helper.json.template"
-    ],
-    "createUpdaterArtifacts": true
+    "resources": {
+      "../../native-messaging-host-manifest/com.ainotetaker.helper.json.template": "native-messaging-host-template.json",
+      "resources/windows/install-native-messaging.ps1": "windows/install-native-messaging.ps1",
+      "resources/windows/uninstall-native-messaging.ps1": "windows/uninstall-native-messaging.ps1"
+    },
+    "linux": {
+      "deb": {
+        "postInstallScript": "scripts/debian/postinst",
+        "postRemoveScript": "scripts/debian/postrm"
+      }
+    },
+    "macOS": {
+      "files": {
+        "scripts/macos/install-native-messaging.sh": "Resources/scripts/install-native-messaging.sh",
+        "scripts/macos/uninstall-native-messaging.sh": "Resources/scripts/uninstall-native-messaging.sh"
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/hooks.nsh"
+      }
+    },
+    "createUpdaterArtifacts": false
   },
   "plugins": {
     "updater": {

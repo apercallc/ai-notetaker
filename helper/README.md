@@ -101,9 +101,10 @@ toolchain or target-OS SDKs in this environment:
 - **Tauri auto-updater configuration** — plugin and artifact shape are wired,
   but updater keys/endpoints are owner-generated release placeholders. See
   `../docs/helper-packaging.md`.
-- **Per-OS installer registration and code signing** — bundle configuration
-  and uninstall documentation are present; Native Messaging registration,
-  macOS notarization, and Windows signing still require native release work.
+- **Per-OS installer registration and code signing** — Debian and Windows
+  package hooks register Native Messaging, and macOS bundles guarded
+  install/uninstall helpers; macOS notarization, Windows signing, and the
+  macOS post-copy helper run still require native release work.
 
 ## A deviation from the docs, flagged as instructed
 
