@@ -31,7 +31,8 @@ use std::sync::Arc;
 /// package only — VB-Audio's terms explicitly exclude the A+B/C+D variants
 /// from bundling permission, so this URL must never be swapped for one of
 /// those without re-checking the license terms.
-pub const VB_CABLE_DOWNLOAD_URL: &str = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
+pub const VB_CABLE_DOWNLOAD_URL: &str =
+    "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
 pub const VB_CABLE_ATTRIBUTION_TEXT: &str = "Virtual audio cable by VB-Audio Software (vb-cable.com) — donationware, please consider supporting them.";
 
 pub struct WindowsAudioCapture {
@@ -40,13 +41,17 @@ pub struct WindowsAudioCapture {
 
 impl WindowsAudioCapture {
     pub fn new() -> Self {
-        Self { running: Arc::new(AtomicBool::new(false)) }
+        Self {
+            running: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     fn installed_device_name(&self) -> Option<String> {
         let host = cpal::default_host();
-        let names: Vec<String> =
-            host.input_devices().map(|it| it.filter_map(|d| d.name().ok()).collect()).unwrap_or_default();
+        let names: Vec<String> = host
+            .input_devices()
+            .map(|it| it.filter_map(|d| d.name().ok()).collect())
+            .unwrap_or_default();
         find_matching_device(&names, WINDOWS_DEVICE_HINT).map(String::from)
     }
 
@@ -82,12 +87,17 @@ impl AudioCapture for WindowsAudioCapture {
         match self.installed_device_name() {
             Some(_) => DriverStatus::Installed,
             None => DriverStatus::NotInstalled {
-                install_guidance: "VB-CABLE will be installed automatically — click continue to proceed.".to_string(),
+                install_guidance:
+                    "VB-CABLE will be installed automatically — click continue to proceed."
+                        .to_string(),
             },
         }
     }
 
-    async fn start_capture(&self, on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>) -> Result<(), AudioError> {
+    async fn start_capture(
+        &self,
+        on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
+    ) -> Result<(), AudioError> {
         let Some(speaker_device_name) = self.installed_device_name() else {
             return Err(AudioError::DeviceNotFound("VB-CABLE".to_string()));
         };
@@ -98,12 +108,15 @@ impl AudioCapture for WindowsAudioCapture {
 
         std::thread::spawn(move || {
             let host = cpal::default_host();
-            let speaker_device =
-                host.input_devices().ok().and_then(|mut it| it.find(|d| d.name().ok().as_deref() == Some(speaker_device_name.as_str())));
+            let speaker_device = host.input_devices().ok().and_then(|mut it| {
+                it.find(|d| d.name().ok().as_deref() == Some(speaker_device_name.as_str()))
+            });
             let mic_device = host.default_input_device();
 
-            let _speaker_stream = speaker_device.and_then(|d| build_input_stream(&d, AudioChannel::Speaker, tx.clone()).ok());
-            let _mic_stream = mic_device.and_then(|d| build_input_stream(&d, AudioChannel::Mic, tx.clone()).ok());
+            let _speaker_stream = speaker_device
+                .and_then(|d| build_input_stream(&d, AudioChannel::Speaker, tx.clone()).ok());
+            let _mic_stream =
+                mic_device.and_then(|d| build_input_stream(&d, AudioChannel::Mic, tx.clone()).ok());
 
             while running.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -130,7 +143,9 @@ fn build_input_stream(
     channel: AudioChannel,
     tx: std::sync::mpsc::Sender<CapturedFrame>,
 ) -> Result<cpal::Stream, AudioError> {
-    let config = device.default_input_config().map_err(|e| AudioError::StreamError(e.to_string()))?;
+    let config = device
+        .default_input_config()
+        .map_err(|e| AudioError::StreamError(e.to_string()))?;
     let sample_rate_hz = config.sample_rate().0;
     let stream = device
         .build_input_stream(
@@ -140,12 +155,18 @@ fn build_input_stream(
                     .iter()
                     .flat_map(|s| ((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes())
                     .collect();
-                let _ = tx.send(CapturedFrame { channel, pcm16, sample_rate_hz });
+                let _ = tx.send(CapturedFrame {
+                    channel,
+                    pcm16,
+                    sample_rate_hz,
+                });
             },
             move |err| tracing::error!("audio stream error: {err}"),
             None,
         )
         .map_err(|e| AudioError::StreamError(e.to_string()))?;
-    stream.play().map_err(|e| AudioError::StreamError(e.to_string()))?;
+    stream
+        .play()
+        .map_err(|e| AudioError::StreamError(e.to_string()))?;
     Ok(stream)
 }

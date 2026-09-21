@@ -12,7 +12,9 @@ mod ipc;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
 
     let mut helper_conn = match ipc::connect().await {
         Ok(conn) => conn,

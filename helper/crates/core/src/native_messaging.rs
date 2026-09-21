@@ -46,7 +46,10 @@ pub fn read_message<R: Read>(reader: &mut R) -> Result<ExtensionToHelper, Framin
     Ok(msg)
 }
 
-pub fn write_message<W: Write>(writer: &mut W, msg: &HelperToExtension) -> Result<(), FramingError> {
+pub fn write_message<W: Write>(
+    writer: &mut W,
+    msg: &HelperToExtension,
+) -> Result<(), FramingError> {
     let payload = serde_json::to_vec(msg)?;
     if payload.len() as u64 > MAX_MESSAGE_BYTES as u64 {
         return Err(FramingError::TooLarge(payload.len() as u32));
@@ -296,7 +299,10 @@ mod tests {
 
     #[test]
     fn round_trips_test_provider_key_message() {
-        let msg = ExtensionToHelper::TestProviderKey { provider: ProviderKind::Deepgram, key: "abc".into() };
+        let msg = ExtensionToHelper::TestProviderKey {
+            provider: ProviderKind::Deepgram,
+            key: "abc".into(),
+        };
         let json = serde_json::to_vec(&msg).unwrap();
         let mut framed = Vec::new();
         framed.extend_from_slice(&(json.len() as u32).to_ne_bytes());

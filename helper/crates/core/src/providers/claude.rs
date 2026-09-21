@@ -1,6 +1,9 @@
 //! Claude (Anthropic Messages API) summarization provider — default tier.
 
-use super::{parse_summary_json, render_transcript, ProviderError, Summary, SummarizationProvider, TranscriptSegment, SUMMARIZATION_SYSTEM_PROMPT};
+use super::{
+    parse_summary_json, render_transcript, ProviderError, SummarizationProvider, Summary,
+    TranscriptSegment, SUMMARIZATION_SYSTEM_PROMPT,
+};
 use crate::native_messaging::SummarizationProviderId;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -27,9 +30,13 @@ async fn test_key_at(url: &str, key: &str) -> Result<(), ProviderError> {
     if status.is_success() {
         Ok(())
     } else if status == 401 {
-        Err(ProviderError::AuthFailed(format!("claude returned {status}")))
+        Err(ProviderError::AuthFailed(format!(
+            "claude returned {status}"
+        )))
     } else {
-        Err(ProviderError::Unreachable(format!("claude returned {status}")))
+        Err(ProviderError::Unreachable(format!(
+            "claude returned {status}"
+        )))
     }
 }
 
@@ -41,12 +48,20 @@ pub struct ClaudeProvider {
 
 impl ClaudeProvider {
     pub fn new(api_key: String) -> Self {
-        Self { api_key, client: reqwest::Client::new(), base_url: ANTHROPIC_MESSAGES_URL.to_string() }
+        Self {
+            api_key,
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_MESSAGES_URL.to_string(),
+        }
     }
 
     #[cfg(test)]
     fn with_base_url(api_key: String, base_url: String) -> Self {
-        Self { api_key, client: reqwest::Client::new(), base_url }
+        Self {
+            api_key,
+            client: reqwest::Client::new(),
+            base_url,
+        }
     }
 }
 
@@ -77,7 +92,9 @@ impl SummarizationProvider for ClaudeProvider {
 
         let status = response.status();
         if status == 401 {
-            return Err(ProviderError::AuthFailed(format!("claude returned {status}")));
+            return Err(ProviderError::AuthFailed(format!(
+                "claude returned {status}"
+            )));
         }
         if status == 429 {
             let retry_after = response
@@ -85,13 +102,20 @@ impl SummarizationProvider for ClaudeProvider {
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok());
-            return Err(ProviderError::RateLimited { retry_after_secs: retry_after });
+            return Err(ProviderError::RateLimited {
+                retry_after_secs: retry_after,
+            });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!("claude returned {status}")));
+            return Err(ProviderError::Unreachable(format!(
+                "claude returned {status}"
+            )));
         }
 
-        let body: Value = response.json().await.map_err(|e| ProviderError::BadResponse(e.to_string()))?;
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|e| ProviderError::BadResponse(e.to_string()))?;
         parse_response(&body)
     }
 }
@@ -115,15 +139,24 @@ mod tests {
     #[tokio::test]
     async fn test_key_succeeds_on_2xx() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).and(header("x-api-key", "good-key")).respond_with(ResponseTemplate::new(200)).mount(&mock_server).await;
+        Mock::given(method("GET"))
+            .and(header("x-api-key", "good-key"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
         assert!(test_key_at(&mock_server.uri(), "good-key").await.is_ok());
     }
 
     #[tokio::test]
     async fn test_key_reports_auth_failed_on_401() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(401)).mount(&mock_server).await;
-        let err = test_key_at(&mock_server.uri(), "bad-key").await.unwrap_err();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+        let err = test_key_at(&mock_server.uri(), "bad-key")
+            .await
+            .unwrap_err();
         assert!(matches!(err, ProviderError::AuthFailed(_)));
     }
 
@@ -152,7 +185,10 @@ mod tests {
 
     #[test]
     fn non_json_reply_is_a_bad_response_error() {
-        assert!(matches!(parse_summary_json("not json at all").unwrap_err(), ProviderError::BadResponse(_)));
+        assert!(matches!(
+            parse_summary_json("not json at all").unwrap_err(),
+            ProviderError::BadResponse(_)
+        ));
     }
 
     #[test]
@@ -176,7 +212,11 @@ mod tests {
             .await;
 
         let provider = ClaudeProvider::with_base_url("test-key".into(), mock_server.uri());
-        let transcript = vec![TranscriptSegment { speaker: "you".into(), text: "hi".into(), is_final: true }];
+        let transcript = vec![TranscriptSegment {
+            speaker: "you".into(),
+            text: "hi".into(),
+            is_final: true,
+        }];
         let summary = provider.summarize(&transcript).await.unwrap();
         assert_eq!(summary.summary, "mocked");
     }
@@ -184,10 +224,20 @@ mod tests {
     #[tokio::test]
     async fn maps_401_to_auth_failed() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(401)).mount(&mock_server).await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
 
         let provider = ClaudeProvider::with_base_url("bad".into(), mock_server.uri());
-        let transcript = vec![TranscriptSegment { speaker: "you".into(), text: "hi".into(), is_final: true }];
-        assert!(matches!(provider.summarize(&transcript).await.unwrap_err(), ProviderError::AuthFailed(_)));
+        let transcript = vec![TranscriptSegment {
+            speaker: "you".into(),
+            text: "hi".into(),
+            is_final: true,
+        }];
+        assert!(matches!(
+            provider.summarize(&transcript).await.unwrap_err(),
+            ProviderError::AuthFailed(_)
+        ));
     }
 }

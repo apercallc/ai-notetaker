@@ -35,13 +35,17 @@ pub struct MacosAudioCapture {
 
 impl MacosAudioCapture {
     pub fn new() -> Self {
-        Self { running: Arc::new(AtomicBool::new(false)) }
+        Self {
+            running: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     fn installed_device_name(&self) -> Option<String> {
         let host = cpal::default_host();
-        let names: Vec<String> =
-            host.input_devices().map(|it| it.filter_map(|d| d.name().ok()).collect()).unwrap_or_default();
+        let names: Vec<String> = host
+            .input_devices()
+            .map(|it| it.filter_map(|d| d.name().ok()).collect())
+            .unwrap_or_default();
         find_matching_device(&names, MACOS_DEVICE_HINT).map(String::from)
     }
 }
@@ -65,7 +69,10 @@ impl AudioCapture for MacosAudioCapture {
         }
     }
 
-    async fn start_capture(&self, on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>) -> Result<(), AudioError> {
+    async fn start_capture(
+        &self,
+        on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
+    ) -> Result<(), AudioError> {
         let Some(speaker_device_name) = self.installed_device_name() else {
             return Err(AudioError::DeviceNotFound("BlackHole".to_string()));
         };
@@ -76,12 +83,15 @@ impl AudioCapture for MacosAudioCapture {
 
         std::thread::spawn(move || {
             let host = cpal::default_host();
-            let speaker_device =
-                host.input_devices().ok().and_then(|mut it| it.find(|d| d.name().ok().as_deref() == Some(speaker_device_name.as_str())));
+            let speaker_device = host.input_devices().ok().and_then(|mut it| {
+                it.find(|d| d.name().ok().as_deref() == Some(speaker_device_name.as_str()))
+            });
             let mic_device = host.default_input_device();
 
-            let _speaker_stream = speaker_device.and_then(|d| build_input_stream(&d, AudioChannel::Speaker, tx.clone()).ok());
-            let _mic_stream = mic_device.and_then(|d| build_input_stream(&d, AudioChannel::Mic, tx.clone()).ok());
+            let _speaker_stream = speaker_device
+                .and_then(|d| build_input_stream(&d, AudioChannel::Speaker, tx.clone()).ok());
+            let _mic_stream =
+                mic_device.and_then(|d| build_input_stream(&d, AudioChannel::Mic, tx.clone()).ok());
 
             while running.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -108,7 +118,9 @@ fn build_input_stream(
     channel: AudioChannel,
     tx: std::sync::mpsc::Sender<CapturedFrame>,
 ) -> Result<cpal::Stream, AudioError> {
-    let config = device.default_input_config().map_err(|e| AudioError::StreamError(e.to_string()))?;
+    let config = device
+        .default_input_config()
+        .map_err(|e| AudioError::StreamError(e.to_string()))?;
     let sample_rate_hz = config.sample_rate().0;
     let stream = device
         .build_input_stream(
@@ -118,12 +130,18 @@ fn build_input_stream(
                     .iter()
                     .flat_map(|s| ((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes())
                     .collect();
-                let _ = tx.send(CapturedFrame { channel, pcm16, sample_rate_hz });
+                let _ = tx.send(CapturedFrame {
+                    channel,
+                    pcm16,
+                    sample_rate_hz,
+                });
             },
             move |err| tracing::error!("audio stream error: {err}"),
             None,
         )
         .map_err(|e| AudioError::StreamError(e.to_string()))?;
-    stream.play().map_err(|e| AudioError::StreamError(e.to_string()))?;
+    stream
+        .play()
+        .map_err(|e| AudioError::StreamError(e.to_string()))?;
     Ok(stream)
 }

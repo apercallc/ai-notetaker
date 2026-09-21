@@ -30,7 +30,9 @@ pub struct LinuxAudioCapture {
 
 impl LinuxAudioCapture {
     pub fn new() -> Self {
-        Self { running: Arc::new(AtomicBool::new(false)) }
+        Self {
+            running: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     /// Idempotently creates the null-sink + loopback + mic-remap modules if
@@ -86,7 +88,10 @@ impl AudioCapture for LinuxAudioCapture {
         }
     }
 
-    async fn start_capture(&self, on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>) -> Result<(), AudioError> {
+    async fn start_capture(
+        &self,
+        on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
+    ) -> Result<(), AudioError> {
         self.ensure_virtual_devices()?;
         self.running.store(true, Ordering::SeqCst);
 
@@ -103,17 +108,20 @@ impl AudioCapture for LinuxAudioCapture {
                 .map(|it| it.filter_map(|d| d.name().ok()).collect())
                 .unwrap_or_default();
 
-            let speaker_device = find_matching_device(&device_names, &format!("{SINK_NAME}.monitor"))
-                .or_else(|| find_matching_device(&device_names, LINUX_DEVICE_HINT))
-                .and_then(|name| host.input_devices().ok()?.find(|d| d.name().ok().as_deref() == Some(name)));
+            let speaker_device =
+                find_matching_device(&device_names, &format!("{SINK_NAME}.monitor"))
+                    .or_else(|| find_matching_device(&device_names, LINUX_DEVICE_HINT))
+                    .and_then(|name| {
+                        host.input_devices()
+                            .ok()?
+                            .find(|d| d.name().ok().as_deref() == Some(name))
+                    });
             let mic_device = host.default_input_device();
 
-            let _speaker_stream = speaker_device.and_then(|d| {
-                build_input_stream(&d, AudioChannel::Speaker, tx.clone()).ok()
-            });
-            let _mic_stream = mic_device.and_then(|d| {
-                build_input_stream(&d, AudioChannel::Mic, tx.clone()).ok()
-            });
+            let _speaker_stream = speaker_device
+                .and_then(|d| build_input_stream(&d, AudioChannel::Speaker, tx.clone()).ok());
+            let _mic_stream =
+                mic_device.and_then(|d| build_input_stream(&d, AudioChannel::Mic, tx.clone()).ok());
 
             while running.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -152,15 +160,23 @@ fn build_input_stream(
             move |data: &[f32], _| {
                 let pcm16: Vec<u8> = data
                     .iter()
-                    .flat_map(|sample| ((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes())
+                    .flat_map(|sample| {
+                        ((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes()
+                    })
                     .collect();
-                let _ = tx.send(CapturedFrame { channel, pcm16, sample_rate_hz });
+                let _ = tx.send(CapturedFrame {
+                    channel,
+                    pcm16,
+                    sample_rate_hz,
+                });
             },
             move |err| tracing::error!("audio stream error: {err}"),
             None,
         )
         .map_err(|e| AudioError::StreamError(e.to_string()))?;
-    stream.play().map_err(|e| AudioError::StreamError(e.to_string()))?;
+    stream
+        .play()
+        .map_err(|e| AudioError::StreamError(e.to_string()))?;
     Ok(stream)
 }
 
@@ -186,10 +202,16 @@ fn module_exists(name_fragment: &str) -> Result<bool, AudioError> {
 
 fn default_sink_name() -> Result<Option<String>, AudioError> {
     let info = run_pactl(&["info"]).unwrap_or_default();
-    Ok(info.lines().find_map(|l| l.strip_prefix("Default Sink: ")).map(String::from))
+    Ok(info
+        .lines()
+        .find_map(|l| l.strip_prefix("Default Sink: "))
+        .map(String::from))
 }
 
 fn default_source_name() -> Result<Option<String>, AudioError> {
     let info = run_pactl(&["info"]).unwrap_or_default();
-    Ok(info.lines().find_map(|l| l.strip_prefix("Default Source: ")).map(String::from))
+    Ok(info
+        .lines()
+        .find_map(|l| l.strip_prefix("Default Source: "))
+        .map(String::from))
 }

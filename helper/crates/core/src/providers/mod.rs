@@ -24,7 +24,9 @@ pub mod deepseek;
 pub mod gemini;
 pub mod groq;
 
-use crate::native_messaging::{ActionItem, ProviderKind, SummarizationProviderId, TranscriptionProviderId};
+use crate::native_messaging::{
+    ActionItem, ProviderKind, SummarizationProviderId, TranscriptionProviderId,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -89,7 +91,10 @@ pub trait TranscriptionProvider: Send + Sync {
     /// Transcribe one chunk of audio (a meeting is fed as a sequence of
     /// chunks so a batch provider still produces a rolling transcript
     /// without waiting for the whole meeting to end).
-    async fn transcribe_chunk(&self, chunk: &AudioChunk) -> Result<Vec<TranscriptSegment>, ProviderError>;
+    async fn transcribe_chunk(
+        &self,
+        chunk: &AudioChunk,
+    ) -> Result<Vec<TranscriptSegment>, ProviderError>;
 }
 
 #[async_trait]
@@ -104,7 +109,11 @@ pub trait SummarizationProvider: Send + Sync {
 /// than a verdict on the key itself. Shared by every provider whose
 /// validation endpoint uses bearer auth (Groq, DeepSeek); Deepgram (custom
 /// `Token` scheme) and Gemini (API key as a query param) have their own.
-pub(crate) async fn bearer_auth_test_key(url: &str, key: &str, provider_name: &str) -> Result<(), ProviderError> {
+pub(crate) async fn bearer_auth_test_key(
+    url: &str,
+    key: &str,
+    provider_name: &str,
+) -> Result<(), ProviderError> {
     let client = reqwest::Client::new();
     let response = client
         .get(url)
@@ -116,9 +125,13 @@ pub(crate) async fn bearer_auth_test_key(url: &str, key: &str, provider_name: &s
     if status.is_success() {
         Ok(())
     } else if status == 401 || status == 403 {
-        Err(ProviderError::AuthFailed(format!("{provider_name} returned {status}")))
+        Err(ProviderError::AuthFailed(format!(
+            "{provider_name} returned {status}"
+        )))
     } else {
-        Err(ProviderError::Unreachable(format!("{provider_name} returned {status}")))
+        Err(ProviderError::Unreachable(format!(
+            "{provider_name} returned {status}"
+        )))
     }
 }
 
@@ -179,7 +192,11 @@ pub fn parse_summary_json(text: &str) -> Result<Summary, ProviderError> {
     let parsed: serde_json::Value = serde_json::from_str(trimmed)
         .map_err(|e| ProviderError::BadResponse(format!("model reply wasn't valid JSON: {e}")))?;
 
-    let summary = parsed.get("summary").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+    let summary = parsed
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let action_items = parsed
         .get("action_items")
         .and_then(serde_json::Value::as_array)
@@ -187,15 +204,24 @@ pub fn parse_summary_json(text: &str) -> Result<Summary, ProviderError> {
             items
                 .iter()
                 .filter_map(|item| {
-                    let text = item.get("text").and_then(serde_json::Value::as_str)?.to_string();
-                    let owner = item.get("owner").and_then(serde_json::Value::as_str).map(String::from);
+                    let text = item
+                        .get("text")
+                        .and_then(serde_json::Value::as_str)?
+                        .to_string();
+                    let owner = item
+                        .get("owner")
+                        .and_then(serde_json::Value::as_str)
+                        .map(String::from);
                     Some(ActionItem { text, owner })
                 })
                 .collect()
         })
         .unwrap_or_default();
 
-    Ok(Summary { summary, action_items })
+    Ok(Summary {
+        summary,
+        action_items,
+    })
 }
 
 pub const SUMMARIZATION_SYSTEM_PROMPT: &str = "You are summarizing a meeting transcript. \
@@ -211,10 +237,21 @@ mod tests {
     #[test]
     fn renders_transcript_as_speaker_prefixed_lines() {
         let transcript = vec![
-            TranscriptSegment { speaker: "you".into(), text: "let's start".into(), is_final: true },
-            TranscriptSegment { speaker: "them".into(), text: "sounds good".into(), is_final: true },
+            TranscriptSegment {
+                speaker: "you".into(),
+                text: "let's start".into(),
+                is_final: true,
+            },
+            TranscriptSegment {
+                speaker: "them".into(),
+                text: "sounds good".into(),
+                is_final: true,
+            },
         ];
-        assert_eq!(render_transcript(&transcript), "you: let's start\nthem: sounds good");
+        assert_eq!(
+            render_transcript(&transcript),
+            "you: let's start\nthem: sounds good"
+        );
     }
 
     #[test]
@@ -234,7 +271,10 @@ mod tests {
             ErrorCode::ProviderAuthFailed
         );
         assert_eq!(
-            ProviderError::RateLimited { retry_after_secs: Some(30) }.to_error_code(),
+            ProviderError::RateLimited {
+                retry_after_secs: Some(30)
+            }
+            .to_error_code(),
             ErrorCode::ProviderRateLimited
         );
         assert_eq!(

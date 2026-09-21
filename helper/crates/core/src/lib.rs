@@ -15,20 +15,29 @@ pub mod resilience;
 pub mod storage;
 
 use crate::native_messaging::{SummarizationProviderId, TranscriptionProviderId};
-use crate::providers::{claude::ClaudeProvider, deepgram::DeepgramProvider, deepseek::DeepSeekProvider, gemini::GeminiProvider, groq::GroqProvider};
+use crate::providers::{
+    claude::ClaudeProvider, deepgram::DeepgramProvider, deepseek::DeepSeekProvider,
+    gemini::GeminiProvider, groq::GroqProvider,
+};
 use crate::providers::{SummarizationProvider, TranscriptionProvider};
 
 /// Builds the configured transcription provider from a settings message's
 /// provider choice + key. Centralized here so the mapping from wire-level
 /// provider IDs to concrete implementations lives in exactly one place.
-pub fn build_transcription_provider(id: TranscriptionProviderId, api_key: String) -> Box<dyn TranscriptionProvider> {
+pub fn build_transcription_provider(
+    id: TranscriptionProviderId,
+    api_key: String,
+) -> Box<dyn TranscriptionProvider> {
     match id {
         TranscriptionProviderId::Deepgram => Box::new(DeepgramProvider::new(api_key)),
         TranscriptionProviderId::Groq => Box::new(GroqProvider::new(api_key)),
     }
 }
 
-pub fn build_summarization_provider(id: SummarizationProviderId, api_key: String) -> Box<dyn SummarizationProvider> {
+pub fn build_summarization_provider(
+    id: SummarizationProviderId,
+    api_key: String,
+) -> Box<dyn SummarizationProvider> {
     match id {
         SummarizationProviderId::Claude => Box::new(ClaudeProvider::new(api_key)),
         SummarizationProviderId::Gemini => Box::new(GeminiProvider::new(api_key)),

@@ -7,12 +7,12 @@
 
 pub mod device_matching;
 
+#[cfg(target_os = "linux")]
+pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
-#[cfg(target_os = "linux")]
-pub mod linux;
 
 use async_trait::async_trait;
 use notetaker_core::providers::AudioChannel;
@@ -47,7 +47,9 @@ pub enum DriverStatus {
     /// Audio's official download (never a bundled binary, see
     /// `helper/CLAUDE.md`); for Windows, bundling is what actually runs
     /// here since VB-Audio's terms permit it.
-    NotInstalled { install_guidance: String },
+    NotInstalled {
+        install_guidance: String,
+    },
 }
 
 #[async_trait]
@@ -74,9 +76,13 @@ mod tests {
 
     #[test]
     fn driver_status_not_installed_carries_guidance_text() {
-        let status = DriverStatus::NotInstalled { install_guidance: "go here".into() };
+        let status = DriverStatus::NotInstalled {
+            install_guidance: "go here".into(),
+        };
         match status {
-            DriverStatus::NotInstalled { install_guidance } => assert_eq!(install_guidance, "go here"),
+            DriverStatus::NotInstalled { install_guidance } => {
+                assert_eq!(install_guidance, "go here")
+            }
             DriverStatus::Installed => panic!("expected NotInstalled"),
         }
     }

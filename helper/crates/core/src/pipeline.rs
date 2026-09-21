@@ -29,7 +29,11 @@ pub struct RetryableChunk {
 pub enum RetryAudioRef {
     /// Offset range within the channel's on-disk PCM file, so retrying
     /// re-reads exactly the bytes that failed rather than the whole file.
-    FileRange { channel_file: String, start: usize, end: usize },
+    FileRange {
+        channel_file: String,
+        start: usize,
+        end: usize,
+    },
 }
 
 pub struct Pipeline {
@@ -46,7 +50,12 @@ impl Pipeline {
         summarization_provider: Box<dyn SummarizationProvider>,
         retry_queue: RetryQueue<RetryableChunk>,
     ) -> Self {
-        Self { store, transcription_provider, summarization_provider, retry_queue }
+        Self {
+            store,
+            transcription_provider,
+            summarization_provider,
+            retry_queue,
+        }
     }
 
     pub fn start_recording(&self, meeting_id: Uuid) -> Result<HelperToExtension, PipelineError> {
@@ -82,7 +91,11 @@ impl Pipeline {
             }];
         }
 
-        let chunk = AudioChunk { channel, pcm16: pcm16.to_vec(), sample_rate_hz };
+        let chunk = AudioChunk {
+            channel,
+            pcm16: pcm16.to_vec(),
+            sample_rate_hz,
+        };
         match self.transcription_provider.transcribe_chunk(&chunk).await {
             Ok(segments) => {
                 let mut messages = Vec::new();
@@ -118,7 +131,10 @@ impl Pipeline {
         }
     }
 
-    pub async fn stop_recording(&self, meeting_id: Uuid) -> Result<Vec<HelperToExtension>, PipelineError> {
+    pub async fn stop_recording(
+        &self,
+        meeting_id: Uuid,
+    ) -> Result<Vec<HelperToExtension>, PipelineError> {
         self.store.mark_stopped(meeting_id, Utc::now())?;
         let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
 
@@ -132,7 +148,10 @@ impl Pipeline {
                     action_items: summary
                         .action_items
                         .into_iter()
-                        .map(|i| ActionItem { text: i.text, owner: i.owner })
+                        .map(|i| ActionItem {
+                            text: i.text,
+                            owner: i.owner,
+                        })
                         .collect(),
                 });
             }
@@ -155,7 +174,10 @@ impl Pipeline {
             .store
             .find_interrupted_meetings()?
             .into_iter()
-            .map(|meta| HelperToExtension::RecoveredRecording { meeting_id: meta.id, started_at: meta.started_at })
+            .map(|meta| HelperToExtension::RecoveredRecording {
+                meeting_id: meta.id,
+                started_at: meta.started_at,
+            })
             .collect())
     }
 
@@ -191,13 +213,24 @@ mod tests {
         fn is_streaming(&self) -> bool {
             false
         }
-        async fn transcribe_chunk(&self, chunk: &AudioChunk) -> Result<Vec<TranscriptSegment>, ProviderError> {
+        async fn transcribe_chunk(
+            &self,
+            chunk: &AudioChunk,
+        ) -> Result<Vec<TranscriptSegment>, ProviderError> {
             if self.fail_times.load(Ordering::SeqCst) > 0 {
                 self.fail_times.fetch_sub(1, Ordering::SeqCst);
                 return Err(ProviderError::Unreachable("simulated failure".into()));
             }
-            let speaker = if chunk.channel == AudioChannel::Mic { "you" } else { "them" };
-            Ok(vec![TranscriptSegment { speaker: speaker.into(), text: "fake transcript".into(), is_final: true }])
+            let speaker = if chunk.channel == AudioChannel::Mic {
+                "you"
+            } else {
+                "them"
+            };
+            Ok(vec![TranscriptSegment {
+                speaker: speaker.into(),
+                text: "fake transcript".into(),
+                is_final: true,
+            }])
         }
     }
 
@@ -208,8 +241,14 @@ mod tests {
         fn id(&self) -> SummarizationProviderId {
             SummarizationProviderId::Claude
         }
-        async fn summarize(&self, _transcript: &[TranscriptSegment]) -> Result<Summary, ProviderError> {
-            Ok(Summary { summary: "fake summary".into(), action_items: vec![] })
+        async fn summarize(
+            &self,
+            _transcript: &[TranscriptSegment],
+        ) -> Result<Summary, ProviderError> {
+            Ok(Summary {
+                summary: "fake summary".into(),
+                action_items: vec![],
+            })
         }
     }
 
@@ -220,7 +259,9 @@ mod tests {
         let retry_queue = RetryQueue::load_or_create(retry_path).unwrap();
         let pipeline = Pipeline::new(
             store,
-            Box::new(FakeTranscriber { fail_times: Arc::new(AtomicUsize::new(fail_times)) }),
+            Box::new(FakeTranscriber {
+                fail_times: Arc::new(AtomicUsize::new(fail_times)),
+            }),
             Box::new(FakeSummarizer),
             retry_queue,
         );
@@ -232,7 +273,9 @@ mod tests {
         let (_dir, pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();
         let msg = pipeline.start_recording(id).unwrap();
-        assert!(matches!(msg, HelperToExtension::RecordingStarted { meeting_id } if meeting_id == id));
+        assert!(
+            matches!(msg, HelperToExtension::RecordingStarted { meeting_id } if meeting_id == id)
+        );
     }
 
     #[tokio::test]
@@ -241,10 +284,14 @@ mod tests {
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
 
-        let messages = pipeline.handle_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3, 4], 16000).await;
+        let messages = pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3, 4], 16000)
+            .await;
 
         // Transcript arrived successfully...
-        assert!(matches!(&messages[0], HelperToExtension::TranscriptPartial { speaker, .. } if speaker == "you"));
+        assert!(
+            matches!(&messages[0], HelperToExtension::TranscriptPartial { speaker, .. } if speaker == "you")
+        );
         // ...and the raw audio is genuinely on disk regardless.
         let bytes = std::fs::read(pipeline.store.audio_path(id, MIC_FILE)).unwrap();
         assert_eq!(bytes, vec![1, 2, 3, 4]);
@@ -256,7 +303,9 @@ mod tests {
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
 
-        let messages = pipeline.handle_audio_chunk(id, AudioChannel::Speaker, &[9, 9, 9], 16000).await;
+        let messages = pipeline
+            .handle_audio_chunk(id, AudioChannel::Speaker, &[9, 9, 9], 16000)
+            .await;
 
         assert!(matches!(&messages[0], HelperToExtension::Error { .. }));
         // Audio still safely on disk despite the transcription failure.
@@ -270,12 +319,18 @@ mod tests {
         let (_dir, mut pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
-        pipeline.handle_audio_chunk(id, AudioChannel::Mic, &[1, 2], 16000).await;
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2], 16000)
+            .await;
 
         let messages = pipeline.stop_recording(id).await.unwrap();
 
-        assert!(matches!(&messages[0], HelperToExtension::RecordingStopped { meeting_id } if *meeting_id == id));
-        assert!(matches!(&messages[1], HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"));
+        assert!(
+            matches!(&messages[0], HelperToExtension::RecordingStopped { meeting_id } if *meeting_id == id)
+        );
+        assert!(
+            matches!(&messages[1], HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary")
+        );
     }
 
     #[tokio::test]
@@ -286,7 +341,9 @@ mod tests {
 
         let recoverable = pipeline.find_recoverable_meetings().unwrap();
         assert_eq!(recoverable.len(), 1);
-        assert!(matches!(&recoverable[0], HelperToExtension::RecoveredRecording { meeting_id, .. } if *meeting_id == id));
+        assert!(
+            matches!(&recoverable[0], HelperToExtension::RecoveredRecording { meeting_id, .. } if *meeting_id == id)
+        );
     }
 
     #[tokio::test]

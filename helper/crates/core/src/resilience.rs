@@ -70,7 +70,12 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
     }
 
     pub fn enqueue(&mut self, payload: T, now: DateTime<Utc>) -> Result<Uuid, RetryQueueError> {
-        let job = RetryJob { id: Uuid::new_v4(), payload, attempts: 0, next_retry_at: now };
+        let job = RetryJob {
+            id: Uuid::new_v4(),
+            payload,
+            attempts: 0,
+            next_retry_at: now,
+        };
         let id = job.id;
         self.jobs.push(job);
         self.persist()?;
@@ -79,7 +84,10 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
 
     /// Jobs whose `next_retry_at` has arrived, oldest-enqueued first.
     pub fn due_jobs(&self, now: DateTime<Utc>) -> Vec<&RetryJob<T>> {
-        self.jobs.iter().filter(|j| j.next_retry_at <= now).collect()
+        self.jobs
+            .iter()
+            .filter(|j| j.next_retry_at <= now)
+            .collect()
     }
 
     /// Call after a retry attempt fails. Increments the attempt count and
@@ -87,7 +95,11 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
     /// attempts — in which case it's returned so the caller can surface a
     /// terminal error to the user (the underlying audio is still safe on
     /// disk regardless).
-    pub fn record_failure(&mut self, job_id: Uuid, now: DateTime<Utc>) -> Result<Option<RetryJob<T>>, RetryQueueError> {
+    pub fn record_failure(
+        &mut self,
+        job_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<Option<RetryJob<T>>, RetryQueueError> {
         let Some(job) = self.jobs.iter_mut().find(|j| j.id == job_id) else {
             return Ok(None);
         };

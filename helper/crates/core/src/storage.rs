@@ -68,7 +68,12 @@ impl MeetingStore {
     pub fn create_meeting(&self, id: Uuid, started_at: DateTime<Utc>) -> Result<(), StorageError> {
         let dir = self.meeting_dir(id);
         fs::create_dir_all(&dir)?;
-        let meta = MeetingMeta { id, started_at, ended_at: None, state: MeetingState::Recording };
+        let meta = MeetingMeta {
+            id,
+            started_at,
+            ended_at: None,
+            state: MeetingState::Recording,
+        };
         self.write_meta(&meta)?;
         Ok(())
     }
@@ -91,9 +96,17 @@ impl MeetingStore {
     /// Appends raw PCM16 bytes to the given channel's file for this
     /// meeting. Called continuously during capture, always before those
     /// same bytes are handed to a transcription provider.
-    pub fn append_audio(&self, id: Uuid, channel_file: &str, pcm16: &[u8]) -> Result<(), StorageError> {
+    pub fn append_audio(
+        &self,
+        id: Uuid,
+        channel_file: &str,
+        pcm16: &[u8],
+    ) -> Result<(), StorageError> {
         let path = self.meeting_dir(id).join(channel_file);
-        let mut file = fs::OpenOptions::new().create(true).append(true).open(path)?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
         file.write_all(pcm16)?;
         Ok(())
     }
@@ -111,7 +124,11 @@ impl MeetingStore {
         self.write_meta(&meta)
     }
 
-    pub fn append_transcript_segment(&self, id: Uuid, segment: &TranscriptSegment) -> Result<(), StorageError> {
+    pub fn append_transcript_segment(
+        &self,
+        id: Uuid,
+        segment: &TranscriptSegment,
+    ) -> Result<(), StorageError> {
         let mut segments = self.load_transcript(id).unwrap_or_default();
         segments.push(segment.clone());
         let path = self.meeting_dir(id).join("transcript.json");
@@ -215,7 +232,10 @@ mod tests {
         store.append_audio(id, SPEAKER_FILE, &[2]).unwrap();
 
         assert_eq!(fs::read(store.audio_path(id, MIC_FILE)).unwrap(), vec![1]);
-        assert_eq!(fs::read(store.audio_path(id, SPEAKER_FILE)).unwrap(), vec![2]);
+        assert_eq!(
+            fs::read(store.audio_path(id, SPEAKER_FILE)).unwrap(),
+            vec![2]
+        );
     }
 
     #[test]
@@ -259,8 +279,26 @@ mod tests {
         let id = Uuid::new_v4();
         store.create_meeting(id, Utc::now()).unwrap();
 
-        store.append_transcript_segment(id, &TranscriptSegment { speaker: "you".into(), text: "first".into(), is_final: true }).unwrap();
-        store.append_transcript_segment(id, &TranscriptSegment { speaker: "them".into(), text: "second".into(), is_final: true }).unwrap();
+        store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "first".into(),
+                    is_final: true,
+                },
+            )
+            .unwrap();
+        store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "them".into(),
+                    text: "second".into(),
+                    is_final: true,
+                },
+            )
+            .unwrap();
 
         let transcript = store.load_transcript(id).unwrap();
         assert_eq!(transcript.len(), 2);

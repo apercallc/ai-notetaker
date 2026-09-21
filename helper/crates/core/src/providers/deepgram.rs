@@ -34,7 +34,11 @@ impl DeepgramProvider {
     /// live credentials or network access to Deepgram itself.
     #[cfg(test)]
     fn with_base_url(api_key: String, base_url: String) -> Self {
-        Self { api_key, client: reqwest::Client::new(), base_url }
+        Self {
+            api_key,
+            client: reqwest::Client::new(),
+            base_url,
+        }
     }
 }
 
@@ -48,7 +52,10 @@ impl TranscriptionProvider for DeepgramProvider {
         false // see module-level scope note
     }
 
-    async fn transcribe_chunk(&self, chunk: &AudioChunk) -> Result<Vec<TranscriptSegment>, ProviderError> {
+    async fn transcribe_chunk(
+        &self,
+        chunk: &AudioChunk,
+    ) -> Result<Vec<TranscriptSegment>, ProviderError> {
         let response = self
             .client
             .post(&self.base_url)
@@ -69,7 +76,9 @@ impl TranscriptionProvider for DeepgramProvider {
 
         let status = response.status();
         if status == 401 || status == 403 {
-            return Err(ProviderError::AuthFailed(format!("deepgram returned {status}")));
+            return Err(ProviderError::AuthFailed(format!(
+                "deepgram returned {status}"
+            )));
         }
         if status == 429 {
             let retry_after = response
@@ -77,10 +86,14 @@ impl TranscriptionProvider for DeepgramProvider {
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok());
-            return Err(ProviderError::RateLimited { retry_after_secs: retry_after });
+            return Err(ProviderError::RateLimited {
+                retry_after_secs: retry_after,
+            });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!("deepgram returned {status}")));
+            return Err(ProviderError::Unreachable(format!(
+                "deepgram returned {status}"
+            )));
         }
 
         let body: Value = response
@@ -111,18 +124,27 @@ async fn test_key_at(url: &str, key: &str) -> Result<(), ProviderError> {
     if status.is_success() {
         Ok(())
     } else if status == 401 || status == 403 {
-        Err(ProviderError::AuthFailed(format!("deepgram returned {status}")))
+        Err(ProviderError::AuthFailed(format!(
+            "deepgram returned {status}"
+        )))
     } else {
-        Err(ProviderError::Unreachable(format!("deepgram returned {status}")))
+        Err(ProviderError::Unreachable(format!(
+            "deepgram returned {status}"
+        )))
     }
 }
 
 /// Pure parsing of Deepgram's `/v1/listen` response shape. Kept separate
 /// from the network call so it's unit-testable with fixture JSON.
-fn parse_response(body: &Value, channel: AudioChannel) -> Result<Vec<TranscriptSegment>, ProviderError> {
+fn parse_response(
+    body: &Value,
+    channel: AudioChannel,
+) -> Result<Vec<TranscriptSegment>, ProviderError> {
     let alternative = body
         .pointer("/results/channels/0/alternatives/0")
-        .ok_or_else(|| ProviderError::BadResponse("missing results.channels[0].alternatives[0]".into()))?;
+        .ok_or_else(|| {
+            ProviderError::BadResponse("missing results.channels[0].alternatives[0]".into())
+        })?;
 
     let transcript = alternative
         .get("transcript")
@@ -137,7 +159,11 @@ fn parse_response(body: &Value, channel: AudioChannel) -> Result<Vec<TranscriptS
     if channel == AudioChannel::Mic {
         // The mic channel is unambiguously "you" — no need to diarize our
         // own voice into multiple speakers.
-        return Ok(vec![TranscriptSegment { speaker: "you".into(), text: transcript, is_final: true }]);
+        return Ok(vec![TranscriptSegment {
+            speaker: "you".into(),
+            text: transcript,
+            is_final: true,
+        }]);
     }
 
     // Speaker channel: use word-level diarization to label each distinct
@@ -147,7 +173,11 @@ fn parse_response(body: &Value, channel: AudioChannel) -> Result<Vec<TranscriptS
         Some(words) if !words.is_empty() && words[0].get("speaker").is_some() => {
             Ok(group_by_speaker(words))
         }
-        _ => Ok(vec![TranscriptSegment { speaker: "them".into(), text: transcript, is_final: true }]),
+        _ => Ok(vec![TranscriptSegment {
+            speaker: "them".into(),
+            text: transcript,
+            is_final: true,
+        }]),
     }
 }
 
@@ -204,11 +234,19 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn mic_chunk() -> AudioChunk {
-        AudioChunk { channel: AudioChannel::Mic, pcm16: vec![0, 1, 2, 3], sample_rate_hz: 16000 }
+        AudioChunk {
+            channel: AudioChannel::Mic,
+            pcm16: vec![0, 1, 2, 3],
+            sample_rate_hz: 16000,
+        }
     }
 
     fn speaker_chunk() -> AudioChunk {
-        AudioChunk { channel: AudioChannel::Speaker, pcm16: vec![4, 5, 6, 7], sample_rate_hz: 16000 }
+        AudioChunk {
+            channel: AudioChannel::Speaker,
+            pcm16: vec![4, 5, 6, 7],
+            sample_rate_hz: 16000,
+        }
     }
 
     #[test]
@@ -217,7 +255,14 @@ mod tests {
             "results": { "channels": [ { "alternatives": [ { "transcript": "hello there" } ] } ] }
         });
         let segments = parse_response(&body, AudioChannel::Mic).unwrap();
-        assert_eq!(segments, vec![TranscriptSegment { speaker: "you".into(), text: "hello there".into(), is_final: true }]);
+        assert_eq!(
+            segments,
+            vec![TranscriptSegment {
+                speaker: "you".into(),
+                text: "hello there".into(),
+                is_final: true
+            }]
+        );
     }
 
     #[test]
@@ -256,7 +301,14 @@ mod tests {
             "results": { "channels": [ { "alternatives": [ { "transcript": "just one voice" } ] } ] }
         });
         let segments = parse_response(&body, AudioChannel::Speaker).unwrap();
-        assert_eq!(segments, vec![TranscriptSegment { speaker: "them".into(), text: "just one voice".into(), is_final: true }]);
+        assert_eq!(
+            segments,
+            vec![TranscriptSegment {
+                speaker: "them".into(),
+                text: "just one voice".into(),
+                is_final: true
+            }]
+        );
     }
 
     #[test]
@@ -282,7 +334,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let provider = DeepgramProvider::with_base_url("test-key".into(), format!("{}/", mock_server.uri()));
+        let provider =
+            DeepgramProvider::with_base_url("test-key".into(), format!("{}/", mock_server.uri()));
         let segments = provider.transcribe_chunk(&mic_chunk()).await.unwrap();
         assert_eq!(segments[0].text, "mocked transcript");
     }
@@ -295,8 +348,12 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let provider = DeepgramProvider::with_base_url("bad-key".into(), format!("{}/", mock_server.uri()));
-        let err = provider.transcribe_chunk(&speaker_chunk()).await.unwrap_err();
+        let provider =
+            DeepgramProvider::with_base_url("bad-key".into(), format!("{}/", mock_server.uri()));
+        let err = provider
+            .transcribe_chunk(&speaker_chunk())
+            .await
+            .unwrap_err();
         assert!(matches!(err, ProviderError::AuthFailed(_)));
     }
 
@@ -314,8 +371,13 @@ mod tests {
     #[tokio::test]
     async fn test_key_reports_auth_failed_on_401() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(401)).mount(&mock_server).await;
-        let err = test_key_at(&mock_server.uri(), "bad-key").await.unwrap_err();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+        let err = test_key_at(&mock_server.uri(), "bad-key")
+            .await
+            .unwrap_err();
         assert!(matches!(err, ProviderError::AuthFailed(_)));
     }
 
@@ -327,10 +389,13 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let provider = DeepgramProvider::with_base_url("test-key".into(), format!("{}/", mock_server.uri()));
+        let provider =
+            DeepgramProvider::with_base_url("test-key".into(), format!("{}/", mock_server.uri()));
         let err = provider.transcribe_chunk(&mic_chunk()).await.unwrap_err();
         match err {
-            ProviderError::RateLimited { retry_after_secs } => assert_eq!(retry_after_secs, Some(12)),
+            ProviderError::RateLimited { retry_after_secs } => {
+                assert_eq!(retry_after_secs, Some(12))
+            }
             other => panic!("expected RateLimited, got {other:?}"),
         }
     }

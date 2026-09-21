@@ -12,10 +12,12 @@ mod tray;
 use notetaker_audio::AudioCapture;
 use notetaker_core::native_messaging::{ErrorCode, ExtensionToHelper, HelperToExtension};
 use notetaker_core::pipeline::{Pipeline, RetryableChunk};
+use notetaker_core::providers::test_provider_key;
 use notetaker_core::resilience::RetryQueue;
 use notetaker_core::storage::MeetingStore;
-use notetaker_core::providers::test_provider_key;
-use notetaker_core::{build_summarization_provider, build_transcription_provider, native_messaging};
+use notetaker_core::{
+    build_summarization_provider, build_transcription_provider, native_messaging,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -40,7 +42,9 @@ struct AppState {
 }
 
 fn data_dir() -> std::path::PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("ai-notetaker")
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("ai-notetaker")
 }
 
 fn pairing_token_path(root: &std::path::Path) -> std::path::PathBuf {
@@ -49,7 +53,9 @@ fn pairing_token_path(root: &std::path::Path) -> std::path::PathBuf {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
 
     let root = data_dir();
     std::fs::create_dir_all(&root)?;
@@ -92,7 +98,9 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
                     let token = native_messaging::generate_pairing_token();
                     let _ = std::fs::write(pairing_token_path(&state.data_dir), &token);
                     *current = Some(token.clone());
-                    let _ = out_tx.send(HelperToExtension::Paired { pairing_token: token });
+                    let _ = out_tx.send(HelperToExtension::Paired {
+                        pairing_token: token,
+                    });
                 }
                 (Some(expected), Some(provided)) if *expected == provided => {
                     // Already paired and the token matches — nothing to
@@ -137,27 +145,44 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
             };
             drop(settings_guard);
 
-            let ExtensionToHelper::Settings { transcription_provider, summarization_provider, api_keys, .. } = settings.inner else {
+            let ExtensionToHelper::Settings {
+                transcription_provider,
+                summarization_provider,
+                api_keys,
+                ..
+            } = settings.inner
+            else {
                 unreachable!("Settings.inner is always the Settings variant");
             };
 
-            let (transcription_key, summarization_key) = match resolve_keys(transcription_provider, summarization_provider, &api_keys) {
-                Ok(keys) => keys,
-                Err(message) => {
-                    let _ = out_tx.send(HelperToExtension::Error { meeting_id: Some(meeting_id), code: ErrorCode::ProviderAuthFailed, message });
-                    return;
-                }
-            };
+            let (transcription_key, summarization_key) =
+                match resolve_keys(transcription_provider, summarization_provider, &api_keys) {
+                    Ok(keys) => keys,
+                    Err(message) => {
+                        let _ = out_tx.send(HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code: ErrorCode::ProviderAuthFailed,
+                            message,
+                        });
+                        return;
+                    }
+                };
 
             let retry_path = state.data_dir.join(format!("retry-{meeting_id}.json"));
-            let retry_queue: RetryQueue<RetryableChunk> = match RetryQueue::load_or_create(retry_path) {
-                Ok(q) => q,
-                Err(e) => {
-                    let _ = out_tx.send(HelperToExtension::Error { meeting_id: Some(meeting_id), code: ErrorCode::DeviceNotFound, message: e.to_string() });
-                    return;
-                }
-            };
-            let store = MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
+            let retry_queue: RetryQueue<RetryableChunk> =
+                match RetryQueue::load_or_create(retry_path) {
+                    Ok(q) => q,
+                    Err(e) => {
+                        let _ = out_tx.send(HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code: ErrorCode::DeviceNotFound,
+                            message: e.to_string(),
+                        });
+                        return;
+                    }
+                };
+            let store =
+                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
             let pipeline = Pipeline::new(
                 store,
                 build_transcription_provider(transcription_provider, transcription_key),
@@ -170,13 +195,21 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
                     let _ = out_tx.send(started_msg);
                 }
                 Err(e) => {
-                    let _ = out_tx.send(HelperToExtension::Error { meeting_id: Some(meeting_id), code: ErrorCode::DeviceNotFound, message: e.to_string() });
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: e.to_string(),
+                    });
                     return;
                 }
             }
 
             let pipeline = Arc::new(Mutex::new(pipeline));
-            state.pipelines.lock().await.insert(meeting_id, pipeline.clone());
+            state
+                .pipelines
+                .lock()
+                .await
+                .insert(meeting_id, pipeline.clone());
 
             let audio: Arc<dyn AudioCapture> = build_audio_backend();
             let out_tx_for_audio = out_tx.clone();
@@ -189,7 +222,12 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
                         let messages = pipeline
                             .lock()
                             .await
-                            .handle_audio_chunk(meeting_id, frame.channel, &frame.pcm16, frame.sample_rate_hz)
+                            .handle_audio_chunk(
+                                meeting_id,
+                                frame.channel,
+                                &frame.pcm16,
+                                frame.sample_rate_hz,
+                            )
                             .await;
                         for m in messages {
                             let _ = out_tx.send(m);
@@ -200,10 +238,18 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
 
             match result {
                 Ok(()) => {
-                    state.active.lock().await.insert(meeting_id, ActiveRecording { audio });
+                    state
+                        .active
+                        .lock()
+                        .await
+                        .insert(meeting_id, ActiveRecording { audio });
                 }
                 Err(e) => {
-                    let _ = out_tx.send(HelperToExtension::Error { meeting_id: Some(meeting_id), code: ErrorCode::DeviceNotFound, message: e.to_string() });
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: e.to_string(),
+                    });
                 }
             }
         }
@@ -221,7 +267,11 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
                         }
                     }
                     Err(e) => {
-                        let _ = out_tx.send(HelperToExtension::Error { meeting_id: Some(meeting_id), code: ErrorCode::ProviderUnreachable, message: e.to_string() });
+                        let _ = out_tx.send(HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code: ErrorCode::ProviderUnreachable,
+                            message: e.to_string(),
+                        });
                     }
                 }
             }
@@ -233,13 +283,15 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
         // transcription provider before the crash is NOT implemented in
         // this pass — flagged in the implementation report.
         ExtensionToHelper::ResumeRecording { meeting_id } => {
-            let store = MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
+            let store =
+                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
             let _ = store.mark_stopped(meeting_id, chrono::Utc::now());
             let _ = out_tx.send(HelperToExtension::RecordingStopped { meeting_id });
         }
 
         ExtensionToHelper::DiscardRecording { meeting_id } => {
-            let store = MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
+            let store =
+                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
             let _ = store.mark_processed(meeting_id);
         }
 
@@ -248,7 +300,11 @@ async fn handle_message(state: Arc<AppState>, msg: ExtensionToHelper, out_tx: ip
         // and docs/native-messaging-protocol.md.
         ExtensionToHelper::TestProviderKey { provider, key } => {
             let (valid, message) = test_provider_key(provider, &key).await;
-            let _ = out_tx.send(HelperToExtension::ProviderKeyTestResult { provider, valid, message });
+            let _ = out_tx.send(HelperToExtension::ProviderKeyTestResult {
+                provider,
+                valid,
+                message,
+            });
         }
     }
 }

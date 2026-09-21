@@ -29,12 +29,20 @@ pub struct GroqProvider {
 
 impl GroqProvider {
     pub fn new(api_key: String) -> Self {
-        Self { api_key, client: reqwest::Client::new(), base_url: GROQ_TRANSCRIPTIONS_URL.to_string() }
+        Self {
+            api_key,
+            client: reqwest::Client::new(),
+            base_url: GROQ_TRANSCRIPTIONS_URL.to_string(),
+        }
     }
 
     #[cfg(test)]
     fn with_base_url(api_key: String, base_url: String) -> Self {
-        Self { api_key, client: reqwest::Client::new(), base_url }
+        Self {
+            api_key,
+            client: reqwest::Client::new(),
+            base_url,
+        }
     }
 }
 
@@ -48,7 +56,10 @@ impl TranscriptionProvider for GroqProvider {
         false
     }
 
-    async fn transcribe_chunk(&self, chunk: &AudioChunk) -> Result<Vec<TranscriptSegment>, ProviderError> {
+    async fn transcribe_chunk(
+        &self,
+        chunk: &AudioChunk,
+    ) -> Result<Vec<TranscriptSegment>, ProviderError> {
         // Whisper's API expects a decodable audio file, not bare PCM; a real
         // implementation wraps chunk.pcm16 in a minimal WAV container here.
         // That wrapping is a pure, easily-testable function in its own
@@ -84,18 +95,28 @@ impl TranscriptionProvider for GroqProvider {
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok());
-            return Err(ProviderError::RateLimited { retry_after_secs: retry_after });
+            return Err(ProviderError::RateLimited {
+                retry_after_secs: retry_after,
+            });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!("groq returned {status}")));
+            return Err(ProviderError::Unreachable(format!(
+                "groq returned {status}"
+            )));
         }
 
-        let body: Value = response.json().await.map_err(|e| ProviderError::BadResponse(e.to_string()))?;
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|e| ProviderError::BadResponse(e.to_string()))?;
         parse_response(&body, chunk.channel)
     }
 }
 
-fn parse_response(body: &Value, channel: AudioChannel) -> Result<Vec<TranscriptSegment>, ProviderError> {
+fn parse_response(
+    body: &Value,
+    channel: AudioChannel,
+) -> Result<Vec<TranscriptSegment>, ProviderError> {
     let text = body
         .get("text")
         .and_then(Value::as_str)
@@ -107,8 +128,16 @@ fn parse_response(body: &Value, channel: AudioChannel) -> Result<Vec<TranscriptS
         return Ok(vec![]);
     }
 
-    let speaker = if channel == AudioChannel::Mic { "you" } else { "them" };
-    Ok(vec![TranscriptSegment { speaker: speaker.into(), text, is_final: true }])
+    let speaker = if channel == AudioChannel::Mic {
+        "you"
+    } else {
+        "them"
+    };
+    Ok(vec![TranscriptSegment {
+        speaker: speaker.into(),
+        text,
+        is_final: true,
+    }])
 }
 
 #[cfg(test)]
@@ -121,15 +150,24 @@ mod tests {
     #[tokio::test]
     async fn test_key_succeeds_on_2xx() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).and(header("Authorization", "Bearer good-key")).respond_with(ResponseTemplate::new(200)).mount(&mock_server).await;
+        Mock::given(method("GET"))
+            .and(header("Authorization", "Bearer good-key"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
         assert!(test_key_at(&mock_server.uri(), "good-key").await.is_ok());
     }
 
     #[tokio::test]
     async fn test_key_reports_auth_failed_on_401() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(401)).mount(&mock_server).await;
-        let err = test_key_at(&mock_server.uri(), "bad-key").await.unwrap_err();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+        let err = test_key_at(&mock_server.uri(), "bad-key")
+            .await
+            .unwrap_err();
         assert!(matches!(err, ProviderError::AuthFailed(_)));
     }
 
@@ -137,7 +175,14 @@ mod tests {
     fn parses_text_field_for_mic_channel() {
         let body = json!({ "text": "  hello from mic  " });
         let segments = parse_response(&body, AudioChannel::Mic).unwrap();
-        assert_eq!(segments, vec![TranscriptSegment { speaker: "you".into(), text: "hello from mic".into(), is_final: true }]);
+        assert_eq!(
+            segments,
+            vec![TranscriptSegment {
+                speaker: "you".into(),
+                text: "hello from mic".into(),
+                is_final: true
+            }]
+        );
     }
 
     #[test]
@@ -156,7 +201,10 @@ mod tests {
     #[test]
     fn missing_text_field_is_bad_response() {
         let body = json!({ "unexpected": true });
-        assert!(matches!(parse_response(&body, AudioChannel::Mic).unwrap_err(), ProviderError::BadResponse(_)));
+        assert!(matches!(
+            parse_response(&body, AudioChannel::Mic).unwrap_err(),
+            ProviderError::BadResponse(_)
+        ));
     }
 
     #[tokio::test]
@@ -169,7 +217,11 @@ mod tests {
             .await;
 
         let provider = GroqProvider::with_base_url("test-key".into(), mock_server.uri());
-        let chunk = AudioChunk { channel: AudioChannel::Mic, pcm16: vec![0, 0], sample_rate_hz: 16000 };
+        let chunk = AudioChunk {
+            channel: AudioChannel::Mic,
+            pcm16: vec![0, 0],
+            sample_rate_hz: 16000,
+        };
         let segments = provider.transcribe_chunk(&chunk).await.unwrap();
         assert_eq!(segments[0].text, "mocked");
     }
@@ -177,10 +229,20 @@ mod tests {
     #[tokio::test]
     async fn maps_403_to_auth_failed() {
         let mock_server = MockServer::start().await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(403)).mount(&mock_server).await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&mock_server)
+            .await;
 
         let provider = GroqProvider::with_base_url("bad".into(), mock_server.uri());
-        let chunk = AudioChunk { channel: AudioChannel::Mic, pcm16: vec![0, 0], sample_rate_hz: 16000 };
-        assert!(matches!(provider.transcribe_chunk(&chunk).await.unwrap_err(), ProviderError::AuthFailed(_)));
+        let chunk = AudioChunk {
+            channel: AudioChannel::Mic,
+            pcm16: vec![0, 0],
+            sample_rate_hz: 16000,
+        };
+        assert!(matches!(
+            provider.transcribe_chunk(&chunk).await.unwrap_err(),
+            ProviderError::AuthFailed(_)
+        ));
     }
 }

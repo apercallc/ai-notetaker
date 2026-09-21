@@ -38,7 +38,9 @@
 #![allow(dead_code)]
 
 use interprocess::local_socket::tokio::{prelude::*, Stream as LocalStream};
-use interprocess::local_socket::{GenericFilePath, GenericNamespaced, ListenerOptions, ToFsName, ToNsName};
+use interprocess::local_socket::{
+    GenericFilePath, GenericNamespaced, ListenerOptions, ToFsName, ToNsName,
+};
 use notetaker_core::native_messaging::{ExtensionToHelper, HelperToExtension};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -60,7 +62,10 @@ pub async fn connect() -> std::io::Result<LocalStream> {
 /// Reads one length-prefixed frame and writes it straight through
 /// unmodified. Returns `Ok(false)` on a clean EOF (the other side hung
 /// up), `Ok(true)` if a frame was relayed, `Err` on an actual I/O failure.
-pub async fn relay_one_frame<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(r: &mut R, w: &mut W) -> std::io::Result<bool> {
+pub async fn relay_one_frame<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    r: &mut R,
+    w: &mut W,
+) -> std::io::Result<bool> {
     let mut len_buf = [0u8; 4];
     match r.read_exact(&mut len_buf).await {
         Ok(_) => {}
@@ -114,8 +119,14 @@ where
 
     let writer_task = tokio::spawn(async move {
         while let Some(msg) = out_rx.recv().await {
-            let Ok(bytes) = serde_json::to_vec(&msg) else { continue };
-            if write_half.write_all(&(bytes.len() as u32).to_ne_bytes()).await.is_err() {
+            let Ok(bytes) = serde_json::to_vec(&msg) else {
+                continue;
+            };
+            if write_half
+                .write_all(&(bytes.len() as u32).to_ne_bytes())
+                .await
+                .is_err()
+            {
                 break;
             }
             if write_half.write_all(&bytes).await.is_err() {
