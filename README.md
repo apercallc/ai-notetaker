@@ -1,6 +1,6 @@
 # AI Notetaker
 
-An open-source, self-hosted alternative to CRISP/Krisp-style AI meeting
+An open-source, self-hosted alternative to Krisp-style AI meeting
 notetakers — no required subscription, works with any meeting app (Zoom,
 Google Meet, Microsoft Teams, Slack Huddles), and you bring your own AI API
 key.
