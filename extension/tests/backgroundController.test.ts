@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS } from "../src/types";
 
 function createFakeClient(): NativeClientLike & {
   emit: (type: string, payload: Record<string, unknown>) => void;
+  emitStatus: (status: string) => void;
 } {
   const handlers = new Map<string, Array<(msg: unknown) => void>>();
   return {
@@ -20,6 +21,13 @@ function createFakeClient(): NativeClientLike & {
     resumeRecording: vi.fn(),
     discardRecording: vi.fn(),
     testProviderKey: vi.fn(async () => ({ valid: true, message: "ok" })),
+    onStatusChange: vi.fn((handler: (status: string) => void) => {
+      if (!handlers.has("__status__")) handlers.set("__status__", []);
+      handlers.get("__status__")!.push(handler as (msg: unknown) => void);
+    }),
+    emitStatus(status: string) {
+      for (const handler of handlers.get("__status__") ?? []) handler(status);
+    },
     emit(type, payload) {
       for (const handler of handlers.get(type) ?? []) handler({ type, ...payload });
     },
@@ -225,6 +233,33 @@ describe("BackgroundController", () => {
     expect(client.discardRecording).toHaveBeenCalledWith("orphan-2");
     expect(client.resumeRecording).not.toHaveBeenCalled();
     expect(controller.getState().recoverableMeeting).toBeNull();
+  });
+
+  it("tracks helper connection status and broadcasts it to the UI", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+
+    client.emitStatus("helper_not_found");
+
+    expect(controller.getState().helperStatus).toBe("helper_not_found");
+    expect(broadcast).toHaveBeenCalledWith({ type: "HELPER_STATUS", status: "helper_not_found" });
+  });
+
+  it("re-pushes settings when the helper (re)connects — the helper holds them in memory only", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    vi.mocked(client.pushSettings).mockClear();
+
+    client.emitStatus("connected");
+
+    // A restarted (or newly installed) helper process starts with no
+    // settings; the transition to connected is when they come back.
+    expect(client.pushSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ transcriptionProvider: DEFAULT_SETTINGS.transcriptionProvider }),
+    );
   });
 
   it("delegates testProviderKey to the native messaging client rather than calling a provider directly", async () => {

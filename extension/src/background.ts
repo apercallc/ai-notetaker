@@ -12,6 +12,16 @@ import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/interna
 const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
 
+// The onboarding wizard (helper install → select device → API key(s)) is
+// the architecture's whole "simple, straightforward install" pillar — it
+// did nothing on its own until this listener existed, since nothing else
+// ever opened it automatically on first install.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install") {
+    void chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
+  }
+});
+
 function broadcastToUi(message: BackgroundToUiMessage): void {
   // No listener (e.g. popup closed) rejects this silently — that's fine,
   // the UI reads persisted state from storage when it next opens.

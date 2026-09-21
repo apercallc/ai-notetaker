@@ -4,6 +4,7 @@
  * docs/native-messaging-protocol.md, which is background <-> helper only —
  * UI pages never talk to the helper directly.
  */
+import type { HelperConnectionStatus } from "./nativeMessaging";
 import type { ActionItem, NotetakerSettings, ProviderKind, Speaker } from "../types";
 
 export type UiToBackgroundMessage =
@@ -18,6 +19,7 @@ export type UiToBackgroundMessage =
 export interface BackgroundState {
   activeMeeting: { id: string } | null;
   recoverableMeeting: { meetingId: string; startedAt: string } | null;
+  helperStatus: HelperConnectionStatus;
 }
 
 export type BackgroundToUiMessage =
@@ -25,4 +27,5 @@ export type BackgroundToUiMessage =
   | { type: "TRANSCRIPT_UPDATE"; meetingId: string; speaker: Speaker; text: string; isFinal: boolean }
   | { type: "SUMMARY_READY"; meetingId: string; summary: string; actionItems: ActionItem[] }
   | { type: "RECORDING_ERROR"; meetingId: string | null; message: string }
-  | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string };
+  | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
+  | { type: "HELPER_STATUS"; status: HelperConnectionStatus };

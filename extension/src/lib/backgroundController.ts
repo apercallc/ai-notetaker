@@ -6,6 +6,7 @@
  * service worker.
  */
 import type { BackgroundState, BackgroundToUiMessage } from "./internalMessages";
+import type { HelperConnectionStatus } from "./nativeMessaging";
 import { getMeeting, getSettings, saveMeeting, saveSettings } from "./storage";
 import type { IncomingMessage, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
 
@@ -15,6 +16,7 @@ export interface NativeClientLike {
     type: T,
     handler: (message: Extract<IncomingMessage, { type: T }>) => void,
   ): void;
+  onStatusChange(handler: (status: HelperConnectionStatus) => void): void;
   pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp">): void;
   startRecording(meetingId: string): void;
   stopRecording(meetingId: string): void;
@@ -31,6 +33,7 @@ export class BackgroundController {
   private settings: NotetakerSettings | null = null;
   private activeMeetingId: string | null = null;
   private recoverableMeeting: BackgroundState["recoverableMeeting"] = null;
+  private helperStatus: HelperConnectionStatus = "connecting";
   private fetchImpl: typeof fetch = fetch;
 
   constructor(
@@ -41,6 +44,7 @@ export class BackgroundController {
     this.client.on("summary_ready", (msg) => void this.handleSummaryReady(msg));
     this.client.on("error", (msg) => void this.handleError(msg));
     this.client.on("recovered_recording", (msg) => this.handleRecoveredRecording(msg));
+    this.client.onStatusChange((status) => this.handleStatusChange(status));
   }
 
   /** Test-only seam: real usage always uses the global fetch. */
@@ -115,7 +119,22 @@ export class BackgroundController {
     return {
       activeMeeting: this.activeMeetingId ? { id: this.activeMeetingId } : null,
       recoverableMeeting: this.recoverableMeeting,
+      helperStatus: this.helperStatus,
     };
+  }
+
+  private handleStatusChange(status: HelperConnectionStatus): void {
+    this.helperStatus = status;
+    this.broadcast({ type: "HELPER_STATUS", status });
+    // The helper holds settings in memory only for its own process
+    // lifetime (protocol: they're re-sent each time the extension
+    // connects), so a transition to "connected" means it either never
+    // had them (helper installed after extension startup) or lost them
+    // (helper restart) — re-push. The client only fires status listeners
+    // on real changes, so this is once per transition, not per message;
+    // the duplicate push on the very first connect (init pushes too) is
+    // an idempotent overwrite.
+    if (status === "connected") this.pushCurrentSettings();
   }
 
   private async handleTranscriptPartial(

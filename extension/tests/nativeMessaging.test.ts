@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { NativeMessagingClient } from "../src/lib/nativeMessaging";
 import * as storage from "../src/lib/storage";
@@ -29,6 +29,12 @@ function createFakePort() {
 
 beforeEach(() => {
   chromeMock.reset();
+});
+
+// Fake timers leaking past a failing test would silently break every
+// later test that awaits real microtask-driven promises — always restore.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("NativeMessagingClient", () => {
@@ -114,6 +120,115 @@ describe("NativeMessagingClient", () => {
 
     expect(() => port._emitMessage({ garbage: true })).not.toThrow();
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  describe("helper_not_found handling", () => {
+    it("settles instead of hanging when connectNative itself throws — Chrome's synchronous unregistered-host mode", async () => {
+      vi.useFakeTimers();
+      chromeMock.runtime.connectNative.mockImplementation(() => {
+        throw new Error("Specified native messaging host not found.");
+      });
+      const client = new NativeMessagingClient();
+      const statuses: string[] = [];
+      client.onStatusChange((s) => statuses.push(s));
+
+      // The whole point: connect() is what the background worker awaits
+      // before it can answer GET_STATE, so in the exact scenario this
+      // state exists for (helper never installed) it must resolve.
+      await expect(client.connect()).resolves.toBeUndefined();
+      expect(statuses).toContain("helper_not_found");
+
+      // The backoff retry still runs.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);
+    });
+
+    it("settles even when the helper dies between connect and hello (port nulled before sendHello completes)", async () => {
+      vi.useFakeTimers();
+      const port = createFakePort();
+      chromeMock.runtime.connectNative.mockReturnValue(port);
+      const client = new NativeMessagingClient();
+      const statuses: string[] = [];
+      client.onStatusChange((s) => statuses.push(s));
+
+      const connectPromise = client.connect();
+      // The helper vanishes before the awaited pairing-token read gets to
+      // send() — handleDisconnect nulls this.port first, so sendHello()
+      // rejects and connect() must still resolve rather than wedge.
+      chromeMock.runtime.lastError = { message: "Specified native messaging host not found." };
+      port._emitDisconnect();
+      chromeMock.runtime.lastError = undefined;
+
+      await expect(connectPromise).resolves.toBeUndefined();
+      expect(statuses).toContain("helper_not_found");
+    });
+
+    it("reports helper_not_found and backs off instead of hot-looping when the host manifest is missing", async () => {
+      vi.useFakeTimers();
+      const ports: Array<ReturnType<typeof createFakePort>> = [];
+      chromeMock.runtime.connectNative.mockImplementation(() => {
+        const newPort = createFakePort();
+        ports.push(newPort);
+        return newPort;
+      });
+      const client = new NativeMessagingClient();
+      const statuses: string[] = [];
+      client.onStatusChange((s) => statuses.push(s));
+      await client.connect();
+
+      chromeMock.runtime.lastError = { message: "Specified native messaging host not found." };
+      ports[0]?._emitDisconnect();
+      chromeMock.runtime.lastError = undefined;
+
+      expect(statuses).toContain("helper_not_found");
+      // No immediate reconnect attempt — that would hot-loop against a
+      // host that is definitionally not there.
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);
+
+      // Second failure backs off further (2s, not another 1s).
+      chromeMock.runtime.lastError = { message: "Specified native messaging host not found." };
+      ports[1]?._emitDisconnect();
+      chromeMock.runtime.lastError = undefined;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2); // not yet — needs 2s this time
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(3);
+    });
+
+    it("an ordinary disconnect (no lastError) still reconnects immediately, not with backoff", async () => {
+      const ports: Array<ReturnType<typeof createFakePort>> = [];
+      chromeMock.runtime.connectNative.mockImplementation(() => {
+        const newPort = createFakePort();
+        ports.push(newPort);
+        return newPort;
+      });
+      const client = new NativeMessagingClient();
+      const statuses: string[] = [];
+      client.onStatusChange((s) => statuses.push(s));
+      await client.connect();
+
+      ports[0]?._emitDisconnect();
+
+      expect(statuses).toContain("disconnected");
+      expect(statuses).not.toContain("helper_not_found");
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);
+    });
+
+    it("reports connected once a real message arrives, and resets the backoff", async () => {
+      const port = createFakePort();
+      chromeMock.runtime.connectNative.mockReturnValue(port);
+      const client = new NativeMessagingClient();
+      const statuses: string[] = [];
+      client.onStatusChange((s) => statuses.push(s));
+      await client.connect();
+
+      port._emitMessage({ type: "paired", pairingToken: "tok" });
+
+      expect(statuses).toContain("connected");
+    });
   });
 
   it("reconnects automatically on disconnect (MV3 service workers die and must resume)", async () => {
@@ -211,7 +326,6 @@ describe("NativeMessagingClient", () => {
         valid: false,
         message: "Timed out waiting for the helper to respond. Is it running?",
       });
-      vi.useRealTimers();
     });
   });
 });

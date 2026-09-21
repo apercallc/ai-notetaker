@@ -99,6 +99,14 @@ here for a follow-up pass, ranked by the reviewers' own priority order):*
   dense "spreadsheet" grid at real (200+ segment) transcript length —
   flagged by the reviewer as needing a live visual check, not a code-only
   judgment call.
+- Extension: the helper-not-found retry backoff uses `setTimeout`, which
+  dies with the MV3 service worker's ~30s idle kill — in production the
+  exponential curve runs only a few times per worker lifetime, then goes
+  quiet until the next SW wake. The MV3-correct primitive is
+  `chrome.alarms` (guardrails-review finding; deferred because it needs
+  the `alarms` permission added to `manifest.json`, a Chrome Web Store
+  review consideration, and the practical gap is small — the helper owns
+  the pipeline and the popup triggers a fresh connect attempt on open).
 
 ### Desktop helper (`helper/`)
 

@@ -41,7 +41,8 @@ header.app-header button.icon-button:hover {
   margin-bottom: var(--space-3);
 }
 
-.banner.recoverable {
+.banner.recoverable,
+.banner.missing-helper {
   border: 1px solid var(--color-warning);
 }
 

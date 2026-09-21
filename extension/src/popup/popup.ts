@@ -71,6 +71,19 @@ async function renderRecoverableBanner(recoverableMeeting: NonNullable<Backgroun
   });
 }
 
+function renderHelperMissingBanner(): void {
+  const container = document.createElement("div");
+  container.className = "banner missing-helper";
+  container.innerHTML = `
+    <p><strong>Helper not detected.</strong> Recording needs the AI Notetaker desktop helper installed and running.</p>
+    <button class="secondary" id="open-helper-setup">Open setup guide</button>
+  `;
+  app.prepend(container);
+  document.getElementById("open-helper-setup")?.addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
+  });
+}
+
 function appendTranscriptLine(container: HTMLElement, speaker: Speaker, text: string): void {
   const line = document.createElement("div");
   line.className = "transcript-line";
@@ -181,6 +194,14 @@ async function render(): Promise<void> {
 
   if (state.recoverableMeeting) {
     await renderRecoverableBanner(state.recoverableMeeting);
+  }
+
+  // Only worth surfacing once onboarding is done and there's no active
+  // recording already in view — a "helper not found" banner while the user
+  // is mid-setup, or stacked on top of a live recording that started
+  // before the helper dropped, would be noise rather than help.
+  if (state.helperStatus === "helper_not_found" && !state.activeMeeting) {
+    renderHelperMissingBanner();
   }
 }
 
