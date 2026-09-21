@@ -29,9 +29,11 @@ your data.
 
 ## Status
 
-Early architecture stage — see
+Core capture, Native Messaging, CI, and the first Tauri tray/packaging pass
+are implemented; native signing, installer registration, and live OS/audio
+validation remain. See
 [`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md)
-for the current design. Implementation has not started yet.
+for the current design and remaining roadmap.
 
 ## Repo structure
 

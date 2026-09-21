@@ -27,10 +27,10 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-As of this implementation pass: **66 tests passing (61 in `core`, 5 in
+As of this implementation pass: **79 tests passing (74 in `core`, 5 in
 `audio`), zero compiler warnings, zero clippy warnings**, verified in a
 Linux dev environment with the full Rust toolchain, ALSA dev headers, and
-(for future Tauri work) WebKitGTK/libayatana-appindicator present.
+the Tauri v2 WebKitGTK/libayatana-appindicator dependencies.
 
 ## What's genuinely verified vs. what isn't (read this before trusting a "done" claim)
 
@@ -88,20 +88,22 @@ toolchain or target-OS SDKs in this environment:
   devices on macOS, WASAPI endpoint control on Windows). Documented as a
   known gap in both `audio::macos` and `audio::windows` module docs.
   Linux's `pactl module-loopback` equivalent *is* implemented.
-- **Tray icon UI** — not wired to Tauri yet; see `crates/app/src/tray.rs`
-  for the exact integration plan and why it's not done in this pass
-  (Tauri's macOS main-thread requirement needs a `main()` restructure that
-  wasn't worth rushing).
+- **Tray icon UI** — wired through Tauri v2 with idle/recording status, recent
+  note/folder opening, opt-in launch-at-login, and quit. The helper has no
+  main window; Tauri owns the process main thread and the IPC server starts
+  from `.setup()`.
 - **Re-transcribing the raw-audio tail after crash recovery** — `resume_recording`
   currently finalizes whatever transcript existed before the crash rather
   than reprocessing any audio captured but never sent to the transcription
   provider before the interruption. The raw audio itself is never lost
   (that's the resilience guarantee, and it holds), but resuming doesn't yet
   recover the *processing* of that last unsent segment.
-- **Tauri auto-updater configuration** — not started; blocked on the same
-  `tauri.conf.json` scaffolding as the tray icon.
-- **Per-OS installer / code signing** — out of scope for this pass (that's
-  sub-project #2 in the roadmap, not sub-project #1).
+- **Tauri auto-updater configuration** — plugin and artifact shape are wired,
+  but updater keys/endpoints are owner-generated release placeholders. See
+  `../docs/helper-packaging.md`.
+- **Per-OS installer registration and code signing** — bundle configuration
+  and uninstall documentation are present; Native Messaging registration,
+  macOS notarization, and Windows signing still require native release work.
 
 ## A deviation from the docs, flagged as instructed
 

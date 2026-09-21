@@ -78,9 +78,10 @@ the one for whichever package you're touching in addition to this file.
 
 ## Current status
 
-Architecture approved, implementation not yet started. Next step is an
-implementation plan (via the writing-plans process) for sub-project #1:
-core capture + notes pipeline, macOS + Windows first.
+Core capture, provider pipeline, Native Messaging, extension helper-detection
+UX, CI, and the first Tauri tray/packaging pass are implemented and tracked
+in `TODO.md`. Native installer registration, OS signing/notarization, live
+provider/meeting validation, and the remaining polish items are still open.
 
 ## Out of scope for now
 

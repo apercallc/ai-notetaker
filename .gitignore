@@ -4,3 +4,4 @@ target/
 dist/
 .DS_Store
 .playwright-mcp/
+helper/crates/app/gen/

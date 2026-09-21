@@ -145,10 +145,13 @@ here for a follow-up pass, ranked by the reviewers' own priority order):*
       `docs/native-messaging-protocol.md`
 - [x] Meeting summary + action-items prompt (Claude provider)
 - [x] Local file format for stored transcripts/audio — tested
-- [ ] Tauri auto-updater wired up and tested — **not done**; tray icon /
-      Tauri app-shell integration deferred (documented integration plan in
-      `helper/crates/app/src/tray.rs`, needs a `main()` restructure for
-      Tauri's macOS main-thread requirement)
+- [x] Tauri tray/app shell wired — `notetaker-helper` now has a plain
+      Tauri-owned `main()`, IPC starts from `.setup()`, and the tray exposes
+      idle/recording status, recent notes, notes folder, opt-in launch-at-login,
+      and quit. Placeholder icon art is checked in; real branding remains.
+- [x] Tauri auto-updater plugin and artifact configuration wired — updater
+      public key, endpoint, and signing artifacts remain owner-only release
+      setup; see `docs/helper-packaging.md`.
 - [x] Startup check for an in-progress recording (crash recovery) —
       tested; note: resume currently finalizes the existing transcript
       rather than reprocessing the last unsent audio segment (the audio
@@ -228,13 +231,22 @@ here for a follow-up pass, ranked by the reviewers' own priority order):*
 - [ ] macOS: Apple Developer ID signing + notarization (no "unidentified
       developer" wall on first launch)
 - [ ] Windows: Authenticode code signing (no SmartScreen warning wall)
-- [ ] Linux: package for common formats (AppImage at minimum; `.deb`/`.rpm`
-      as reach)
-- [ ] Auto-launch-on-login option (opt-in, not default)
-- [ ] Uninstall path documented/tested per OS (including removing the
-      virtual audio device cleanly)
-- [ ] First-run helper detection from the extension (clear "helper not
-      found" state with a fix-it link, not a silent failure)
+- [x] Linux: package for common formats — Tauri `.deb` + AppImage targets and
+      cargo-deb metadata are configured; `.rpm` remains out of this slice.
+- [x] Auto-launch-on-login option — tray menu action is opt-in and defaults
+      to off.
+- [x] Uninstall path documented per OS, including removing the virtual audio
+      device cleanly — see `docs/helper-packaging.md`; native-OS execution
+      remains release-owner validation.
+- [x] First-run helper detection from the extension — the actionable
+      not-found state landed in `b8e5270` and remains covered by extension
+      tests.
+- [ ] Final per-OS installer registration of the Native Messaging manifest —
+      package inputs and exact Chrome locations are documented, but token
+      substitution/Windows registry setup still needs installer implementation.
+- [ ] Generate and publish the owner-controlled Tauri updater key/endpoint —
+      config placeholders are intentional until the release owner supplies
+      signing credentials.
 
 ---
 

@@ -4,9 +4,10 @@
 manifest for this project (see `docs/native-messaging-protocol.md`). It's a
 `.template` file, not the real manifest: `__NM_HOST_BINARY_PATH__` must be
 replaced with the absolute path to the installed `notetaker-nm-host` binary
-before it's placed where Chrome actually looks for it. **This substitution
-+ placement is installer logic that doesn't exist yet** — tracked as an
-open item, see the helper implementation report.
+before it's placed where Chrome actually looks for it. The Tauri/cargo-deb
+packages include this template as an installer input; final per-OS
+substitution, placement, and Windows registry registration remain installer
+work and must not be claimed from a local build.
 
 ## Where Chrome looks for it, per OS
 
