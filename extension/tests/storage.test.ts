@@ -109,6 +109,22 @@ describe("meeting storage", () => {
     expect((await listMeetings(2)).map((item) => item.id)).toEqual(["m3", "m2"]);
   });
 
+  it("searches the complete archive across titles, summaries, transcripts, and actions", async () => {
+    await saveMeeting({ ...meeting, id: "m1", summary: "Roadmap review" });
+    await saveMeeting({
+      ...meeting,
+      id: "m2",
+      title: "Customer call",
+      summary: "Discussed launch timing",
+      transcript: [{ speaker: "them", text: "The launch is Friday", timestamp: "2026-09-21T10:01:00.000Z", isFinal: true }],
+      actionItems: [{ text: "Send the launch brief", owner: "Alex" }],
+    });
+
+    expect((await listMeetings(undefined, "launch")).map((item) => item.id)).toEqual(["m2"]);
+    expect((await listMeetings(undefined, "design")).map((item) => item.id)).toEqual(["m1"]);
+    expect((await listMeetings(undefined, "alex")).map((item) => item.id)).toEqual(["m2"]);
+  });
+
   it("deletes a meeting", async () => {
     await saveMeeting(meeting);
     await queueWebappSync(meeting);

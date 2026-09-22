@@ -185,6 +185,11 @@ The detailed troubleshooting flow is in [`docs/getting-started.md`](docs/getting
 
 ## For contributors
 
+The living roadmap is [`TODO.md`](TODO.md). Contribution setup, architecture
+boundaries, required checks, and pull-request expectations are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md); release evidence and external gates are
+kept explicit there and in the roadmap.
+
 ```sh
 cd helper && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 cd ../extension && npm run typecheck && npm test && npm run build

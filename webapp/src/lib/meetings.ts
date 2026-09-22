@@ -207,6 +207,7 @@ export async function listMeetings(
             { title: { contains: query, mode: "insensitive" as const } },
             { summary: { contains: query, mode: "insensitive" as const } },
             { transcript: { some: { text: { contains: query, mode: "insensitive" as const } } } },
+            { actionItems: { some: { text: { contains: query, mode: "insensitive" as const } } } },
           ],
         }
       : {}),

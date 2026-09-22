@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMeeting } from "@/lib/meetings";
 import { DeleteButton } from "./DeleteButton";
+import { ExportButtons } from "./ExportButtons";
 import { updateActionItemAction } from "./actions";
 
 function formatDate(iso: string): string {
@@ -86,6 +87,7 @@ export default async function MeetingDetailPage({
       )}
 
       <div className="detail-actions">
+        <ExportButtons meeting={meeting} />
         <DeleteButton meetingId={meeting.id} meetingTitle={meeting.title} />
       </div>
     </div>

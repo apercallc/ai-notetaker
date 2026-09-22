@@ -113,6 +113,19 @@ a {
   margin-top: var(--space-5);
 }
 
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.export-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .search-input,
 .text-input {
   width: 100%;
@@ -394,6 +407,24 @@ a {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+}
+
+@media print {
+  .back-link,
+  .detail-actions,
+  .action-save,
+  .action-due-label {
+    display: none !important;
+  }
+
+  .container {
+    max-width: none;
+    padding: 0;
+  }
+
+  .transcript-line {
+    content-visibility: visible;
   }
 }
 

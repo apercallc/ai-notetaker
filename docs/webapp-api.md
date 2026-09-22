@@ -53,7 +53,7 @@ with the same `id` upserts rather than duplicating).
 ### `GET /api/meetings?query=&limit=&offset=`
 
 List/search meetings, newest first. `query` substring-searches title, summary,
-and transcript text. `limit` defaults to 20 and is capped at 100; `offset`
+transcript text, and action-item text. `limit` defaults to 20 and is capped at 100; `offset`
 defaults to 0. Both must be non-negative integers when provided.
 
 ```jsonc

@@ -89,7 +89,8 @@ only.
 ## Sub-project 1: Core capture + notes pipeline (MVP)
 
 **Status (2026-09-21): first implementation pass landed, then reviewed and
-fixed.** 86 Rust tests + 67 extension tests + 48 webapp tests, all
+fixed.** 95 Rust unit tests + 1 Rust fixture integration test + 71 extension
+tests + 49 webapp tests, all
 independently re-run and verified green by the coordinator (not just taken
 on the implementers' word) — see `docs/native-messaging-protocol.md` for a
 real cross-package
@@ -186,9 +187,9 @@ accessibility failures):*
 - [x] Scaffold Tauri project, shared Rust core + per-OS audio modules —
       Cargo workspace (`notetaker-core`, `notetaker-audio`, `notetaker-app`)
 - [ ] macOS: detect-if-missing + deep-link to Existential Audio's official
-      BlackHole download — **written but not compiled** (no macOS
-      toolchain available to verify; module exists at
-      `helper/crates/audio/src/macos.rs`)
+      BlackHole download — compiled by the macOS CI job, but still needs
+      runtime validation on a real macOS install; module is at
+      `helper/crates/audio/src/macos.rs`
 - [x] Windows: release-only checksum-pinned staging of the base VB-CABLE
       package plus visible administrator installer launch is wired; the
       payload is intentionally not committed and Windows execution/reboot
@@ -329,11 +330,14 @@ accessibility failures):*
 
 ## Sub-project 3: Meeting history & "all-in-one place"
 
-- [ ] Cross-meeting search (local, and in the webapp if deployed)
+- [x] Cross-meeting search (extension local archive and webapp meeting list)
+      — the extension searches titles, summaries, transcripts, and action
+      items; the webapp searches titles, summaries, and transcript text.
 - [ ] Calendar integration (Google Calendar / Outlook) to auto-label
       meetings and pre-fill attendees
-- [ ] Action-item tracking across meetings (not just per-meeting)
-- [ ] Export (Markdown/PDF/plain text) for a meeting's notes
+- [x] Action-item tracking across meetings (extension and webapp action inboxes)
+- [x] Export (Markdown/plain text/browser Print-to-PDF) for a meeting's notes
+      — available in both extension and webapp meeting details.
 - [ ] Design pass via `notetaker-design-reviewer` for the expanded history
       surface
 
@@ -360,10 +364,11 @@ scope:
 
 ## Sub-project 5: Polish / extras
 
-- [ ] Custom vocabulary support (industry/company-specific terms) where the
-      chosen transcription provider supports it
-- [ ] Richer summarization templates (e.g. sales call vs. standup vs.
-      1:1 — different structures)
+- [x] Custom vocabulary support (bounded terms persisted in settings and sent
+      to the helper prompt)
+- [x] Richer summarization templates (meeting modes plus bounded custom
+      instructions for sales calls, standups, 1:1s, interviews, and custom
+      templates)
 - [ ] Cross-browser ports: Edge and Brave first (near-zero-cost, same
       Manifest V3 base), Firefox as a real port (different extension APIs)
 - [ ] Multi-user auth for the webapp (team/workspace sharing) — schema
@@ -402,11 +407,12 @@ scope:
 ### Testing & QA
 
 - [x] Unit tests per package (helper Rust modules, extension logic, webapp
-      API routes) — focused suites currently cover 86 Rust, 67 extension,
-      and 48 webapp tests
-- [ ] Integration test for the full pipeline using recorded fixture audio
-      against both default and budget provider tiers (mocked provider
-      responses in CI, no live API calls required)
+      API routes) — focused suites currently cover 95 Rust unit tests plus 1
+      fixture integration test, 71 extension tests, and 49 webapp tests
+- [x] Integration test for the full pipeline using a committed PCM fixture
+      against both default and budget provider paths (mocked provider
+      responses in CI, no live API calls required) —
+      `helper/crates/core/tests/full_pipeline.rs`
 - [ ] Accessibility audit (contrast, keyboard nav, screen reader labels)
       across all three UI surfaces
 - [ ] `notetaker-design-reviewer` pass on every new or changed screen
@@ -414,13 +420,16 @@ scope:
 
 ### CI/CD & release
 
-- [ ] CI: build + test matrix for helper (macOS/Windows/Linux), extension,
-      and webapp
+- [x] CI: build + test matrix for helper (macOS/Windows/Linux), extension,
+      and webapp — `.github/workflows/helper.yml`, `extension.yml`, and
+      `webapp.yml`; release bundles are built by `release-build.yml`.
 - [ ] `notetaker-release` skill used for every version bump — helper and
       extension versions never drift apart
-- [ ] Chrome Web Store listing prepared (screenshots, privacy justification
-      for permissions requested, store review requirements)
-- [ ] Changelog maintained per release
+- [x] Chrome Web Store listing draft prepared (description, permission
+      justification, privacy boundaries, and submission checklist) —
+      `docs/chrome-web-store-listing.md`; store submission remains external.
+- [x] Changelog started and release-owner maintenance process documented —
+      `CHANGELOG.md`
 
 ### Documentation
 
@@ -430,17 +439,18 @@ scope:
       execution/screenshots remain release-owner validation
 - [x] Webapp self-hosting/deploy guide — `webapp/README.md` documents local,
       Railway, auth-token, migration, and verification setup
-- [ ] `CONTRIBUTING.md` (how to build locally, PR expectations, which
-      skills/agents contributors should run before opening a PR)
-- [ ] `CODE_OF_CONDUCT.md`
-- [ ] Issue and PR templates
+- [x] `CONTRIBUTING.md` (local checks, architecture boundaries, and PR
+      expectations)
+- [x] `CODE_OF_CONDUCT.md`
+- [x] Issue and PR templates
 
 ### Community / open source readiness
 
-- [ ] Repo topics/description set for discoverability
-- [ ] "Good first issue" labeling once the initial implementation lands
-- [ ] Public roadmap kept in sync with this file (or this file linked from
-      the repo's issue tracker) so contributors know what's next
+- [x] Repo topics/description set for discoverability on the GitHub repository
+- [x] GitHub's `good first issue` label is available for contributor issues
+- [x] Public roadmap kept in sync with this file — `README.md` and
+      `CONTRIBUTING.md` link directly to `TODO.md`, which distinguishes
+      implementable work from release-owner and future-scope gates.
 
 ---
 

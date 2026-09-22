@@ -34,10 +34,10 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-As of this implementation pass: **86 tests passing (80 in `core`, 6 in
-`audio`), zero compiler warnings, zero clippy warnings**, verified in a
-Linux dev environment with the full Rust toolchain, ALSA dev headers, and
-the Tauri v2 WebKitGTK/libayatana-appindicator dependencies.
+As of this implementation pass: **96 Rust tests passing (89 in `core`, 6 in
+`audio`, and 1 fixture integration test), zero compiler warnings, zero clippy
+warnings**. Linux is verified locally; the helper CI matrix also compiles and
+tests the platform-gated macOS and Windows modules on their native runners.
 
 ## What's genuinely verified vs. what isn't (read this before trusting a "done" claim)
 
@@ -72,11 +72,13 @@ hardware, no display, no live meeting in this environment:
   `notetaker-nm-host` process Chrome actually spawns, has not been
   exercised end-to-end.
 
-**Written for macOS/Windows but literally uncompiled** — no cross-compile
-toolchain or target-OS SDKs in this environment:
+**Compiled by native CI runners but not runtime-verified** — this environment
+has no macOS/Windows device, driver, UAC, or meeting app:
 
-- `audio::macos` (BlackHole detection + capture) — cfg-gated, never built.
-- `audio::windows` (VB-CABLE detection + capture) — cfg-gated, never built.
+- `audio::macos` (BlackHole detection + capture) — compiled by the macOS job;
+  install and Multi-Output Device behavior still need a real Mac.
+- `audio::windows` (VB-CABLE detection + capture) — compiled by the Windows
+  job; installer/UAC/reboot and device behavior still need a real Windows PC.
 
 **Explicitly not implemented, flagged rather than faked:**
 

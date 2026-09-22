@@ -6,6 +6,7 @@ import { getInstallPageUrl } from "../lib/install";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
+let historyQuery = "";
 
 function clearLiveListener(): void {
   removeLiveListener?.();
@@ -205,7 +206,7 @@ async function runAudioProbe(): Promise<void> {
 }
 
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
-  const meetings = await listMeetings(5);
+  const meetings = await listMeetings(historyQuery ? undefined : 5, historyQuery || undefined);
   const helperStatusCopy =
     helperStatus === "connecting"
       ? "Connecting to the desktop helper…"
@@ -232,13 +233,19 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
     </div>
     <div class="history-section">
       <div class="history-heading">
-        <h2 tabindex="-1" data-view-heading>Recent meetings</h2>
+        <h2 tabindex="-1" data-view-heading>${historyQuery ? "Search results" : "Recent meetings"}</h2>
         <button type="button" class="text-link" id="open-action-inbox">Action inbox</button>
       </div>
+      <form class="meeting-search" id="meeting-search" role="search">
+        <label class="sr-only" for="meeting-search-input">Search meetings</label>
+        <input id="meeting-search-input" type="search" placeholder="Search all meetings…" value="${escapeHtml(historyQuery)}" />
+        <button type="submit" class="secondary">Search</button>
+        ${historyQuery ? `<button type="button" class="text-link" id="clear-meeting-search">Clear</button>` : ""}
+      </form>
       ${
         meetings.length > 0
           ? meetings.map(renderHistoryItem).join("")
-          : `<p class="empty-state">No meetings yet — hit Record during your next call.</p>`
+          : `<p class="empty-state">${historyQuery ? `No meetings match “${escapeHtml(historyQuery)}”.` : "No meetings yet — hit Record during your next call."}</p>`
       }
     </div>
   `;
@@ -251,6 +258,15 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());
   document.getElementById("open-action-inbox")?.addEventListener("click", () => {
     chrome.tabs.create({ url: chrome.runtime.getURL("actions/actions.html") });
+  });
+  document.getElementById("meeting-search")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    historyQuery = (document.getElementById("meeting-search-input") as HTMLInputElement).value.trim();
+    void render();
+  });
+  document.getElementById("clear-meeting-search")?.addEventListener("click", () => {
+    historyQuery = "";
+    void render();
   });
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
   for (const button of document.querySelectorAll<HTMLButtonElement>(".history-item")) {

@@ -90,11 +90,24 @@ export async function savePairingToken(token: string): Promise<void> {
  * Reading only its tail keeps the popup cheap even after a year of notes.
  * Callers that need the complete archive can omit the limit.
  */
-export async function listMeetings(limit?: number): Promise<MeetingRecord[]> {
+export async function listMeetings(limit?: number, query?: string): Promise<MeetingRecord[]> {
   const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-  const ids = limit === undefined ? index : index.slice(-Math.max(0, limit));
+  const normalizedQuery = query?.trim().toLocaleLowerCase();
+  // A search must inspect the whole archive before applying a display limit;
+  // the normal popup path still reads only its newest five records.
+  const ids = normalizedQuery ? index : limit === undefined ? index : index.slice(-Math.max(0, limit));
   const meetings = await Promise.all(ids.map((id) => getMeeting(id)));
-  return meetings
+  const matchingMeetings = meetings.filter((meeting): meeting is MeetingRecord => {
+    if (!meeting) return false;
+    if (!normalizedQuery) return true;
+    return [
+      meeting.title,
+      meeting.summary ?? "",
+      ...meeting.transcript.map((segment) => segment.text),
+      ...meeting.actionItems.flatMap((item) => [item.text, item.owner ?? ""]),
+    ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+  });
+  return matchingMeetings
     .filter((m): m is MeetingRecord => m !== null)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }

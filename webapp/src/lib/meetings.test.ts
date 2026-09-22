@@ -172,17 +172,26 @@ describe("listMeetings", () => {
     expect(meetings[0].id).toBe("22222222-2222-2222-2222-222222222222");
   });
 
-  it("full-text searches title and summary", async () => {
+  it("full-text searches title, summary, transcript, and action items", async () => {
     await upsertMeeting(
       sampleMeeting({ id: "11111111-1111-1111-1111-111111111111", title: "Roadmap planning", summary: "Discussed Q4 roadmap and blockers." })
     );
     await upsertMeeting(
-      sampleMeeting({ id: "22222222-2222-2222-2222-222222222222", title: "1:1 with Sam", summary: "Career growth check-in." })
+      sampleMeeting({
+        id: "22222222-2222-2222-2222-222222222222",
+        title: "1:1 with Sam",
+        summary: "Career growth check-in.",
+        actionItems: [{ text: "Schedule a follow-up", owner: "Sam" }],
+      }),
     );
 
     const { meetings } = await listMeetings({ query: "roadmap" });
     expect(meetings).toHaveLength(1);
     expect(meetings[0].title).toBe("Roadmap planning");
+
+    const actionSearch = await listMeetings({ query: "send api keys" });
+    expect(actionSearch.meetings).toHaveLength(1);
+    expect(actionSearch.meetings[0].title).toBe("Roadmap planning");
   });
 
   it("paginates with limit/offset", async () => {

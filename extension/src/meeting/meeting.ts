@@ -25,6 +25,38 @@ function exportAsMarkdown(meeting: NonNullable<Awaited<ReturnType<typeof getMeet
   return lines.join("\n");
 }
 
+function exportAsPlainText(meeting: NonNullable<Awaited<ReturnType<typeof getMeeting>>>): string {
+  const lines = [
+    meeting.title,
+    `Started: ${new Date(meeting.startedAt).toLocaleString()}`,
+    "",
+    "SUMMARY",
+    meeting.summary ?? "No summary available.",
+    "",
+    "ACTION ITEMS",
+    ...(meeting.actionItems.length > 0
+      ? meeting.actionItems.map((item) => `${item.status === "done" ? "[done]" : "[open]"} ${item.text}${item.owner ? ` (${item.owner})` : ""}${item.dueAt ? ` — due ${item.dueAt.slice(0, 10)}` : ""}`)
+      : ["None"]),
+    "",
+    "TRANSCRIPT",
+    ...meeting.transcript.map((segment) => `${speakerLabel(segment.speaker)}: ${segment.text}`),
+  ];
+  return lines.join("\n");
+}
+
+function downloadText(meeting: NonNullable<Awaited<ReturnType<typeof getMeeting>>>, content: string, extension: string, type: string): void {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${meeting.title.replace(/[^a-z0-9]+/gi, "-") || "meeting"}.${extension}`;
+  link.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    link.remove();
+  }, 0);
+}
+
 async function render(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const id = params.get("id");
@@ -76,23 +108,19 @@ async function render(): Promise<void> {
 
     <div class="toolbar">
       <button class="secondary" id="export-markdown">Export as Markdown</button>
+      <button class="secondary" id="export-plain-text">Export as text</button>
+      <button class="secondary" id="print-meeting">Print / Save PDF</button>
       <button class="danger" id="delete-meeting">Delete meeting</button>
     </div>
   `;
 
   document.getElementById("export-markdown")?.addEventListener("click", () => {
-    const blob = new Blob([exportAsMarkdown(meeting)], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${meeting.title.replace(/[^a-z0-9]+/gi, "-")}.md`;
-    link.click();
-    // Allow the browser to start the download before releasing the object URL.
-    window.setTimeout(() => {
-      URL.revokeObjectURL(url);
-      link.remove();
-    }, 0);
+    downloadText(meeting, exportAsMarkdown(meeting), "md", "text/markdown");
   });
+  document.getElementById("export-plain-text")?.addEventListener("click", () => {
+    downloadText(meeting, exportAsPlainText(meeting), "txt", "text/plain");
+  });
+  document.getElementById("print-meeting")?.addEventListener("click", () => window.print());
 
   document.getElementById("delete-meeting")?.addEventListener("click", async () => {
     if (!confirm("Delete this meeting? This can't be undone.")) return;

@@ -130,6 +130,28 @@ button.record-toggle {
   gap: var(--space-2);
 }
 
+.meeting-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.meeting-search input {
+  min-width: 0;
+  flex: 1;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
+
+.meeting-search button {
+  white-space: nowrap;
+}
+
 .history-section h2 {
   font-size: 0.75rem;
   text-transform: uppercase;
