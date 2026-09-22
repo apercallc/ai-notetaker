@@ -137,7 +137,30 @@ describe("NativeMessagingClient", () => {
     client.on("transcript_partial", handler);
 
     expect(() => port._emitMessage({ garbage: true })).not.toThrow();
+    expect(() => port._emitMessage({ type: "transcript_partial", meetingId: "m1", speaker: "not-a-speaker", text: "oops", isFinal: true })).not.toThrow();
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does not let a stale port disconnect a newer connection", async () => {
+    const ports: Array<ReturnType<typeof createFakePort>> = [];
+    chromeMock.runtime.connectNative.mockImplementation(() => {
+      const port = createFakePort();
+      ports.push(port);
+      return port;
+    });
+    const client = new NativeMessagingClient();
+    await client.connect();
+    ports[0]?._emitDisconnect();
+    expect(ports).toHaveLength(2);
+
+    ports[0]?._emitDisconnect();
+    client.startRecording("meeting-1", "general");
+
+    expect(ports[1]?.postMessage).toHaveBeenCalledWith({
+      type: "start_recording",
+      meetingId: "meeting-1",
+      meetingMode: "general",
+    });
   });
 
   describe("helper_not_found handling", () => {

@@ -42,13 +42,16 @@ export type HelperConnectionStatus = "connecting" | "connected" | "helper_not_fo
 
 export class NativeMessagingClient {
   private port: chrome.runtime.Port | null = null;
+  private connectPromise: Promise<void> | null = null;
   private listeners: Map<IncomingMessageType, Set<Listener<IncomingMessage>>> = new Map();
   private statusListeners: Set<Listener<HelperConnectionStatus>> = new Set();
   private currentStatus: HelperConnectionStatus | null = null;
   private notFoundBackoffMs = MIN_NOT_FOUND_BACKOFF_MS;
 
   connect(): Promise<void> {
-    return new Promise((resolve) => {
+    if (this.connectPromise) return this.connectPromise;
+
+    const connection = new Promise<void>((resolve) => {
       this.setStatus("connecting");
       let port: chrome.runtime.Port;
       try {
@@ -66,7 +69,9 @@ export class NativeMessagingClient {
       }
       this.port = port;
       port.onMessage.addListener((raw: unknown) => this.handleMessage(raw));
-      port.onDisconnect.addListener(() => this.handleDisconnect());
+      // A reconnect creates a new Port. Pass the instance through so a late
+      // disconnect from an older port cannot tear down the newer connection.
+      port.onDisconnect.addListener(() => this.handleDisconnect(port));
       // If the helper dies between connect and hello, handleDisconnect has
       // already nulled this.port, so sendHello() rejects when it gets to
       // send() — resolve on either outcome for the same reason as above:
@@ -80,6 +85,16 @@ export class NativeMessagingClient {
         () => resolve(),
       );
     });
+    this.connectPromise = connection;
+    void connection.then(
+      () => {
+        if (this.connectPromise === connection) this.connectPromise = null;
+      },
+      () => {
+        if (this.connectPromise === connection) this.connectPromise = null;
+      },
+    );
+    return connection;
   }
 
   onStatusChange(handler: Listener<HelperConnectionStatus>): void {
@@ -101,7 +116,8 @@ export class NativeMessagingClient {
     this.send({ type: "hello", pairingToken });
   }
 
-  private handleDisconnect(): void {
+  private handleDisconnect(disconnectedPort?: chrome.runtime.Port): void {
+    if (disconnectedPort && this.port !== disconnectedPort) return;
     this.port = null;
     const lastError = chrome.runtime.lastError;
     const hostMissing = /not found/i.test(lastError?.message ?? "");

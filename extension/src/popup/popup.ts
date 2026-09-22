@@ -65,12 +65,20 @@ async function renderRecoverableBanner(recoverableMeeting: NonNullable<Backgroun
   `;
   app.prepend(container);
   document.getElementById("resume-recording")?.addEventListener("click", async () => {
-    await sendToBackground({ type: "RESUME_RECORDING", meetingId: recoverableMeeting.meetingId });
-    await render();
+    try {
+      await sendToBackground({ type: "RESUME_RECORDING", meetingId: recoverableMeeting.meetingId });
+      await render();
+    } catch (error) {
+      renderFailure(error);
+    }
   });
   document.getElementById("discard-recording")?.addEventListener("click", async () => {
-    await sendToBackground({ type: "DISCARD_RECORDING", meetingId: recoverableMeeting.meetingId });
-    await render();
+    try {
+      await sendToBackground({ type: "DISCARD_RECORDING", meetingId: recoverableMeeting.meetingId });
+      await render();
+    } catch (error) {
+      renderFailure(error);
+    }
   });
 }
 
@@ -112,8 +120,12 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
     appendTranscriptLine(transcriptView, segment.speaker, segment.text);
   }
   document.getElementById("stop-recording")?.addEventListener("click", async () => {
-    await sendToBackground({ type: "STOP_RECORDING", meetingId });
-    await render();
+    try {
+      await sendToBackground({ type: "STOP_RECORDING", meetingId });
+      await render();
+    } catch (error) {
+      renderFailure(error);
+    }
   });
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
@@ -123,7 +135,7 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
     }
     if (message.type === "SUMMARY_READY" && message.meetingId === meetingId) {
       clearLiveListener();
-      void render();
+      void renderSafely();
     }
     // A failed recording used to leave this exact view showing a "live"
     // transcript that had actually stopped updating, with no visible sign
@@ -132,7 +144,7 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
     // out of the dead "recording" view covers the case where it's open.
     if (message.type === "RECORDING_ERROR" && message.meetingId === meetingId) {
       clearLiveListener();
-      void render();
+      void renderSafely();
     }
     if (message.type === "PROCESSING_WARNING" && message.meetingId === meetingId) {
       const status = document.getElementById("status");
@@ -238,7 +250,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       </div>
       <form class="meeting-search" id="meeting-search" role="search">
         <label class="sr-only" for="meeting-search-input">Search meetings</label>
-        <input id="meeting-search-input" type="search" placeholder="Search all meetings…" value="${escapeHtml(historyQuery)}" />
+        <input id="meeting-search-input" type="search" maxlength="200" placeholder="Search all meetings…" value="${escapeHtml(historyQuery)}" />
         <button type="submit" class="secondary">Search</button>
         ${historyQuery ? `<button type="button" class="text-link" id="clear-meeting-search">Clear</button>` : ""}
       </form>
@@ -252,7 +264,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   document.getElementById("start-recording")?.addEventListener("click", async () => {
     const meetingMode = (document.getElementById("meeting-mode") as HTMLSelectElement).value as MeetingMode;
     await sendToBackground({ type: "START_RECORDING", meetingMode });
-    await render();
+    await renderSafely();
   });
   document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus(helperStatus));
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());
@@ -262,11 +274,11 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   document.getElementById("meeting-search")?.addEventListener("submit", (event) => {
     event.preventDefault();
     historyQuery = (document.getElementById("meeting-search-input") as HTMLInputElement).value.trim();
-    void render();
+    void renderSafely();
   });
   document.getElementById("clear-meeting-search")?.addEventListener("click", () => {
     historyQuery = "";
-    void render();
+    void renderSafely();
   });
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
   for (const button of document.querySelectorAll<HTMLButtonElement>(".history-item")) {
@@ -311,4 +323,26 @@ async function render(): Promise<void> {
   app.querySelector<HTMLElement>("[data-view-heading]")?.focus({ preventScroll: true });
 }
 
-void render();
+function renderFailure(error: unknown): void {
+  console.error("AI Notetaker popup failed to render", error);
+  clearLiveListener();
+  app.innerHTML = `
+    ${renderHeader(true)}
+    <div class="empty-state error-state" role="alert">
+      <p>Something went wrong loading the notetaker.</p>
+      <button type="button" class="primary" id="retry-render">Try again</button>
+    </div>
+  `;
+  document.getElementById("retry-render")?.addEventListener("click", () => void renderSafely());
+  document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
+}
+
+async function renderSafely(): Promise<void> {
+  try {
+    await render();
+  } catch (error) {
+    renderFailure(error);
+  }
+}
+
+void renderSafely();

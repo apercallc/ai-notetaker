@@ -95,6 +95,7 @@ export class BackgroundController {
   }
 
   async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general"): Promise<string> {
+    if (this.activeMeetingId) return this.activeMeetingId;
     if (this.helperStatus !== "connected" || !this.helperInfo) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -146,7 +147,25 @@ export class BackgroundController {
       meeting.status = "processing";
       await saveMeeting(meeting);
     }
-    this.client.stopRecording(meetingId);
+    if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
+    try {
+      this.client.stopRecording(meetingId);
+    } catch {
+      // The helper may disappear between the UI click and the native send.
+      // Keep the durable meeting record visible, but make the uncertain
+      // finalization explicit instead of leaving the popup in a fake live
+      // recording state or surfacing an unhandled promise rejection.
+      await updateMeeting(meetingId, (current) => ({
+        ...current,
+        status: "error",
+        errorMessage: "The stop command could not reach the desktop helper. Reconnect it and recover this recording.",
+      }));
+      this.broadcast({
+        type: "RECORDING_ERROR",
+        meetingId,
+        message: "The stop command could not reach the desktop helper. Reconnect it and recover this recording.",
+      });
+    }
   }
 
   resumeRecording(meetingId: string): void {

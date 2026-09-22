@@ -316,8 +316,26 @@ describe("BackgroundController", () => {
     await controller.stopRecording(meetingId);
 
     expect(client.stopRecording).toHaveBeenCalledWith(meetingId);
+    expect(controller.getState().activeMeeting).toBeNull();
     const stored = await getMeeting(meetingId);
     expect(stored?.status).toBe("processing");
+  });
+
+  it("shows a durable error instead of leaving a live view when the stop send fails", async () => {
+    const client = createFakeClient();
+    vi.spyOn(client, "stopRecording").mockImplementation(() => {
+      throw new Error("disconnected");
+    });
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    await controller.stopRecording(meetingId);
+
+    expect(controller.getState().activeMeeting).toBeNull();
+    expect((await getMeeting(meetingId))?.status).toBe("error");
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", meetingId }));
   });
 
   it("clears the active meeting once its summary arrives", async () => {

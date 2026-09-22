@@ -125,6 +125,20 @@ describe("meeting storage", () => {
     expect((await listMeetings(undefined, "alex")).map((item) => item.id)).toEqual(["m2"]);
   });
 
+  it("loads an archive search with one batched storage read", async () => {
+    await saveMeeting({ ...meeting, id: "m1" });
+    await saveMeeting({ ...meeting, id: "m2", title: "Customer call" });
+    chromeMock.storage.local.get.mockClear();
+
+    await listMeetings(undefined, "customer");
+
+    expect(chromeMock.storage.local.get).toHaveBeenCalledTimes(2);
+    expect(chromeMock.storage.local.get).toHaveBeenLastCalledWith(
+      ["notetaker.meeting.m1", "notetaker.meeting.m2"],
+      expect.any(Function),
+    );
+  });
+
   it("deletes a meeting", async () => {
     await saveMeeting(meeting);
     await queueWebappSync(meeting);
@@ -148,5 +162,12 @@ describe("meeting storage", () => {
     expect(await getWebappSyncOutbox()).toEqual([meeting]);
     await removeWebappSyncOutbox(meeting.id);
     expect(await getWebappSyncOutbox()).toEqual([]);
+  });
+
+  it("serializes concurrent webapp outbox updates without dropping a meeting", async () => {
+    const second = { ...meeting, id: "m2", title: "Second meeting" };
+    await Promise.all([queueWebappSync(meeting), queueWebappSync(second)]);
+
+    expect((await getWebappSyncOutbox()).map((item) => item.id)).toEqual(["m1", "m2"]);
   });
 });

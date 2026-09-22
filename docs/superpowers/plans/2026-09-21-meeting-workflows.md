@@ -1,5 +1,11 @@
 # Meeting Workflows Implementation Plan
 
+> Status: implemented locally and reflected in `TODO.md` as of September 21,
+> 2026. The remaining unchecked roadmap items below are historical task
+> checkboxes; owner-gated OS/audio/provider/deployment validation remains
+> intentionally tracked in `TODO.md` rather than represented as completed by
+> source changes alone.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make AI Notetaker reliable to set up, useful after the meeting, and more accurate for different meeting types while preserving its local-first BYOK architecture.

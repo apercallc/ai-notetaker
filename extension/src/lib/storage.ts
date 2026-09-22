@@ -15,7 +15,7 @@ const KEYS = {
   webappSyncOutbox: "notetaker.webappSync.outbox",
 } as const;
 
-function storageGet<T>(key: string): Promise<T | undefined> {
+function storageGet<T>(key: string | string[]): Promise<T | undefined> {
   return new Promise((resolve, reject) => {
     chrome.storage.local.get(key, (items) => {
       const error = chrome.runtime.lastError;
@@ -23,7 +23,7 @@ function storageGet<T>(key: string): Promise<T | undefined> {
         reject(new Error(error.message));
         return;
       }
-      resolve(items[key] as T | undefined);
+      resolve(typeof key === "string" ? (items[key] as T | undefined) : (items as T));
     });
   });
 }
@@ -92,11 +92,17 @@ export async function savePairingToken(token: string): Promise<void> {
  */
 export async function listMeetings(limit?: number, query?: string): Promise<MeetingRecord[]> {
   const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-  const normalizedQuery = query?.trim().toLocaleLowerCase();
+  const normalizedQuery = query?.trim().slice(0, 200).toLocaleLowerCase();
   // A search must inspect the whole archive before applying a display limit;
   // the normal popup path still reads only its newest five records.
   const ids = normalizedQuery ? index : limit === undefined ? index : index.slice(-Math.max(0, limit));
-  const meetings = await Promise.all(ids.map((id) => getMeeting(id)));
+  // Fetch the selected records in one storage operation. Searching is an
+  // archive-wide operation, so issuing one request per meeting makes older
+  // profiles increasingly slow and can exhaust the browser's callback queue.
+  const records = ids.length
+    ? ((await storageGet<Record<string, MeetingRecord>>(ids.map((id) => KEYS.meetingPrefix + id))) ?? {})
+    : {};
+  const meetings = ids.map((id) => records[KEYS.meetingPrefix + id] ?? null);
   const matchingMeetings = meetings.filter((meeting): meeting is MeetingRecord => {
     if (!meeting) return false;
     if (!normalizedQuery) return true;
@@ -163,16 +169,26 @@ export function updateMeeting(
 export async function deleteMeeting(id: string): Promise<void> {
   return enqueueMeetingMutation(id, async () => {
     const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-    const outbox = await getWebappSyncOutbox();
-    await storageSet({
-      [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id),
-      [KEYS.webappSyncOutbox]: outbox.filter((meeting) => meeting.id !== id),
-    });
+    await storageSet({ [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id) });
+    await removeWebappSyncOutbox(id);
     await storageRemove(KEYS.meetingPrefix + id);
   });
 }
 
 const MAX_WEBAPP_OUTBOX_ITEMS = 50;
+let webappOutboxWriteQueue: Promise<void> = Promise.resolve();
+
+function enqueueWebappOutboxMutation(mutation: (outbox: MeetingRecord[]) => MeetingRecord[]): Promise<void> {
+  const current = webappOutboxWriteQueue.catch(() => undefined).then(async () => {
+    const outbox = await getWebappSyncOutbox();
+    await storageSet({ [KEYS.webappSyncOutbox]: mutation(outbox) });
+  });
+  webappOutboxWriteQueue = current.then(
+    () => undefined,
+    () => undefined,
+  );
+  return current;
+}
 
 export async function getWebappSyncOutbox(): Promise<MeetingRecord[]> {
   const stored = await storageGet<MeetingRecord[]>(KEYS.webappSyncOutbox);
@@ -182,12 +198,9 @@ export async function getWebappSyncOutbox(): Promise<MeetingRecord[]> {
 }
 
 export async function queueWebappSync(meeting: MeetingRecord): Promise<void> {
-  const outbox = await getWebappSyncOutbox();
-  const next = [...outbox.filter((queued) => queued.id !== meeting.id), meeting].slice(-MAX_WEBAPP_OUTBOX_ITEMS);
-  await storageSet({ [KEYS.webappSyncOutbox]: next });
+  await enqueueWebappOutboxMutation((outbox) => [...outbox.filter((queued) => queued.id !== meeting.id), meeting].slice(-MAX_WEBAPP_OUTBOX_ITEMS));
 }
 
 export async function removeWebappSyncOutbox(id: string): Promise<void> {
-  const outbox = await getWebappSyncOutbox();
-  await storageSet({ [KEYS.webappSyncOutbox]: outbox.filter((meeting) => meeting.id !== id) });
+  await enqueueWebappOutboxMutation((outbox) => outbox.filter((meeting) => meeting.id !== id));
 }
