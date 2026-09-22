@@ -21,7 +21,7 @@ use notetaker_core::storage::MeetingStore;
 use notetaker_core::{
     build_summarization_provider, build_transcription_provider, native_messaging,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,6 +47,7 @@ struct AppState {
     active: Mutex<HashMap<Uuid, ActiveRecording>>,
     pipelines: Mutex<HashMap<Uuid, Arc<Mutex<Pipeline>>>>,
     retry_tasks: Mutex<HashMap<Uuid, RetryWorker>>,
+    subscribers: Mutex<HashMap<Uuid, Vec<ipc::OutSender>>>,
 }
 
 struct RetryWorker {
@@ -133,6 +134,7 @@ fn main() {
                 active: Mutex::new(HashMap::new()),
                 pipelines: Mutex::new(HashMap::new()),
                 retry_tasks: Mutex::new(HashMap::new()),
+                subscribers: Mutex::new(HashMap::new()),
             });
             let tray = tray::initialize(app.handle(), root.clone())?;
             let ipc_state = state.clone();
@@ -202,7 +204,14 @@ async fn handle_message(
 
             // Crash recovery: surface any meeting left in `Recording`
             // state by an unclean shutdown, once per new connection.
-            if let Ok(interrupted) = state.store.find_interrupted_meetings() {
+            let active_ids: HashSet<Uuid> = state.active.lock().await.keys().copied().collect();
+            for meeting_id in &active_ids {
+                subscribe_meeting(&state, *meeting_id, out_tx.clone()).await;
+                let _ = out_tx.send(HelperToExtension::RecordingStarted {
+                    meeting_id: *meeting_id,
+                });
+            }
+            if let Ok(interrupted) = state.store.find_interrupted_meetings_excluding(&active_ids) {
                 for meta in interrupted {
                     let _ = out_tx.send(HelperToExtension::RecoveredRecording {
                         meeting_id: meta.id,
@@ -224,6 +233,7 @@ async fn handle_message(
             meeting_id,
             meeting_mode,
         } => {
+            subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
             let settings_guard = state.settings.lock().await;
             let Some(settings) = settings_guard.clone() else {
                 let _ = out_tx.send(HelperToExtension::Error {
@@ -294,6 +304,7 @@ async fn handle_message(
                 }
                 Err(e) => {
                     tray.set_recording(false);
+                    let _ = state.store.mark_stopped(meeting_id, chrono::Utc::now());
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
                         code: ErrorCode::DeviceNotFound,
@@ -309,7 +320,7 @@ async fn handle_message(
                 .lock()
                 .await
                 .insert(meeting_id, pipeline.clone());
-            let retry_task = spawn_retry_worker(pipeline.clone(), out_tx.clone());
+            let retry_task = spawn_retry_worker(meeting_id, pipeline.clone(), state.clone());
             state
                 .retry_tasks
                 .lock()
@@ -317,11 +328,11 @@ async fn handle_message(
                 .insert(meeting_id, retry_task);
 
             let audio = state.audio.clone();
-            let out_tx_for_audio = out_tx.clone();
+            let state_for_audio = state.clone();
             let pipeline_for_audio = pipeline.clone();
             let result = audio
                 .start_capture(Box::new(move |frame| {
-                    let out_tx = out_tx_for_audio.clone();
+                    let state = state_for_audio.clone();
                     let pipeline = pipeline_for_audio.clone();
                     tokio::spawn(async move {
                         let messages = pipeline
@@ -335,7 +346,7 @@ async fn handle_message(
                             )
                             .await;
                         for m in messages {
-                            let _ = out_tx.send(m);
+                            send_meeting_message(&state, meeting_id, m).await;
                         }
                     });
                 }))
@@ -354,6 +365,7 @@ async fn handle_message(
                         worker.abort();
                     }
                     state.pipelines.lock().await.remove(&meeting_id);
+                    let _ = state.store.mark_stopped(meeting_id, chrono::Utc::now());
                     tray.set_recording(false);
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
@@ -366,17 +378,16 @@ async fn handle_message(
         }
 
         ExtensionToHelper::StopRecording { meeting_id } => {
-            let worker = state.retry_tasks.lock().await.remove(&meeting_id);
             if let Some(active) = state.active.lock().await.remove(&meeting_id) {
                 let _ = active.audio.stop_capture().await;
             }
-            if let Some(pipeline) = state.pipelines.lock().await.remove(&meeting_id) {
+            if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
                 let messages = pipeline.lock().await.stop_recording(meeting_id).await;
                 tray.set_recording(false);
                 match messages {
                     Ok(messages) => {
                         for m in messages {
-                            let _ = out_tx.send(m);
+                            send_meeting_message(&state, meeting_id, m).await;
                         }
                     }
                     Err(e) => {
@@ -391,29 +402,72 @@ async fn handle_message(
             // Keep the worker alive after capture stops so persisted failed
             // chunks still retry. It exits once the queue drains (or the
             // connection disappears), rather than being abandoned here.
-            if let Some(worker) = worker {
-                worker.request_stop();
-            }
-            true
-        }
-
-        // Resuming a crash-recovered meeting: finalize whatever transcript
-        // was already captured before the interruption. Re-transcribing
-        // the raw-audio tail that was captured but never sent to the
-        // transcription provider before the crash is NOT implemented in
-        // this pass — flagged in the implementation report.
-        ExtensionToHelper::ResumeRecording { meeting_id } => {
-            let store =
-                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
-            let _ = store.mark_stopped(meeting_id, chrono::Utc::now());
-            let _ = out_tx.send(HelperToExtension::RecordingStopped { meeting_id });
             if let Some(worker) = state.retry_tasks.lock().await.get(&meeting_id) {
                 worker.request_stop();
             }
             true
         }
 
+        // Resuming a crash-recovered meeting: finalize whatever transcript
+        // was already captured before the interruption, then transcribe the
+        // durable raw-audio tail before summarizing it.
+        ExtensionToHelper::ResumeRecording { meeting_id } => {
+            let Some(settings) = state.settings.lock().await.clone() else {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::ProviderAuthFailed,
+                    message: "provider settings are required to recover this recording".into(),
+                });
+                return true;
+            };
+            let pipeline = match build_retry_pipeline(&state.data_dir, meeting_id, &settings) {
+                Ok(pipeline) => Arc::new(Mutex::new(pipeline)),
+                Err(message) => {
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::ProviderAuthFailed,
+                        message,
+                    });
+                    return true;
+                }
+            };
+            subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
+            match pipeline.lock().await.recover_recording(meeting_id).await {
+                Ok(messages) => {
+                    for message in messages {
+                        send_meeting_message(&state, meeting_id, message).await;
+                    }
+                }
+                Err(error) => {
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: error.to_string(),
+                    });
+                }
+            }
+            let has_pending = {
+                let pipeline = pipeline.lock().await;
+                pipeline.retry_queue_len() > 0 || pipeline.has_pending_summary(meeting_id)
+            };
+            if has_pending {
+                state
+                    .pipelines
+                    .lock()
+                    .await
+                    .insert(meeting_id, pipeline.clone());
+                let worker = spawn_retry_worker(meeting_id, pipeline, state.clone());
+                worker.request_stop();
+                state.retry_tasks.lock().await.insert(meeting_id, worker);
+            }
+            true
+        }
+
         ExtensionToHelper::DiscardRecording { meeting_id } => {
+            if let Some(active) = state.active.lock().await.remove(&meeting_id) {
+                let _ = active.audio.stop_capture().await;
+                tray.set_recording(false);
+            }
             if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
                 worker.abort();
             }
@@ -421,7 +475,35 @@ async fn handle_message(
             let _ = std::fs::remove_file(state.data_dir.join(format!("retry-{meeting_id}.json")));
             let store =
                 MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
-            let _ = store.mark_processed(meeting_id);
+            if let Err(error) = store.delete_meeting(meeting_id) {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: format!("could not delete recovered recording: {error}"),
+                });
+            }
+            true
+        }
+
+        ExtensionToHelper::DeleteMeeting { meeting_id } => {
+            if let Some(active) = state.active.lock().await.remove(&meeting_id) {
+                let _ = active.audio.stop_capture().await;
+                tray.set_recording(false);
+            }
+            if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
+                worker.abort();
+            }
+            state.pipelines.lock().await.remove(&meeting_id);
+            let store =
+                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
+            if let Err(error) = store.delete_meeting(meeting_id) {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: format!("could not delete meeting data: {error}"),
+                });
+            }
+            let _ = std::fs::remove_file(state.data_dir.join(format!("retry-{meeting_id}.json")));
             true
         }
 
@@ -493,24 +575,34 @@ fn audio_status_message(
     }
 }
 
-fn spawn_retry_worker(pipeline: Arc<Mutex<Pipeline>>, out_tx: ipc::OutSender) -> RetryWorker {
+fn spawn_retry_worker(
+    meeting_id: Uuid,
+    pipeline: Arc<Mutex<Pipeline>>,
+    state: Arc<AppState>,
+) -> RetryWorker {
     let stop_when_empty = Arc::new(AtomicBool::new(false));
     let stop_signal = stop_when_empty.clone();
     let task = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
         loop {
             ticker.tick().await;
-            let (messages, queue_empty) = {
+            let (messages, queue_empty, summary_pending) = {
                 let mut pipeline = pipeline.lock().await;
-                let messages = pipeline.process_due_retries(chrono::Utc::now()).await;
-                (messages, pipeline.retry_queue_len() == 0)
+                let now = chrono::Utc::now();
+                let mut messages = pipeline.process_due_retries(now).await;
+                messages.extend(pipeline.process_pending_summary(meeting_id).await);
+                (
+                    messages,
+                    pipeline.retry_queue_len() == 0,
+                    pipeline.has_pending_summary(meeting_id),
+                )
             };
             for message in messages {
-                if out_tx.send(message).is_err() {
-                    return;
-                }
+                send_meeting_message(&state, meeting_id, message).await;
             }
-            if stop_signal.load(Ordering::Acquire) && queue_empty {
+            if stop_signal.load(Ordering::Acquire) && queue_empty && !summary_pending {
+                state.pipelines.lock().await.remove(&meeting_id);
+                state.retry_tasks.lock().await.remove(&meeting_id);
                 return;
             }
         }
@@ -526,7 +618,8 @@ async fn start_pending_retry_workers(
     settings: Settings,
     out_tx: ipc::OutSender,
 ) {
-    for meeting_id in pending_retry_meeting_ids(&state.data_dir) {
+    for meeting_id in pending_processing_meeting_ids(&state.data_dir) {
+        subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
         if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
             let worker_running = state
                 .retry_tasks
@@ -540,15 +633,24 @@ async fn start_pending_retry_workers(
             if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
                 worker.abort();
             }
-            if pipeline.lock().await.retry_queue_len() > 0 {
-                let worker = spawn_retry_worker(pipeline, out_tx.clone());
+            let has_pending = {
+                let pipeline = pipeline.lock().await;
+                pipeline.retry_queue_len() > 0 || pipeline.has_pending_summary(meeting_id)
+            };
+            if has_pending {
+                let worker = spawn_retry_worker(meeting_id, pipeline, state.clone());
+                worker.request_stop();
                 state.retry_tasks.lock().await.insert(meeting_id, worker);
             }
             continue;
         }
 
         let pipeline = match build_retry_pipeline(&state.data_dir, meeting_id, &settings) {
-            Ok(pipeline) if pipeline.retry_queue_len() > 0 => Arc::new(Mutex::new(pipeline)),
+            Ok(pipeline)
+                if pipeline.retry_queue_len() > 0 || pipeline.has_pending_summary(meeting_id) =>
+            {
+                Arc::new(Mutex::new(pipeline))
+            }
             Ok(_) => continue,
             Err(message) => {
                 let _ = out_tx.send(HelperToExtension::Error {
@@ -565,23 +667,54 @@ async fn start_pending_retry_workers(
             .lock()
             .await
             .insert(meeting_id, pipeline.clone());
-        let worker = spawn_retry_worker(pipeline, out_tx.clone());
+        let worker = spawn_retry_worker(meeting_id, pipeline, state.clone());
+        worker.request_stop();
         state.retry_tasks.lock().await.insert(meeting_id, worker);
     }
 }
 
-fn pending_retry_meeting_ids(root: &Path) -> Vec<Uuid> {
+async fn subscribe_meeting(state: &Arc<AppState>, meeting_id: Uuid, out_tx: ipc::OutSender) {
+    let mut subscribers = state.subscribers.lock().await;
+    let entries = subscribers.entry(meeting_id).or_default();
+    entries.retain(|sender| !sender.is_closed());
+    if !entries.iter().any(|sender| sender.same_channel(&out_tx)) {
+        entries.push(out_tx);
+    }
+}
+
+async fn send_meeting_message(state: &Arc<AppState>, meeting_id: Uuid, message: HelperToExtension) {
+    let mut subscribers = state.subscribers.lock().await;
+    let Some(entries) = subscribers.get_mut(&meeting_id) else {
+        return;
+    };
+    entries.retain(|sender| !sender.is_closed() && sender.send(message.clone()).is_ok());
+    if entries.is_empty() {
+        subscribers.remove(&meeting_id);
+    }
+}
+
+fn pending_processing_meeting_ids(root: &Path) -> Vec<Uuid> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return vec![];
     };
-    entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
+    let mut ids = HashSet::new();
+    for entry in entries.filter_map(Result::ok) {
+        if let Some(id) = entry.file_name().to_str().and_then(|name| {
             let value = name.strip_prefix("retry-")?.strip_suffix(".json")?;
             Uuid::parse_str(value).ok()
-        })
-        .collect()
+        }) {
+            ids.insert(id);
+        }
+        if let Ok(bytes) = std::fs::read(entry.path().join("meta.json")) {
+            if let Ok(meta) = serde_json::from_slice::<notetaker_core::storage::MeetingMeta>(&bytes)
+            {
+                if meta.summary_pending {
+                    ids.insert(meta.id);
+                }
+            }
+        }
+    }
+    ids.into_iter().collect()
 }
 
 fn build_retry_pipeline(

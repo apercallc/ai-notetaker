@@ -72,7 +72,10 @@ async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown>
       controller.resumeRecording(message.meetingId);
       return {};
     case "DISCARD_RECORDING":
-      controller.discardRecording(message.meetingId);
+      await controller.discardRecording(message.meetingId);
+      return {};
+    case "DELETE_MEETING":
+      await controller.deleteMeeting(message.meetingId);
       return {};
     case "TEST_PROVIDER_KEY":
       return controller.testProviderKey(message.provider, message.key);

@@ -131,6 +131,9 @@ impl Pipeline {
                 message: format!("failed to persist audio to disk: {e}"),
             }];
         }
+        let _ = self
+            .store
+            .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz);
 
         let mut messages = Vec::new();
         let previous = match channel {
@@ -214,32 +217,64 @@ impl Pipeline {
             pcm16: pending.pcm16,
             sample_rate_hz: pending.sample_rate_hz,
         };
+        let retry_job_id = match self.retry_queue.enqueue(
+            RetryableChunk {
+                meeting_id,
+                channel,
+                sample_rate_hz: chunk.sample_rate_hz,
+                audio_ref: RetryAudioRef::FileRange {
+                    channel_file: channel_file.to_string(),
+                    start: pending.start,
+                    end,
+                },
+            },
+            Utc::now(),
+        ) {
+            Ok(id) => id,
+            Err(error) => {
+                return vec![HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: format!("failed to persist transcription retry: {error}"),
+                }]
+            }
+        };
         match self.transcription_provider.transcribe_chunk(&chunk).await {
             Ok(segments) => {
                 let mut messages = Vec::new();
-                let _ = self.store.append_transcript_segments(meeting_id, &segments);
-                for segment in &segments {
-                    messages.push(HelperToExtension::TranscriptPartial {
-                        meeting_id,
-                        speaker: segment.speaker.clone(),
-                        text: segment.text.clone(),
-                        is_final: segment.is_final,
-                    });
+                match self.store.append_transcript_segments(meeting_id, &segments) {
+                    Ok(()) => {
+                        let _ = self
+                            .store
+                            .mark_audio_transcribed(meeting_id, channel_file, end);
+                        let _ = self.retry_queue.record_success(retry_job_id);
+                        for segment in &segments {
+                            messages.push(HelperToExtension::TranscriptPartial {
+                                meeting_id,
+                                speaker: segment.speaker.clone(),
+                                text: segment.text.clone(),
+                                is_final: segment.is_final,
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        let _ = self.retry_queue.record_failure(retry_job_id, Utc::now());
+                        messages.push(HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code: ErrorCode::DeviceNotFound,
+                            message: format!(
+                                "transcript could not be persisted; queued for retry: {error}"
+                            ),
+                        });
+                    }
                 }
                 messages
             }
             Err(e) => {
-                let retryable = RetryableChunk {
-                    meeting_id,
-                    channel,
-                    sample_rate_hz: chunk.sample_rate_hz,
-                    audio_ref: RetryAudioRef::FileRange {
-                        channel_file: channel_file.to_string(),
-                        start: pending.start,
-                        end,
-                    },
-                };
-                let _ = self.retry_queue.enqueue(retryable, Utc::now());
+                // The job was persisted before the provider call, so leaving
+                // its initial due time intact makes the first retry eligible
+                // immediately. Subsequent failures use exponential backoff
+                // in process_due_retries.
                 vec![HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
                     code: e.to_error_code(),
@@ -255,18 +290,135 @@ impl Pipeline {
     ) -> Result<Vec<HelperToExtension>, PipelineError> {
         self.accepting_audio = false;
         self.store.mark_stopped(meeting_id, Utc::now())?;
+        self.store.mark_summary_pending(meeting_id)?;
         let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
         messages.extend(self.flush_pending_audio(meeting_id).await);
 
-        let transcript = self.store.load_transcript(meeting_id)?;
+        if self.retry_queue_len() > 0 {
+            messages.push(HelperToExtension::Error {
+                meeting_id: Some(meeting_id),
+                code: ErrorCode::ProviderUnreachable,
+                message: "summary deferred until transcription retries finish".into(),
+            });
+            return Ok(messages);
+        }
+
+        messages.extend(self.process_pending_summary(meeting_id).await);
+        Ok(messages)
+    }
+
+    pub async fn recover_recording(
+        &mut self,
+        meeting_id: Uuid,
+    ) -> Result<Vec<HelperToExtension>, PipelineError> {
+        self.accepting_audio = false;
+        let meta = self.store.load_meta(meeting_id)?;
+        self.summary_options = meta.summary_options.clone();
+        self.store.mark_stopped(meeting_id, Utc::now())?;
+        self.store.mark_summary_pending(meeting_id)?;
+        let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
+
+        for (channel, channel_file, start, sample_rate_hz) in [
+            (
+                AudioChannel::Mic,
+                MIC_FILE,
+                meta.transcribed_mic_bytes,
+                meta.mic_sample_rate_hz,
+            ),
+            (
+                AudioChannel::Speaker,
+                SPEAKER_FILE,
+                meta.transcribed_speaker_bytes,
+                meta.speaker_sample_rate_hz,
+            ),
+        ] {
+            let end = std::fs::metadata(self.store.audio_path(meeting_id, channel_file))
+                .map(|meta| meta.len() as usize)
+                .unwrap_or(start);
+            if end <= start {
+                continue;
+            }
+            let batch_size = (sample_rate_hz as usize)
+                .saturating_mul(2)
+                .saturating_mul(TRANSCRIPTION_BATCH_SECONDS);
+            let mut offset = start;
+            while offset < end {
+                let batch_end = (offset + batch_size.max(2)).min(end);
+                let pcm16 =
+                    self.store
+                        .read_audio_range(meeting_id, channel_file, offset, batch_end)?;
+                messages.extend(
+                    self.transcribe_pending(
+                        meeting_id,
+                        channel,
+                        channel_file,
+                        PendingAudio {
+                            pcm16,
+                            sample_rate_hz,
+                            start: offset,
+                        },
+                    )
+                    .await,
+                );
+                offset = batch_end;
+            }
+        }
+
+        if self.retry_queue_len() == 0 {
+            messages.extend(self.process_pending_summary(meeting_id).await);
+        }
+        Ok(messages)
+    }
+
+    pub fn has_pending_summary(&self, meeting_id: Uuid) -> bool {
+        self.store
+            .load_meta(meeting_id)
+            .map(|meta| meta.summary_pending)
+            .unwrap_or(false)
+    }
+
+    pub async fn process_pending_summary(&mut self, meeting_id: Uuid) -> Vec<HelperToExtension> {
+        let Ok(meta) = self.store.load_meta(meeting_id) else {
+            return vec![];
+        };
+        if !meta.summary_pending || self.retry_queue_len() > 0 {
+            return vec![];
+        }
+        let transcript = match self.store.load_transcript(meeting_id) {
+            Ok(transcript) => transcript,
+            Err(error) => {
+                return vec![HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: format!("could not reload transcript for summary: {error}"),
+                }]
+            }
+        };
         match self
             .summarization_provider
-            .summarize(&transcript, &self.summary_options)
+            .summarize(&transcript, &meta.summary_options)
             .await
         {
             Ok(summary) => {
-                self.store.mark_processed(meeting_id)?;
-                messages.push(HelperToExtension::SummaryReady {
+                if let Err(error) = self.store.write_summary(meeting_id, &summary) {
+                    return vec![HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: format!(
+                            "summarization failed: could not persist summary: {error}"
+                        ),
+                    }];
+                }
+                if let Err(error) = self.store.mark_processed(meeting_id) {
+                    return vec![HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: format!(
+                            "summarization failed: could not finalize meeting: {error}"
+                        ),
+                    }];
+                }
+                vec![HelperToExtension::SummaryReady {
                     meeting_id,
                     summary: summary.summary,
                     action_items: summary
@@ -277,17 +429,14 @@ impl Pipeline {
                             owner: i.owner,
                         })
                         .collect(),
-                });
+                }]
             }
-            Err(e) => {
-                messages.push(HelperToExtension::Error {
-                    meeting_id: Some(meeting_id),
-                    code: e.to_error_code(),
-                    message: format!("summarization failed: {e}"),
-                });
-            }
+            Err(error) => vec![HelperToExtension::Error {
+                meeting_id: Some(meeting_id),
+                code: error.to_error_code(),
+                message: format!("summarization failed: {error}"),
+            }],
         }
-        Ok(messages)
     }
 
     /// Crash recovery: called once on helper startup. Every meeting still
@@ -354,25 +503,44 @@ impl Pipeline {
             };
             match self.transcription_provider.transcribe_chunk(&chunk).await {
                 Ok(segments) => {
-                    let _ = self
+                    match self
                         .store
-                        .append_transcript_segments(job.meeting_id, &segments);
-                    for segment in &segments {
-                        messages.push(HelperToExtension::TranscriptPartial {
-                            meeting_id: job.meeting_id,
-                            speaker: segment.speaker.clone(),
-                            text: segment.text.clone(),
-                            is_final: segment.is_final,
-                        });
-                    }
-                    if !segments.is_empty() {
-                        if let Some(summary_message) =
-                            self.resummarize_if_finalized(job.meeting_id).await
-                        {
-                            messages.push(summary_message);
+                        .append_transcript_segments(job.meeting_id, &segments)
+                    {
+                        Ok(()) => {
+                            let _ = self.store.mark_audio_transcribed(
+                                job.meeting_id,
+                                channel_file,
+                                *end,
+                            );
+                            for segment in &segments {
+                                messages.push(HelperToExtension::TranscriptPartial {
+                                    meeting_id: job.meeting_id,
+                                    speaker: segment.speaker.clone(),
+                                    text: segment.text.clone(),
+                                    is_final: segment.is_final,
+                                });
+                            }
+                            let _ = self.retry_queue.record_success(job_id);
+                            if !segments.is_empty() && self.retry_queue_len() == 0 {
+                                if let Some(summary_message) =
+                                    self.resummarize_if_finalized(job.meeting_id).await
+                                {
+                                    messages.push(summary_message);
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            let _ = self.retry_queue.record_failure(job_id, now);
+                            messages.push(HelperToExtension::Error {
+                                meeting_id: Some(job.meeting_id),
+                                code: ErrorCode::DeviceNotFound,
+                                message: format!(
+                                    "transcript could not be persisted; queued for retry: {error}"
+                                ),
+                            });
                         }
                     }
-                    let _ = self.retry_queue.record_success(job_id);
                 }
                 Err(error) => {
                     if let Ok(Some(_exhausted)) = self.retry_queue.record_failure(job_id, now) {
@@ -391,7 +559,7 @@ impl Pipeline {
 
     async fn resummarize_if_finalized(&self, meeting_id: Uuid) -> Option<HelperToExtension> {
         let meta = self.store.load_meta(meeting_id).ok()?;
-        if meta.state == MeetingState::Recording {
+        if meta.state == MeetingState::Recording || !meta.summary_pending {
             return None;
         }
         let transcript = match self.store.load_transcript(meeting_id) {
@@ -415,7 +583,24 @@ impl Pipeline {
             .await
         {
             Ok(summary) => {
-                let _ = self.store.mark_processed(meeting_id);
+                if let Err(error) = self.store.write_summary(meeting_id, &summary) {
+                    return Some(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: format!(
+                            "summarization failed: could not persist summary: {error}"
+                        ),
+                    });
+                }
+                if let Err(error) = self.store.mark_processed(meeting_id) {
+                    return Some(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: format!(
+                            "summarization failed: could not finalize meeting: {error}"
+                        ),
+                    });
+                }
                 Some(HelperToExtension::SummaryReady {
                     meeting_id,
                     summary: summary.summary,
@@ -677,5 +862,68 @@ mod tests {
         pipeline.stop_recording(id).await.unwrap();
 
         assert!(pipeline.find_recoverable_meetings().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recovery_processes_audio_tail_and_completes_the_meeting() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3], 16_000)
+            .await;
+
+        let messages = pipeline.recover_recording(id).await.unwrap();
+
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::SummaryReady { .. })));
+        assert_eq!(
+            pipeline.store.load_meta(id).unwrap().state,
+            MeetingState::Processed
+        );
+        assert_eq!(pipeline.store.load_transcript(id).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn summary_failure_remains_pending_for_a_later_retry() {
+        struct FailingSummarizer;
+
+        #[async_trait]
+        impl SummarizationProvider for FailingSummarizer {
+            fn id(&self) -> SummarizationProviderId {
+                SummarizationProviderId::Claude
+            }
+
+            async fn summarize(
+                &self,
+                _transcript: &[TranscriptSegment],
+                _options: &SummaryOptions,
+            ) -> Result<Summary, ProviderError> {
+                Err(ProviderError::Unreachable("summary unavailable".into()))
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(FakeTranscriber {
+                fail_times: Arc::new(AtomicUsize::new(0)),
+            }),
+            Box::new(FailingSummarizer),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        let messages = pipeline.stop_recording(id).await.unwrap();
+
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::Error { .. })));
+        let meta = pipeline.store.load_meta(id).unwrap();
+        assert_eq!(meta.state, MeetingState::Stopped);
+        assert!(meta.summary_pending);
     }
 }

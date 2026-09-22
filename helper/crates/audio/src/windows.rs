@@ -128,6 +128,7 @@ impl AudioCapture for WindowsAudioCapture {
 
         let (tx, rx) = std::sync::mpsc::channel::<CapturedFrame>();
         let running = self.running.clone();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
         std::thread::spawn(move || {
             let host = cpal::default_host();
@@ -136,15 +137,54 @@ impl AudioCapture for WindowsAudioCapture {
             });
             let mic_device = host.default_input_device();
 
-            let _speaker_stream = speaker_device
-                .and_then(|d| build_input_stream(&d, AudioChannel::Speaker, tx.clone()).ok());
-            let _mic_stream =
-                mic_device.and_then(|d| build_input_stream(&d, AudioChannel::Mic, tx.clone()).ok());
+            let Some(speaker_device) = speaker_device else {
+                let _ = ready_tx.send(Err("VB-CABLE meeting-audio device was not found".into()));
+                return;
+            };
+            let Some(mic_device) = mic_device else {
+                let _ = ready_tx.send(Err("the system microphone was not found".into()));
+                return;
+            };
+            let speaker_stream =
+                match build_input_stream(&speaker_device, AudioChannel::Speaker, tx.clone()) {
+                    Ok(stream) => stream,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error.to_string()));
+                        return;
+                    }
+                };
+            let mic_stream = match build_input_stream(&mic_device, AudioChannel::Mic, tx.clone()) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    let _ = ready_tx.send(Err(error.to_string()));
+                    return;
+                }
+            };
+            let _ = ready_tx.send(Ok(()));
 
             while running.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
+            drop((speaker_stream, mic_stream));
         });
+
+        match tokio::time::timeout(std::time::Duration::from_secs(3), ready_rx).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(error))) => {
+                self.running.store(false, Ordering::SeqCst);
+                return Err(AudioError::StreamError(error));
+            }
+            Ok(Err(_)) => {
+                self.running.store(false, Ordering::SeqCst);
+                return Err(AudioError::StreamError(
+                    "audio startup thread exited unexpectedly".into(),
+                ));
+            }
+            Err(_) => {
+                self.running.store(false, Ordering::SeqCst);
+                return Err(AudioError::StreamError("audio startup timed out".into()));
+            }
+        }
 
         tokio::spawn(async move {
             while let Ok(frame) = rx.recv() {

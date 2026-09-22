@@ -12,6 +12,7 @@ const KEYS = {
   pairingToken: "notetaker.pairingToken",
   meetingsIndex: "notetaker.meetings.index", // ordered list of meeting IDs
   meetingPrefix: "notetaker.meeting.", // + id
+  webappSyncOutbox: "notetaker.webappSync.outbox",
 } as const;
 
 function storageGet<T>(key: string): Promise<T | undefined> {
@@ -149,7 +150,31 @@ export function updateMeeting(
 export async function deleteMeeting(id: string): Promise<void> {
   return enqueueMeetingMutation(id, async () => {
     const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-    await storageSet({ [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id) });
+    const outbox = await getWebappSyncOutbox();
+    await storageSet({
+      [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id),
+      [KEYS.webappSyncOutbox]: outbox.filter((meeting) => meeting.id !== id),
+    });
     await storageRemove(KEYS.meetingPrefix + id);
   });
+}
+
+const MAX_WEBAPP_OUTBOX_ITEMS = 50;
+
+export async function getWebappSyncOutbox(): Promise<MeetingRecord[]> {
+  const stored = await storageGet<MeetingRecord[]>(KEYS.webappSyncOutbox);
+  return Array.isArray(stored)
+    ? stored.filter((meeting): meeting is MeetingRecord => !!meeting && typeof meeting.id === "string")
+    : [];
+}
+
+export async function queueWebappSync(meeting: MeetingRecord): Promise<void> {
+  const outbox = await getWebappSyncOutbox();
+  const next = [...outbox.filter((queued) => queued.id !== meeting.id), meeting].slice(-MAX_WEBAPP_OUTBOX_ITEMS);
+  await storageSet({ [KEYS.webappSyncOutbox]: next });
+}
+
+export async function removeWebappSyncOutbox(id: string): Promise<void> {
+  const outbox = await getWebappSyncOutbox();
+  await storageSet({ [KEYS.webappSyncOutbox]: outbox.filter((meeting) => meeting.id !== id) });
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { BackgroundController, type NativeClientLike } from "../src/lib/backgroundController";
-import { getMeeting } from "../src/lib/storage";
+import { getMeeting, saveSettings } from "../src/lib/storage";
 import { DEFAULT_SETTINGS } from "../src/types";
 
 function createFakeClient(): NativeClientLike & {
@@ -20,6 +20,7 @@ function createFakeClient(): NativeClientLike & {
     stopRecording: vi.fn(),
     resumeRecording: vi.fn(),
     discardRecording: vi.fn(),
+    deleteMeeting: vi.fn(),
     getAudioPreflight: vi.fn(async () => ({
       platform: "test",
       driver: "test",
@@ -44,9 +45,10 @@ function createFakeClient(): NativeClientLike & {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   chromeMock.reset();
   vi.restoreAllMocks();
+  await saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true });
 });
 
 describe("BackgroundController", () => {
@@ -74,11 +76,29 @@ describe("BackgroundController", () => {
     expect(stored?.status).toBe("recording");
   });
 
+  it("blocks recording until consent has been acknowledged", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    await saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: false });
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+
+    const meetingId = await controller.startRecording();
+
+    expect(meetingId).toBe("");
+    expect(client.startRecording).not.toHaveBeenCalled();
+    expect(broadcast).toHaveBeenCalledWith({
+      type: "RECORDING_ERROR",
+      meetingId: null,
+      message: "Acknowledge the recording consent notice in setup before recording.",
+    });
+  });
+
   it("uses the saved default meeting mode for new recordings", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
     await controller.init();
-    await controller.saveSettings({ ...DEFAULT_SETTINGS, defaultMeetingMode: "standup" });
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, defaultMeetingMode: "standup", consentDisclosureAcknowledged: true });
 
     const meetingId = await controller.startRecording();
 
@@ -181,6 +201,7 @@ describe("BackgroundController", () => {
     await controller.init();
     await controller.saveSettings({
       ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
       webapp: { url: "https://notes.example.com", token: "tok123" },
     });
     const meetingId = await controller.startRecording();
@@ -206,7 +227,7 @@ describe("BackgroundController", () => {
     const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) => ({ ok: true, status: 201 }) as Response);
     controller.setFetchImpl(fetchImpl);
     await controller.init();
-    await controller.saveSettings({ ...DEFAULT_SETTINGS, webapp: { url: "https://notes.example.com", token: "tok123" } });
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, webapp: { url: "https://notes.example.com", token: "tok123" } });
     const meetingId = await controller.startRecording();
 
     client.emit("summary_ready", {
@@ -326,16 +347,28 @@ describe("BackgroundController", () => {
     expect(controller.getState().recoverableMeeting).toBeNull();
   });
 
-  it("discarding a recovered recording clears it without resuming", () => {
+  it("discarding a recovered recording clears it without resuming", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
     client.emit("recovered_recording", { meetingId: "orphan-2", startedAt: "2026-09-21T09:00:00.000Z" });
 
-    controller.discardRecording("orphan-2");
+    await controller.discardRecording("orphan-2");
 
     expect(client.discardRecording).toHaveBeenCalledWith("orphan-2");
     expect(client.resumeRecording).not.toHaveBeenCalled();
     expect(controller.getState().recoverableMeeting).toBeNull();
+  });
+
+  it("deletes local meeting state and asks the helper to delete disk data", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    await controller.deleteMeeting(meetingId);
+
+    expect(client.deleteMeeting).toHaveBeenCalledWith(meetingId);
+    expect(await getMeeting(meetingId)).toBeNull();
   });
 
   it("tracks helper connection status and broadcasts it to the UI", async () => {

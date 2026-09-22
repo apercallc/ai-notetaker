@@ -10,6 +10,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -65,7 +66,15 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
     }
 
     fn persist(&self) -> Result<(), RetryQueueError> {
-        fs::write(&self.path, serde_json::to_vec_pretty(&self.jobs)?)?;
+        let temp = self.path.with_extension("tmp");
+        let mut file = fs::File::create(&temp)?;
+        file.write_all(&serde_json::to_vec_pretty(&self.jobs)?)?;
+        file.sync_all()?;
+        #[cfg(windows)]
+        if self.path.exists() {
+            fs::remove_file(&self.path)?;
+        }
+        fs::rename(temp, &self.path)?;
         Ok(())
     }
 

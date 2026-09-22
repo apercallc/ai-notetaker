@@ -9,6 +9,9 @@ import {
   saveMeeting,
   getMeeting,
   deleteMeeting,
+  getWebappSyncOutbox,
+  queueWebappSync,
+  removeWebappSyncOutbox,
 } from "../src/lib/storage";
 import { DEFAULT_SETTINGS, type MeetingRecord } from "../src/types";
 
@@ -108,9 +111,11 @@ describe("meeting storage", () => {
 
   it("deletes a meeting", async () => {
     await saveMeeting(meeting);
+    await queueWebappSync(meeting);
     await deleteMeeting("m1");
     expect(await getMeeting("m1")).toBeNull();
     expect(await listMeetings()).toEqual([]);
+    expect(await getWebappSyncOutbox()).toEqual([]);
   });
 
   it("upserts rather than duplicating on repeated save", async () => {
@@ -119,5 +124,13 @@ describe("meeting storage", () => {
     const meetings = await listMeetings();
     expect(meetings).toHaveLength(1);
     expect(meetings[0]?.summary).toBe("Updated summary");
+  });
+
+  it("persists a bounded webapp sync outbox and removes delivered meetings", async () => {
+    await queueWebappSync(meeting);
+
+    expect(await getWebappSyncOutbox()).toEqual([meeting]);
+    await removeWebappSyncOutbox(meeting.id);
+    expect(await getWebappSyncOutbox()).toEqual([]);
   });
 });

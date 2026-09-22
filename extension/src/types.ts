@@ -125,6 +125,7 @@ export type OutgoingMessage =
   | { type: "stop_recording"; meetingId: string }
   | { type: "resume_recording"; meetingId: string }
   | { type: "discard_recording"; meetingId: string }
+  | { type: "delete_meeting"; meetingId: string }
   | { type: "test_provider_key"; provider: ProviderKind; key: string }
   | { type: "audio_preflight" }
   | { type: "audio_probe" };

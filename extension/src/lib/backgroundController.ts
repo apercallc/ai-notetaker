@@ -7,9 +7,9 @@
  */
 import type { BackgroundState, BackgroundToUiMessage } from "./internalMessages";
 import type { HelperConnectionStatus } from "./nativeMessaging";
-import { getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
+import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
-import { syncMeetingToWebapp } from "./webappSync";
+import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import type { AudioProbeResult, AudioStatus, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
 
 export interface NativeClientLike {
@@ -24,6 +24,7 @@ export interface NativeClientLike {
   stopRecording(meetingId: string): void;
   resumeRecording(meetingId: string): void;
   discardRecording(meetingId: string): void;
+  deleteMeeting(meetingId: string): void;
   testProviderKey(provider: ProviderKind, key: string): Promise<{ valid: boolean; message: string }>;
   getAudioPreflight(): Promise<AudioStatus>;
   runAudioProbe(): Promise<AudioProbeResult>;
@@ -47,6 +48,7 @@ export class BackgroundController {
     this.client.on("transcript_partial", (msg) => void this.handleTranscriptPartial(msg));
     this.client.on("summary_ready", (msg) => void this.handleSummaryReady(msg));
     this.client.on("error", (msg) => void this.handleError(msg));
+    this.client.on("recording_started", (msg) => this.handleRecordingStarted(msg));
     this.client.on("recovered_recording", (msg) => this.handleRecoveredRecording(msg));
     this.client.onStatusChange((status) => this.handleStatusChange(status));
   }
@@ -60,6 +62,7 @@ export class BackgroundController {
     this.settings = await getSettings();
     await this.client.connect();
     this.pushCurrentSettings();
+    void flushWebappSyncOutbox(this.settings, this.fetchImpl);
   }
 
   private pushCurrentSettings(): void {
@@ -79,9 +82,18 @@ export class BackgroundController {
     this.settings = settings;
     await saveSettings(settings);
     this.pushCurrentSettings();
+    void flushWebappSyncOutbox(this.settings, this.fetchImpl);
   }
 
   async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general"): Promise<string> {
+    if (!this.settings?.consentDisclosureAcknowledged) {
+      this.broadcast({
+        type: "RECORDING_ERROR",
+        meetingId: null,
+        message: "Acknowledge the recording consent notice in setup before recording.",
+      });
+      return "";
+    }
     const meetingId = generateMeetingId();
     const meeting: MeetingRecord = {
       id: meetingId,
@@ -122,9 +134,27 @@ export class BackgroundController {
     if (this.recoverableMeeting?.meetingId === meetingId) this.recoverableMeeting = null;
   }
 
-  discardRecording(meetingId: string): void {
-    this.client.discardRecording(meetingId);
-    if (this.recoverableMeeting?.meetingId === meetingId) this.recoverableMeeting = null;
+  async discardRecording(meetingId: string): Promise<void> {
+    try {
+      this.client.discardRecording(meetingId);
+    } catch {
+      // The helper may be offline; local deletion still needs to complete.
+    } finally {
+      if (this.recoverableMeeting?.meetingId === meetingId) this.recoverableMeeting = null;
+      await deleteLocalMeeting(meetingId);
+    }
+  }
+
+  async deleteMeeting(meetingId: string): Promise<void> {
+    try {
+      this.client.deleteMeeting(meetingId);
+    } catch {
+      // The helper may be offline; local deletion still needs to complete.
+    } finally {
+      // The helper owns the durable raw-audio copy, but local extension data
+      // must still be removable when the helper is temporarily unavailable.
+      await deleteLocalMeeting(meetingId);
+    }
   }
 
   testProviderKey(provider: ProviderKind, key: string): Promise<{ valid: boolean; message: string }> {
@@ -159,6 +189,10 @@ export class BackgroundController {
     // the duplicate push on the very first connect (init pushes too) is
     // an idempotent overwrite.
     if (status === "connected") this.pushCurrentSettings();
+  }
+
+  private handleRecordingStarted(msg: Extract<IncomingMessage, { type: "recording_started" }>): void {
+    this.activeMeetingId = msg.meetingId;
   }
 
   private async handleTranscriptPartial(
@@ -224,7 +258,12 @@ export class BackgroundController {
         // helper. It is not a failed meeting: keep the recording active so a
         // later retry can append the recovered transcript and the user can
         // still stop normally.
-        if (msg.message.startsWith("transcription failed, queued for retry:")) {
+        if (
+          msg.message.startsWith("transcription failed, queued for retry:") ||
+          msg.message.startsWith("transcript could not be persisted; queued for retry:") ||
+          msg.message.startsWith("summary deferred until transcription retries finish") ||
+          msg.message.startsWith("summarization failed:")
+        ) {
           this.broadcast({ type: "PROCESSING_WARNING", meetingId: msg.meetingId, message: msg.message });
           return;
         }

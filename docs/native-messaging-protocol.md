@@ -87,6 +87,7 @@ file on Unix-like systems.
 // In response to a "recovered_recording" message from the helper (see below).
 { "type": "resume_recording", "meetingId": "<uuid>" }
 { "type": "discard_recording", "meetingId": "<uuid>" }
+{ "type": "delete_meeting", "meetingId": "<uuid>" }
 
 // Settings-page "test key" button. The extension never calls provider APIs
 // directly (see extension/CLAUDE.md) — this is why "test key" exists as a
@@ -101,6 +102,11 @@ file on Unix-like systems.
 
 { "type": "recording_started", "meetingId": "<uuid>" }
 { "type": "recording_stopped", "meetingId": "<uuid>" }
+
+// When a Native Messaging connection is recreated while the persistent
+// helper is still recording, the helper replays recording_started and routes
+// subsequent meeting events to the new connection. This makes MV3 worker
+// suspension transparent to the capture pipeline.
 
 // Streamed continuously while recording.
 {

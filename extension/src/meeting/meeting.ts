@@ -1,4 +1,4 @@
-import { deleteMeeting, getMeeting, getSettings, updateMeeting } from "../lib/storage";
+import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, updateMeeting } from "../lib/storage";
 import { escapeHtml } from "../lib/html";
 import { syncMeetingToWebapp } from "../lib/webappSync";
 import { speakerLabel } from "../types";
@@ -92,7 +92,13 @@ async function render(): Promise<void> {
 
   document.getElementById("delete-meeting")?.addEventListener("click", async () => {
     if (!confirm("Delete this meeting? This can't be undone.")) return;
-    await deleteMeeting(id);
+    try {
+      await chrome.runtime.sendMessage({ type: "DELETE_MEETING", meetingId: id });
+    } catch {
+      // The helper may be offline; local deletion remains authoritative for
+      // the extension UI and can be retried for helper-owned raw audio.
+    }
+    await deleteLocalMeeting(id);
     window.close();
   });
 

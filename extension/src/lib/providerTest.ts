@@ -28,6 +28,7 @@ export function normalizeWebappUrl(raw: string): string | null {
     const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return null;
     if (url.username || url.password) return null;
+    if (url.pathname !== "/" || url.search) return null;
     url.hash = "";
     return url.toString().replace(/\/+$/, "");
   } catch {

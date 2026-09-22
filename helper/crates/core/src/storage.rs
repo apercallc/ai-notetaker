@@ -17,7 +17,7 @@
 //! ```
 
 use crate::native_messaging::MeetingMode;
-use crate::providers::{SummaryOptions, TranscriptSegment};
+use crate::providers::{Summary, SummaryOptions, TranscriptSegment};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -41,6 +41,16 @@ pub struct MeetingMeta {
     pub state: MeetingState,
     #[serde(default)]
     pub summary_options: SummaryOptions,
+    #[serde(default)]
+    pub transcribed_mic_bytes: usize,
+    #[serde(default)]
+    pub transcribed_speaker_bytes: usize,
+    #[serde(default = "default_sample_rate")]
+    pub mic_sample_rate_hz: u32,
+    #[serde(default = "default_sample_rate")]
+    pub speaker_sample_rate_hz: u32,
+    #[serde(default)]
+    pub summary_pending: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -77,6 +87,11 @@ impl MeetingStore {
             ended_at: None,
             state: MeetingState::Recording,
             summary_options: SummaryOptions::default(),
+            transcribed_mic_bytes: 0,
+            transcribed_speaker_bytes: 0,
+            mic_sample_rate_hz: default_sample_rate(),
+            speaker_sample_rate_hz: default_sample_rate(),
+            summary_pending: false,
         };
         self.write_meta(&meta)?;
         Ok(())
@@ -98,13 +113,18 @@ impl MeetingStore {
             ended_at: None,
             state: MeetingState::Recording,
             summary_options,
+            transcribed_mic_bytes: 0,
+            transcribed_speaker_bytes: 0,
+            mic_sample_rate_hz: default_sample_rate(),
+            speaker_sample_rate_hz: default_sample_rate(),
+            summary_pending: false,
         };
         self.write_meta(&meta)
     }
 
     fn write_meta(&self, meta: &MeetingMeta) -> Result<(), StorageError> {
         let path = self.meeting_dir(meta.id).join("meta.json");
-        fs::write(path, serde_json::to_vec_pretty(meta)?)?;
+        atomic_write(&path, &serde_json::to_vec_pretty(meta)?)?;
         Ok(())
     }
 
@@ -132,6 +152,10 @@ impl MeetingStore {
             .append(true)
             .open(path)?;
         file.write_all(pcm16)?;
+        // The next pipeline step may send these exact bytes to a provider;
+        // make the write durable before that call so a process crash cannot
+        // leave the retry cursor pointing at audio that never reached disk.
+        file.sync_data()?;
         Ok(())
     }
 
@@ -145,6 +169,55 @@ impl MeetingStore {
     pub fn mark_processed(&self, id: Uuid) -> Result<(), StorageError> {
         let mut meta = self.load_meta(id)?;
         meta.state = MeetingState::Processed;
+        meta.summary_pending = false;
+        self.write_meta(&meta)
+    }
+
+    pub fn mark_summary_pending(&self, id: Uuid) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        meta.summary_pending = true;
+        self.write_meta(&meta)
+    }
+
+    pub fn mark_audio_transcribed(
+        &self,
+        id: Uuid,
+        channel_file: &str,
+        end: usize,
+    ) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        match channel_file {
+            MIC_FILE => meta.transcribed_mic_bytes = meta.transcribed_mic_bytes.max(end),
+            SPEAKER_FILE => {
+                meta.transcribed_speaker_bytes = meta.transcribed_speaker_bytes.max(end)
+            }
+            _ => {
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid audio channel",
+                )))
+            }
+        }
+        self.write_meta(&meta)
+    }
+
+    pub fn mark_audio_sample_rate(
+        &self,
+        id: Uuid,
+        channel_file: &str,
+        sample_rate_hz: u32,
+    ) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        match channel_file {
+            MIC_FILE => meta.mic_sample_rate_hz = sample_rate_hz,
+            SPEAKER_FILE => meta.speaker_sample_rate_hz = sample_rate_hz,
+            _ => {
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid audio channel",
+                )))
+            }
+        }
         self.write_meta(&meta)
     }
 
@@ -170,7 +243,7 @@ impl MeetingStore {
         let mut segments = self.load_transcript(id).unwrap_or_default();
         segments.extend_from_slice(new_segments);
         let path = self.meeting_dir(id).join("transcript.json");
-        fs::write(path, serde_json::to_vec_pretty(&segments)?)?;
+        atomic_write(&path, &serde_json::to_vec_pretty(&segments)?)?;
         Ok(())
     }
 
@@ -183,10 +256,32 @@ impl MeetingStore {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
+    pub fn write_summary(&self, id: Uuid, summary: &Summary) -> Result<(), StorageError> {
+        let path = self.meeting_dir(id).join("summary.json");
+        atomic_write(&path, &serde_json::to_vec_pretty(summary)?)?;
+        Ok(())
+    }
+
+    pub fn load_summary(&self, id: Uuid) -> Result<Option<Summary>, StorageError> {
+        let path = self.meeting_dir(id).join("summary.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = fs::read(path)?;
+        Ok(Some(serde_json::from_slice(&bytes)?))
+    }
+
     /// Every meeting directory whose meta is still `Recording` — i.e. one
     /// that never saw a clean `stop_recording` before the process exited.
     /// This is the crash-recovery scan run on helper startup.
     pub fn find_interrupted_meetings(&self) -> Result<Vec<MeetingMeta>, StorageError> {
+        self.find_interrupted_meetings_excluding(&std::collections::HashSet::new())
+    }
+
+    pub fn find_interrupted_meetings_excluding(
+        &self,
+        excluded: &std::collections::HashSet<Uuid>,
+    ) -> Result<Vec<MeetingMeta>, StorageError> {
         let meetings_dir = self.root.join("meetings");
         if !meetings_dir.exists() {
             return Ok(vec![]);
@@ -203,12 +298,20 @@ impl MeetingStore {
             }
             let bytes = fs::read(&meta_path)?;
             let meta: MeetingMeta = serde_json::from_slice(&bytes)?;
-            if meta.state == MeetingState::Recording {
+            if meta.state == MeetingState::Recording && !excluded.contains(&meta.id) {
                 interrupted.push(meta);
             }
         }
         interrupted.sort_by_key(|m| m.started_at);
         Ok(interrupted)
+    }
+
+    pub fn delete_meeting(&self, id: Uuid) -> Result<(), StorageError> {
+        let dir = self.meeting_dir(id);
+        if dir.exists() {
+            fs::remove_dir_all(dir)?;
+        }
+        Ok(())
     }
 
     pub fn audio_path(&self, id: Uuid, channel_file: &str) -> PathBuf {
@@ -249,6 +352,25 @@ impl MeetingStore {
 
 pub const MIC_FILE: &str = "mic.pcm";
 pub const SPEAKER_FILE: &str = "speaker.pcm";
+
+fn default_sample_rate() -> u32 {
+    16_000
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    let temp = path.with_extension("tmp");
+    let mut file = fs::File::create(&temp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    // Windows does not replace an existing destination with rename. Remove
+    // it only on that platform; Unix keeps the atomic rename semantics.
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    fs::rename(temp, path)?;
+    Ok(())
+}
 
 pub fn is_valid_root(path: &Path) -> bool {
     path.is_dir() || !path.exists()
@@ -402,5 +524,52 @@ mod tests {
         store.create_meeting(id, Utc::now()).unwrap();
 
         assert!(store.read_audio_range(id, "../meta.json", 0, 1).is_err());
+    }
+
+    #[test]
+    fn excludes_active_recordings_from_recovery_scan() {
+        let (_dir, store) = temp_store();
+        let active_id = Uuid::new_v4();
+        let interrupted_id = Uuid::new_v4();
+        store.create_meeting(active_id, Utc::now()).unwrap();
+        store.create_meeting(interrupted_id, Utc::now()).unwrap();
+
+        let excluded = std::collections::HashSet::from([active_id]);
+        let recoverable = store
+            .find_interrupted_meetings_excluding(&excluded)
+            .unwrap();
+
+        assert_eq!(
+            recoverable.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![interrupted_id]
+        );
+    }
+
+    #[test]
+    fn deleting_a_meeting_removes_raw_audio_and_metadata() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store.append_audio(id, MIC_FILE, &[1, 2, 3]).unwrap();
+
+        store.delete_meeting(id).unwrap();
+
+        assert!(store.load_meta(id).is_err());
+        assert!(!store.audio_path(id, MIC_FILE).exists());
+    }
+
+    #[test]
+    fn summaries_are_persisted_for_tray_and_restart_access() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        let summary = Summary {
+            summary: "A concise note".into(),
+            action_items: vec![],
+        };
+
+        store.write_summary(id, &summary).unwrap();
+
+        assert_eq!(store.load_summary(id).unwrap(), Some(summary));
     }
 }

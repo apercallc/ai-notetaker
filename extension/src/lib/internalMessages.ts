@@ -16,6 +16,7 @@ export type UiToBackgroundMessage =
   | { type: "SAVE_SETTINGS"; settings: NotetakerSettings }
   | { type: "RESUME_RECORDING"; meetingId: string }
   | { type: "DISCARD_RECORDING"; meetingId: string }
+  | { type: "DELETE_MEETING"; meetingId: string }
   | { type: "TEST_PROVIDER_KEY"; provider: ProviderKind; key: string };
 
 export interface BackgroundState {

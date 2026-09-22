@@ -46,11 +46,32 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const SOCKET_NAME: &str = "ai-notetaker.sock";
 
+fn socket_path() -> std::path::PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("ai-notetaker")
+        .join(SOCKET_NAME)
+}
+
+fn ensure_socket_directory() -> std::io::Result<()> {
+    let path = socket_path();
+    let directory = path
+        .parent()
+        .expect("the socket path always has a parent directory");
+    std::fs::create_dir_all(directory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
 pub fn socket_name() -> std::io::Result<interprocess::local_socket::Name<'static>> {
     if GenericNamespaced::is_supported() {
         SOCKET_NAME.to_ns_name::<GenericNamespaced>()
     } else {
-        let path = std::env::temp_dir().join(SOCKET_NAME);
+        let path = socket_path();
         path.to_fs_name::<GenericFilePath>()
     }
 }
@@ -103,6 +124,7 @@ where
     F: Fn(ExtensionToHelper, OutSender) -> Fut + Clone + Send + 'static,
     Fut: std::future::Future<Output = bool> + Send,
 {
+    ensure_socket_directory()?;
     let listener = ListenerOptions::new().name(socket_name()?).create_tokio()?;
     loop {
         let conn = listener.accept().await?;

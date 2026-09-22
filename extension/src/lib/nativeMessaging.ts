@@ -217,6 +217,10 @@ export class NativeMessagingClient {
     this.send({ type: "discard_recording", meetingId });
   }
 
+  deleteMeeting(meetingId: string): void {
+    this.send({ type: "delete_meeting", meetingId });
+  }
+
   getAudioPreflight(): Promise<AudioStatus> {
     return new Promise((resolve) => {
       let settled = false;

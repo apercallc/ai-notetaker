@@ -25,12 +25,33 @@ them drift apart.
       Windows, and Linux devices with each supported meeting app; local tests
       cannot prove OS routing or provider behavior.
 
+## Hardening pass (2026-09-21)
+
+- [x] Crash recovery now excludes active in-process recordings, reprocesses
+      each durable raw-audio tail from its persisted transcription cursor, and
+      keeps failed summaries pending for a later retry.
+- [x] Retry metadata, meeting metadata, and transcripts use atomic temp-file
+      replacement; deleting a meeting removes its helper-owned raw audio and
+      metadata as well as extension-local state.
+- [x] Audio startup fails closed when either capture stream cannot be built;
+      platform guidance now distinguishes the physical microphone from the
+      virtual meeting-audio input.
+- [x] MV3 helper reconnects replay active-recording state and route subsequent
+      transcript/summary events to the new connection; optional webapp sync
+      failures persist in a bounded local outbox.
+- [x] Recording is blocked until consent is acknowledged, onboarding provider
+      tests must pass before completion, and canonical webapp URLs cannot
+      include a path or query that could redirect bearer-token delivery.
+- [x] Local webapp integration tests have a one-command disposable Postgres
+      runner (`webapp/npm run test:with-postgres`); ESLint 9 is configured and
+      passes.
+
 ---
 
 ## Sub-project 1: Core capture + notes pipeline (MVP)
 
 **Status (2026-09-21): first implementation pass landed, then reviewed and
-fixed.** 86 Rust tests + 61 extension tests + 48 webapp tests, all
+fixed.** 86 Rust tests + 67 extension tests + 48 webapp tests, all
 independently re-run and verified green by the coordinator (not just taken
 on the implementers' word) — see `docs/native-messaging-protocol.md` for a
 real cross-package
@@ -152,7 +173,8 @@ accessibility failures):*
 - [ ] Deepgram integration — **implemented against the batch REST
       endpoint, not the live-streaming endpoint** the spec names as
       default; same trait, swappable later, tested with mocked HTTP
-      (`wiremock`)
+      (`wiremock`). The current UX is rolling five-second batch partials;
+      true live WebSocket streaming remains a scoped follow-up.
 - [x] Claude Haiku integration — tested
 - [x] Groq Whisper Turbo integration — tested
 - [x] Gemini Flash + DeepSeek V4 Flash integration — both implemented,
@@ -170,10 +192,8 @@ accessibility failures):*
       public key, endpoint, and signing artifacts remain owner-only release
       setup; see `docs/helper-packaging.md`.
 - [x] Startup check for an in-progress recording (crash recovery) —
-      tested; note: resume currently finalizes the existing transcript
-      rather than reprocessing the last unsent audio segment (the audio
-      itself is never lost — that guarantee holds, the *resume* UX is
-      simplified for now)
+      tested; resume reprocesses the durable raw-audio tail after the last
+      persisted transcription cursor before finalizing the summary.
 - [x] Onboarding/install messaging about reboot/re-login — copy exists in
       the extension's onboarding wizard
 
@@ -344,7 +364,7 @@ scope:
 ### Testing & QA
 
 - [x] Unit tests per package (helper Rust modules, extension logic, webapp
-      API routes) — focused suites currently cover 86 Rust, 61 extension,
+      API routes) — focused suites currently cover 86 Rust, 67 extension,
       and 48 webapp tests
 - [ ] Integration test for the full pipeline using recorded fixture audio
       against both default and budget provider tiers (mocked provider

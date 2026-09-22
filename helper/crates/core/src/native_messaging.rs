@@ -97,6 +97,10 @@ pub enum ExtensionToHelper {
         #[serde(rename = "meetingId")]
         meeting_id: Uuid,
     },
+    DeleteMeeting {
+        #[serde(rename = "meetingId")]
+        meeting_id: Uuid,
+    },
     TestProviderKey {
         provider: ProviderKind,
         key: String,
@@ -349,6 +353,15 @@ mod tests {
         framed.extend_from_slice(&json);
         let mut cursor = Cursor::new(framed);
         assert_eq!(read_message(&mut cursor).unwrap(), msg);
+    }
+
+    #[test]
+    fn round_trips_delete_meeting_message() {
+        let id = Uuid::new_v4();
+        let message = ExtensionToHelper::DeleteMeeting { meeting_id: id };
+        let json = serde_json::to_vec(&message).unwrap();
+        let decoded: ExtensionToHelper = serde_json::from_slice(&json).unwrap();
+        assert_eq!(decoded, message);
     }
 
     #[test]

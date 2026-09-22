@@ -10,6 +10,7 @@ let settings: NotetakerSettings = DEFAULT_SETTINGS;
 let consentAcknowledged = false;
 let audioStatus: AudioStatus | null = null;
 let audioProbe: AudioProbeResult | null = null;
+let providerTestsPassed = false;
 
 function detectPlatform(): "mac" | "windows" | "linux" | "unknown" {
   const platform = navigator.userAgent.toLowerCase();
@@ -64,15 +65,15 @@ function renderStep2(): string {
     <div class="device-guide" aria-label="Audio device setup by operating system">
       <section class="platform-card">
         <h2>macOS</h2>
-        <p>In Audio MIDI Setup, create a Multi-Output Device containing BlackHole and your headphones or speakers. Choose the Multi-Output Device as Speaker and BlackHole as Microphone.</p>
+        <p>In Audio MIDI Setup, create a Multi-Output Device containing BlackHole and your headphones or speakers. Choose it as Speaker and keep your physical microphone as Microphone.</p>
       </section>
       <section class="platform-card">
         <h2>Windows</h2>
-        <p>Enable “Listen to this device” for CABLE Output and choose your normal headphones as playback. Choose CABLE Input as Speaker and CABLE Output as Microphone in the meeting app.</p>
+        <p>Enable “Listen to this device” for CABLE Output and choose your normal headphones as playback. Choose CABLE Input as Speaker and keep your physical microphone as Microphone in the meeting app.</p>
       </section>
       <section class="platform-card">
         <h2>Linux</h2>
-        <p>Choose “AI Notetaker” (the PulseAudio/PipeWire virtual device) for input and output in the meeting app. Keep your normal speakers as system output so loopback remains audible.</p>
+        <p>Choose “AI Notetaker” (the PulseAudio/PipeWire virtual device) as Speaker and keep your physical microphone as Microphone. Keep your normal speakers as system output so loopback remains audible.</p>
       </section>
       <p class="text-secondary setup-note">Device names vary by OS and meeting app. See the helper packaging guide for troubleshooting and uninstall steps.</p>
       <a class="setup-link" href="https://github.com/ai-notetaker/ai-notetaker/blob/main/docs/helper-packaging.md" target="_blank" rel="noreferrer">Open the full setup and uninstall guide</a>
@@ -155,6 +156,7 @@ function renderStep(): string {
 function canAdvance(): boolean {
   if (step === 1) return !!(document.getElementById("helper-installed") as HTMLInputElement)?.checked;
   if (step === 2) return !!audioStatus?.ready && !!audioProbe?.passed;
+  if (step === 3) return providerTestsPassed;
   if (step === 4) return !!(document.getElementById("consent-ack") as HTMLInputElement)?.checked;
   return true;
 }
@@ -227,9 +229,16 @@ function wireEvents(): void {
       testApiKey("claude", claudeKey),
     ]);
     const bothValid = deepgramResult.valid && claudeResult.valid;
+    providerTestsPassed = bothValid;
     resultEl.textContent = `${deepgramResult.message} ${claudeResult.message}`;
     resultEl.className = `test-result ${bothValid ? "valid" : "invalid"}`;
   });
+
+  for (const id of ["onboarding-deepgram-key", "onboarding-claude-key"]) {
+    document.getElementById(id)?.addEventListener("input", () => {
+      providerTestsPassed = false;
+    });
+  }
 }
 
 async function init(): Promise<void> {

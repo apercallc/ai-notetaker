@@ -159,13 +159,15 @@ Choose the devices in the meeting app, not only in the operating system:
 
 - **macOS:** In Audio MIDI Setup, create a Multi-Output Device containing
   BlackHole and your headphones or speakers. Choose the Multi-Output Device
-  as the meeting app's speaker and BlackHole as its microphone.
+  as the meeting app's speaker and keep your normal physical microphone as
+  the meeting app's microphone; the helper captures both separately.
 - **Windows:** Enable “Listen to this device” for CABLE Output and choose
   your normal headphones for playback. Choose CABLE Input as the meeting
-  app's speaker and CABLE Output as its microphone.
+  app's speaker and keep your normal physical microphone as its microphone.
 - **Linux:** Choose the helper's “AI Notetaker” PulseAudio/PipeWire virtual
-  device for input and output in the meeting app. Keep your normal speakers
-  as the system output so the loopback remains audible.
+  device as the meeting app's speaker and keep your normal physical
+  microphone as its microphone. Keep your normal speakers as the system
+  output so the loopback remains audible.
 
 Click **Check devices**, then **Run 2-second test**. Continue only when the
 wizard reports that both the microphone and meeting audio are ready.

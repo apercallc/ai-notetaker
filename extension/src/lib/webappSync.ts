@@ -1,4 +1,5 @@
 import { normalizeWebappUrl } from "./providerTest";
+import { getWebappSyncOutbox, queueWebappSync, removeWebappSyncOutbox } from "./storage";
 import type { MeetingRecord, NotetakerSettings } from "../types";
 
 const WEBAPP_SYNC_TIMEOUT_MS = 15_000;
@@ -12,11 +13,12 @@ export async function syncMeetingToWebapp(
   meeting: MeetingRecord,
   settings: Pick<NotetakerSettings, "webapp"> | null | undefined,
   fetchImpl: typeof fetch = fetch,
-): Promise<void> {
+  options: { queueOnFailure?: boolean } = {},
+): Promise<boolean> {
   const webapp = settings?.webapp;
-  if (!webapp) return;
+  if (!webapp) return false;
   const normalized = normalizeWebappUrl(webapp.url);
-  if (!normalized) return;
+  if (!normalized) return false;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), WEBAPP_SYNC_TIMEOUT_MS);
   try {
@@ -46,9 +48,23 @@ export async function syncMeetingToWebapp(
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`webapp returned HTTP ${response.status}`);
+    await removeWebappSyncOutbox(meeting.id);
+    return true;
   } catch {
     console.warn(`Failed to sync meeting ${meeting.id} to webapp`);
+    if (options.queueOnFailure !== false) await queueWebappSync(meeting);
+    return false;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+export async function flushWebappSyncOutbox(
+  settings: Pick<NotetakerSettings, "webapp"> | null | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  if (!settings?.webapp) return;
+  for (const meeting of await getWebappSyncOutbox()) {
+    await syncMeetingToWebapp(meeting, settings, fetchImpl, { queueOnFailure: false });
   }
 }

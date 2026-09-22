@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:with-postgres": "node scripts/test-with-postgres.mjs",
     "test:watch": "vitest",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

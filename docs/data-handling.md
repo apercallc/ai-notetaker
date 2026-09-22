@@ -20,8 +20,11 @@ AI provider.
 
 ## Deletion
 
-Delete local extension meetings from the extension's meeting detail view.
-For a complete local reset, stop and quit the helper, then remove its
+Delete a meeting from the extension's meeting detail view; the extension
+requests deletion from the helper and removes its local copy. If the helper
+is offline, the extension-local deletion still completes and the helper can
+be cleaned separately. For a complete local reset, stop and quit the helper,
+then remove its
 `ai-notetaker` app-data directory as described in
 [`helper-packaging.md`](helper-packaging.md). Deleting a meeting or the data
 directory is permanent; export or copy data first when it must be retained.

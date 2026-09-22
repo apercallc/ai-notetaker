@@ -53,13 +53,17 @@ docker run -d --name ai-notetaker-dev-pg \
 
 ## Running tests
 
-Tests are real integration tests against a live Postgres (not mocked) —
-point `DATABASE_URL` in `.env` at a real (throwaway is fine) database
-before running them:
+Tests are real integration tests against a live Postgres (not mocked). If
+Docker is available, the repository-managed command creates and removes an
+isolated throwaway database automatically:
 
 ```bash
-npm test
+npm run test:with-postgres
 ```
+
+To use an existing database instead, set `DATABASE_URL` in `.env` and run
+`npm test` directly. The Docker helper uses port `5499`; override it with
+`AI_NOTETAKER_TEST_DB_PORT` if that port is occupied.
 
 Test files run sequentially (see `vitest.config.ts`) because they share one
 database and each resets its own tables in `beforeEach` — running them in

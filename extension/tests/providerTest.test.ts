@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { normalizeWebappUrl, testWebappHealth } from "../src/lib/providerTest";
 
 describe("normalizeWebappUrl", () => {
-  it("normalizes HTTPS URLs and removes fragments", () => {
-    expect(normalizeWebappUrl("https://notes.example.com/app/#settings")).toBe("https://notes.example.com/app");
+  it("accepts only the canonical webapp root and removes fragments", () => {
+    expect(normalizeWebappUrl("https://notes.example.com/#settings")).toBe("https://notes.example.com");
+    expect(normalizeWebappUrl("https://notes.example.com/app/#settings")).toBeNull();
   });
 
   it("allows HTTP only for loopback development", () => {
