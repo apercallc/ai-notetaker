@@ -48,8 +48,6 @@ The **Record** button stays disabled until the helper and both audio channels
 are ready. You can choose a meeting mode, run a two-second audio test, see
 recent meetings, and open the action-item inbox.
 
-![AI Notetaker audio-ready recording popup](docs/screenshots/recording-ready.png)
-
 These screenshots show the built extension UI and its documented states. A
 real provider call, OS audio driver, and live meeting still need to be tested
 on the machine where you use the app.
