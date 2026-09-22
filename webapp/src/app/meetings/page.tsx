@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listMeetings } from "@/lib/meetings";
+import { listMeetings, MAX_SEARCH_LENGTH } from "@/lib/meetings";
 import { logout } from "@/app/login/actions";
 import { SearchForm } from "./SearchForm";
 
@@ -20,7 +20,10 @@ export default async function MeetingsPage({
 }: {
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
-  const { q, page: rawPage } = await searchParams;
+  const { q: rawQuery, page: rawPage } = await searchParams;
+  // Keep a pasted or hand-crafted URL from turning a normal page view into a
+  // validation error; the API still rejects oversized queries explicitly.
+  const q = rawQuery?.trim().slice(0, MAX_SEARCH_LENGTH);
   const parsedPage = Number(rawPage ?? "1");
   const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 && parsedPage <= MAX_PAGE ? parsedPage : 1;
   let result = await listMeetings({ query: q, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });

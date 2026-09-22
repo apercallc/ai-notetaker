@@ -294,7 +294,7 @@ impl Pipeline {
         let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
         messages.extend(self.flush_pending_audio(meeting_id).await);
 
-        if self.retry_queue_len() > 0 {
+        if self.has_pending_retries(meeting_id) {
             messages.push(HelperToExtension::Error {
                 meeting_id: Some(meeting_id),
                 code: ErrorCode::ProviderUnreachable,
@@ -364,7 +364,7 @@ impl Pipeline {
             }
         }
 
-        if self.retry_queue_len() == 0 {
+        if !self.has_pending_retries(meeting_id) {
             messages.extend(self.process_pending_summary(meeting_id).await);
         }
         Ok(messages)
@@ -381,7 +381,7 @@ impl Pipeline {
         let Ok(meta) = self.store.load_meta(meeting_id) else {
             return vec![];
         };
-        if !meta.summary_pending || self.retry_queue_len() > 0 {
+        if !meta.summary_pending || self.has_pending_retries(meeting_id) {
             return vec![];
         }
         let transcript = match self.store.load_transcript(meeting_id) {
@@ -458,6 +458,11 @@ impl Pipeline {
         self.retry_queue.len()
     }
 
+    fn has_pending_retries(&self, meeting_id: Uuid) -> bool {
+        self.retry_queue
+            .any(|job| job.payload.meeting_id == meeting_id)
+    }
+
     /// Consume retry jobs whose backoff has elapsed. The audio range was
     /// persisted before the original provider call, so a retry reads the
     /// exact durable bytes rather than relying on an in-memory frame.
@@ -522,7 +527,7 @@ impl Pipeline {
                                 });
                             }
                             let _ = self.retry_queue.record_success(job_id);
-                            if !segments.is_empty() && self.retry_queue_len() == 0 {
+                            if !self.has_pending_retries(job.meeting_id) {
                                 if let Some(summary_message) =
                                     self.resummarize_if_finalized(job.meeting_id).await
                                 {
@@ -640,6 +645,7 @@ mod tests {
 
     struct FakeTranscriber {
         fail_times: Arc<AtomicUsize>,
+        return_empty: bool,
     }
 
     #[async_trait]
@@ -657,6 +663,9 @@ mod tests {
             if self.fail_times.load(Ordering::SeqCst) > 0 {
                 self.fail_times.fetch_sub(1, Ordering::SeqCst);
                 return Err(ProviderError::Unreachable("simulated failure".into()));
+            }
+            if self.return_empty {
+                return Ok(vec![]);
             }
             let speaker = if chunk.channel == AudioChannel::Mic {
                 "you"
@@ -691,6 +700,13 @@ mod tests {
     }
 
     fn build_pipeline(fail_times: usize) -> (tempfile::TempDir, Pipeline) {
+        build_pipeline_with_options(fail_times, false)
+    }
+
+    fn build_pipeline_with_options(
+        fail_times: usize,
+        return_empty: bool,
+    ) -> (tempfile::TempDir, Pipeline) {
         let dir = tempfile::tempdir().unwrap();
         let store = MeetingStore::new(dir.path()).unwrap();
         let retry_path = dir.path().join("retry.json");
@@ -699,6 +715,7 @@ mod tests {
             store,
             Box::new(FakeTranscriber {
                 fail_times: Arc::new(AtomicUsize::new(fail_times)),
+                return_empty,
             }),
             Box::new(FakeSummarizer),
             retry_queue,
@@ -822,6 +839,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn successful_empty_retry_still_resummarizes_a_stopped_meeting() {
+        let (_dir, mut pipeline) = build_pipeline_with_options(1, true);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[9, 8, 7], 16000)
+            .await;
+        pipeline.flush_pending_audio(id).await;
+        pipeline.stop_recording(id).await.unwrap();
+
+        let messages = pipeline.process_due_retries(Utc::now()).await;
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
+    }
+
+    #[tokio::test]
+    async fn one_meeting_retry_does_not_defer_another_meetings_summary() {
+        let (_dir, mut pipeline) = build_pipeline(1);
+        let deferred_id = Uuid::new_v4();
+        pipeline.start_recording(deferred_id).unwrap();
+        pipeline
+            .handle_audio_chunk(deferred_id, AudioChannel::Mic, &[9, 8, 7], 16000)
+            .await;
+        pipeline.flush_pending_audio(deferred_id).await;
+        let deferred_messages = pipeline.stop_recording(deferred_id).await.unwrap();
+        assert!(!deferred_messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::SummaryReady { .. })));
+
+        let immediate_id = Uuid::new_v4();
+        pipeline.start_recording(immediate_id).unwrap();
+        pipeline
+            .handle_audio_chunk(immediate_id, AudioChannel::Mic, &[1, 2, 3], 16000)
+            .await;
+        pipeline.flush_pending_audio(immediate_id).await;
+        let immediate_messages = pipeline.stop_recording(immediate_id).await.unwrap();
+        assert!(immediate_messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { meeting_id, .. } if *meeting_id == immediate_id
+        )));
+
+        let retry_messages = pipeline.process_due_retries(Utc::now()).await;
+        assert!(retry_messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { meeting_id, .. } if *meeting_id == deferred_id
+        )));
+    }
+
+    #[tokio::test]
     async fn stop_recording_marks_stopped_and_returns_summary() {
         let (_dir, mut pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();
@@ -911,6 +979,7 @@ mod tests {
             store,
             Box::new(FakeTranscriber {
                 fail_times: Arc::new(AtomicUsize::new(0)),
+                return_empty: false,
             }),
             Box::new(FailingSummarizer),
             retry_queue,

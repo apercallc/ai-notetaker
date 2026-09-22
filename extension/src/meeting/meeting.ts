@@ -87,7 +87,11 @@ async function render(): Promise<void> {
     link.href = url;
     link.download = `${meeting.title.replace(/[^a-z0-9]+/gi, "-")}.md`;
     link.click();
-    URL.revokeObjectURL(url);
+    // Allow the browser to start the download before releasing the object URL.
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url);
+      link.remove();
+    }, 0);
   });
 
   document.getElementById("delete-meeting")?.addEventListener("click", async () => {

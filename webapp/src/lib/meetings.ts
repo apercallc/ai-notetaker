@@ -16,6 +16,8 @@ const MAX_ACTION_TEXT_LENGTH = 2_000;
 const MAX_OWNER_LENGTH = 200;
 const MAX_ACTION_ID_LENGTH = 128;
 const MAX_OFFSET = 100_000;
+const MAX_TRANSCRIPT_TOTAL_LENGTH = 5_000_000;
+const MAX_ACTION_TOTAL_LENGTH = 2_000_000;
 
 function assertValid(input: unknown): CreateMeetingRequest {
   if (typeof input !== "object" || input === null) {
@@ -47,6 +49,7 @@ function assertValid(input: unknown): CreateMeetingRequest {
   if (!Array.isArray(body.transcript) || body.transcript.length > MAX_TRANSCRIPT_SEGMENTS) {
     throw new ValidationError("transcript must be an array");
   }
+  let transcriptLength = 0;
   for (const segment of body.transcript) {
     if (
       typeof segment !== "object" ||
@@ -60,10 +63,15 @@ function assertValid(input: unknown): CreateMeetingRequest {
     ) {
       throw new ValidationError("each transcript segment needs speaker, text, and timestamp");
     }
+    transcriptLength += (segment as Record<string, string>).text.length;
+    if (transcriptLength > MAX_TRANSCRIPT_TOTAL_LENGTH) {
+      throw new ValidationError("transcript is too large");
+    }
   }
   if (!Array.isArray(body.actionItems) || body.actionItems.length > MAX_ACTION_ITEMS) {
     throw new ValidationError("actionItems must be an array");
   }
+  let actionTextLength = 0;
   for (const item of body.actionItems) {
     if (
       typeof item !== "object" ||
@@ -89,6 +97,10 @@ function assertValid(input: unknown): CreateMeetingRequest {
           Number.isNaN(Date.parse((item as Record<string, string>).completedAt))))
     ) {
       throw new ValidationError("each action item needs text");
+    }
+    actionTextLength += (item as Record<string, string>).text.length;
+    if (actionTextLength > MAX_ACTION_TOTAL_LENGTH) {
+      throw new ValidationError("action items are too large");
     }
   }
   if (body.title !== undefined && (typeof body.title !== "string" || body.title.length > MAX_TITLE_LENGTH)) {
@@ -169,7 +181,7 @@ export interface ListMeetingsOptions {
   offset?: number;
 }
 
-const MAX_SEARCH_LENGTH = 200;
+export const MAX_SEARCH_LENGTH = 200;
 
 export async function listMeetings(
   options: ListMeetingsOptions
@@ -269,6 +281,9 @@ export async function updateActionItem(
   changes: { status?: "open" | "done"; dueAt?: string | null },
 ): Promise<boolean> {
   if (!id || id.length > MAX_ACTION_ID_LENGTH) throw new ValidationError("action item id is invalid");
+  if (changes.status !== undefined && changes.status !== "open" && changes.status !== "done") {
+    throw new ValidationError("status must be open or done");
+  }
   if (changes.dueAt !== undefined && changes.dueAt !== null && Number.isNaN(Date.parse(changes.dueAt))) {
     throw new ValidationError("dueAt must be an ISO 8601 string");
   }

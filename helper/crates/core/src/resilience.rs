@@ -136,6 +136,13 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
     pub fn is_empty(&self) -> bool {
         self.jobs.is_empty()
     }
+
+    pub fn any<F>(&self, predicate: F) -> bool
+    where
+        F: FnMut(&RetryJob<T>) -> bool,
+    {
+        self.jobs.iter().any(predicate)
+    }
 }
 
 #[cfg(test)]

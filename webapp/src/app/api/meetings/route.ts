@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listMeetings, upsertMeeting, ValidationError } from "@/lib/meetings";
 
+const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+
 // Auth is enforced globally by src/proxy.ts for every /api/* route —
 // this handler doesn't re-check it, by design (one enforcement point).
 
@@ -30,9 +32,35 @@ function parseIntegerParam(value: string | null, name: string): number | undefin
 }
 
 export async function POST(request: NextRequest) {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && Number(contentLength) > MAX_REQUEST_BYTES) {
+    return NextResponse.json({ error: "request body is too large" }, { status: 413 });
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
+    if (!request.body) throw new Error("missing request body");
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_REQUEST_BYTES) {
+        await reader.cancel();
+        return NextResponse.json({ error: "request body is too large" }, { status: 413 });
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }

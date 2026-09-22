@@ -53,7 +53,11 @@ export function proxy(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  // Everything except Next's own internals and common static asset
-  // extensions — those don't need to pass through the auth check.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Everything except Next's own internals and static assets — those don't
+  // need to pass through the auth check. In particular, excluding SVG and
+  // font files keeps the login page's own assets usable before a session
+  // exists.
+  matcher: [
+    "/((?!_next/static|_next/image|_next/font|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml|webmanifest)$).*)",
+  ],
 };

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { FormEvent } from "react";
+import { MAX_SEARCH_LENGTH } from "@/lib/meetings";
 
 export function SearchForm({ initialQuery }: { initialQuery: string }) {
   const router = useRouter();
@@ -30,6 +31,7 @@ export function SearchForm({ initialQuery }: { initialQuery: string }) {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search meetings…"
           className="search-input"
+          maxLength={MAX_SEARCH_LENGTH}
           disabled={pending}
         />
         <button type="submit" className="button button-primary" disabled={pending} aria-busy={pending}>

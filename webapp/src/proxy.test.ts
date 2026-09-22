@@ -66,5 +66,7 @@ describe("proxy", () => {
 
   it("matcher config excludes Next internals and static assets", () => {
     expect(config.matcher).toBeDefined();
+    expect(config.matcher[0]).toContain("_next/font");
+    expect(config.matcher[0]).toContain("svg");
   });
 });

@@ -76,6 +76,9 @@ describe("upsertMeeting", () => {
     expect(openItems[0]?.meeting.title).toBe("Weekly sync");
 
     expect(await updateActionItem("action-1", { status: "done", dueAt: null })).toBe(true);
+    await expect(
+      updateActionItem("action-1", { status: "invalid" as "open" }),
+    ).rejects.toThrow("status must be open or done");
     const detail = await getMeeting("11111111-1111-1111-1111-111111111111");
     expect(detail?.mode).toBe("sales");
     expect(detail?.actionItems[0]).toMatchObject({ status: "done", dueAt: null });
@@ -133,6 +136,17 @@ describe("upsertMeeting", () => {
 
   it("rejects oversized payloads before they reach Prisma", async () => {
     await expect(upsertMeeting(sampleMeeting({ summary: "x".repeat(100_001) }))).rejects.toThrow(ValidationError);
+    await expect(
+      upsertMeeting(
+        sampleMeeting({
+          transcript: Array.from({ length: 251 }, (_, index) => ({
+            speaker: "you",
+            text: "x".repeat(20_000),
+            timestamp: `2026-09-21T15:${String(index % 60).padStart(2, "0")}:00.000Z`,
+          })),
+        }),
+      ),
+    ).rejects.toThrow("transcript is too large");
     await expect(
       upsertMeeting(sampleMeeting({ actionItems: Array.from({ length: 1_001 }, () => ({ text: "too many" })) })),
     ).rejects.toThrow(ValidationError);

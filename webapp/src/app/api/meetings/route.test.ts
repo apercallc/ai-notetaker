@@ -65,6 +65,16 @@ describe("POST /api/meetings", () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
   });
+
+  it("rejects oversized request bodies before parsing them", async () => {
+    const req = new NextRequest("http://localhost/api/meetings", {
+      method: "POST",
+      headers: { "content-length": String(16 * 1024 * 1024 + 1) },
+      body: "{}",
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+  });
 });
 
 describe("GET /api/meetings", () => {

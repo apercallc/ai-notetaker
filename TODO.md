@@ -38,7 +38,8 @@ only.
       release-owner work.
 - [x] Replace the onboarding's generic GitHub Releases link with an
       OS-detected install page and a manual platform override; GitHub Pages
-      must be enabled for the configured repository before this is live.
+      is enabled for the configured repository and the install site is live at
+      `https://apercallc.github.io/ai-notetaker/`.
 - [ ] Finish and test direct native installers, including release-owner
       signing/notarization and per-OS Native Messaging registration.
 - [x] Add Homebrew Cask plus WinGet/Chocolatey templates and release-build
@@ -76,6 +77,12 @@ only.
 - [x] Local webapp integration tests have a one-command disposable Postgres
       runner (`webapp/npm run test:with-postgres`); ESLint 9 is configured and
       passes.
+- [x] Retry completion is scoped per meeting, so one meeting's queued audio
+      cannot block or strand another meeting's pending summary; empty but
+      successful transcript retries are covered by regression tests.
+- [x] Webapp meeting ingestion now caps streamed request bodies and aggregate
+      transcript/action-item text, while the UI bounds pasted search URLs and
+      serves static login assets without a session.
 
 ---
 
