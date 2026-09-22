@@ -23,8 +23,7 @@
     ],
     "resources": {
       "../../native-messaging-host-manifest/com.ainotetaker.helper.json.template": "native-messaging-host-template.json",
-      "resources/windows/install-native-messaging.ps1": "windows/install-native-messaging.ps1",
-      "resources/windows/uninstall-native-messaging.ps1": "windows/uninstall-native-messaging.ps1"
+      "resources/windows": "windows"
     },
     "linux": {
       "deb": {

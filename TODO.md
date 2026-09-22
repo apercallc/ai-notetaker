@@ -25,6 +25,37 @@ them drift apart.
       Windows, and Linux devices with each supported meeting app; local tests
       cannot prove OS routing or provider behavior.
 
+## Distribution and installation architecture (2026-09-21)
+
+The approved direction is documented in
+[`docs/superpowers/specs/2026-09-21-distribution-and-installation-architecture.md`](docs/superpowers/specs/2026-09-21-distribution-and-installation-architecture.md).
+The desktop helper remains native; Docker is for the optional history webapp
+only.
+
+- [x] Add the release manifest schema/template covering helper/extension
+      versions, protocol compatibility, OS/architecture artifacts, checksums,
+      and package-manager metadata; publishing real signed values remains
+      release-owner work.
+- [x] Replace the onboarding's generic GitHub Releases link with an
+      OS-detected install page and a manual platform override; GitHub Pages
+      must be enabled for the configured repository before this is live.
+- [ ] Finish and test direct native installers, including release-owner
+      signing/notarization and per-OS Native Messaging registration.
+- [x] Add Homebrew Cask plus WinGet/Chocolatey templates and release-build
+      rendering around pinned native artifacts; publishing packages remains
+      release-owner work. npm stays limited to source builds.
+- [x] Add `webapp/Dockerfile` and Docker Compose for the optional webapp and
+      Postgres, with persistent storage, migrations, health checks, and
+      authenticated token setup.
+- [x] Add helper/extension protocol compatibility and a user-facing install
+      health state for helper missing, incompatible, driver missing, routing
+      incomplete, and ready.
+- [ ] Complete acceptance testing for native installers, package-manager
+      install/upgrade/uninstall, and Chrome Web Store/manual extension paths.
+- [x] Docker webapp acceptance smoke test passes: image build, migrations,
+      health endpoint, unauthenticated rejection, and authenticated API access;
+      native OS and remote deployment proof remain release-owner work.
+
 ## Hardening pass (2026-09-21)
 
 - [x] Crash recovery now excludes active in-process recordings, reprocesses
@@ -151,11 +182,11 @@ accessibility failures):*
       BlackHole download — **written but not compiled** (no macOS
       toolchain available to verify; module exists at
       `helper/crates/audio/src/macos.rs`)
-- [ ] Windows: bundle + silently install base VB-CABLE only — **written
-      but not compiled**, and the actual binary fetch/embed step
-      intentionally errors rather than fakes success (no network access to
-      pull VB-Audio's real installer in this environment); module at
-      `helper/crates/audio/src/windows.rs`
+- [x] Windows: release-only checksum-pinned staging of the base VB-CABLE
+      package plus visible administrator installer launch is wired; the
+      payload is intentionally not committed and Windows execution/reboot
+      behavior remains release-owner validation. See
+      `packaging/windows/` and `helper/crates/audio/src/windows.rs`.
 - [x] Linux: PulseAudio/PipeWire null-sink integration — `cpal` + `pactl`,
       compiles and unit-tests pass (not hardware-verified — no audio
       device in this sandbox)

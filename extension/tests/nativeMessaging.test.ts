@@ -83,6 +83,24 @@ describe("NativeMessagingClient", () => {
     expect(await storage.getPairingToken()).toBe("new-token-123");
   });
 
+  it("dispatches helper compatibility information", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    const handler = vi.fn();
+    client.on("helper_info", handler);
+    port._emitMessage({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 1, platform: "linux" });
+
+    expect(handler).toHaveBeenCalledWith({
+      type: "helper_info",
+      helperVersion: "0.1.0",
+      protocolVersion: 1,
+      platform: "linux",
+    });
+  });
+
   it("dispatches transcript_partial messages to registered listeners", async () => {
     const port = createFakePort();
     chromeMock.runtime.connectNative.mockReturnValue(port);

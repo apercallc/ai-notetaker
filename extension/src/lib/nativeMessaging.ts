@@ -38,7 +38,7 @@ type IncomingMessageType = IncomingMessage["type"];
  * actionable "install the helper" state instead of silently retrying
  * forever.
  */
-export type HelperConnectionStatus = "connecting" | "connected" | "helper_not_found" | "disconnected";
+export type HelperConnectionStatus = "connecting" | "connected" | "helper_not_found" | "disconnected" | "incompatible";
 
 export class NativeMessagingClient {
   private port: chrome.runtime.Port | null = null;

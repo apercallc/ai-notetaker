@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install AI Notetaker</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; --bg: #f6f7fb; --card: #fff; --ink: #172033; --muted: #5c667a; --accent: #5b4bdb; --border: #dfe3ee; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #121522; --card: #1d2230; --ink: #f4f6ff; --muted: #b7bfd3; --border: #353d52; } }
+    body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 20px 72px; }
+    h1 { font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.05; margin-bottom: 12px; }
+    h2 { margin-top: 0; }
+    .lede { color: var(--muted); font-size: 1.12rem; max-width: 62ch; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-top: 20px; }
+    .platforms { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+    .platform { border: 2px solid var(--border); border-radius: 12px; padding: 16px; }
+    .platform.selected { border-color: var(--accent); }
+    code { display: block; overflow-x: auto; background: color-mix(in srgb, var(--ink) 10%, transparent); border-radius: 8px; padding: 10px; margin: 10px 0; }
+    a { color: var(--accent); font-weight: 650; }
+    button, select { font: inherit; }
+    button { cursor: pointer; border: 0; border-radius: 8px; padding: 10px 14px; background: var(--accent); color: white; font-weight: 650; }
+    .muted { color: var(--muted); }
+    .warning { border-left: 4px solid #d68a00; padding-left: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="muted">AI Notetaker</p>
+    <h1>Install the pieces that fit your computer.</h1>
+    <p class="lede">The Chrome extension is the control panel. The native desktop helper owns audio capture, local storage, and the AI pipeline. Docker is optional and only hosts your history webapp.</p>
+
+    <section class="card" aria-labelledby="choose-os">
+      <h2 id="choose-os">1. Choose your desktop</h2>
+      <label for="platform">Detected platform</label>
+      <select id="platform">
+        <option value="macos">macOS</option>
+        <option value="windows">Windows</option>
+        <option value="linux">Linux</option>
+        <option value="unknown">Other / choose manually</option>
+      </select>
+      <div id="instructions" class="platforms" style="margin-top: 16px"></div>
+    </section>
+
+    <section class="card" aria-labelledby="extension">
+      <h2 id="extension">2. Install the Chrome extension</h2>
+      <p class="muted">The extension is installed separately because Chrome does not allow a normal desktop installer to silently install browser extensions.</p>
+      <p><a href="https://github.com/apercallc/ai-notetaker/releases/latest">Open the extension release fallback</a> <span class="muted">(the Chrome Web Store link will appear when the listing is published)</span></p>
+    </section>
+
+    <section class="card" aria-labelledby="docker">
+      <h2 id="docker">Optional: self-host history with Docker</h2>
+      <p>Use Docker Compose for the authenticated webapp and Postgres. It never receives your provider keys and cannot replace the desktop helper.</p>
+      <code>cp webapp/.env.docker.example webapp/.env
+docker compose -f webapp/docker-compose.yml --env-file webapp/.env up -d --build</code>
+      <p><a href="https://github.com/apercallc/ai-notetaker/blob/main/webapp/README.md#deploy-with-docker-compose">Read the Docker deployment guide</a></p>
+    </section>
+
+    <p class="muted warning">Audio drivers are OS-level components. macOS users install BlackHole from Existential Audio; Windows uses base VB-CABLE; Linux uses the helper's PulseAudio/PipeWire modules. The helper will confirm when audio is actually ready.</p>
+  </main>
+  <script>
+    const releases = 'https://github.com/apercallc/ai-notetaker/releases/latest';
+    const platform = document.querySelector('#platform');
+    const instructions = document.querySelector('#instructions');
+    const detected = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
+    const hinted = new URLSearchParams(location.search).get('platform');
+    platform.value = ['macos', 'windows', 'linux', 'unknown'].includes(hinted) ? hinted : detected.includes('mac') ? 'macos' : detected.includes('win') ? 'windows' : detected.includes('linux') ? 'linux' : 'unknown';
+    const content = {
+      macos: ['macOS', 'Download the signed DMG from the latest release or install the Homebrew Cask.', 'brew install --cask ai-notetaker', 'BlackHole is linked to the official Existential Audio installer and is never bundled.'],
+      windows: ['Windows', 'Download the signed installer or use WinGet/Chocolatey.', 'winget install AI-Notetaker', 'The native installer may install only base VB-CABLE and keeps VB-Audio attribution visible.'],
+      linux: ['Linux', 'Install the signed Debian package; use AppImage when your distribution does not use apt.', 'sudo apt install ./AI-Notetaker.deb', 'The helper creates its PulseAudio/PipeWire null sink when pactl is available.'],
+      unknown: ['your OS', 'Use the latest release page and choose the native artifact for your system.', '', 'The supported desktop targets are macOS, Windows, and Linux.']
+    };
+    function render() {
+      const [name, description, command, driver] = content[platform.value];
+      instructions.innerHTML = `<article class="platform selected"><h3>${name}</h3><p>${description}</p>${command ? `<code>${command}</code>` : ''}<p class="muted">${driver}</p><a href="${releases}">View release artifacts</a></article>`;
+    }
+    platform.addEventListener('change', render);
+    render();
+  </script>
+</body>
+</html>

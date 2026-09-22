@@ -1,0 +1,21 @@
+cask "ai-notetaker" do
+  version "__VERSION__"
+  sha256 "__SHA256__"
+
+  url "__URL__", verified: "github.com/apercallc/ai-notetaker/"
+  name "AI Notetaker"
+  desc "Local-first, self-hosted AI meeting notetaker"
+  homepage "https://apercallc.github.io/ai-notetaker/"
+
+  app "AI Notetaker.app"
+
+  postflight do
+    system_command staged_path.join("AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh")
+  end
+
+  uninstall_preflight do
+    system_command staged_path.join("AI Notetaker.app/Contents/Resources/scripts/uninstall-native-messaging.sh")
+  end
+
+  zap trash: ["~/Library/Application Support/ai-notetaker"]
+end

@@ -29,8 +29,42 @@ cargo install cargo-deb
 cargo deb --manifest-path helper/crates/app/Cargo.toml
 ```
 
+## End-user distribution channels
+
+When a release is published, use the native artifact for the operating system
+or the package-manager channel below. All channels install the same helper and
+Native Messaging relay; they do not install the Chrome extension.
+
+```sh
+# macOS
+brew install --cask ai-notetaker
+
+# Windows PowerShell
+winget install AI-Notetaker
+# Chocolatey is also supported: choco install ai-notetaker
+```
+
+Linux users should install the signed `.deb` from the release page. The
+AppImage is a fallback for distributions that cannot use the Debian package,
+but it cannot safely register a Native Messaging relay inside a transient
+mount, so the `.deb` or an explicit stable-path registration is preferred.
+
+Package-manager packages are pinned to a release URL and SHA-256; they must
+never fetch a floating “latest” binary during installation. Update a
+package-managed helper with its package manager. Direct-download installs use
+the Tauri updater once release signing and the owner-controlled updater key
+are configured.
+
 Linux CI installs the Tauri v2 WebKitGTK, GTK, Ayatana AppIndicator, and
 librsvg development packages in addition to the ALSA headers.
+
+Windows release builds stage only the base VB-CABLE archive after verifying the
+release owner's `VB_CABLE_SHA256` repository variable. The helper launches the
+official setup visibly with the normal administrator prompt; it does not fetch
+or silently install a floating driver. The user may need to reboot before the
+device is enumerated. Attribution to [VB-Audio](https://vb-audio.com/Cable/)
+and the donation option must remain visible. A+B/C+D packages are never
+included.
 
 ## Native Messaging installer registration
 

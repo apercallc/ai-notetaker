@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apercallc.github.io/ai-notetaker/release/manifest.schema.json",
+  "title": "AI Notetaker release manifest",
+  "type": "object",
+  "required": ["schemaVersion", "product", "version", "status", "extension", "protocol", "artifacts", "packageManagers", "docker"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "product": { "const": "ai-notetaker" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "status": { "enum": ["unpublished", "published"] },
+    "extension": {
+      "type": "object",
+      "required": ["version", "id", "chromeWebStoreUrl", "fallbackZipUrl"],
+      "properties": {
+        "version": { "type": "string" },
+        "id": { "type": "string", "pattern": "^[a-p]{32}$" },
+        "chromeWebStoreUrl": { "type": ["string", "null"], "format": "uri" },
+        "fallbackZipUrl": { "type": ["string", "null"], "format": "uri" }
+      },
+      "additionalProperties": false
+    },
+    "protocol": {
+      "type": "object",
+      "required": ["version", "minimumSupported"],
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "minimumSupported": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["platform", "architecture", "format", "url", "sha256", "signatureStatus"],
+        "properties": {
+          "platform": { "enum": ["macos", "windows", "linux"] },
+          "architecture": { "enum": ["arm64", "x86_64", "universal", "amd64"] },
+          "format": { "enum": ["dmg", "pkg", "msi", "nsis", "deb", "appimage"] },
+          "url": { "type": "string", "format": "uri" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "signatureStatus": { "enum": ["signed", "notarized", "signed_and_notarized", "checksummed"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "packageManagers": {
+      "type": "object",
+      "required": ["homebrew", "winget", "chocolatey"],
+      "properties": {
+        "homebrew": { "$ref": "#/$defs/packageManager" },
+        "winget": { "$ref": "#/$defs/packageManager" },
+        "chocolatey": { "$ref": "#/$defs/packageManager" }
+      },
+      "additionalProperties": false
+    },
+    "docker": {
+      "type": "object",
+      "required": ["composeFile", "scope"],
+      "properties": {
+        "composeFile": { "type": "string" },
+        "scope": { "const": "history-webapp-only" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "packageManager": {
+      "type": "object",
+      "required": ["installCommand", "updateCommand"],
+      "properties": {
+        "installCommand": { "type": "string", "minLength": 1 },
+        "updateCommand": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

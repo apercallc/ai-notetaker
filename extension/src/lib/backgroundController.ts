@@ -10,7 +10,7 @@ import type { HelperConnectionStatus } from "./nativeMessaging";
 import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
-import type { AudioProbeResult, AudioStatus, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
+import type { AudioProbeResult, AudioStatus, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -39,6 +39,7 @@ export class BackgroundController {
   private activeMeetingId: string | null = null;
   private recoverableMeeting: BackgroundState["recoverableMeeting"] = null;
   private helperStatus: HelperConnectionStatus = "connecting";
+  private helperInfo: HelperInfo | null = null;
   private fetchImpl: typeof fetch = fetch;
 
   constructor(
@@ -49,6 +50,7 @@ export class BackgroundController {
     this.client.on("summary_ready", (msg) => void this.handleSummaryReady(msg));
     this.client.on("error", (msg) => void this.handleError(msg));
     this.client.on("recording_started", (msg) => this.handleRecordingStarted(msg));
+    this.client.on("helper_info", (msg) => this.handleHelperInfo(msg));
     this.client.on("recovered_recording", (msg) => this.handleRecoveredRecording(msg));
     this.client.onStatusChange((status) => this.handleStatusChange(status));
   }
@@ -63,6 +65,13 @@ export class BackgroundController {
     await this.client.connect();
     this.pushCurrentSettings();
     void flushWebappSyncOutbox(this.settings, this.fetchImpl);
+  }
+
+  async checkHelper(): Promise<BackgroundState> {
+    if (this.helperStatus !== "connected" || !this.helperInfo) {
+      await this.client.connect();
+    }
+    return this.getState();
   }
 
   private pushCurrentSettings(): void {
@@ -86,6 +95,17 @@ export class BackgroundController {
   }
 
   async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general"): Promise<string> {
+    if (this.helperStatus !== "connected" || !this.helperInfo) {
+      this.broadcast({
+        type: "RECORDING_ERROR",
+        meetingId: null,
+        message:
+          this.helperStatus === "incompatible"
+            ? "The desktop helper needs an update before it can record. Open the install page to update it."
+            : "The desktop helper is not connected. Install and start it, then check again.",
+      });
+      return "";
+    }
     if (!this.settings?.consentDisclosureAcknowledged) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -174,11 +194,13 @@ export class BackgroundController {
       activeMeeting: this.activeMeetingId ? { id: this.activeMeetingId } : null,
       recoverableMeeting: this.recoverableMeeting,
       helperStatus: this.helperStatus,
+      helperInfo: this.helperInfo,
     };
   }
 
   private handleStatusChange(status: HelperConnectionStatus): void {
     this.helperStatus = status;
+    if (status === "helper_not_found" || status === "disconnected") this.helperInfo = null;
     this.broadcast({ type: "HELPER_STATUS", status });
     // The helper holds settings in memory only for its own process
     // lifetime (protocol: they're re-sent each time the extension
@@ -189,6 +211,16 @@ export class BackgroundController {
     // the duplicate push on the very first connect (init pushes too) is
     // an idempotent overwrite.
     if (status === "connected") this.pushCurrentSettings();
+  }
+
+  private handleHelperInfo(msg: Extract<IncomingMessage, { type: "helper_info" }>): void {
+    this.helperInfo = {
+      helperVersion: msg.helperVersion,
+      protocolVersion: msg.protocolVersion,
+      platform: msg.platform,
+    };
+    this.helperStatus = msg.protocolVersion === 1 ? "connected" : "incompatible";
+    this.broadcast({ type: "HELPER_STATUS", status: this.helperStatus });
   }
 
   private handleRecordingStarted(msg: Extract<IncomingMessage, { type: "recording_started" }>): void {

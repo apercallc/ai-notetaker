@@ -75,14 +75,14 @@ the AI pipeline**, not the extension.
     all-rights-reserved — that combination means we do **not** bundle their
     binary inside our installer. Instead, the onboarding wizard detects if
     it's missing and deep-links to Existential Audio's official download
-    with clear steps, rather than silently installing it ourselves.
+    with clear steps, rather than installing it invisibly ourselves.
   - **Windows — [VB-Cable](https://vb-audio.com/Cable/)**: VB-Audio's own
-    licensing terms explicitly *permit* silent bundling inside another
-    installer, free or commercial, provided the end user can still identify
-    it as VB-Audio's VB-CABLE and see the donation option/attribution to
-    vb-cable.com — so our Windows installer **does** bundle and silently
-    install base VB-CABLE, with that attribution kept visible in the
-    installer UI. Only the base VB-CABLE may be bundled this way; VB-Audio's
+    licensing terms permit bundling the base package inside another installer,
+    free or commercial, provided the end user can still identify it as
+    VB-Audio's VB-CABLE and see the donation option/attribution to vb-cable.com.
+    Our Windows release stages only a checksum-pinned base package and launches
+    the vendor installer visibly with that attribution kept in the installer
+    experience. Only the base VB-CABLE may be bundled this way; VB-Audio's
     terms explicitly exclude the VB-CABLE A+B/C+D variants from bundling.
   - **Linux**: a PulseAudio/PipeWire null-sink module — no third-party
     binary involved, nothing to clear here.

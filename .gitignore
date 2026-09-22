@@ -5,4 +5,5 @@ dist/
 .DS_Store
 .playwright-mcp/
 helper/crates/app/gen/
+helper/crates/app/resources/windows/vb-cable/
 *.tsbuildinfo

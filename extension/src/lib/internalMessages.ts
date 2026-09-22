@@ -5,10 +5,11 @@
  * UI pages never talk to the helper directly.
  */
 import type { HelperConnectionStatus } from "./nativeMessaging";
-import type { ActionItem, AudioProbeResult, AudioStatus, MeetingMode, NotetakerSettings, ProviderKind, Speaker } from "../types";
+import type { ActionItem, AudioProbeResult, AudioStatus, HelperInfo, MeetingMode, NotetakerSettings, ProviderKind, Speaker } from "../types";
 
 export type UiToBackgroundMessage =
   | { type: "GET_STATE" }
+  | { type: "CHECK_HELPER" }
   | { type: "GET_AUDIO_PREFLIGHT" }
   | { type: "RUN_AUDIO_PROBE" }
   | { type: "START_RECORDING"; meetingMode?: MeetingMode }
@@ -23,6 +24,7 @@ export interface BackgroundState {
   activeMeeting: { id: string } | null;
   recoverableMeeting: { meetingId: string; startedAt: string } | null;
   helperStatus: HelperConnectionStatus;
+  helperInfo: HelperInfo | null;
 }
 
 export interface AudioPreflightResponse {

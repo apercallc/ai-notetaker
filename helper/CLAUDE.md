@@ -20,10 +20,11 @@ for the full rationale.
   don't treat them the same.** macOS: never bundle Existential Audio's
   compiled BlackHole installer (GPL source, but the official binary and
   branding are separately all-rights-reserved) — detect-if-missing and
-  deep-link to their official download instead. Windows: base VB-CABLE
-  (never the A+B/C+D variants) may be bundled and silently installed, but
-  VB-Audio's terms require the vb-cable.com attribution and donation option
-  to stay visible in our installer UI.
+  deep-link to their official download instead. Windows: only the base
+  VB-CABLE package may be bundled; stage the complete official archive with a
+  release-time checksum, launch its visible administrator installer, and keep
+  vb-cable.com attribution and the donation option visible in the installer
+  UI. Never bundle A+B/C+D variants or fetch a driver at runtime.
 - **Capture mic and speaker as separate channels/streams, always.** Never
   merge them into one blob before sending to the transcription API — the
   dual-channel split is what gives "you vs. everyone else" diarization for

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>ai-notetaker</id>
+    <version>__VERSION__</version>
+    <title>AI Notetaker</title>
+    <authors>AI Notetaker contributors</authors>
+    <owners>AI Notetaker contributors</owners>
+    <licenseUrl>https://github.com/apercallc/ai-notetaker/blob/main/LICENSE</licenseUrl>
+    <projectUrl>https://apercallc.github.io/ai-notetaker/</projectUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Local-first, self-hosted AI meeting notetaker. The native installer includes only the permitted base VB-CABLE package and keeps VB-Audio attribution and donation information visible.</description>
+    <tags>meeting transcription ai notetaker audio</tags>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

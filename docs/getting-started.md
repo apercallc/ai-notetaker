@@ -3,6 +3,10 @@
 This is the complete first-use guide for AI Notetaker. You only need the
 optional webapp if you want meeting history on more than one device.
 
+For the release and installation model—including Homebrew Cask,
+WinGet/Chocolatey, OS prerequisite detection, and the Docker-only webapp
+option—see the [distribution and installation architecture](superpowers/specs/2026-09-21-distribution-and-installation-architecture.md).
+
 ## What you are installing
 
 AI Notetaker has two required parts:
@@ -34,12 +38,16 @@ Have these ready:
 > have a release installer, use it and skip to [Install the extension](#install-the-extension).
 > Otherwise use the source-build steps below.
 
+The intended production flow is the Chrome Web Store extension plus a native
+helper installer for the user's OS. Docker is supported for the optional
+history webapp, not for desktop audio capture.
+
 ## Build from source
 
 ### 1. Get the repository
 
 ```sh
-git clone https://github.com/ai-notetaker/ai-notetaker.git
+git clone https://github.com/apercallc/ai-notetaker.git
 cd ai-notetaker
 ```
 
@@ -236,6 +244,10 @@ Local history is the default and requires no server. For cross-device history:
 The webapp is self-hosted by you. It stores finished notes and action items;
 it does not call Deepgram, Claude, Groq, Gemini, or DeepSeek and never needs
 those keys.
+
+For a local/private Docker deployment instead, run the Compose flow in
+[`webapp/README.md`](../webapp/README.md#deploy-with-docker-compose), then
+paste `http://127.0.0.1:3000` and the same `AUTH_TOKEN` into the extension.
 
 ## Troubleshooting
 

@@ -2,6 +2,7 @@ import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
 import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
+import { getInstallPageUrl } from "../lib/install";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
@@ -72,16 +73,17 @@ async function renderRecoverableBanner(recoverableMeeting: NonNullable<Backgroun
   });
 }
 
-function renderHelperMissingBanner(): void {
+function renderHelperMissingBanner(status: BackgroundState["helperStatus"], helperInfo: BackgroundState["helperInfo"]): void {
   const container = document.createElement("div");
   container.className = "banner missing-helper";
+  const incompatible = status === "incompatible";
   container.innerHTML = `
-    <p><strong>Helper not detected.</strong> Recording needs the AI Notetaker desktop helper installed and running.</p>
-    <button class="secondary" id="open-helper-setup">Open setup guide</button>
+    <p><strong>${incompatible ? "Helper update required." : "Helper not detected."}</strong> ${incompatible ? `Version ${escapeHtml(helperInfo?.helperVersion ?? "unknown")} is not compatible with this extension.` : "Recording needs the AI Notetaker desktop helper installed and running."}</p>
+    <button class="secondary" id="open-helper-setup">${incompatible ? "Update desktop helper" : "Install desktop helper"}</button>
   `;
   app.prepend(container);
   document.getElementById("open-helper-setup")?.addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
+    chrome.tabs.create({ url: getInstallPageUrl("popup") });
   });
 }
 
@@ -167,7 +169,7 @@ function meetingModeOptions(selected: MeetingMode): string {
   return options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
 }
 
-async function renderAudioStatus(): Promise<void> {
+async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]): Promise<void> {
   const statusEl = document.getElementById("audio-status");
   const checkButton = document.getElementById("check-audio") as HTMLButtonElement | null;
   const probeButton = document.getElementById("test-audio") as HTMLButtonElement | null;
@@ -177,12 +179,17 @@ async function renderAudioStatus(): Promise<void> {
   const response = await sendToBackground<{ status: AudioStatus }>({ type: "GET_AUDIO_PREFLIGHT" });
   const status = response.status;
   const deviceLine = [status.microphone ? `Mic: ${status.microphone}` : "Mic: missing", status.speaker ? `Meeting audio: ${status.speaker}` : "Meeting audio: missing"].join(" · ");
-  statusEl.textContent = `${status.ready ? "Audio ready." : "Audio needs attention."} ${deviceLine} ${status.guidance}`;
+  const readiness = !status.driverInstalled
+    ? "Audio driver missing."
+    : status.ready
+      ? "Audio ready."
+      : "Audio routing incomplete.";
+  statusEl.textContent = `${readiness} ${deviceLine} ${status.guidance}`;
   statusEl.className = status.ready ? "text-success" : "text-warning";
   if (checkButton) checkButton.textContent = status.ready ? "Refresh audio check" : "Check audio again";
   if (probeButton) probeButton.disabled = !status.ready;
   const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-  if (startButton) startButton.disabled = !status.ready;
+  if (startButton) startButton.disabled = !status.ready || helperStatus !== "connected";
 }
 
 async function runAudioProbe(): Promise<void> {
@@ -204,6 +211,8 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       ? "Connecting to the desktop helper…"
       : helperStatus === "disconnected"
         ? "Desktop helper disconnected — start it before recording."
+        : helperStatus === "incompatible"
+          ? "Desktop helper needs an update before recording."
         : "";
   app.innerHTML = `
     ${renderHeader(true)}
@@ -238,7 +247,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
     await sendToBackground({ type: "START_RECORDING", meetingMode });
     await render();
   });
-  document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus());
+  document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus(helperStatus));
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());
   document.getElementById("open-action-inbox")?.addEventListener("click", () => {
     chrome.tabs.create({ url: chrome.runtime.getURL("actions/actions.html") });
@@ -250,7 +259,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(id)}`) });
     });
   }
-  void renderAudioStatus();
+  void renderAudioStatus(helperStatus);
 }
 
 async function render(): Promise<void> {
@@ -277,8 +286,8 @@ async function render(): Promise<void> {
   // recording already in view — a "helper not found" banner while the user
   // is mid-setup, or stacked on top of a live recording that started
   // before the helper dropped, would be noise rather than help.
-  if (state.helperStatus === "helper_not_found" && !state.activeMeeting) {
-    renderHelperMissingBanner();
+  if ((state.helperStatus === "helper_not_found" || state.helperStatus === "incompatible") && !state.activeMeeting) {
+    renderHelperMissingBanner(state.helperStatus, state.helperInfo);
   }
 
   // Each render replaces the entire view. Move focus to the new view's

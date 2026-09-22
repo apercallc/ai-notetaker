@@ -89,11 +89,10 @@ toolchain or target-OS SDKs in this environment:
   every sound-card callback into a provider request; the final partial batch
   is flushed before summarization. This keeps the batch-tier latency/cost
   trade-off explicit.
-- **VB-CABLE's actual silent-install download+run step** — the licensing-
-  permitted bundling logic exists in `audio::windows::install_if_missing`,
-  but it currently returns an explicit error rather than fetching and
-  running a real installer; this sandbox has no Windows target to verify
-  against anyway.
+- **Windows VB-CABLE execution** — release-only checksum-pinned staging and
+  the visible vendor installer launch are wired in
+  `audio::windows::install_if_missing`; this sandbox has no Windows target,
+  UAC environment, or audio device to verify the native flow against.
 - **The macOS Multi-Output Device / Windows "Listen to this device" setup**
   that lets the user keep hearing the meeting normally while we capture it
   — needs platform APIs below what `cpal` exposes (CoreAudio aggregate

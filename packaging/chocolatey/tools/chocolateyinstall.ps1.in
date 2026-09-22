@@ -1,0 +1,16 @@
+$ErrorActionPreference = 'Stop'
+
+$packageArgs = @{
+  packageName   = 'ai-notetaker'
+  fileType      = 'exe'
+  url64bit      = '__URL__'
+  checksum64    = '__SHA256__'
+  checksumType64 = 'sha256'
+  silentArgs    = '/S'
+  validExitCodes = @(0, 3010)
+}
+
+Install-ChocolateyPackage @packageArgs
+
+Write-Host 'AI Notetaker includes the desktop helper only. Install the Chrome extension separately.'
+Write-Host 'Windows audio uses base VB-CABLE by VB-Audio Software (vb-audio.com). Please consider supporting the donationware project.'

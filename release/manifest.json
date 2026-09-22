@@ -1,0 +1,36 @@
+{
+  "$schema": "./manifest.schema.json",
+  "schemaVersion": 1,
+  "product": "ai-notetaker",
+  "version": "0.1.0",
+  "status": "unpublished",
+  "extension": {
+    "version": "0.1.0",
+    "id": "jidooookkdbbbhkkdmcajnnnhhphodok",
+    "chromeWebStoreUrl": null,
+    "fallbackZipUrl": null
+  },
+  "protocol": {
+    "version": 1,
+    "minimumSupported": 1
+  },
+  "artifacts": [],
+  "packageManagers": {
+    "homebrew": {
+      "installCommand": "brew install --cask ai-notetaker",
+      "updateCommand": "brew upgrade --cask ai-notetaker"
+    },
+    "winget": {
+      "installCommand": "winget install AI-Notetaker",
+      "updateCommand": "winget upgrade AI-Notetaker"
+    },
+    "chocolatey": {
+      "installCommand": "choco install ai-notetaker",
+      "updateCommand": "choco upgrade ai-notetaker"
+    }
+  },
+  "docker": {
+    "composeFile": "webapp/docker-compose.yml",
+    "scope": "history-webapp-only"
+  }
+}

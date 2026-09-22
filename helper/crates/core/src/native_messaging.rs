@@ -13,6 +13,10 @@ use uuid::Uuid;
 /// Audio itself never flows over this channel (only transcript text and
 /// control messages), so this ceiling is generous headroom, not a tight fit.
 pub const MAX_MESSAGE_BYTES: u32 = 1024 * 1024;
+/// Increment when the JSON wire contract changes incompatibly. The extension
+/// uses the helper's advertised value to show an upgrade path instead of
+/// failing later with an opaque recording error.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FramingError {
@@ -115,6 +119,13 @@ pub enum HelperToExtension {
     Paired {
         #[serde(rename = "pairingToken")]
         pairing_token: String,
+    },
+    HelperInfo {
+        #[serde(rename = "helperVersion")]
+        helper_version: String,
+        #[serde(rename = "protocolVersion")]
+        protocol_version: u32,
+        platform: String,
     },
     RecordingStarted {
         #[serde(rename = "meetingId")]
@@ -370,6 +381,19 @@ mod tests {
             provider: ProviderKind::Claude,
             valid: true,
             message: "Claude key is valid.".into(),
+        };
+        let mut buf = Vec::new();
+        write_message(&mut buf, &msg).unwrap();
+        let decoded: HelperToExtension = serde_json::from_slice(&buf[4..]).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn round_trips_helper_info_message() {
+        let msg = HelperToExtension::HelperInfo {
+            helper_version: "0.1.0".into(),
+            protocol_version: PROTOCOL_VERSION,
+            platform: "linux".into(),
         };
         let mut buf = Vec::new();
         write_message(&mut buf, &msg).unwrap();

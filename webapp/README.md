@@ -12,6 +12,34 @@ You deploy and own this instance yourself. Nothing here is run by the
 AI Notetaker project — your meeting notes never touch a server anyone else
 controls.
 
+## Deploy with Docker Compose
+
+Docker is an optional deployment path for this history webapp only. It does
+not capture microphone/system audio, run the desktop helper, install Chrome,
+or receive AI provider keys.
+
+```bash
+cp .env.docker.example .env
+# Replace both values with URL-safe random values, for example:
+#   openssl rand -hex 32
+docker compose up -d --build
+```
+
+The default bind is `127.0.0.1:3000`; open `http://127.0.0.1:3000/login`
+and enter the `AUTH_TOKEN`. Prisma migrations run in the webapp container
+before Next.js starts, and Postgres data persists in the
+`ai-notetaker-postgres` named volume. Back up that volume and put HTTPS and
+network controls in front of the service before exposing it remotely.
+
+To stop the containers without deleting notes:
+
+```bash
+docker compose down
+```
+
+Do not use `docker compose down -v` unless you intentionally want to delete
+the Postgres volume and all stored meeting history.
+
 ## Deploy on Railway (recommended)
 
 1. If a published Railway template link is available, open it. Otherwise,

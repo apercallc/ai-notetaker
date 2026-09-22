@@ -56,6 +56,8 @@ async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown>
     case "GET_STATE":
       void chrome.action.setBadgeText({ text: "" });
       return controller.getState();
+    case "CHECK_HELPER":
+      return controller.checkHelper();
     case "GET_AUDIO_PREFLIGHT":
       return { status: await controller.getAudioPreflight() };
     case "RUN_AUDIO_PROBE":

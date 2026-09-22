@@ -1,0 +1,15 @@
+PackageIdentifier: AI.Notetaker
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: AI Notetaker contributors
+PackageName: AI Notetaker
+License: MIT
+ShortDescription: Local-first, self-hosted AI meeting notetaker
+PackageUrl: https://apercallc.github.io/ai-notetaker/
+Installers:
+  - Architecture: x64
+    InstallerType: nsis
+    InstallerUrl: __URL__
+    InstallerSha256: __SHA256__
+ManifestType: singleton
+ManifestVersion: 1.6.0

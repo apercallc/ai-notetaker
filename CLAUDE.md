@@ -29,8 +29,9 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
   Never bundle BlackHole's compiled installer (link out to Existential
   Audio's official download instead — their binary/branding are
   all-rights-reserved despite GPL source). Base VB-CABLE (never A+B/C+D)
-  may be bundled/silently installed on Windows, but only with vb-cable.com
-  attribution and the donation option kept visible in our installer.
+  may be bundled on Windows only as a checksum-pinned release payload; the
+  helper launches the vendor installer visibly with vb-cable.com attribution
+  and the donation option kept visible in our installer experience.
 - **Capture mic and speaker as separate channels**, not one mixed blob —
   this is what makes "you vs. everyone else" diarization free.
 - **Raw audio is always saved locally first**, independent of any API call

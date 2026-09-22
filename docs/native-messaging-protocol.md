@@ -15,6 +15,9 @@ framing automatically).
   `jidooookkdbbbhkkdmcajnnnhhphodok`
 - The helper's native messaging host manifest must allowlist exactly this
   extension ID (`chrome-extension://jidooookkdbbbhkkdmcajnnnhhphodok/`).
+- Current wire protocol version: `1`. The helper advertises its version after
+  every successful `hello`; the extension must stop recording and show an
+  update path when the version is unsupported.
 
 ## Process model: two binaries, not one
 
@@ -99,6 +102,14 @@ file on Unix-like systems.
 
 ```jsonc
 { "type": "paired", "pairingToken": "<new token>" } // only on first-ever connection
+
+// Sent after every authenticated hello, including reconnects.
+{
+  "type": "helper_info",
+  "helperVersion": "0.1.0",
+  "protocolVersion": 1,
+  "platform": "linux | macos | windows"
+}
 
 { "type": "recording_started", "meetingId": "<uuid>" }
 { "type": "recording_stopped", "meetingId": "<uuid>" }

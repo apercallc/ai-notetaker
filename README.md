@@ -25,6 +25,11 @@ The full, copy-and-paste setup is in [`docs/getting-started.md`](docs/getting-st
 It covers source builds, per-OS audio routing, provider keys, recording,
 troubleshooting, and the optional history webapp.
 
+The production distribution model is documented in the
+[distribution and installation architecture](docs/superpowers/specs/2026-09-21-distribution-and-installation-architecture.md): native helper
+installers/package-manager channels for capture, with Docker reserved for the
+optional self-hosted history webapp.
+
 > **Current project status:** the helper packages and installer registration
 > are implemented, but signed public installers and a live cross-OS meeting
 > validation pass are still release-owner work. If no release is published

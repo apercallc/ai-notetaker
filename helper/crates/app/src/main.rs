@@ -202,6 +202,12 @@ async fn handle_message(
             }
             drop(current);
 
+            let _ = out_tx.send(HelperToExtension::HelperInfo {
+                helper_version: env!("CARGO_PKG_VERSION").to_string(),
+                protocol_version: native_messaging::PROTOCOL_VERSION,
+                platform: current_platform().to_string(),
+            });
+
             // Crash recovery: surface any meeting left in `Recording`
             // state by an unclean shutdown, once per new connection.
             let active_ids: HashSet<Uuid> = state.active.lock().await.keys().copied().collect();
@@ -551,6 +557,26 @@ async fn handle_message(
             true
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn current_platform() -> &'static str {
+    "macos"
+}
+
+#[cfg(target_os = "windows")]
+fn current_platform() -> &'static str {
+    "windows"
+}
+
+#[cfg(target_os = "linux")]
+fn current_platform() -> &'static str {
+    "linux"
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn current_platform() -> &'static str {
+    "unknown"
 }
 
 fn audio_status_message(

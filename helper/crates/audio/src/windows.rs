@@ -1,11 +1,9 @@
-//! Windows virtual audio device: VB-CABLE. Per the verified licensing
-//! terms in the architecture spec (§3.1) and `helper/CLAUDE.md`, VB-Audio's
-//! terms explicitly permit bundling and silently installing *base*
-//! VB-CABLE (never the A+B/C+D variants), provided vb-cable.com
-//! attribution and the donation option stay visible in our installer UI —
-//! that attribution display is an app-layer/installer-UI concern, not this
-//! crate's. The actual download/install step remains an explicit release
-//! task; this module currently handles detection and truthful guidance.
+//! Windows virtual audio device: VB-CABLE. Only the base package is supported;
+//! A+B/C+D variants are deliberately out of scope. Release artifacts stage the
+//! complete, checksum-pinned official package beside the helper. The helper
+//! launches the vendor installer visibly so Windows can show its normal UAC and
+//! administrator flow; it never downloads a driver at runtime or passes an
+//! undocumented silent-install switch.
 //!
 //! **Known gap, flagged rather than faked:** same issue as macOS — routing
 //! a meeting app's output to CABLE Input means the user stops hearing the
@@ -24,8 +22,11 @@ use crate::{AudioCapture, AudioDiagnostics, AudioError, CapturedFrame, DriverSta
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// The exact VB-CABLE download this project is licensed to bundle. The base
 /// package only — VB-Audio's terms explicitly exclude the A+B/C+D variants
@@ -34,6 +35,7 @@ use std::sync::Arc;
 pub const VB_CABLE_DOWNLOAD_URL: &str =
     "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
 pub const VB_CABLE_ATTRIBUTION_TEXT: &str = "Virtual audio cable by VB-Audio Software (vb-cable.com) — donationware, please consider supporting them.";
+const BUNDLED_DRIVER_RELATIVE_PATH: &str = "resources/windows/vb-cable/VBCABLE_Setup_x64.exe";
 
 pub struct WindowsAudioCapture {
     running: Arc<AtomicBool>,
@@ -55,25 +57,76 @@ impl WindowsAudioCapture {
         find_matching_device(&names, WINDOWS_DEVICE_HINT).map(String::from)
     }
 
-    /// Intended release hook to download (if needed) and silently install
-    /// base VB-CABLE. The
-    /// installer UI calling this must display `VB_CABLE_ATTRIBUTION_TEXT`
-    /// and a link to vb-cable.com, per VB-Audio's bundling terms — that
-    /// display is the caller's responsibility.
+    /// Installs the release-bundled base VB-CABLE package when it is absent.
+    /// The release installer UI must display `VB_CABLE_ATTRIBUTION_TEXT` and a
+    /// link to vb-cable.com; this crate owns only the device check and launch.
     pub async fn install_if_missing(&self) -> Result<(), AudioError> {
+        self.install_bundled_driver()
+    }
+
+    fn install_bundled_driver(&self) -> Result<(), AudioError> {
         if self.installed_device_name().is_some() {
             return Ok(());
         }
-        // Real implementation: download VB_CABLE_DOWNLOAD_URL, unzip, and
-        // run VBCABLE_Setup_x64.exe with its documented silent-install
-        // flag. Not executed here — this sandbox has no Windows target and
-        // no network path to VB-Audio's download host was exercised, so
-        // this is written but unverified; flagged in the implementation
-        // report rather than claimed as tested.
+
+        let Some(installer) = bundled_driver_path() else {
+            return Err(AudioError::DriverSetup(format!(
+                "This build does not include the pinned base VB-CABLE installer. Install the base package from {VB_CABLE_DOWNLOAD_URL}, extract the full archive, run VBCABLE_Setup_x64.exe as administrator, reboot if Windows requests it, then check audio again."
+            )));
+        };
+
+        let status = Command::new(&installer)
+            // The official archive contains companion files beside the setup
+            // executable; preserve that extracted-package working directory.
+            .current_dir(
+                installer
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new(".")),
+            )
+            .status()
+            .map_err(|error| {
+                AudioError::DriverSetup(format!(
+                    "could not launch the bundled VB-CABLE installer at {}: {error}",
+                    installer.display()
+                ))
+            })?;
+        if !status.success() {
+            return Err(AudioError::DriverSetup(format!(
+                "the bundled VB-CABLE installer exited with {status}; approve the administrator prompt and try again"
+            )));
+        }
+
+        for _ in 0..30 {
+            if self.installed_device_name().is_some() {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+
         Err(AudioError::DriverSetup(
-            "VB-CABLE silent install is not yet wired to a real download+run step — see implementation report".into(),
+            "VB-CABLE was installed but Windows has not exposed the device yet; reboot Windows if requested, then check audio again".into(),
         ))
     }
+}
+
+fn bundled_driver_path() -> Option<PathBuf> {
+    let relative_path = PathBuf::from(BUNDLED_DRIVER_RELATIVE_PATH);
+    let file_name = relative_path.file_name()?;
+    let resource_suffix = relative_path.parent()?;
+    let mut candidates = Vec::new();
+
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            candidates.push(parent.join(&relative_path));
+            candidates.push(parent.join("windows").join("vb-cable").join(file_name));
+        }
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(current_dir.join(&relative_path));
+        candidates.push(current_dir.join(resource_suffix).join(file_name));
+    }
+
+    candidates.into_iter().find(|path| path.is_file())
 }
 
 impl Default for WindowsAudioCapture {
@@ -84,6 +137,10 @@ impl Default for WindowsAudioCapture {
 
 #[async_trait]
 impl AudioCapture for WindowsAudioCapture {
+    fn prepare(&self) -> Result<(), AudioError> {
+        self.install_bundled_driver()
+    }
+
     fn driver_status(&self) -> DriverStatus {
         match self.installed_device_name() {
             Some(_) => DriverStatus::Installed,

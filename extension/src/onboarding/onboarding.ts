@@ -2,6 +2,8 @@ import { getSettings } from "../lib/storage";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { DEFAULT_SETTINGS, type AudioProbeResult, type AudioStatus, type NotetakerSettings } from "../types";
 import { escapeHtml } from "../lib/html";
+import { detectInstallPlatform, getInstallPageUrl, type InstallPlatform } from "../lib/install";
+import type { BackgroundState } from "../lib/internalMessages";
 
 const app = document.getElementById("app")!;
 const TOTAL_STEPS = 4;
@@ -12,12 +14,12 @@ let audioStatus: AudioStatus | null = null;
 let audioProbe: AudioProbeResult | null = null;
 let providerTestsPassed = false;
 
-function detectPlatform(): "mac" | "windows" | "linux" | "unknown" {
-  const platform = navigator.userAgent.toLowerCase();
-  if (platform.includes("mac")) return "mac";
-  if (platform.includes("win")) return "windows";
-  if (platform.includes("linux")) return "linux";
-  return "unknown";
+function detectPlatform(): InstallPlatform {
+  return detectInstallPlatform();
+}
+
+function platformLabel(platform: InstallPlatform): string {
+  return platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : platform === "linux" ? "Linux" : "your OS";
 }
 
 function renderStepIndicator(): string {
@@ -31,7 +33,7 @@ function renderStepIndicator(): string {
 function renderStep1(): string {
   const platform = detectPlatform();
   const downloadLabel =
-    platform === "mac" ? "Download for macOS" : platform === "windows" ? "Download for Windows" : "Download for Linux";
+    platform === "macos" ? "Install on macOS" : platform === "windows" ? "Install on Windows" : platform === "linux" ? "Install on Linux" : "Choose your OS";
   return `
     <h1>1. Install the helper</h1>
     <p>
@@ -40,18 +42,36 @@ function renderStep1(): string {
       you're using.
     </p>
     <button class="primary" id="download-helper">${downloadLabel}</button>
+    <button type="button" class="secondary" id="check-helper">Check desktop helper</button>
+    <p id="helper-install-status" class="text-secondary" role="status">${helperStatusCopy()}</p>
     <div class="callout warning">
       <strong>Heads up:</strong> after installing, you may need to reboot or
       log out and back in before the device shows up in your meeting app's
       audio settings. This is normal — it's how audio devices work on
-      ${platform === "mac" ? "macOS" : platform === "windows" ? "Windows" : "Linux"}, not a sign that
+      ${platformLabel(platform)}, not a sign that
       something went wrong.
     </div>
     <label class="checkbox-row">
-      <input type="checkbox" id="helper-installed" />
+      <input type="checkbox" id="helper-installed" ${helperInstallAcknowledged ? "checked" : ""} />
       I've installed the helper
     </label>
   `;
+}
+
+let helperStatus: BackgroundState["helperStatus"] = "connecting";
+let helperInfo: BackgroundState["helperInfo"] = null;
+let helperInstallAcknowledged = false;
+
+function helperStatusCopy(): string {
+  if (helperStatus === "connected") {
+    return `Desktop helper ${helperInfo?.helperVersion ? `v${helperInfo.helperVersion} ` : ""}is connected.`;
+  }
+  if (helperStatus === "incompatible") {
+    return `This helper (v${helperInfo?.helperVersion ?? "unknown"}) is incompatible. Install the current version.`;
+  }
+  if (helperStatus === "helper_not_found") return "Desktop helper not detected yet. Install it, launch it, then check again.";
+  if (helperStatus === "disconnected") return "Desktop helper is not responding. Launch it, then check again.";
+  return "Checking for the desktop helper…";
 }
 
 function renderStep2(): string {
@@ -76,7 +96,7 @@ function renderStep2(): string {
         <p>Choose “AI Notetaker” (the PulseAudio/PipeWire virtual device) as Speaker and keep your physical microphone as Microphone. Keep your normal speakers as system output so loopback remains audible.</p>
       </section>
       <p class="text-secondary setup-note">Device names vary by OS and meeting app. See the helper packaging guide for troubleshooting and uninstall steps.</p>
-      <a class="setup-link" href="https://github.com/ai-notetaker/ai-notetaker/blob/main/docs/helper-packaging.md" target="_blank" rel="noreferrer">Open the full setup and uninstall guide</a>
+      <a class="setup-link" href="https://github.com/apercallc/ai-notetaker/blob/main/docs/helper-packaging.md" target="_blank" rel="noreferrer">Open the full setup and uninstall guide</a>
     </div>
     <div class="audio-preflight" aria-live="polite">
       <p id="audio-preflight-result" class="${audioStatus?.ready ? "valid" : "text-secondary"}">${renderAudioStatusCopy()}</p>
@@ -92,7 +112,12 @@ function renderAudioStatusCopy(): string {
   if (!audioStatus) return "Check the devices after selecting them in your meeting app.";
   const devices = `${audioStatus.microphone ?? "microphone missing"} · ${audioStatus.speaker ?? "meeting audio missing"}`;
   const probe = audioProbe ? ` ${audioProbe.message}` : "";
-  return `${audioStatus.ready ? "Devices ready." : "Devices need attention."} ${devices} ${audioStatus.guidance}${probe}`;
+  const readiness = !audioStatus.driverInstalled
+    ? "Audio driver missing."
+    : audioStatus.ready
+      ? "Devices ready."
+      : "Audio routing incomplete.";
+  return `${readiness} ${devices} ${audioStatus.guidance}${probe}`;
 }
 
 function renderStep3(): string {
@@ -154,7 +179,7 @@ function renderStep(): string {
 }
 
 function canAdvance(): boolean {
-  if (step === 1) return !!(document.getElementById("helper-installed") as HTMLInputElement)?.checked;
+  if (step === 1) return helperInstallAcknowledged && helperStatus === "connected";
   if (step === 2) return !!audioStatus?.ready && !!audioProbe?.passed;
   if (step === 3) return providerTestsPassed;
   if (step === 4) return !!(document.getElementById("consent-ack") as HTMLInputElement)?.checked;
@@ -201,9 +226,18 @@ function wireEvents(): void {
   });
 
   document.getElementById("download-helper")?.addEventListener("click", () => {
-    // Points at the repo's releases page — the actual per-OS installer
-    // artifacts are built by sub-project 1's helper/ package.
-    chrome.tabs.create({ url: "https://github.com/ai-notetaker/ai-notetaker/releases" });
+    chrome.tabs.create({ url: getInstallPageUrl("onboarding") });
+  });
+
+  document.getElementById("check-helper")?.addEventListener("click", async () => {
+    const state = await chrome.runtime.sendMessage({ type: "CHECK_HELPER" }) as BackgroundState;
+    helperStatus = state.helperStatus;
+    helperInfo = state.helperInfo;
+    render();
+  });
+
+  document.getElementById("helper-installed")?.addEventListener("change", (event) => {
+    helperInstallAcknowledged = (event.target as HTMLInputElement).checked;
   });
 
   document.getElementById("check-audio-setup")?.addEventListener("click", async () => {
@@ -243,6 +277,9 @@ function wireEvents(): void {
 
 async function init(): Promise<void> {
   settings = await getSettings();
+  const state = await chrome.runtime.sendMessage({ type: "GET_STATE" }) as BackgroundState;
+  helperStatus = state.helperStatus;
+  helperInfo = state.helperInfo;
   render();
 }
 

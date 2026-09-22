@@ -10,7 +10,11 @@ function createFakeClient(): NativeClientLike & {
 } {
   const handlers = new Map<string, Array<(msg: unknown) => void>>();
   return {
-    connect: vi.fn(async () => {}),
+    connect: vi.fn(async () => {
+      for (const handler of handlers.get("helper_info") ?? []) {
+        handler({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 1, platform: "linux" });
+      }
+    }),
     on: vi.fn((type: string, handler: (msg: unknown) => void) => {
       if (!handlers.has(type)) handlers.set(type, []);
       handlers.get(type)!.push(handler);
@@ -381,6 +385,36 @@ describe("BackgroundController", () => {
 
     expect(controller.getState().helperStatus).toBe("helper_not_found");
     expect(broadcast).toHaveBeenCalledWith({ type: "HELPER_STATUS", status: "helper_not_found" });
+  });
+
+  it("does not create a local recording before the helper handshake completes", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+
+    const meetingId = await controller.startRecording();
+
+    expect(meetingId).toBe("");
+    expect(client.startRecording).not.toHaveBeenCalled();
+    expect(broadcast).toHaveBeenCalledWith({
+      type: "RECORDING_ERROR",
+      meetingId: null,
+      message: "The desktop helper is not connected. Install and start it, then check again.",
+    });
+  });
+
+  it("blocks recording when the helper advertises an incompatible protocol", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    client.emit("helper_info", { helperVersion: "0.0.1", protocolVersion: 99, platform: "linux" });
+
+    const meetingId = await controller.startRecording();
+
+    expect(meetingId).toBe("");
+    expect(client.startRecording).not.toHaveBeenCalled();
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", meetingId: null }));
   });
 
   it("re-pushes settings when the helper (re)connects — the helper holds them in memory only", async () => {

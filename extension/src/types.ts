@@ -39,6 +39,12 @@ export interface AudioProbeResult {
   message: string;
 }
 
+export interface HelperInfo {
+  helperVersion: string;
+  protocolVersion: number;
+  platform: "macos" | "windows" | "linux" | "unknown";
+}
+
 export interface NotetakerSettings {
   transcriptionProvider: TranscriptionProvider;
   summarizationProvider: SummarizationProvider;
@@ -134,6 +140,7 @@ export type OutgoingMessage =
 
 export type IncomingMessage =
   | { type: "paired"; pairingToken: string }
+  | { type: "helper_info"; helperVersion: string; protocolVersion: number; platform: HelperInfo["platform"] }
   | { type: "recording_started"; meetingId: string }
   | { type: "recording_stopped"; meetingId: string }
   | {
@@ -170,6 +177,7 @@ export function isIncomingMessage(value: unknown): value is IncomingMessage {
   }
   const validTypes: IncomingMessage["type"][] = [
     "paired",
+    "helper_info",
     "recording_started",
     "recording_stopped",
     "transcript_partial",
