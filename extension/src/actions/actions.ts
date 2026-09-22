@@ -5,6 +5,18 @@ import type { ActionItem, ActionItemStatus, MeetingRecord } from "../types";
 
 const app = document.getElementById("app")!;
 
+function showActionError(message: string): void {
+  let error = document.getElementById("action-error");
+  if (!error) {
+    error = document.createElement("p");
+    error.id = "action-error";
+    error.className = "empty-state error-state";
+    error.setAttribute("role", "alert");
+    app.prepend(error);
+  }
+  error.textContent = message;
+}
+
 type Filter = "all" | ActionItemStatus;
 
 function actionId(meeting: MeetingRecord, item: ActionItem, index: number): string {
@@ -59,7 +71,7 @@ async function render(): Promise<void> {
               <div class="action-meta">
                 <a href="../meeting/meeting.html?id=${encodeURIComponent(meeting.id)}">${escapeHtml(meeting.title)}</a>
                 ${item.owner ? `<span>Owner: ${escapeHtml(item.owner)}</span>` : ""}
-                <label>Due <input type="date" class="action-due" data-meeting-id="${escapeHtml(meeting.id)}" data-action-id="${escapeHtml(id)}" value="${escapeHtml(formatDueDate(item.dueAt))}" /></label>
+                <label>Due <input type="date" class="action-due" data-meeting-id="${escapeHtml(meeting.id)}" data-action-id="${escapeHtml(id)}" data-saved-value="${escapeHtml(formatDueDate(item.dueAt))}" value="${escapeHtml(formatDueDate(item.dueAt))}" /></label>
               </div>
             </div>
           </li>`;
@@ -70,20 +82,38 @@ async function render(): Promise<void> {
 
   for (const input of document.querySelectorAll<HTMLInputElement>(".action-toggle")) {
     input.addEventListener("change", async () => {
-      await setActionItem(input.dataset.meetingId!, input.dataset.actionId!, {
-        status: input.checked ? "done" : "open",
-        completedAt: input.checked ? new Date().toISOString() : null,
-      });
-      await render();
+      try {
+        await setActionItem(input.dataset.meetingId!, input.dataset.actionId!, {
+          status: input.checked ? "done" : "open",
+          completedAt: input.checked ? new Date().toISOString() : null,
+        });
+        await render();
+      } catch {
+        input.checked = !input.checked;
+        showActionError("Could not update this action item. Check the helper/webapp connection and try again.");
+      }
     });
   }
   for (const input of document.querySelectorAll<HTMLInputElement>(".action-due")) {
     input.addEventListener("change", async () => {
-      await setActionItem(input.dataset.meetingId!, input.dataset.actionId!, {
-        dueAt: input.value ? new Date(`${input.value}T00:00:00.000Z`).toISOString() : null,
-      });
+      try {
+        await setActionItem(input.dataset.meetingId!, input.dataset.actionId!, {
+          dueAt: input.value ? new Date(`${input.value}T00:00:00.000Z`).toISOString() : null,
+        });
+        input.dataset.savedValue = input.value;
+      } catch {
+        input.value = input.dataset.savedValue ?? "";
+        showActionError("Could not save the due date. Check the helper/webapp connection and try again.");
+      }
     });
   }
 }
 
-void render();
+function renderFailure(): void {
+  app.innerHTML = `
+    <header class="action-header"><h1>Action items</h1><a href="../popup/popup.html">Record</a></header>
+    <p class="empty-state error-state" role="alert">Action items could not be loaded. Reopen this page and try again.</p>
+  `;
+}
+
+void render().catch(renderFailure);

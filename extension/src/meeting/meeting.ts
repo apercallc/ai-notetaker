@@ -5,6 +5,18 @@ import { speakerLabel } from "../types";
 
 const app = document.getElementById("app")!;
 
+function showMeetingError(message: string): void {
+  let error = document.getElementById("meeting-error");
+  if (!error) {
+    error = document.createElement("p");
+    error.id = "meeting-error";
+    error.className = "text-warning";
+    error.setAttribute("role", "alert");
+    app.prepend(error);
+  }
+  error.textContent = message;
+}
+
 function exportAsMarkdown(meeting: NonNullable<Awaited<ReturnType<typeof getMeeting>>>): string {
   const lines = [
     `# ${meeting.title}`,
@@ -89,7 +101,7 @@ async function render(): Promise<void> {
               return `<li class="action-item ${item.status === "done" ? "done" : ""}">
                 <input type="checkbox" class="action-toggle" data-action-id="${escapeHtml(id)}" ${item.status === "done" ? "checked" : ""} aria-label="Mark action item ${escapeHtml(item.text)} complete" />
                 <span>${escapeHtml(item.text)}${item.owner ? ` <span class="text-secondary">(${escapeHtml(item.owner)})</span>` : ""}</span>
-                <input type="date" class="action-due" data-action-id="${escapeHtml(id)}" value="${escapeHtml(item.dueAt?.slice(0, 10) ?? "")}" aria-label="Due date for ${escapeHtml(item.text)}" />
+                <input type="date" class="action-due" data-action-id="${escapeHtml(id)}" data-saved-value="${escapeHtml(item.dueAt?.slice(0, 10) ?? "")}" value="${escapeHtml(item.dueAt?.slice(0, 10) ?? "")}" aria-label="Due date for ${escapeHtml(item.text)}" />
               </li>`;
             }).join("")}</ul>`
           : `<p class="text-secondary">None.</p>`
@@ -98,12 +110,14 @@ async function render(): Promise<void> {
 
     <section>
       <h2>Transcript</h2>
-      ${meeting.transcript
-        .map(
-          (segment) =>
-            `<p class="transcript-line"><span class="speaker">${escapeHtml(speakerLabel(segment.speaker))}:</span>${escapeHtml(segment.text)}</p>`,
-        )
-        .join("")}
+      ${meeting.transcript.length > 0
+        ? meeting.transcript
+            .map(
+              (segment) =>
+                `<p class="transcript-line"><span class="speaker">${escapeHtml(speakerLabel(segment.speaker))}:</span>${escapeHtml(segment.text)}</p>`,
+            )
+            .join("")
+        : `<p class="text-secondary">No transcript available.</p>`}
     </section>
 
     <div class="toolbar">
@@ -130,39 +144,60 @@ async function render(): Promise<void> {
       // The helper may be offline; local deletion remains authoritative for
       // the extension UI and can be retried for helper-owned raw audio.
     }
-    await deleteLocalMeeting(id);
-    window.close();
+    try {
+      await deleteLocalMeeting(id);
+      window.close();
+    } catch {
+      showMeetingError("The meeting could not be deleted locally. Try again.");
+    }
   });
 
   for (const input of document.querySelectorAll<HTMLInputElement>(".action-toggle")) {
     input.addEventListener("change", async () => {
-      const current = await getMeeting(id);
-      if (!current) return;
-      const updated = await updateMeeting(id, (meeting) => ({
-        ...meeting,
-        actionItems: meeting.actionItems.map((item, index) =>
-          (item.id ?? `${meeting.id}-${index}`) === input.dataset.actionId
-            ? { ...item, id: input.dataset.actionId, status: input.checked ? "done" : "open", completedAt: input.checked ? new Date().toISOString() : null }
-            : item,
-        ),
-      }));
-      if (updated) await syncMeetingToWebapp(updated, await getSettings());
-      await render();
+      try {
+        const current = await getMeeting(id);
+        if (!current) return;
+        const updated = await updateMeeting(id, (meeting) => ({
+          ...meeting,
+          actionItems: meeting.actionItems.map((item, index) =>
+            (item.id ?? `${meeting.id}-${index}`) === input.dataset.actionId
+              ? { ...item, id: input.dataset.actionId, status: input.checked ? "done" : "open", completedAt: input.checked ? new Date().toISOString() : null }
+              : item,
+          ),
+        }));
+        if (updated) await syncMeetingToWebapp(updated, await getSettings());
+        await render();
+      } catch {
+        input.checked = !input.checked;
+        showMeetingError("Could not update this action item. Check the helper/webapp connection and try again.");
+      }
     });
   }
   for (const input of document.querySelectorAll<HTMLInputElement>(".action-due")) {
     input.addEventListener("change", async () => {
-      const updated = await updateMeeting(id, (meeting) => ({
-        ...meeting,
-        actionItems: meeting.actionItems.map((item, index) =>
-          (item.id ?? `${meeting.id}-${index}`) === input.dataset.actionId
-            ? { ...item, id: input.dataset.actionId, dueAt: input.value ? new Date(`${input.value}T00:00:00.000Z`).toISOString() : null }
-            : item,
-        ),
-      }));
-      if (updated) await syncMeetingToWebapp(updated, await getSettings());
+      try {
+        const updated = await updateMeeting(id, (meeting) => ({
+          ...meeting,
+          actionItems: meeting.actionItems.map((item, index) =>
+            (item.id ?? `${meeting.id}-${index}`) === input.dataset.actionId
+              ? { ...item, id: input.dataset.actionId, dueAt: input.value ? new Date(`${input.value}T00:00:00.000Z`).toISOString() : null }
+              : item,
+          ),
+        }));
+        if (updated) await syncMeetingToWebapp(updated, await getSettings());
+        input.dataset.savedValue = input.value;
+      } catch {
+        input.value = input.dataset.savedValue ?? "";
+        showMeetingError("Could not save the due date. Check the helper/webapp connection and try again.");
+      }
     });
   }
 }
 
-void render();
+function renderFailure(): void {
+  app.innerHTML = `
+    <p class="text-warning" role="alert">This meeting could not be loaded. It may have been deleted or local storage may be unavailable.</p>
+  `;
+}
+
+void render().catch(renderFailure);

@@ -83,7 +83,7 @@ function render(): void {
 
     <div class="save-bar">
       <button type="button" class="primary" id="save-settings">Save settings</button>
-      <span class="test-result text-secondary" id="save-status"></span>
+      <span class="test-result text-secondary" id="save-status" role="status" aria-live="polite"></span>
     </div>
   `;
 
@@ -198,15 +198,24 @@ function wireEvents(): void {
       const provider = button.dataset.provider as ProviderKind;
       const input = document.getElementById(`key-${provider}`) as HTMLInputElement;
       const resultEl = document.getElementById(`test-result-${provider}`)!;
+      button.disabled = true;
       resultEl.textContent = "Checking…";
       resultEl.className = "test-result text-secondary";
-      const result = await testApiKey(provider, input.value);
-      resultEl.textContent = result.message;
-      resultEl.className = `test-result ${result.valid ? "valid" : "invalid"}`;
+      try {
+        const result = await testApiKey(provider, input.value);
+        resultEl.textContent = result.message;
+        resultEl.className = `test-result ${result.valid ? "valid" : "invalid"}`;
+      } catch {
+        resultEl.textContent = "The helper could not test this key. Check that it is running and try again.";
+        resultEl.className = "test-result invalid";
+      } finally {
+        button.disabled = false;
+      }
     });
   }
 
   document.getElementById("test-webapp")?.addEventListener("click", async () => {
+    const testButton = document.getElementById("test-webapp") as HTMLButtonElement;
     const url = (document.getElementById("webapp-url") as HTMLInputElement).value.trim();
     const resultEl = document.getElementById("webapp-test-result")!;
     if (!url) {
@@ -214,14 +223,23 @@ function wireEvents(): void {
       resultEl.className = "test-result invalid";
       return;
     }
+    testButton.disabled = true;
     resultEl.textContent = "Checking…";
     resultEl.className = "test-result text-secondary";
-    const result = await testWebappHealth(url);
-    resultEl.textContent = result.message;
-    resultEl.className = `test-result ${result.healthy ? "valid" : "invalid"}`;
+    try {
+      const result = await testWebappHealth(url);
+      resultEl.textContent = result.message;
+      resultEl.className = `test-result ${result.healthy ? "valid" : "invalid"}`;
+    } catch {
+      resultEl.textContent = "The connection test failed unexpectedly. Check the URL and try again.";
+      resultEl.className = "test-result invalid";
+    } finally {
+      testButton.disabled = false;
+    }
   });
 
   document.getElementById("save-settings")?.addEventListener("click", async () => {
+    const saveButton = document.getElementById("save-settings") as HTMLButtonElement;
     readFormIntoSettings();
     const statusEl = document.getElementById("save-status")!;
     if (settings.webapp && !normalizeWebappUrl(settings.webapp.url)) {
@@ -229,11 +247,21 @@ function wireEvents(): void {
       statusEl.className = "test-result invalid";
       return;
     }
-    await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
-    statusEl.textContent = "Saved.";
-    setTimeout(() => {
-      statusEl.textContent = "";
-    }, 2000);
+    saveButton.disabled = true;
+    statusEl.textContent = "Saving…";
+    statusEl.className = "test-result text-secondary";
+    try {
+      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+      statusEl.textContent = "Saved.";
+      setTimeout(() => {
+        statusEl.textContent = "";
+      }, 2000);
+    } catch {
+      statusEl.textContent = "Could not save settings. Reopen the extension and try again.";
+      statusEl.className = "test-result invalid";
+    } finally {
+      saveButton.disabled = false;
+    }
   });
 }
 
@@ -242,4 +270,15 @@ async function init(): Promise<void> {
   render();
 }
 
-void init();
+function renderFailure(): void {
+  app.innerHTML = `
+    <h1>Settings</h1>
+    <div class="empty-state" role="alert">
+      <p>Settings could not be loaded.</p>
+      <button type="button" class="primary" id="retry-settings">Try again</button>
+    </div>
+  `;
+  document.getElementById("retry-settings")?.addEventListener("click", () => void init().catch(renderFailure));
+}
+
+void init().catch(renderFailure);

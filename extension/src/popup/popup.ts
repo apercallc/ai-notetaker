@@ -189,20 +189,28 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]):
   if (!statusEl) return;
   statusEl.textContent = "Checking audio devices…";
   statusEl.className = "text-secondary";
-  const response = await sendToBackground<{ status: AudioStatus }>({ type: "GET_AUDIO_PREFLIGHT" });
-  const status = response.status;
-  const deviceLine = [status.microphone ? `Mic: ${status.microphone}` : "Mic: missing", status.speaker ? `Meeting audio: ${status.speaker}` : "Meeting audio: missing"].join(" · ");
-  const readiness = !status.driverInstalled
-    ? "Audio driver missing."
-    : status.ready
-      ? "Audio ready."
-      : "Audio routing incomplete.";
-  statusEl.textContent = `${readiness} ${deviceLine} ${status.guidance}`;
-  statusEl.className = status.ready ? "text-success" : "text-warning";
-  if (checkButton) checkButton.textContent = status.ready ? "Refresh audio check" : "Check audio again";
-  if (probeButton) probeButton.disabled = !status.ready;
-  const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-  if (startButton) startButton.disabled = !status.ready || helperStatus !== "connected";
+  try {
+    const response = await sendToBackground<{ status: AudioStatus }>({ type: "GET_AUDIO_PREFLIGHT" });
+    const status = response.status;
+    const deviceLine = [status.microphone ? `Mic: ${status.microphone}` : "Mic: missing", status.speaker ? `Meeting audio: ${status.speaker}` : "Meeting audio: missing"].join(" · ");
+    const readiness = !status.driverInstalled
+      ? "Audio driver missing."
+      : status.ready
+        ? "Audio ready."
+        : "Audio routing incomplete.";
+    statusEl.textContent = `${readiness} ${deviceLine} ${status.guidance}`;
+    statusEl.className = status.ready ? "text-success" : "text-warning";
+    if (checkButton) checkButton.textContent = status.ready ? "Refresh audio check" : "Check audio again";
+    if (probeButton) probeButton.disabled = !status.ready;
+    const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
+    if (startButton) startButton.disabled = !status.ready || helperStatus !== "connected";
+  } catch {
+    statusEl.textContent = "Audio check failed. Confirm the desktop helper is running, then try again.";
+    statusEl.className = "text-warning";
+    if (probeButton) probeButton.disabled = true;
+    const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
+    if (startButton) startButton.disabled = true;
+  }
 }
 
 async function runAudioProbe(): Promise<void> {
@@ -211,10 +219,16 @@ async function runAudioProbe(): Promise<void> {
   if (!statusEl) return;
   if (probeButton) probeButton.disabled = true;
   statusEl.textContent = "Listening for microphone and meeting audio for 2 seconds…";
-  const response = await sendToBackground<{ result: AudioProbeResult }>({ type: "RUN_AUDIO_PROBE" });
-  statusEl.textContent = response.result.message;
-  statusEl.className = response.result.passed ? "text-success" : "text-warning";
-  if (probeButton) probeButton.disabled = false;
+  try {
+    const response = await sendToBackground<{ result: AudioProbeResult }>({ type: "RUN_AUDIO_PROBE" });
+    statusEl.textContent = response.result.message;
+    statusEl.className = response.result.passed ? "text-success" : "text-warning";
+  } catch {
+    statusEl.textContent = "Audio test failed. Confirm the desktop helper is running, then try again.";
+    statusEl.className = "text-warning";
+  } finally {
+    if (probeButton) probeButton.disabled = false;
+  }
 }
 
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
@@ -262,9 +276,15 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
     </div>
   `;
   document.getElementById("start-recording")?.addEventListener("click", async () => {
-    const meetingMode = (document.getElementById("meeting-mode") as HTMLSelectElement).value as MeetingMode;
-    await sendToBackground({ type: "START_RECORDING", meetingMode });
-    await renderSafely();
+    const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
+    if (startButton) startButton.disabled = true;
+    try {
+      const meetingMode = (document.getElementById("meeting-mode") as HTMLSelectElement).value as MeetingMode;
+      await sendToBackground({ type: "START_RECORDING", meetingMode });
+      await renderSafely();
+    } catch (error) {
+      renderFailure(error);
+    }
   });
   document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus(helperStatus));
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());

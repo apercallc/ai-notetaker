@@ -194,6 +194,7 @@ function render(): void {
       <button type="button" class="secondary" id="back-button" ${step === 1 ? "disabled" : ""}>Back</button>
       <button type="button" class="primary" id="next-button">${step === TOTAL_STEPS ? "Finish" : "Continue"}</button>
     </div>
+    <p id="step-error" class="test-result invalid" role="alert"></p>
   `;
   wireEvents();
 }
@@ -205,6 +206,8 @@ function wireEvents(): void {
   });
 
   document.getElementById("next-button")?.addEventListener("click", async () => {
+    const nextButton = document.getElementById("next-button") as HTMLButtonElement;
+    if (nextButton.disabled) return;
     if (step === 3) {
       settings.apiKeys.deepgram = (document.getElementById("onboarding-deepgram-key") as HTMLInputElement).value;
       settings.apiKeys.claude = (document.getElementById("onboarding-claude-key") as HTMLInputElement).value;
@@ -212,13 +215,37 @@ function wireEvents(): void {
     if (step === 4) {
       consentAcknowledged = (document.getElementById("consent-ack") as HTMLInputElement).checked;
     }
-    if (!canAdvance()) return;
+    if (!canAdvance()) {
+      const error = document.getElementById("step-error");
+      if (error) {
+        error.textContent = step === 1
+          ? "Install and connect the desktop helper before continuing."
+          : step === 2
+            ? "Check both devices and complete the 2-second audio test before continuing."
+            : step === 3
+              ? "Test both provider keys before continuing."
+              : "Acknowledge the recording consent notice before finishing setup.";
+      }
+      return;
+    }
 
     if (step === TOTAL_STEPS) {
+      nextButton.disabled = true;
+      nextButton.textContent = "Saving…";
       settings.onboardingComplete = true;
       settings.consentDisclosureAcknowledged = consentAcknowledged;
-      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
-      window.close();
+      try {
+        await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+        window.close();
+      } catch {
+        nextButton.disabled = false;
+        nextButton.textContent = "Finish";
+        const status = document.getElementById("step-error");
+        if (status) {
+          status.textContent = "Could not save setup. Check that the extension is running, then try again.";
+          status.className = "test-result invalid";
+        }
+      }
       return;
     }
     step += 1;
@@ -230,10 +257,20 @@ function wireEvents(): void {
   });
 
   document.getElementById("check-helper")?.addEventListener("click", async () => {
-    const state = await chrome.runtime.sendMessage({ type: "CHECK_HELPER" }) as BackgroundState;
-    helperStatus = state.helperStatus;
-    helperInfo = state.helperInfo;
-    render();
+    const button = document.getElementById("check-helper") as HTMLButtonElement;
+    const status = document.getElementById("helper-install-status");
+    button.disabled = true;
+    if (status) status.textContent = "Checking for the desktop helper…";
+    try {
+      const state = await chrome.runtime.sendMessage({ type: "CHECK_HELPER" }) as BackgroundState;
+      helperStatus = state.helperStatus;
+      helperInfo = state.helperInfo;
+      render();
+    } catch {
+      if (status) status.textContent = "Could not check the helper. Launch it, then try again.";
+    } finally {
+      button.disabled = false;
+    }
   });
 
   document.getElementById("helper-installed")?.addEventListener("change", (event) => {
@@ -241,31 +278,67 @@ function wireEvents(): void {
   });
 
   document.getElementById("check-audio-setup")?.addEventListener("click", async () => {
-    const result = (await chrome.runtime.sendMessage({ type: "GET_AUDIO_PREFLIGHT" })) as { status: AudioStatus };
-    audioStatus = result.status;
-    audioProbe = null;
-    render();
+    const button = document.getElementById("check-audio-setup") as HTMLButtonElement;
+    const status = document.getElementById("audio-preflight-result");
+    button.disabled = true;
+    if (status) status.textContent = "Checking audio devices…";
+    try {
+      const result = (await chrome.runtime.sendMessage({ type: "GET_AUDIO_PREFLIGHT" })) as { status: AudioStatus };
+      audioStatus = result.status;
+      audioProbe = null;
+      render();
+    } catch {
+      if (status) {
+        status.textContent = "Could not check audio. Confirm the desktop helper is running, then try again.";
+        status.className = "invalid";
+      }
+    } finally {
+      button.disabled = false;
+    }
   });
 
   document.getElementById("probe-audio-setup")?.addEventListener("click", async () => {
-    const result = (await chrome.runtime.sendMessage({ type: "RUN_AUDIO_PROBE" })) as { result: AudioProbeResult };
-    audioProbe = result.result;
-    render();
+    const button = document.getElementById("probe-audio-setup") as HTMLButtonElement;
+    const status = document.getElementById("audio-preflight-result");
+    button.disabled = true;
+    if (status) status.textContent = "Listening for microphone and meeting audio for 2 seconds…";
+    try {
+      const result = (await chrome.runtime.sendMessage({ type: "RUN_AUDIO_PROBE" })) as { result: AudioProbeResult };
+      audioProbe = result.result;
+      render();
+    } catch {
+      if (status) {
+        status.textContent = "Audio test failed. Confirm the desktop helper is running, then try again.";
+        status.className = "invalid";
+      }
+    } finally {
+      button.disabled = false;
+    }
   });
 
   document.getElementById("test-onboarding-keys")?.addEventListener("click", async () => {
+    const button = document.getElementById("test-onboarding-keys") as HTMLButtonElement;
     const deepgramKey = (document.getElementById("onboarding-deepgram-key") as HTMLInputElement).value;
     const claudeKey = (document.getElementById("onboarding-claude-key") as HTMLInputElement).value;
     const resultEl = document.getElementById("onboarding-key-result")!;
+    button.disabled = true;
     resultEl.textContent = "Checking…";
-    const [deepgramResult, claudeResult] = await Promise.all([
-      testApiKey("deepgram", deepgramKey),
-      testApiKey("claude", claudeKey),
-    ]);
-    const bothValid = deepgramResult.valid && claudeResult.valid;
-    providerTestsPassed = bothValid;
-    resultEl.textContent = `${deepgramResult.message} ${claudeResult.message}`;
-    resultEl.className = `test-result ${bothValid ? "valid" : "invalid"}`;
+    try {
+      const [deepgramResult, claudeResult] = await Promise.all([
+        testApiKey("deepgram", deepgramKey),
+        testApiKey("claude", claudeKey),
+      ]);
+      const bothValid = deepgramResult.valid && claudeResult.valid;
+      providerTestsPassed = bothValid;
+      resultEl.textContent = `${deepgramResult.message} ${claudeResult.message}`;
+      resultEl.className = `test-result ${bothValid ? "valid" : "invalid"}`;
+    } catch {
+      providerTestsPassed = false;
+      resultEl.textContent = "The helper could not test the keys. Check that it is running and try again.";
+      resultEl.className = "test-result invalid";
+    } finally {
+      button.disabled = false;
+    }
   });
 
   for (const id of ["onboarding-deepgram-key", "onboarding-claude-key"]) {
@@ -283,4 +356,15 @@ async function init(): Promise<void> {
   render();
 }
 
-void init();
+function renderFailure(): void {
+  app.innerHTML = `
+    <h1>AI Notetaker setup</h1>
+    <div class="empty-state" role="alert">
+      <p>Setup could not be loaded.</p>
+      <button type="button" class="primary" id="retry-onboarding">Try again</button>
+    </div>
+  `;
+  document.getElementById("retry-onboarding")?.addEventListener("click", () => void init().catch(renderFailure));
+}
+
+void init().catch(renderFailure);
