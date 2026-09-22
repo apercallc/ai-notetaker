@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { getWebappSyncOutbox } from "../src/lib/storage";
-import { syncMeetingToWebapp } from "../src/lib/webappSync";
+import { flushWebappSyncOutbox, syncMeetingToWebapp } from "../src/lib/webappSync";
 import type { MeetingRecord } from "../src/types";
 
 const meeting: MeetingRecord = {
@@ -43,5 +43,18 @@ describe("webapp sync durability", () => {
       syncMeetingToWebapp(meeting, { webapp: { ...settings.webapp, url: "https://notes.example.test/app" } }, fetchImpl),
     ).resolves.toBe(false);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("can avoid re-queueing while flushing an outbox", async () => {
+    await expect(syncMeetingToWebapp(meeting, settings, vi.fn<typeof fetch>().mockRejectedValue(new Error("offline")), { queueOnFailure: false })).resolves.toBe(false);
+    expect(await getWebappSyncOutbox()).toEqual([]);
+  });
+
+  it("flushes each queued meeting without duplicating failures", async () => {
+    await syncMeetingToWebapp(meeting, settings, vi.fn<typeof fetch>().mockRejectedValue(new Error("offline")));
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
+    await flushWebappSyncOutbox(settings, fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(await getWebappSyncOutbox()).toEqual([]);
   });
 });

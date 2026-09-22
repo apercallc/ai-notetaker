@@ -60,6 +60,15 @@ describe("settings storage", () => {
     expect(chromeMock.storage.sync.set).not.toHaveBeenCalled();
     expect(chromeMock.storage.local.set).toHaveBeenCalled();
   });
+
+  it("surfaces chrome storage failures instead of silently losing settings", async () => {
+    chromeMock.storage.local.set.mockImplementationOnce((_items, callback) => {
+      chromeMock.runtime.lastError = { message: "storage quota exceeded" };
+      callback?.();
+      chromeMock.runtime.lastError = undefined;
+    });
+    await expect(saveSettings({ ...DEFAULT_SETTINGS })).rejects.toThrow("storage quota exceeded");
+  });
 });
 
 describe("pairing token storage", () => {
@@ -162,6 +171,11 @@ describe("meeting storage", () => {
     expect(await getWebappSyncOutbox()).toEqual([meeting]);
     await removeWebappSyncOutbox(meeting.id);
     expect(await getWebappSyncOutbox()).toEqual([]);
+  });
+
+  it("filters malformed entries restored from an older outbox", async () => {
+    await chrome.storage.local.set({ "notetaker.webappSync.outbox": [null, { id: 3 }, meeting] });
+    expect(await getWebappSyncOutbox()).toEqual([meeting]);
   });
 
   it("serializes concurrent webapp outbox updates without dropping a meeting", async () => {

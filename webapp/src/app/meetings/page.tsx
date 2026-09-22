@@ -18,9 +18,9 @@ function formatDate(iso: string): string {
 export default async function MeetingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; page?: string; error?: string }>;
 }) {
-  const { q: rawQuery, page: rawPage } = await searchParams;
+  const { q: rawQuery, page: rawPage, error } = await searchParams;
   // Keep a pasted or hand-crafted URL from turning a normal page view into a
   // validation error; the API still rejects oversized queries explicitly.
   const q = rawQuery?.trim().slice(0, MAX_SEARCH_LENGTH);
@@ -53,6 +53,12 @@ export default async function MeetingsPage({
       </div>
 
       <SearchForm initialQuery={q ?? ""} />
+
+      {error && (
+        <p className="error-text" role="alert">
+          {error === "delete-failed" ? "That meeting could not be deleted. Try again." : "That meeting request was invalid."}
+        </p>
+      )}
 
       {meetings.length === 0 ? (
         <p className="empty-state">

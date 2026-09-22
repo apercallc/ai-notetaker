@@ -25,6 +25,28 @@ them drift apart.
       Windows, and Linux devices with each supported meeting app; local tests
       cannot prove OS routing or provider behavior.
 
+## Quality, error handling, and open-source operations (2026-09-21)
+
+- [x] Add reproducible coverage commands and CI artifacts for every surface;
+      the current deterministic gates report 91.26% Rust-core lines,
+      95.97% extension lines, and 92.81% webapp lines. Platform-native audio,
+      Tauri tray, Chrome entrypoints, and rendered pages remain separate
+      smoke-test concerns rather than being counted as fake unit coverage.
+- [x] Expand unit and integration coverage for protocol validation, native
+      messaging diagnostics, storage failures, retry recovery, webapp API
+      limits, request-body streaming, and provider/webapp error responses.
+- [x] Standardize webapp API error envelopes with safe generic 500 responses,
+      request correlation IDs, and server-rendered retry boundaries; malformed
+      action submissions now return user-visible recovery messages.
+- [x] Remove normal-path helper storage `expect` calls, log fatal startup
+      failures with context, and add tests for missing durable retry audio and
+      pre-start audio callbacks.
+- [x] Add open-source project operations: MIT license, security policy,
+      CODEOWNERS, Dependabot configuration, and `docs/testing.md`.
+- [ ] Run real browser/Chrome Native Messaging flows and provider/audio tests
+      on supported OSes; source/tests/builds cannot prove a live helper pairing,
+      virtual-device routing, or a real provider response.
+
 ## Distribution and installation architecture (2026-09-21)
 
 The approved direction is documented in
@@ -89,8 +111,8 @@ only.
 ## Sub-project 1: Core capture + notes pipeline (MVP)
 
 **Status (2026-09-21): first implementation pass landed, then reviewed and
-fixed.** 95 Rust unit tests + 1 Rust fixture integration test + 71 extension
-tests + 49 webapp tests, all
+fixed.** 93 Rust core unit tests + 1 Rust fixture integration test + 117
+extension tests + 55 webapp tests, all
 independently re-run and verified green by the coordinator (not just taken
 on the implementers' word) — see `docs/native-messaging-protocol.md` for a
 real cross-package
@@ -407,8 +429,9 @@ scope:
 ### Testing & QA
 
 - [x] Unit tests per package (helper Rust modules, extension logic, webapp
-      API routes) — focused suites currently cover 95 Rust unit tests plus 1
-      fixture integration test, 71 extension tests, and 49 webapp tests
+      API routes) — focused suites currently cover 93 Rust core unit tests
+      plus 1 fixture integration test, 117 extension tests, and 55 webapp
+      tests; see `docs/testing.md` for coverage scope and commands.
 - [x] Integration test for the full pipeline using a committed PCM fixture
       against both default and budget provider paths (mocked provider
       responses in CI, no live API calls required) —
@@ -443,6 +466,8 @@ scope:
       expectations)
 - [x] `CODE_OF_CONDUCT.md`
 - [x] Issue and PR templates
+- [x] MIT license, security policy, CODEOWNERS, Dependabot updates, and
+      reproducible coverage/testing documentation
 
 ### Community / open source readiness
 

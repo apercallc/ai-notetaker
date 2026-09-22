@@ -10,6 +10,13 @@ export default defineConfig({
     // file's cleanup (`beforeEach` deleting all rows) race a different
     // file's in-flight assertions against the same tables.
     fileParallelism: false,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary", "lcov"],
+      include: ["src/lib/**/*.ts", "src/app/api/**/*.ts"],
+      exclude: ["src/**/*.test.ts", "src/lib/db.ts"],
+      thresholds: { statements: 90, branches: 80, functions: 90, lines: 90 },
+    },
   },
   resolve: {
     alias: {

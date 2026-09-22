@@ -44,3 +44,31 @@ pub fn build_summarization_provider(
         SummarizationProviderId::Deepseek => Box::new(DeepSeekProvider::new(api_key)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn provider_builders_cover_every_wire_provider() {
+        assert_eq!(
+            build_transcription_provider(TranscriptionProviderId::Deepgram, "key".into()).id(),
+            TranscriptionProviderId::Deepgram
+        );
+        assert_eq!(
+            build_transcription_provider(TranscriptionProviderId::Groq, "key".into()).id(),
+            TranscriptionProviderId::Groq
+        );
+        assert_eq!(
+            build_summarization_provider(SummarizationProviderId::Claude, "key".into()).id(),
+            SummarizationProviderId::Claude
+        );
+        assert_eq!(
+            build_summarization_provider(SummarizationProviderId::Gemini, "key".into()).id(),
+            SummarizationProviderId::Gemini
+        );
+        assert_eq!(
+            build_summarization_provider(SummarizationProviderId::Deepseek, "key".into()).id(),
+            SummarizationProviderId::Deepseek
+        );
+    }
+}

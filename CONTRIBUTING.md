@@ -11,11 +11,13 @@ Run the focused checks for every changed package:
 ```sh
 cd helper && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 cd ../extension && npm run typecheck && npm test && npm run build
-cd ../webapp && npx prisma generate && npm test && npm run build
+cd ../webapp && npx prisma generate && npm run test:with-postgres && npm run build
 ```
 
 The webapp tests use Postgres. `webapp/.env.example` documents the required
-local variables; the Docker Compose flow provides a disposable database.
+local variables; `npm run test:with-postgres` provisions a disposable database
+and is the supported local test entrypoint. See
+[`docs/testing.md`](docs/testing.md) for coverage commands and scope.
 
 For changes under `helper/`, `extension/`, or `webapp/`, review the diff
 against the guardrails before committing. UI changes should also receive a

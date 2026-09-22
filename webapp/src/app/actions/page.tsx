@@ -15,9 +15,9 @@ function dateInputValue(date: Date | null): string {
 export default async function ActionItemsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; error?: string }>;
 }) {
-  const { status: rawStatus } = await searchParams;
+  const { status: rawStatus, error } = await searchParams;
   const status: ActionStatus | undefined = rawStatus === "open" || rawStatus === "done" ? rawStatus : undefined;
   const items = await listActionItems(status);
 
@@ -40,6 +40,12 @@ export default async function ActionItemsPage({
         <Link href={filterHref("open")} aria-current={status === "open" ? "page" : undefined}>Open</Link>
         <Link href={filterHref("done")} aria-current={status === "done" ? "page" : undefined}>Done</Link>
       </nav>
+
+      {error && (
+        <p className="error-text" role="alert">
+          {error === "missing-action" ? "That action item no longer exists." : "We could not save that action item. Check the date and try again."}
+        </p>
+      )}
 
       {items.length === 0 ? (
         <p className="empty-state">

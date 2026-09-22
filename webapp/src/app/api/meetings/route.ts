@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listMeetings, upsertMeeting, ValidationError } from "@/lib/meetings";
+import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 
 const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 
@@ -7,18 +8,16 @@ const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 // this handler doesn't re-check it, by design (one enforcement point).
 
 export async function GET(request: NextRequest) {
+  const requestId = requestIdFrom(request);
   const { searchParams } = request.nextUrl;
   const query = searchParams.get("query") ?? undefined;
   try {
     const limit = parseIntegerParam(searchParams.get("limit"), "limit");
     const offset = parseIntegerParam(searchParams.get("offset"), "offset");
     const result = await listMeetings({ query, limit, offset });
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: { "x-request-id": requestId } });
   } catch (err) {
-    if (err instanceof ValidationError) {
-      return NextResponse.json({ error: err.message }, { status: 400 });
-    }
-    throw err;
+    return apiErrorResponse(err, { requestId });
   }
 }
 
@@ -32,9 +31,10 @@ function parseIntegerParam(value: string | null, name: string): number | undefin
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = requestIdFrom(request);
   const contentLength = request.headers.get("content-length");
   if (contentLength && Number(contentLength) > MAX_REQUEST_BYTES) {
-    return NextResponse.json({ error: "request body is too large" }, { status: 413 });
+    return jsonError("request body is too large", 413, requestId);
   }
 
   let body: unknown;
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       totalBytes += value.byteLength;
       if (totalBytes > MAX_REQUEST_BYTES) {
         await reader.cancel();
-        return NextResponse.json({ error: "request body is too large" }, { status: 413 });
+        return jsonError("request body is too large", 413, requestId);
       }
       chunks.push(value);
     }
@@ -62,16 +62,13 @@ export async function POST(request: NextRequest) {
     }
     body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
-    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+    return jsonError("invalid JSON body", 400, requestId);
   }
 
   try {
     const result = await upsertMeeting(body);
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result, { status: 201, headers: { "x-request-id": requestId } });
   } catch (err) {
-    if (err instanceof ValidationError) {
-      return NextResponse.json({ error: err.message }, { status: 400 });
-    }
-    throw err;
+    return apiErrorResponse(err, { requestId });
   }
 }

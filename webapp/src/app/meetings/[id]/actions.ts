@@ -6,8 +6,15 @@ import { revalidatePath } from "next/cache";
 
 export async function deleteMeetingAction(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
-  if (!id) return;
-  await deleteMeeting(id);
+  if (!id) {
+    redirect("/meetings?error=invalid-delete");
+  }
+  try {
+    await deleteMeeting(id);
+  } catch (error) {
+    console.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
+    redirect("/meetings?error=delete-failed");
+  }
   redirect("/meetings");
 }
 
@@ -17,18 +24,28 @@ export async function updateActionItemAction(formData: FormData): Promise<void> 
   const statusValue = formData.get("done") === "1" ? "done" : "open";
   const dueAtValue = String(formData.get("dueAt") ?? "");
 
-  if (!id) return;
+  if (!id) {
+    redirect("/actions?error=invalid-action");
+  }
 
   let dueAt: string | null = null;
   if (dueAtValue) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueAtValue)) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueAtValue)) {
+      redirect("/actions?error=invalid-date");
+    }
     dueAt = `${dueAtValue}T00:00:00.000Z`;
   }
 
-  await updateActionItem(id, {
-    status: statusValue,
-    dueAt,
-  });
+  let updated: boolean;
+  try {
+    updated = await updateActionItem(id, { status: statusValue, dueAt });
+  } catch (error) {
+    console.error("action item update failed", { id, error: error instanceof Error ? error.message : String(error) });
+    redirect("/actions?error=update-failed");
+  }
+  if (!updated) {
+    redirect("/actions?error=missing-action");
+  }
 
   revalidatePath("/actions");
   revalidatePath("/meetings");

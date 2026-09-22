@@ -63,6 +63,7 @@ pub enum StorageError {
     NotFound(Uuid),
 }
 
+#[derive(Debug, Clone)]
 pub struct MeetingStore {
     root: PathBuf,
 }

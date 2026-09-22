@@ -331,6 +331,73 @@ describe("NativeMessagingClient", () => {
     });
   });
 
+  it("does not throw when settings change while the helper is offline", () => {
+    const client = new NativeMessagingClient();
+    expect(() => client.pushSettings({
+      transcriptionProvider: "deepgram",
+      summarizationProvider: "claude",
+      apiKeys: {},
+      webapp: null,
+      defaultMeetingMode: "general",
+      customVocabulary: [],
+      customSummaryInstructions: "",
+    })).not.toThrow();
+  });
+
+  it("round-trips audio preflight and probe replies", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    const preflight = client.getAudioPreflight();
+    expect(port.postMessage).toHaveBeenCalledWith({ type: "audio_preflight" });
+    port._emitMessage({ type: "audio_status", platform: "linux", driver: "PipeWire", driverInstalled: true, microphone: "Mic", speaker: "Monitor", ready: true, guidance: "ready" });
+    await expect(preflight).resolves.toMatchObject({ ready: true, driver: "PipeWire" });
+
+    const probe = client.runAudioProbe();
+    expect(port.postMessage).toHaveBeenCalledWith({ type: "audio_probe" });
+    port._emitMessage({ type: "audio_probe_result", micFrames: 4, speakerFrames: 8, passed: true, message: "Audio passed" });
+    await expect(probe).resolves.toMatchObject({ micFrames: 4, speakerFrames: 8, passed: true, message: "Audio passed" });
+  });
+
+  it("returns actionable audio fallbacks when disconnected or timed out", async () => {
+    const disconnected = new NativeMessagingClient();
+    await expect(disconnected.getAudioPreflight()).resolves.toMatchObject({ ready: false, driverInstalled: false });
+    await expect(disconnected.runAudioProbe()).resolves.toMatchObject({ passed: false, micFrames: 0 });
+
+    vi.useFakeTimers();
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+    const result = client.getAudioPreflight();
+    await vi.advanceTimersByTimeAsync(8_000);
+    await expect(result).resolves.toMatchObject({ ready: false });
+  });
+
+  it("sends lifecycle commands and reconnects when an alarm asks it to", async () => {
+    const ports: Array<ReturnType<typeof createFakePort>> = [];
+    chromeMock.runtime.connectNative.mockImplementation(() => {
+      const port = createFakePort();
+      ports.push(port);
+      return port;
+    });
+    const client = new NativeMessagingClient();
+    await client.connect();
+    client.stopRecording("m");
+    client.resumeRecording("m");
+    client.discardRecording("m");
+    client.deleteMeeting("m");
+    expect(ports[0]?.postMessage).toHaveBeenCalledWith({ type: "stop_recording", meetingId: "m" });
+    expect(ports[0]?.postMessage).toHaveBeenCalledWith({ type: "resume_recording", meetingId: "m" });
+    expect(ports[0]?.postMessage).toHaveBeenCalledWith({ type: "discard_recording", meetingId: "m" });
+    expect(ports[0]?.postMessage).toHaveBeenCalledWith({ type: "delete_meeting", meetingId: "m" });
+    ports[0]?._emitDisconnect();
+    client.retryFromAlarm();
+    expect(ports.length).toBeGreaterThanOrEqual(2);
+  });
+
   describe("testProviderKey", () => {
     it("sends test_provider_key and resolves with the matching provider_key_test_result", async () => {
       const port = createFakePort();

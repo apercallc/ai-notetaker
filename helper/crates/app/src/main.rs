@@ -155,7 +155,10 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running AI Notetaker helper");
+        .unwrap_or_else(|error| {
+            tracing::error!(%error, "AI Notetaker helper stopped during startup");
+            std::process::exit(1);
+        });
 }
 
 async fn handle_message(
@@ -289,10 +292,8 @@ async fn handle_message(
                         return true;
                     }
                 };
-            let store =
-                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
             let mut pipeline = Pipeline::new(
-                store,
+                state.store.as_ref().clone(),
                 build_transcription_provider(transcription_provider, transcription_key),
                 build_summarization_provider(summarization_provider, summarization_key),
                 retry_queue,
@@ -479,9 +480,7 @@ async fn handle_message(
             }
             state.pipelines.lock().await.remove(&meeting_id);
             let _ = std::fs::remove_file(state.data_dir.join(format!("retry-{meeting_id}.json")));
-            let store =
-                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
-            if let Err(error) = store.delete_meeting(meeting_id) {
+            if let Err(error) = state.store.delete_meeting(meeting_id) {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
                     code: ErrorCode::DeviceNotFound,
@@ -500,9 +499,7 @@ async fn handle_message(
                 worker.abort();
             }
             state.pipelines.lock().await.remove(&meeting_id);
-            let store =
-                MeetingStore::new(&state.data_dir).expect("data dir already validated at startup");
-            if let Err(error) = store.delete_meeting(meeting_id) {
+            if let Err(error) = state.store.delete_meeting(meeting_id) {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
                     code: ErrorCode::DeviceNotFound,

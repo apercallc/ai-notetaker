@@ -8,11 +8,13 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.280",
+    "@vitest/coverage-v8": "^4.1.11",
     "esbuild": "^0.25.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.6.0",

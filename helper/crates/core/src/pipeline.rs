@@ -734,6 +734,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn audio_received_before_start_is_ignored() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        assert!(pipeline
+            .handle_audio_chunk(Uuid::new_v4(), AudioChannel::Mic, &[1, 2], 16_000)
+            .await
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn changing_sample_rate_flushes_the_previous_audio_buffer() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2], 16_000)
+            .await;
+        let messages = pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[3, 4], 48_000)
+            .await;
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::TranscriptPartial { .. })));
+    }
+
+    #[tokio::test]
+    async fn retry_reports_missing_saved_audio_without_panicking() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .retry_queue
+            .enqueue(
+                RetryableChunk {
+                    meeting_id: id,
+                    channel: AudioChannel::Mic,
+                    sample_rate_hz: 16_000,
+                    audio_ref: RetryAudioRef::FileRange {
+                        channel_file: MIC_FILE.to_string(),
+                        start: 0,
+                        end: 4,
+                    },
+                },
+                Utc::now(),
+            )
+            .unwrap();
+        let messages = pipeline.process_due_retries(Utc::now()).await;
+        assert!(
+            matches!(messages.as_slice(), [HelperToExtension::Error { message, .. }] if message.contains("retry could not read saved audio"))
+        );
+    }
+
+    #[tokio::test]
     async fn audio_chunk_is_persisted_before_transcription_is_attempted() {
         let (_dir, mut pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();

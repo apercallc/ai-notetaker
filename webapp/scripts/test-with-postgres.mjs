@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 const container = "ai-notetaker-test-postgres";
 const port = process.env.AI_NOTETAKER_TEST_DB_PORT ?? "5499";
 const databaseUrl = `postgresql://notetaker:notetaker@localhost:${port}/ainotetaker_test`;
+const testArgs = process.argv.slice(2).filter((argument) => argument !== "--");
 let started = false;
 
 function run(command, args, env = {}) {
@@ -57,7 +58,7 @@ try {
   const env = { DATABASE_URL: databaseUrl, AUTH_TOKEN: "local-test-token" };
   run("npx", ["prisma", "generate"], env);
   run("npx", ["prisma", "migrate", "deploy"], env);
-  run("npm", ["test"], env);
+  run("npm", ["test", ...(testArgs.length > 0 ? ["--", ...testArgs] : [])], env);
 } finally {
   if (started) {
     try {

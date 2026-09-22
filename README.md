@@ -193,11 +193,13 @@ kept explicit there and in the roadmap.
 ```sh
 cd helper && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 cd ../extension && npm run typecheck && npm test && npm run build
-cd ../webapp && npx prisma generate && npm test && npm run build
+cd ../webapp && npx prisma generate && npm run test:with-postgres && npm run build
 ```
 
 Package-specific notes live in [`extension/README.md`](extension/README.md),
 [`helper/README.md`](helper/README.md), and [`webapp/README.md`](webapp/README.md).
+Coverage commands and the distinction between deterministic tests and real
+OS/browser/provider validation are in [`docs/testing.md`](docs/testing.md).
 Architecture decisions are recorded in [`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md).
 
 ## License

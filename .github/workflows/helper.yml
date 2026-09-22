@@ -60,3 +60,15 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
+
+      # LLVM coverage is Linux-only here because the Tauri tray and native
+      # audio backends are platform-specific. The report still covers the
+      # shared core and audio matching logic; the matrix above remains the
+      # authoritative cross-platform compile/test gate.
+      - name: Install cargo-llvm-cov
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Shared-core coverage
+        if: runner.os == 'Linux'
+        run: cargo llvm-cov --package notetaker-core --all-targets --summary-only --fail-under-lines 90

@@ -75,6 +75,18 @@ describe("POST /api/meetings", () => {
     const res = await POST(req);
     expect(res.status).toBe(413);
   });
+
+  it("cancels a streamed body as soon as it crosses the size limit", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(16 * 1024 * 1024 + 1));
+        controller.close();
+      },
+    });
+    const req = new Request("http://localhost/api/meetings", { method: "POST", body, duplex: "half" } as RequestInit & { duplex: "half" }) as unknown as NextRequest;
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+  });
 });
 
 describe("GET /api/meetings", () => {
@@ -91,6 +103,12 @@ describe("GET /api/meetings", () => {
     const res = await GET(new NextRequest("http://localhost/api/meetings?limit=not-a-number"));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "limit must be a non-negative integer" });
+  });
+
+  it("accepts valid numeric pagination parameters", async () => {
+    const res = await GET(new NextRequest("http://localhost/api/meetings?limit=1&offset=0"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).total).toBe(0);
   });
 
   it("returns 400 for an overlong search query", async () => {

@@ -225,6 +225,27 @@ a {
   text-align: center;
 }
 
+.error-state,
+.loading-state {
+  padding-top: 15vh;
+  text-align: center;
+}
+
+.error-state button {
+  border: 0;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  cursor: pointer;
+  font: inherit;
+}
+
+.error-state button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
 .pagination {
   display: flex;
   align-items: center;

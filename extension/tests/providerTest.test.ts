@@ -15,6 +15,7 @@ describe("normalizeWebappUrl", () => {
   it("rejects embedded credentials and non-web schemes", () => {
     expect(normalizeWebappUrl("https://user:pass@notes.example.com")).toBeNull();
     expect(normalizeWebappUrl("file:///tmp/notes")).toBeNull();
+    expect(normalizeWebappUrl("not a url")).toBeNull();
   });
 });
 
@@ -43,6 +44,14 @@ describe("testWebappHealth", () => {
     }) as unknown as typeof fetch;
     const result = await testWebappHealth("https://unreachable.example.com", fetchImpl);
     expect(result.healthy).toBe(false);
+  });
+
+  it("reports the remote HTTP status for an unhealthy deployment", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 503 })) as unknown as typeof fetch;
+    await expect(testWebappHealth("https://notes.example.com", fetchImpl)).resolves.toEqual({
+      healthy: false,
+      message: "Webapp responded with HTTP 503.",
+    });
   });
 
   it("passes an abort signal so a stalled health check cannot hang the settings page", async () => {

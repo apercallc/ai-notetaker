@@ -46,12 +46,14 @@ export const chromeMock = {
   },
   runtime: {
     connectNative: vi.fn(),
+    sendMessage: vi.fn(),
     lastError: undefined as { message: string } | undefined,
   },
   reset() {
     storageLocal._reset();
     storageSync._reset();
     this.runtime.connectNative.mockReset();
+    this.runtime.sendMessage.mockReset();
     this.runtime.lastError = undefined;
   },
 };

@@ -80,6 +80,14 @@ describe("BackgroundController", () => {
     expect(stored?.status).toBe("recording");
   });
 
+  it("tracks a helper recording_started event for an existing meeting", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    client.emit("recording_started", { meetingId: "helper-meeting" });
+    expect(controller.getState().activeMeeting).toEqual({ id: "helper-meeting" });
+  });
+
   it("blocks recording until consent has been acknowledged", async () => {
     const client = createFakeClient();
     const broadcast = vi.fn();
@@ -269,6 +277,18 @@ describe("BackgroundController", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("reports an invalid configured webapp URL while retaining the local meeting", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, webapp: { url: "https://notes.example.com/app", token: "tok" } });
+    const meetingId = await controller.startRecording();
+    client.emit("summary_ready", { meetingId, summary: "saved", actionItems: [] });
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", meetingId })));
+    expect((await getMeeting(meetingId))?.summary).toBe("saved");
+  });
+
   it("marks the meeting as errored on an error message", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
@@ -284,6 +304,34 @@ describe("BackgroundController", () => {
 
     const stored = await getMeeting(meetingId);
     expect(stored?.errorMessage).toBe("Key rejected");
+  });
+
+  it("broadcasts helper errors for unknown meetings without creating phantom state", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    client.emit("error", { meetingId: "unknown", code: "provider_error", message: "failed" });
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId: "unknown", message: "failed" }));
+    expect(await getMeeting("unknown")).toBeNull();
+  });
+
+  it("keeps the local meeting alive for each retryable processing warning", async () => {
+    const warningMessages = [
+      "transcript could not be persisted; queued for retry: disk busy",
+      "summary deferred until transcription retries finish",
+      "summarization failed: provider busy",
+    ];
+    for (const message of warningMessages) {
+      const client = createFakeClient();
+      const broadcast = vi.fn();
+      const controller = new BackgroundController(client, broadcast);
+      await controller.init();
+      const meetingId = await controller.startRecording();
+      client.emit("error", { meetingId, code: "temporary", message });
+      await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "PROCESSING_WARNING", meetingId, message }));
+      expect((await getMeeting(meetingId))?.status).toBe("recording");
+    }
   });
 
   it("keeps the meeting active when a failed chunk is queued for retry", async () => {
