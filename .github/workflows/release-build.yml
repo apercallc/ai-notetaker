@@ -66,7 +66,7 @@ jobs:
       - run: npm run build
       - name: Package extension fallback ZIP
         run: zip -r "../ai-notetaker-extension-${GITHUB_REF_NAME}.zip" dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: extension-${{ github.ref_name }}
           path: ai-notetaker-extension-${{ github.ref_name }}.zip
@@ -158,7 +158,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "signtool failed on $($target.FullName)" }
           }
           Remove-Item $pfxPath
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: helper-${{ matrix.os }}-${{ github.ref_name }}
           path: helper/target/release/bundle
