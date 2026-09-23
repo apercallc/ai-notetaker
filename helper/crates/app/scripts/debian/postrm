@@ -12,10 +12,12 @@ remove_manifest() {
     # a user's replacement or another application's manifest with the same name.
     if [ -f "$manifest_path" ] &&
         grep -Fq "chrome-extension://$extension_id/" "$manifest_path" &&
-        grep -Fq "\"path\": \"$host_binary\"" "$manifest_path"; then
+        grep -Fq "\"path\":\"$host_binary\"" "$manifest_path"; then
         rm -f "$manifest_path"
     fi
 }
 
 remove_manifest '/etc/opt/chrome/native-messaging-hosts'
 remove_manifest '/etc/chromium/native-messaging-hosts'
+remove_manifest '/etc/opt/microsoft/msedge/native-messaging-hosts'
+remove_manifest '/etc/brave/native-messaging-hosts'

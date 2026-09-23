@@ -15,7 +15,7 @@ write_manifest() {
     # An existing manifest created by this package is safe to refresh on upgrade.
     if [ -e "$manifest_path" ] && {
         ! grep -Fq "chrome-extension://$extension_id/" "$manifest_path" ||
-        ! grep -Fq '"path": "/usr/bin/notetaker-nm-host"' "$manifest_path";
+        ! grep -Fq '"path":"/usr/bin/notetaker-nm-host"' "$manifest_path";
     }; then
         echo "notetaker: leaving unrelated Native Messaging manifest unchanged: $manifest_path" >&2
         return 0
@@ -32,3 +32,5 @@ write_manifest() {
 
 write_manifest '/etc/opt/chrome/native-messaging-hosts'
 write_manifest '/etc/chromium/native-messaging-hosts'
+write_manifest '/etc/opt/microsoft/msedge/native-messaging-hosts'
+write_manifest '/etc/brave/native-messaging-hosts'
