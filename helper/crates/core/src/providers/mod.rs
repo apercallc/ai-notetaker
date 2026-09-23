@@ -111,6 +111,26 @@ impl ProviderError {
     }
 }
 
+/// A persistent low-latency transcription session opened by a streaming
+/// provider. Unlike `TranscriptionProvider::transcribe_chunk`, this is not
+/// request/response — audio is pushed in as it's captured and results
+/// arrive asynchronously, often before the whole utterance has been said.
+#[async_trait]
+pub trait StreamingSession: Send {
+    /// Feed already-disk-persisted PCM16 into the session. Fire-and-forget
+    /// at the network layer — never waits for a transcription result.
+    async fn send_audio(&mut self, pcm16: &[u8]) -> Result<(), ProviderError>;
+    /// Drain whatever results have arrived since the last call, paired
+    /// with a locally-assigned utterance id. An empty Vec is the normal,
+    /// common case.
+    async fn try_recv_segments(&mut self) -> Vec<(TranscriptSegment, u32)>;
+    /// True once the underlying connection has dropped and the caller
+    /// must open a new session to keep streaming.
+    fn is_closed(&self) -> bool;
+    /// Signal end-of-audio and drain any trailing final segments.
+    async fn close(&mut self) -> Vec<(TranscriptSegment, u32)>;
+}
+
 #[async_trait]
 pub trait TranscriptionProvider: Send + Sync {
     fn id(&self) -> TranscriptionProviderId;
@@ -125,6 +145,17 @@ pub trait TranscriptionProvider: Send + Sync {
         &self,
         chunk: &AudioChunk,
     ) -> Result<Vec<TranscriptSegment>, ProviderError>;
+
+    /// Streaming providers override this to open a persistent low-latency
+    /// session. Default: unsupported — every batch-only provider (Groq,
+    /// and Deepgram's own batch path) keeps this as-is.
+    async fn open_streaming_session(
+        &self,
+        _channel: AudioChannel,
+        _sample_rate_hz: u32,
+    ) -> Result<Box<dyn StreamingSession>, ProviderError> {
+        Err(ProviderError::Unreachable("streaming not supported".into()))
+    }
 }
 
 #[async_trait]
@@ -334,6 +365,31 @@ mod tests {
         assert!(prompt.contains("sales call"));
         assert!(prompt.contains("Acme, QBR"));
         assert!(prompt.contains("Call out objections separately."));
+    }
+
+    struct BatchOnlyProvider;
+
+    #[async_trait]
+    impl TranscriptionProvider for BatchOnlyProvider {
+        fn id(&self) -> TranscriptionProviderId {
+            TranscriptionProviderId::Groq
+        }
+        fn is_streaming(&self) -> bool {
+            false
+        }
+        async fn transcribe_chunk(
+            &self,
+            _chunk: &AudioChunk,
+        ) -> Result<Vec<TranscriptSegment>, ProviderError> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn default_open_streaming_session_is_unsupported() {
+        let provider = BatchOnlyProvider;
+        let result = provider.open_streaming_session(AudioChannel::Mic, 16000).await;
+        assert!(matches!(result, Err(ProviderError::Unreachable(_))));
     }
 
     #[test]
