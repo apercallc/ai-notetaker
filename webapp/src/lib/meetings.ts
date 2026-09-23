@@ -114,7 +114,7 @@ function defaultTitle(startedAt: string): string {
   return `Meeting on ${new Date(startedAt).toISOString().slice(0, 10)}`;
 }
 
-export async function upsertMeeting(rawInput: unknown): Promise<{ id: string; title: string }> {
+export async function upsertMeeting(rawInput: unknown, workspaceId: string): Promise<{ id: string; title: string }> {
   const input = assertValid(rawInput);
   const title = input.title?.trim() ? input.title.trim() : defaultTitle(input.startedAt);
 
@@ -126,6 +126,7 @@ export async function upsertMeeting(rawInput: unknown): Promise<{ id: string; ti
       create: {
         id: input.id,
         userId: LOCAL_USER_ID,
+        workspaceId,
         title,
         mode: input.mode ?? "general",
         startedAt: new Date(input.startedAt),
@@ -184,6 +185,7 @@ export interface ListMeetingsOptions {
 export const MAX_SEARCH_LENGTH = 200;
 
 export async function listMeetings(
+  workspaceId: string,
   options: ListMeetingsOptions
 ): Promise<{ meetings: MeetingSummaryResponse[]; total: number }> {
   const query = options.query?.trim();
@@ -200,7 +202,7 @@ export async function listMeetings(
   const offset = options.offset ?? 0;
 
   const where = {
-    userId: LOCAL_USER_ID,
+    workspaceId,
     ...(query
       ? {
           OR: [
@@ -236,9 +238,9 @@ export async function listMeetings(
   };
 }
 
-export async function getMeeting(id: string): Promise<MeetingDetailResponse | null> {
+export async function getMeeting(workspaceId: string, id: string): Promise<MeetingDetailResponse | null> {
   const row = await prisma.meeting.findFirst({
-    where: { id, userId: LOCAL_USER_ID },
+    where: { id, workspaceId },
     include: {
       transcript: { orderBy: { order: "asc" } },
       actionItems: true,
@@ -269,15 +271,16 @@ export async function getMeeting(id: string): Promise<MeetingDetailResponse | nu
   };
 }
 
-export async function listActionItems(status?: "open" | "done") {
+export async function listActionItems(workspaceId: string, status?: "open" | "done") {
   return prisma.actionItem.findMany({
-    where: { userId: LOCAL_USER_ID, ...(status ? { status } : {}) },
+    where: { meeting: { workspaceId }, ...(status ? { status } : {}) },
     orderBy: [{ status: "asc" }, { dueAt: "asc" }, { id: "asc" }],
     include: { meeting: { select: { id: true, title: true, startedAt: true } } },
   });
 }
 
 export async function updateActionItem(
+  workspaceId: string,
   id: string,
   changes: { status?: "open" | "done"; dueAt?: string | null },
 ): Promise<boolean> {
@@ -289,7 +292,7 @@ export async function updateActionItem(
     throw new ValidationError("dueAt must be an ISO 8601 string");
   }
   const result = await prisma.actionItem.updateMany({
-    where: { id, userId: LOCAL_USER_ID },
+    where: { id, meeting: { workspaceId } },
     data: {
       ...(changes.status ? { status: changes.status, completedAt: changes.status === "done" ? new Date() : null } : {}),
       ...(changes.dueAt !== undefined ? { dueAt: changes.dueAt ? new Date(changes.dueAt) : null } : {}),
@@ -298,6 +301,6 @@ export async function updateActionItem(
   return result.count > 0;
 }
 
-export async function deleteMeeting(id: string): Promise<void> {
-  await prisma.meeting.deleteMany({ where: { id, userId: LOCAL_USER_ID } });
+export async function deleteMeeting(workspaceId: string, id: string): Promise<void> {
+  await prisma.meeting.deleteMany({ where: { id, workspaceId } });
 }
