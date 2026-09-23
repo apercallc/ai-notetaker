@@ -175,8 +175,8 @@ describe("BackgroundController", () => {
     await vi.waitFor(async () => {
       const meeting = await getMeeting(meetingId);
       expect(meeting?.transcript).toHaveLength(1);
-      expect(meeting?.transcript[0].text).toBe("hello world");
-      expect(meeting?.transcript[0].isFinal).toBe(true);
+      expect(meeting?.transcript[0]?.text).toBe("hello world");
+      expect(meeting?.transcript[0]?.isFinal).toBe(true);
     });
   });
 

@@ -123,6 +123,11 @@ button.record-toggle {
   margin-right: var(--space-1);
 }
 
+.transcript-line-provisional {
+  opacity: 0.65;
+  font-style: italic;
+}
+
 .history-heading {
   display: flex;
   align-items: center;

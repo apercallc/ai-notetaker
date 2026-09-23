@@ -96,11 +96,26 @@ function renderHelperMissingBanner(status: BackgroundState["helperStatus"], help
   });
 }
 
-function appendTranscriptLine(container: HTMLElement, speaker: Speaker, text: string): void {
-  const line = document.createElement("div");
-  line.className = "transcript-line";
+function appendTranscriptLine(
+  container: HTMLElement,
+  speaker: Speaker,
+  text: string,
+  isFinal: boolean,
+  utteranceId: number | undefined,
+): void {
+  const key = utteranceId === undefined ? null : `${speaker}:${utteranceId}`;
+  const existing = key ? container.querySelector<HTMLElement>(`[data-utterance-key="${CSS.escape(key)}"]`) : null;
+  const line = existing ?? document.createElement("div");
+  line.className = isFinal ? "transcript-line" : "transcript-line transcript-line-provisional";
   line.innerHTML = `<span class="speaker">${escapeHtml(speakerLabel(speaker))}:</span>${escapeHtml(text)}`;
-  container.appendChild(line);
+  if (key) {
+    if (isFinal) {
+      line.removeAttribute("data-utterance-key");
+    } else {
+      line.dataset.utteranceKey = key;
+    }
+  }
+  if (!existing) container.appendChild(line);
   container.scrollTop = container.scrollHeight;
 }
 
@@ -117,7 +132,7 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
   `;
   const transcriptView = document.getElementById("transcript-view")!;
   for (const segment of meeting?.transcript ?? []) {
-    appendTranscriptLine(transcriptView, segment.speaker, segment.text);
+    appendTranscriptLine(transcriptView, segment.speaker, segment.text, segment.isFinal, segment.utteranceId);
   }
   document.getElementById("stop-recording")?.addEventListener("click", async () => {
     try {
@@ -131,7 +146,7 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
 
   function liveListener(message: BackgroundToUiMessage): void {
     if (message.type === "TRANSCRIPT_UPDATE" && message.meetingId === meetingId) {
-      appendTranscriptLine(transcriptView, message.speaker, message.text);
+      appendTranscriptLine(transcriptView, message.speaker, message.text, message.isFinal, message.utteranceId);
     }
     if (message.type === "SUMMARY_READY" && message.meetingId === meetingId) {
       clearLiveListener();
