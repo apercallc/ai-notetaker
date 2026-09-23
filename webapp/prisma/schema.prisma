@@ -62,3 +62,58 @@ model ActionItem {
   @@index([meetingId])
   @@index([userId, status, dueAt])
 }
+
+// Real per-person browser-UI auth, added alongside (not replacing) the
+// single deploy-time AUTH_TOKEN, which still gates the /api/* ingestion
+// contract the desktop helper uses. See
+// docs/superpowers/specs/2026-09-22-webapp-multi-user-auth-design.md.
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  memberships WorkspaceMembership[]
+  sessions    Session[]
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
+  name      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  memberships WorkspaceMembership[]
+
+  // Exactly one workspace has isDefault = true — the ingestion target for
+  // every meeting synced via the AUTH_TOKEN Bearer contract, and the
+  // workspace the first bootstrapped user automatically owns.
+  @@index([isDefault])
+}
+
+model WorkspaceMembership {
+  id          String   @id @default(uuid())
+  userId      String
+  workspaceId String
+  role        String
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
