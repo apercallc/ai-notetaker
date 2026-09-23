@@ -231,11 +231,15 @@ accessibility failures):*
       unqueued raw-audio tail after a crash remains a recovery follow-up.
 - [x] Provider interface/trait for transcription providers
 - [x] Provider interface/trait for summarization providers
-- [ ] Deepgram integration — **implemented against the batch REST
-      endpoint, not the live-streaming endpoint** the spec names as
-      default; same trait, swappable later, tested with mocked HTTP
-      (`wiremock`). The current UX is rolling five-second batch partials;
-      true live WebSocket streaming remains a scoped follow-up.
+- [x] Deepgram integration — real WebSocket live-streaming implemented
+      per `docs/superpowers/specs/2026-09-22-deepgram-live-streaming-design.md`;
+      interim results replace an in-progress transcript line in place
+      (extension), a WS drop backfills the gap via the existing batch
+      retry queue while the session reconnects, and the batch REST path
+      is retained for key-test and backfill. Tested against a real local
+      WebSocket server (no live Deepgram credentials in this sandbox);
+      a live handshake against Deepgram's real streaming endpoint with a
+      real API key remains release-owner validation.
 - [x] Claude Haiku integration — tested
 - [x] Groq Whisper Turbo integration — tested
 - [x] Gemini Flash + DeepSeek V4 Flash integration — both implemented,
