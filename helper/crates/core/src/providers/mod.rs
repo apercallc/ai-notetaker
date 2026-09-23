@@ -116,7 +116,7 @@ impl ProviderError {
 /// request/response — audio is pushed in as it's captured and results
 /// arrive asynchronously, often before the whole utterance has been said.
 #[async_trait]
-pub trait StreamingSession: Send {
+pub trait StreamingSession: Send + Sync {
     /// Feed already-disk-persisted PCM16 into the session. Fire-and-forget
     /// at the network layer — never waits for a transcription result.
     async fn send_audio(&mut self, pcm16: &[u8]) -> Result<(), ProviderError>;

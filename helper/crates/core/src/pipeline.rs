@@ -9,7 +9,8 @@
 
 use crate::native_messaging::{ActionItem, ErrorCode, HelperToExtension};
 use crate::providers::{
-    AudioChannel, AudioChunk, SummarizationProvider, SummaryOptions, TranscriptionProvider,
+    AudioChannel, AudioChunk, StreamingSession, SummarizationProvider, SummaryOptions,
+    TranscriptionProvider,
 };
 use crate::resilience::RetryQueue;
 use crate::storage::{MeetingState, MeetingStore, MIC_FILE, SPEAKER_FILE};
@@ -60,6 +61,14 @@ pub struct Pipeline {
     accepting_audio: bool,
     pending_mic: Option<PendingAudio>,
     pending_speaker: Option<PendingAudio>,
+    // --- streaming-provider state (unused when is_streaming() is false) ---
+    mic_session: Option<Box<dyn StreamingSession>>,
+    speaker_session: Option<Box<dyn StreamingSession>>,
+    /// Byte offset in the channel's on-disk file that has never been
+    /// handed to any streaming session (either none has ever opened, or
+    /// the previous one dropped). `None` means fully caught up.
+    mic_stream_gap_start: Option<usize>,
+    speaker_stream_gap_start: Option<usize>,
 }
 
 impl Pipeline {
@@ -78,6 +87,10 @@ impl Pipeline {
             accepting_audio: false,
             pending_mic: None,
             pending_speaker: None,
+            mic_session: None,
+            speaker_session: None,
+            mic_stream_gap_start: None,
+            speaker_stream_gap_start: None,
         }
     }
 
@@ -135,6 +148,19 @@ impl Pipeline {
             .store
             .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz);
 
+        if self.transcription_provider.is_streaming() {
+            return self
+                .handle_streaming_audio_chunk(
+                    meeting_id,
+                    channel,
+                    channel_file,
+                    pcm16,
+                    sample_rate_hz,
+                    existing_len,
+                )
+                .await;
+        }
+
         let mut messages = Vec::new();
         let previous = match channel {
             AudioChannel::Mic
@@ -186,9 +212,151 @@ impl Pipeline {
         messages
     }
 
+    /// Streaming-provider counterpart to the batch path above: skips the
+    /// `TRANSCRIPTION_BATCH_SECONDS` buffering entirely and pushes audio
+    /// straight into a persistent session, opening/reopening it as needed
+    /// and backfilling any gap left by a dropped connection through the
+    /// existing batch retry queue.
+    async fn handle_streaming_audio_chunk(
+        &mut self,
+        meeting_id: Uuid,
+        channel: AudioChannel,
+        channel_file: &str,
+        pcm16: &[u8],
+        sample_rate_hz: u32,
+        existing_len: usize,
+    ) -> Vec<HelperToExtension> {
+        let (session, gap_start) = match channel {
+            AudioChannel::Mic => (&mut self.mic_session, &mut self.mic_stream_gap_start),
+            AudioChannel::Speaker => (&mut self.speaker_session, &mut self.speaker_stream_gap_start),
+        };
+
+        if session.is_none() || session.as_ref().is_some_and(|s| s.is_closed()) {
+            *session = None;
+            gap_start.get_or_insert(existing_len);
+            match self
+                .transcription_provider
+                .open_streaming_session(channel, sample_rate_hz)
+                .await
+            {
+                Ok(new_session) => *session = Some(new_session),
+                Err(_) => {
+                    // Stay disconnected; audio keeps accumulating on disk
+                    // (already persisted above) and the gap keeps growing
+                    // until a future call successfully reopens a session.
+                    return vec![];
+                }
+            }
+        }
+
+        let mut messages = Vec::new();
+
+        let gap_start = match channel {
+            AudioChannel::Mic => &mut self.mic_stream_gap_start,
+            AudioChannel::Speaker => &mut self.speaker_stream_gap_start,
+        };
+        // A session just (re)opened and there's untranscribed history —
+        // backfill it exactly once through the existing batch retry path.
+        if let Some(start) = gap_start.take() {
+            if start < existing_len {
+                let backfill = self
+                    .store
+                    .read_audio_range(meeting_id, channel_file, start, existing_len)
+                    .unwrap_or_default();
+                if !backfill.is_empty() {
+                    messages.extend(
+                        self.transcribe_pending(
+                            meeting_id,
+                            channel,
+                            channel_file,
+                            PendingAudio {
+                                pcm16: backfill,
+                                sample_rate_hz,
+                                start,
+                            },
+                        )
+                        .await,
+                    );
+                }
+            }
+        }
+
+        let session = match channel {
+            AudioChannel::Mic => self.mic_session.as_mut(),
+            AudioChannel::Speaker => self.speaker_session.as_mut(),
+        }
+        .expect("session was just ensured to be Some above");
+
+        let streamed_through = existing_len + pcm16.len();
+        if session.send_audio(pcm16).await.is_err() {
+            let gap_start = match channel {
+                AudioChannel::Mic => &mut self.mic_stream_gap_start,
+                AudioChannel::Speaker => &mut self.speaker_stream_gap_start,
+            };
+            gap_start.get_or_insert(existing_len);
+            return messages;
+        }
+
+        let received = session.try_recv_segments().await;
+        let mut saw_final = false;
+        for (segment, utterance_id) in received {
+            if segment.is_final {
+                saw_final = true;
+                let _ = self
+                    .store
+                    .append_transcript_segments(meeting_id, &[segment.clone()]);
+            }
+            messages.push(HelperToExtension::TranscriptPartial {
+                meeting_id,
+                speaker: segment.speaker,
+                text: segment.text,
+                is_final: segment.is_final,
+                utterance_id,
+            });
+        }
+        if saw_final {
+            let _ = self
+                .store
+                .mark_audio_transcribed(meeting_id, channel_file, streamed_through);
+        }
+        messages
+    }
+
     /// Flushes any sub-threshold audio before final summarization.
     pub async fn flush_pending_audio(&mut self, meeting_id: Uuid) -> Vec<HelperToExtension> {
         let mut messages = Vec::new();
+        if let Some(mut session) = self.mic_session.take() {
+            for (segment, utterance_id) in session.close().await {
+                if segment.is_final {
+                    let _ = self
+                        .store
+                        .append_transcript_segments(meeting_id, &[segment.clone()]);
+                }
+                messages.push(HelperToExtension::TranscriptPartial {
+                    meeting_id,
+                    speaker: segment.speaker,
+                    text: segment.text,
+                    is_final: segment.is_final,
+                    utterance_id,
+                });
+            }
+        }
+        if let Some(mut session) = self.speaker_session.take() {
+            for (segment, utterance_id) in session.close().await {
+                if segment.is_final {
+                    let _ = self
+                        .store
+                        .append_transcript_segments(meeting_id, &[segment.clone()]);
+                }
+                messages.push(HelperToExtension::TranscriptPartial {
+                    meeting_id,
+                    speaker: segment.speaker,
+                    text: segment.text,
+                    is_final: segment.is_final,
+                    utterance_id,
+                });
+            }
+        }
         if let Some(batch) = self.pending_mic.take() {
             messages.extend(
                 self.transcribe_pending(meeting_id, AudioChannel::Mic, MIC_FILE, batch)
@@ -1052,5 +1220,218 @@ mod tests {
         let meta = pipeline.store.load_meta(id).unwrap();
         assert_eq!(meta.state, MeetingState::Stopped);
         assert!(meta.summary_pending);
+    }
+
+    struct FakeStreamingSession {
+        outbox: std::collections::VecDeque<(TranscriptSegment, u32)>,
+        closed: bool,
+    }
+
+    #[async_trait]
+    impl crate::providers::StreamingSession for FakeStreamingSession {
+        async fn send_audio(&mut self, _pcm16: &[u8]) -> Result<(), ProviderError> {
+            if self.closed {
+                return Err(ProviderError::Unreachable("closed".into()));
+            }
+            Ok(())
+        }
+        async fn try_recv_segments(&mut self) -> Vec<(TranscriptSegment, u32)> {
+            self.outbox.drain(..).collect()
+        }
+        fn is_closed(&self) -> bool {
+            self.closed
+        }
+        async fn close(&mut self) -> Vec<(TranscriptSegment, u32)> {
+            self.outbox.drain(..).collect()
+        }
+    }
+
+    struct FakeStreamingTranscriber {
+        next_segment: std::sync::Mutex<Option<(TranscriptSegment, u32)>>,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for FakeStreamingTranscriber {
+        fn id(&self) -> TranscriptionProviderId {
+            TranscriptionProviderId::Deepgram
+        }
+        fn is_streaming(&self) -> bool {
+            true
+        }
+        async fn transcribe_chunk(
+            &self,
+            _chunk: &AudioChunk,
+        ) -> Result<Vec<TranscriptSegment>, ProviderError> {
+            Ok(vec![])
+        }
+        async fn open_streaming_session(
+            &self,
+            _channel: AudioChannel,
+            _sample_rate_hz: u32,
+        ) -> Result<Box<dyn crate::providers::StreamingSession>, ProviderError> {
+            let mut outbox = std::collections::VecDeque::new();
+            if let Some(seg) = self.next_segment.lock().unwrap().take() {
+                outbox.push_back(seg);
+            }
+            Ok(Box::new(FakeStreamingSession {
+                outbox,
+                closed: false,
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_provider_emits_partial_without_waiting_for_batch_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let provider = FakeStreamingTranscriber {
+            next_segment: std::sync::Mutex::new(Some((
+                TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "hi".into(),
+                    is_final: true,
+                },
+                0,
+            ))),
+        };
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(provider),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let meeting_id = Uuid::new_v4();
+        pipeline.start_recording(meeting_id).unwrap();
+
+        // One tiny chunk — far below TRANSCRIPTION_BATCH_SECONDS worth of
+        // audio, which would never flush on the batch path.
+        let messages = pipeline
+            .handle_audio_chunk(meeting_id, AudioChannel::Mic, &[0, 1, 2, 3], 16000)
+            .await;
+
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            HelperToExtension::TranscriptPartial { text, is_final: true, .. } if text == "hi"
+        )));
+    }
+
+    struct DropsAfterOneSendSession {
+        closed: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl crate::providers::StreamingSession for DropsAfterOneSendSession {
+        async fn send_audio(&mut self, _pcm16: &[u8]) -> Result<(), ProviderError> {
+            self.closed.store(true, std::sync::atomic::Ordering::Relaxed);
+            Err(ProviderError::Unreachable("dropped".into()))
+        }
+        async fn try_recv_segments(&mut self) -> Vec<(TranscriptSegment, u32)> {
+            vec![]
+        }
+        fn is_closed(&self) -> bool {
+            self.closed.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        async fn close(&mut self) -> Vec<(TranscriptSegment, u32)> {
+            vec![]
+        }
+    }
+
+    struct DropsThenRecoversTranscriber {
+        attempts: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for DropsThenRecoversTranscriber {
+        fn id(&self) -> TranscriptionProviderId {
+            TranscriptionProviderId::Deepgram
+        }
+        fn is_streaming(&self) -> bool {
+            true
+        }
+        async fn transcribe_chunk(
+            &self,
+            chunk: &AudioChunk,
+        ) -> Result<Vec<TranscriptSegment>, ProviderError> {
+            Ok(vec![TranscriptSegment {
+                speaker: "you".into(),
+                text: format!("backfilled {} bytes", chunk.pcm16.len()),
+                is_final: true,
+            }])
+        }
+        async fn open_streaming_session(
+            &self,
+            _channel: AudioChannel,
+            _sample_rate_hz: u32,
+        ) -> Result<Box<dyn crate::providers::StreamingSession>, ProviderError> {
+            self.attempts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(Box::new(DropsAfterOneSendSession {
+                closed: std::sync::atomic::AtomicBool::new(false),
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn ws_drop_enqueues_one_gap_backfill_job_via_existing_retry_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let provider = DropsThenRecoversTranscriber {
+            attempts: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(provider),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let meeting_id = Uuid::new_v4();
+        pipeline.start_recording(meeting_id).unwrap();
+
+        // First chunk: session opens, send_audio fails immediately (fake
+        // session drops on first send) -> gap starts at offset 0.
+        let _ = pipeline
+            .handle_audio_chunk(meeting_id, AudioChannel::Mic, &[9, 9], 16000)
+            .await;
+        // Second chunk: session is closed, so a new one opens; the gap
+        // [0, existing_len) must get backfilled via transcribe_chunk (the
+        // batch path) before new audio streams live again.
+        let messages = pipeline
+            .handle_audio_chunk(meeting_id, AudioChannel::Mic, &[8, 8], 16000)
+            .await;
+
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            HelperToExtension::TranscriptPartial { text, .. } if text.starts_with("backfilled")
+        )));
+    }
+
+    #[tokio::test]
+    async fn stop_recording_closes_streaming_sessions_and_flushes_trailing_final() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let provider = FakeStreamingTranscriber {
+            next_segment: std::sync::Mutex::new(None),
+        };
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(provider),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let meeting_id = Uuid::new_v4();
+        pipeline.start_recording(meeting_id).unwrap();
+        let _ = pipeline
+            .handle_audio_chunk(meeting_id, AudioChannel::Mic, &[1, 2], 16000)
+            .await;
+
+        assert!(pipeline.mic_session.is_some());
+        let _ = pipeline.stop_recording(meeting_id).await.unwrap();
+        assert!(
+            pipeline.mic_session.is_none(),
+            "session must be closed and cleared on stop"
+        );
     }
 }
