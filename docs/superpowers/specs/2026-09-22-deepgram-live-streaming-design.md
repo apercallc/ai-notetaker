@@ -37,21 +37,28 @@ Two long-lived WebSocket sessions per active meeting — one for the mic
 channel, one for the speaker channel — opened when `start_recording` runs
 for a streaming-capable provider, closed on `stop_recording`/session error.
 
-### Provider trait split
+### Provider trait extension (not a second trait)
 
-`TranscriptionProvider` (existing, `providers/mod.rs`) stays a
-request/response trait — used for the "test key" button and for
-gap-backfill (below). It cannot express a persistent session, so a second
-trait is added for providers that support it:
+`TranscriptionProvider` (existing, `providers/mod.rs`) gains one default
+method instead of spawning a parallel trait — every existing provider
+keeps compiling unchanged:
 
 ```rust
 #[async_trait]
-pub trait StreamingTranscriptionProvider: Send + Sync {
-    async fn open_session(
+pub trait TranscriptionProvider: Send + Sync {
+    fn id(&self) -> TranscriptionProviderId;
+    fn is_streaming(&self) -> bool;
+    async fn transcribe_chunk(&self, chunk: &AudioChunk) -> Result<Vec<TranscriptSegment>, ProviderError>;
+
+    /// Streaming providers override this to open a persistent low-latency
+    /// session. Default: unsupported (every batch provider keeps this).
+    async fn open_streaming_session(
         &self,
-        channel: AudioChannel,
-        sample_rate_hz: u32,
-    ) -> Result<Box<dyn StreamingSession>, ProviderError>;
+        _channel: AudioChannel,
+        _sample_rate_hz: u32,
+    ) -> Result<Box<dyn StreamingSession>, ProviderError> {
+        Err(ProviderError::Unreachable("streaming not supported".into()))
+    }
 }
 
 #[async_trait]
@@ -68,10 +75,13 @@ pub trait StreamingSession: Send {
 }
 ```
 
-`DeepgramProvider` implements both traits. `is_streaming()` on the existing
-`TranscriptionProvider` trait (already present, currently `false` for
-every provider) becomes the pipeline's switch: `true` only for Deepgram
-once this lands.
+`DeepgramProvider` overrides `open_streaming_session` and `is_streaming()`
+(`true`); the existing `transcribe_chunk` batch path is untouched and
+still backs the key-test button and gap-backfill. `Pipeline::new`'s
+signature does not change — it gets `mic_session`/`speaker_session`/
+utterance-counter fields, all initialized empty/zero, and opens sessions
+lazily from the existing `transcription_provider` the first time a
+streaming provider is in play.
 
 ### Utterance IDs
 
@@ -123,6 +133,20 @@ When `send_audio` or the receive loop reports the session is closed:
 This means a streaming provider never loses a transcript segment to a
 network blip — it just gets that one segment slightly later, via REST
 instead of WS, exactly like a batch-provider retry looks today.
+
+**Known limitation (documented, not fixed here):** `mark_audio_transcribed`
+— the offset `recover_recording` uses after an unclean shutdown to know
+how much raw audio still needs (re)transcription — only advances for the
+byte range a provider has positively confirmed (a completed batch
+response, or now, a live final). Deepgram's streaming protocol doesn't
+report byte offsets per final, so the marker advances to "audio handed to
+the session as of the most recent final" when a final arrives. On a crash
+landing inside that narrow window (after audio is sent, before its final
+arrives — bounded by Deepgram's endpointing, ~300ms–1s), that sliver can
+be skipped by recovery. This is the same shape of gap TODO.md already
+accepts for the batch path ("only an unqueued raw-audio tail after a
+crash remains a recovery follow-up") — not a new class of risk, and out
+of scope to close here.
 
 ### Protocol change (`docs/native-messaging-protocol.md` + both sides)
 
