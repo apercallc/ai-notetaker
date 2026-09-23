@@ -49,12 +49,19 @@ export const chromeMock = {
     sendMessage: vi.fn(),
     lastError: undefined as { message: string } | undefined,
   },
+  identity: {
+    launchWebAuthFlow: vi.fn(),
+    getRedirectURL: vi.fn(() => "https://fake-extension-id.chromiumapp.org/"),
+  },
   reset() {
     storageLocal._reset();
     storageSync._reset();
     this.runtime.connectNative.mockReset();
     this.runtime.sendMessage.mockReset();
     this.runtime.lastError = undefined;
+    this.identity.launchWebAuthFlow.mockReset();
+    this.identity.getRedirectURL.mockReset();
+    this.identity.getRedirectURL.mockReturnValue("https://fake-extension-id.chromiumapp.org/");
   },
 };
 
