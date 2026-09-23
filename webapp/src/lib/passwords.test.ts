@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashPassword, verifyPassword } from "./passwords";
+import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "./passwords";
 
 describe("hashPassword / verifyPassword", () => {
   it("verifies a password against its own hash", async () => {
@@ -20,5 +20,10 @@ describe("hashPassword / verifyPassword", () => {
 
   it("rejects a malformed stored hash instead of throwing", async () => {
     expect(await verifyPassword("anything", "not-a-valid-hash")).toBe(false);
+  });
+
+  it("DUMMY_PASSWORD_HASH never verifies against any password (used to pay scrypt's cost on an unknown-email login attempt)", async () => {
+    expect(await verifyPassword("anything", DUMMY_PASSWORD_HASH)).toBe(false);
+    expect(await verifyPassword("", DUMMY_PASSWORD_HASH)).toBe(false);
   });
 });

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { isValidSetupToken } from "@/lib/auth";
-import { hashPassword, verifyPassword } from "@/lib/passwords";
+import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "@/lib/passwords";
 import { createSession, deleteSession } from "@/lib/sessions";
 import { createWorkspaceWithOwner, getDefaultWorkspaceId } from "@/lib/workspaces";
 import { safeNextPath } from "@/lib/navigation";
@@ -69,7 +69,12 @@ export async function login(formData: FormData): Promise<void> {
   const safeNext = safeNextPath(next);
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+  // Always pay scrypt's cost, even for an email with no account — otherwise
+  // an unknown email returns fast (skips verifyPassword entirely) while a
+  // known email with a wrong password returns slow, letting an attacker
+  // enumerate registered emails by timing the response.
+  const passwordMatches = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+  if (!user || !passwordMatches) {
     redirect(`/login?error=1&next=${encodeURIComponent(safeNext)}`);
   }
 
