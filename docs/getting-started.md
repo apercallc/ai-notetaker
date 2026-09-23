@@ -152,6 +152,37 @@ If Chrome gives you a different ID, the committed `key` was changed or the
 wrong directory was loaded. Do not change `extension/manifest.json`'s `key`;
 the Native Messaging manifest allowlists the stable ID.
 
+### Using Edge or Brave instead of Chrome
+
+The same extension build works in Edge and Brave (both are Chromium-based
+and implement the same extension APIs). Since it isn't published to
+Edge Add-ons or listed for Brave, load it manually:
+
+1. Download or build the extension (`extension/dist/`, or the released
+   ZIP).
+2. Edge: go to `edge://extensions`, enable **Developer mode**, click
+   **Load unpacked**, select the `dist/` folder.
+   Brave: go to `brave://extensions`, enable **Developer Mode**, click
+   **Load unpacked**, select the `dist/` folder.
+3. Install the desktop helper as normal — its installer registers the
+   Native Messaging host for Edge and Brave automatically, alongside
+   Chrome.
+
+### Using Firefox
+
+Firefox support is a real port (its own manifest fields and Native
+Messaging host manifest shape — see
+`docs/superpowers/specs/2026-09-22-cross-browser-ports-design.md`), but
+the extension isn't signed by Mozilla yet, so it only loads temporarily:
+
+1. Build the extension (`extension/dist/`).
+2. Go to `about:debugging` → **This Firefox** → **Load Temporary Add-on…**
+   → select any file inside `dist/` (e.g. `manifest.json`).
+3. This resets every time Firefox restarts until the extension is signed
+   and published via addons.mozilla.org (release-owner work).
+4. Install the desktop helper as normal — its installer registers the
+   Firefox-specific Native Messaging host manifest automatically.
+
 ## Complete the first-run wizard
 
 Open the extension popup and choose **Start setup**. Complete each step:

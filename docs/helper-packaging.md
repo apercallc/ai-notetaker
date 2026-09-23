@@ -73,20 +73,31 @@ packages now register the real installed relay instead of shipping the token
 unchanged:
 
 - Debian packages run `scripts/debian/postinst` and `postrm`. They write the
-  system-wide manifest to both `/etc/opt/chrome/native-messaging-hosts/` and
-  `/etc/chromium/native-messaging-hosts/`, and only remove a manifest that
-  still contains this extension ID and `/usr/bin/notetaker-nm-host`.
+  system-wide manifest to `/etc/opt/chrome/native-messaging-hosts/`,
+  `/etc/chromium/native-messaging-hosts/`,
+  `/etc/opt/microsoft/msedge/native-messaging-hosts/`, and
+  `/etc/brave/native-messaging-hosts/` (Chrome, generic Chromium, Edge, and
+  Brave), plus `/usr/lib/mozilla/native-messaging-hosts/` for Firefox using
+  its separate `allowed_extensions`-shaped manifest, and only remove a
+  manifest that still contains this extension's identity and
+  `/usr/bin/notetaker-nm-host`.
 - Windows NSIS runs `windows/hooks.nsh` after install and before uninstall.
-  The PowerShell hooks write the manifest beside the installed binaries and
-  register it under the per-user Chrome key
-  `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.ainotetaker.helper`.
-  They refuse to remove a changed or unrelated manifest.
+  The PowerShell hooks write the Chromium-family manifest beside the
+  installed binaries and register it under the per-user Chrome, Edge, and
+  Brave keys (`HKCU\Software\{Google\Chrome,Microsoft\Edge,BraveSoftware\Brave-Browser}\NativeMessagingHosts\com.ainotetaker.helper`),
+  plus a separate Firefox-shaped manifest under
+  `HKCU\Software\Mozilla\NativeMessagingHosts\com.ainotetaker.helper`. They
+  refuse to remove a changed or unrelated manifest.
 - macOS DMG has no post-install hook. The app bundles
   `Contents/Resources/scripts/install-native-messaging.sh` and its guarded
   uninstall counterpart. Run the installer helper after copying the app to
   `/Applications` (or pass the actual `.app` path) so it can write the
-  per-user Chrome manifest, for example:
+  per-user Chrome, Edge, Brave, and Firefox manifests, for example:
   `sh "/Applications/AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh"`.
+- See `docs/superpowers/specs/2026-09-22-cross-browser-ports-design.md` for
+  why Firefox needs a structurally different manifest (`allowed_extensions`
+  with a permanent gecko ID, not `allowed_origins` with a
+  `chrome-extension://` URL) instead of just another directory.
 
 AppImages are portable artifacts and cannot safely point Chrome at a relay
 inside a transient AppImage mount; use the Debian package for automatic Linux
