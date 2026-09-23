@@ -30,6 +30,15 @@ export interface CalendarConnection {
   expiresAt: string;
 }
 
+/**
+ * Every network call in this module gets this bound — findCurrentEvent's
+ * "never block or delay starting a recording" promise (module doc above)
+ * requires it: without a timeout, a slow/hung Google or Microsoft
+ * endpoint would otherwise delay startRecording by however long the
+ * browser's own (long, unbounded-in-practice) network timeout takes.
+ */
+const CALENDAR_REQUEST_TIMEOUT_MS = 5_000;
+
 interface ProviderConfig {
   authEndpoint: string;
   tokenEndpoint: string;
@@ -201,6 +210,7 @@ export async function connectCalendar(
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    signal: AbortSignal.timeout(CALENDAR_REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`token exchange failed: ${response.status}`);
   const tokens = (await response.json()) as TokenResponse;
@@ -230,6 +240,7 @@ async function refreshAccessToken(connection: CalendarConnection, fetchImpl: typ
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
+      signal: AbortSignal.timeout(CALENDAR_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return null;
     const tokens = (await response.json()) as TokenResponse;
@@ -265,6 +276,7 @@ export async function findCurrentEvent(
     const config = PROVIDER_CONFIG[connection.provider];
     const response = await fetchImpl(config.eventsUrl(dayStart.toISOString(), dayEnd.toISOString()), {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(CALENDAR_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return null;
 
