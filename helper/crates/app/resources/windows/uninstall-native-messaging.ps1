@@ -14,6 +14,9 @@ $registryPaths = @(
     "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName",
     "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$hostName"
 )
+$geckoId = 'notetaker@apercallc.dev'
+$firefoxManifestPath = Join-Path $InstallDir "$hostName.firefox.json"
+$firefoxRegistryPath = "HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName"
 
 if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     try {
@@ -27,11 +30,30 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     }
 }
 
+if (Test-Path -LiteralPath $firefoxManifestPath -PathType Leaf) {
+    try {
+        $firefoxManifest = Get-Content -LiteralPath $firefoxManifestPath -Raw | ConvertFrom-Json
+        $allowedExtensions = @($firefoxManifest.allowed_extensions)
+        if ($firefoxManifest.path -eq $hostBinary -and $allowedExtensions -contains $geckoId) {
+            Remove-Item -LiteralPath $firefoxManifestPath -Force
+        }
+    } catch {
+        Write-Warning "AI Notetaker's Firefox Native Messaging manifest could not be parsed; leaving it in place: $firefoxManifestPath"
+    }
+}
+
 foreach ($registryPath in $registryPaths) {
     if (Test-Path -LiteralPath $registryPath) {
         $registeredManifest = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
         if ($registeredManifest -eq $manifestPath) {
             Remove-Item -LiteralPath $registryPath -Recurse -Force
         }
+    }
+}
+
+if (Test-Path -LiteralPath $firefoxRegistryPath) {
+    $registeredFirefoxManifest = (Get-ItemProperty -LiteralPath $firefoxRegistryPath -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
+    if ($registeredFirefoxManifest -eq $firefoxManifestPath) {
+        Remove-Item -LiteralPath $firefoxRegistryPath -Recurse -Force
     }
 }
