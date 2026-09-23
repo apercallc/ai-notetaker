@@ -248,12 +248,17 @@ impl Pipeline {
                             .store
                             .mark_audio_transcribed(meeting_id, channel_file, end);
                         let _ = self.retry_queue.record_success(retry_job_id);
-                        for segment in &segments {
+                        for (index, segment) in segments.iter().enumerate() {
                             messages.push(HelperToExtension::TranscriptPartial {
                                 meeting_id,
                                 speaker: segment.speaker.clone(),
                                 text: segment.text.clone(),
                                 is_final: segment.is_final,
+                                // Batch segments are always final; a
+                                // per-call counter is enough since no
+                                // caller ever needs replace-in-place
+                                // semantics for a non-streaming provider.
+                                utterance_id: (end as u32).wrapping_add(index as u32),
                             });
                         }
                     }
@@ -518,12 +523,13 @@ impl Pipeline {
                                 channel_file,
                                 *end,
                             );
-                            for segment in &segments {
+                            for (index, segment) in segments.iter().enumerate() {
                                 messages.push(HelperToExtension::TranscriptPartial {
                                     meeting_id: job.meeting_id,
                                     speaker: segment.speaker.clone(),
                                     text: segment.text.clone(),
                                     is_final: segment.is_final,
+                                    utterance_id: (*end as u32).wrapping_add(index as u32),
                                 });
                             }
                             let _ = self.retry_queue.record_success(job_id);

@@ -142,6 +142,12 @@ pub enum HelperToExtension {
         text: String,
         #[serde(rename = "isFinal")]
         is_final: bool,
+        /// Identifies one in-progress utterance so the extension can
+        /// replace a not-yet-final line instead of always appending.
+        /// Non-streaming providers emit a fresh id per message (every
+        /// message from them is already final).
+        #[serde(rename = "utteranceId")]
+        utterance_id: u32,
     },
     SummaryReady {
         #[serde(rename = "meetingId")]
@@ -324,6 +330,7 @@ mod tests {
             speaker: "you".into(),
             text: "hello world".into(),
             is_final: false,
+            utterance_id: 0,
         };
         let mut buf = Vec::new();
         write_message(&mut buf, &msg).unwrap();

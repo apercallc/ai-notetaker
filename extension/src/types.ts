@@ -149,6 +149,7 @@ export type IncomingMessage =
       speaker: Speaker;
       text: string;
       isFinal: boolean;
+      utteranceId: number;
     }
   | {
       type: "summary_ready";
@@ -204,7 +205,8 @@ export function isIncomingMessage(value: unknown): value is IncomingMessage {
     case "recording_stopped":
       return hasNonEmptyString("meetingId");
     case "transcript_partial":
-      return hasNonEmptyString("meetingId") && isSpeaker(message.speaker) && isString("text") && typeof message.isFinal === "boolean";
+      return hasNonEmptyString("meetingId") && isSpeaker(message.speaker) && isString("text") &&
+        typeof message.isFinal === "boolean" && typeof message.utteranceId === "number" && Number.isInteger(message.utteranceId);
     case "summary_ready":
       return hasNonEmptyString("meetingId") && isString("summary") && Array.isArray(message.actionItems) &&
         message.actionItems.length <= 1_000 && message.actionItems.every(isActionItem);

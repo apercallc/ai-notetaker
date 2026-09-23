@@ -116,6 +116,7 @@ describe("NativeMessagingClient", () => {
       speaker: "you",
       text: "hello",
       isFinal: false,
+      utteranceId: 0,
     });
 
     expect(handler).toHaveBeenCalledWith({
@@ -124,6 +125,7 @@ describe("NativeMessagingClient", () => {
       speaker: "you",
       text: "hello",
       isFinal: false,
+      utteranceId: 0,
     });
   });
 

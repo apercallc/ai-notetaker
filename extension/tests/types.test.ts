@@ -22,7 +22,7 @@ describe("isIncomingMessage", () => {
     { type: "helper_info", helperVersion: "1.0.0", protocolVersion: 1, platform: "linux" },
     { type: "recording_started", meetingId: "meeting" },
     { type: "recording_stopped", meetingId: "meeting" },
-    { type: "transcript_partial", meetingId: "meeting", speaker: "you", text: "hello", isFinal: false },
+    { type: "transcript_partial", meetingId: "meeting", speaker: "you", text: "hello", isFinal: false, utteranceId: 0 },
     { type: "summary_ready", meetingId: "meeting", summary: "summary", actionItems: [{ text: "follow up", status: "open", dueAt: null }] },
     { type: "error", meetingId: null, code: "provider_error", message: "try again" },
     { type: "recovered_recording", meetingId: "meeting", startedAt: "2026-09-21T10:00:00Z" },

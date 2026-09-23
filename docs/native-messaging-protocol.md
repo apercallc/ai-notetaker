@@ -125,8 +125,13 @@ file on Unix-like systems.
   "meetingId": "<uuid>",
   "speaker": "you" | "them" | "them-2" | ...,
   "text": "...",
-  "isFinal": false
+  "isFinal": false,
+  "utteranceId": 0
 }
+// utteranceId increments per channel each time a final segment is
+// emitted; the extension uses (speaker, utteranceId) to know whether an
+// incoming message replaces the currently-shown in-progress line or
+// starts a new one.
 
 // Once the LLM summarization call returns, after stop_recording.
 {
