@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isAuthorizedBearer, isAuthorizedSession } from "./lib/auth";
+import { isAuthorizedBearer } from "./lib/auth";
+import { getSessionUser } from "./lib/sessions";
 
 // Proxy files (Next.js 16's replacement for middleware.ts) always run on
 // the Node.js runtime, which is exactly why we moved off middleware.ts in
@@ -7,23 +8,26 @@ import { isAuthorizedBearer, isAuthorizedSession } from "./lib/auth";
 // node:crypto, which the old Edge-runtime middleware didn't support.
 
 /**
- * Every route in this app requires the deploy-time AUTH_TOKEN, including
- * reads — see docs/webapp-api.md and the architecture spec §3.5. This is
- * the single enforcement point for that rule; it must run before every
+ * Every route in this app requires authentication, including reads — see
+ * docs/webapp-api.md, the architecture spec §3.5, and
+ * docs/superpowers/specs/2026-09-22-webapp-multi-user-auth-design.md. This
+ * is the single enforcement point for that rule; it must run before every
  * page and API route (see `config.matcher` below), not be re-implemented
  * per-route where it's easy to forget on one.
  *
  * Two auth mechanisms, for two different kinds of client:
  * - `/api/*` (the extension, future mobile clients): a Bearer token in the
  *   Authorization header, per docs/webapp-api.md. `/api/health` is the one
- *   deliberate exception, documented there.
- * - Everything else (the browser UI): a session cookie set once after
- *   entering the token on /login, so the user isn't retyping it on every
- *   page load. This is a pragmatic addition on top of the documented API
- *   contract, not a deviation from it — docs/webapp-api.md only specifies
- *   the /api/* surface.
+ *   deliberate exception, documented there. Unchanged by the multi-user
+ *   auth work — one deployment still has one AUTH_TOKEN.
+ * - Everything else (the browser UI): a real per-user session, looked up
+ *   in the database by the opaque id in the `session` cookie. This is a
+ *   deliberate, acknowledged move from a zero-database-call comparison to
+ *   a DB round trip on every page load — a revocable, per-user session
+ *   can't be validated without state, and this project already has a
+ *   database.
  */
-export function proxy(request: NextRequest): NextResponse {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
 
   if (pathname === "/api/health") {
@@ -42,8 +46,9 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
-  const sessionCookie = request.cookies.get("session")?.value;
-  if (!isAuthorizedSession(sessionCookie)) {
+  const sessionId = request.cookies.get("session")?.value;
+  const user = await getSessionUser(sessionId);
+  if (!user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);

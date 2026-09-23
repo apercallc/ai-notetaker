@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listMeetings, MAX_SEARCH_LENGTH } from "@/lib/meetings";
+import { requireSession } from "@/lib/currentUser";
 import { logout } from "@/app/login/actions";
 import { SearchForm } from "./SearchForm";
 
@@ -20,18 +21,19 @@ export default async function MeetingsPage({
 }: {
   searchParams: Promise<{ q?: string; page?: string; error?: string }>;
 }) {
+  const { workspaceId } = await requireSession();
   const { q: rawQuery, page: rawPage, error } = await searchParams;
   // Keep a pasted or hand-crafted URL from turning a normal page view into a
   // validation error; the API still rejects oversized queries explicitly.
   const q = rawQuery?.trim().slice(0, MAX_SEARCH_LENGTH);
   const parsedPage = Number(rawPage ?? "1");
   const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 && parsedPage <= MAX_PAGE ? parsedPage : 1;
-  let result = await listMeetings({ query: q, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  let result = await listMeetings(workspaceId, { query: q, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
   const { total } = result;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   if (currentPage !== page) {
-    result = await listMeetings({ query: q, limit: PAGE_SIZE, offset: (currentPage - 1) * PAGE_SIZE });
+    result = await listMeetings(workspaceId, { query: q, limit: PAGE_SIZE, offset: (currentPage - 1) * PAGE_SIZE });
   }
   const { meetings } = result;
 

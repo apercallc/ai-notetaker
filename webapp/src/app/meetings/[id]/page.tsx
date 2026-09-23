@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMeeting } from "@/lib/meetings";
+import { requireSession } from "@/lib/currentUser";
 import { DeleteButton } from "./DeleteButton";
 import { ExportButtons } from "./ExportButtons";
 import { updateActionItemAction } from "./actions";
@@ -22,7 +23,8 @@ export default async function MeetingDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const meeting = await getMeeting(id);
+  const { workspaceId } = await requireSession();
+  const meeting = await getMeeting(workspaceId, id);
   if (!meeting) notFound();
 
   return (

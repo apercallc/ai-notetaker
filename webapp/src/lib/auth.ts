@@ -38,19 +38,3 @@ export function isAuthorizedBearer(authorizationHeader: string | null): boolean 
 
   return constantTimeEquals(provided, expected);
 }
-
-/**
- * The browser UI uses a session cookie (set once after the user enters the
- * token on /login) rather than requiring an Authorization header on every
- * page navigation — a pragmatic addition on top of the documented API
- * contract in docs/webapp-api.md, which only concerns /api/* routes. The
- * cookie's value is the raw token itself; the same fail-closed and
- * constant-time comparison rules apply.
- */
-export function isAuthorizedSession(sessionCookieValue: string | undefined): boolean {
-  const expected = process.env.AUTH_TOKEN;
-  if (!expected) return false;
-  if (!sessionCookieValue) return false;
-
-  return constantTimeEquals(sessionCookieValue, expected);
-}

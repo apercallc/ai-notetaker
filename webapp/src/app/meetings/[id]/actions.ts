@@ -2,15 +2,17 @@
 
 import { redirect } from "next/navigation";
 import { deleteMeeting, updateActionItem } from "@/lib/meetings";
+import { requireSession } from "@/lib/currentUser";
 import { revalidatePath } from "next/cache";
 
 export async function deleteMeetingAction(formData: FormData): Promise<void> {
+  const { workspaceId } = await requireSession();
   const id = String(formData.get("id") ?? "");
   if (!id) {
     redirect("/meetings?error=invalid-delete");
   }
   try {
-    await deleteMeeting(id);
+    await deleteMeeting(workspaceId, id);
   } catch (error) {
     console.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
     redirect("/meetings?error=delete-failed");
@@ -19,6 +21,7 @@ export async function deleteMeetingAction(formData: FormData): Promise<void> {
 }
 
 export async function updateActionItemAction(formData: FormData): Promise<void> {
+  const { workspaceId } = await requireSession();
   const id = String(formData.get("id") ?? "");
   const meetingId = String(formData.get("meetingId") ?? "");
   const statusValue = formData.get("done") === "1" ? "done" : "open";
@@ -38,7 +41,7 @@ export async function updateActionItemAction(formData: FormData): Promise<void> 
 
   let updated: boolean;
   try {
-    updated = await updateActionItem(id, { status: statusValue, dueAt });
+    updated = await updateActionItem(workspaceId, id, { status: statusValue, dueAt });
   } catch (error) {
     console.error("action item update failed", { id, error: error instanceof Error ? error.message : String(error) });
     redirect("/actions?error=update-failed");

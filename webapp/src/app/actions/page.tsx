@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listActionItems } from "@/lib/meetings";
+import { requireSession } from "@/lib/currentUser";
 import { updateActionItemAction } from "@/app/meetings/[id]/actions";
 
 type ActionStatus = "open" | "done";
@@ -17,9 +18,10 @@ export default async function ActionItemsPage({
 }: {
   searchParams: Promise<{ status?: string; error?: string }>;
 }) {
+  const { workspaceId } = await requireSession();
   const { status: rawStatus, error } = await searchParams;
   const status: ActionStatus | undefined = rawStatus === "open" || rawStatus === "done" ? rawStatus : undefined;
-  const items = await listActionItems(status);
+  const items = await listActionItems(workspaceId, status);
 
   function filterHref(nextStatus?: ActionStatus): string {
     return nextStatus ? `/actions?status=${nextStatus}` : "/actions";

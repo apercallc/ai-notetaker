@@ -1,15 +1,21 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy, config } from "./proxy";
+import { prisma } from "./lib/db";
 
 const ORIGINAL_TOKEN = process.env.AUTH_TOKEN;
 
 describe("proxy", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     process.env.AUTH_TOKEN = "correct-token-value";
+    await prisma.session.deleteMany();
+    await prisma.user.deleteMany();
   });
   afterEach(() => {
     process.env.AUTH_TOKEN = ORIGINAL_TOKEN;
+  });
+  afterAll(async () => {
+    await prisma.$disconnect();
   });
 
   it("allows GET /api/health with no auth at all", async () => {
@@ -55,13 +61,35 @@ describe("proxy", () => {
     expect(res.headers.get("location")).toContain("/login");
   });
 
-  it("allows a UI page request through with a valid session cookie", async () => {
+  it("rejects a UI page request with a session cookie that doesn't resolve to a real session", async () => {
     const req = new NextRequest("http://localhost/meetings", {
-      headers: { Cookie: "session=correct-token-value" },
+      headers: { Cookie: "session=not-a-real-session-id" },
+    });
+    const res = await proxy(req);
+    expect(res.status).toBe(307);
+  });
+
+  it("allows a UI page request through with a valid, real session cookie", async () => {
+    const user = await prisma.user.create({ data: { email: "person@example.com", passwordHash: "irrelevant" } });
+    const session = await prisma.session.create({ data: { userId: user.id, expiresAt: new Date(Date.now() + 100_000) } });
+
+    const req = new NextRequest("http://localhost/meetings", {
+      headers: { Cookie: `session=${session.id}` },
     });
     const res = await proxy(req);
     expect(res.status).not.toBe(307);
     expect(res.status).not.toBe(401);
+  });
+
+  it("rejects an expired session cookie", async () => {
+    const user = await prisma.user.create({ data: { email: "person@example.com", passwordHash: "irrelevant" } });
+    const session = await prisma.session.create({ data: { userId: user.id, expiresAt: new Date(Date.now() - 1000) } });
+
+    const req = new NextRequest("http://localhost/meetings", {
+      headers: { Cookie: `session=${session.id}` },
+    });
+    const res = await proxy(req);
+    expect(res.status).toBe(307);
   });
 
   it("matcher config excludes Next internals and static assets", () => {
