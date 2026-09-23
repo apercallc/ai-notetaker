@@ -20,6 +20,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 bytes = "1"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
 
 # Tauri 2.11.6 still resolves the GTK 3 stack to glib 0.18.x, while the
 # upstream UB fix is released only in glib 0.20. Keep the stable GTK/Tauri

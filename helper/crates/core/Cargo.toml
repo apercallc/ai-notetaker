@@ -17,6 +17,8 @@ chrono.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 rand = "0.8"
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
 tokio-test = "0.4"
