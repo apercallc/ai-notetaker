@@ -10,10 +10,18 @@ if [ "${app_path#/}" = "$app_path" ]; then
 fi
 
 host_binary="$app_path/Contents/MacOS/notetaker-nm-host"
-manifest_path="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/$host_name.json"
 
-if [ -f "$manifest_path" ] &&
-    grep -Fq "chrome-extension://$extension_id/" "$manifest_path" &&
-    grep -Fq "\"path\": \"$host_binary\"" "$manifest_path"; then
-    rm -f "$manifest_path"
-fi
+uninstall_for_vendor() {
+    vendor_dir=$1
+    manifest_path="$HOME/Library/Application Support/$vendor_dir/NativeMessagingHosts/$host_name.json"
+
+    if [ -f "$manifest_path" ] &&
+        grep -Fq "chrome-extension://$extension_id/" "$manifest_path" &&
+        grep -Fq "\"path\":\"$host_binary\"" "$manifest_path"; then
+        rm -f "$manifest_path"
+    fi
+}
+
+for vendor_dir in "Google/Chrome" "Microsoft Edge" "BraveSoftware/Brave-Browser"; do
+    uninstall_for_vendor "$vendor_dir"
+done
