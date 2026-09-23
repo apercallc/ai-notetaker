@@ -1,0 +1,7 @@
+{
+  "name": "com.ainotetaker.helper",
+  "description": "AI Notetaker desktop helper — bridges the Firefox extension to the local capture/pipeline process",
+  "path": "__NM_HOST_BINARY_PATH__",
+  "type": "stdio",
+  "allowed_extensions": ["notetaker@apercallc.dev"]
+}

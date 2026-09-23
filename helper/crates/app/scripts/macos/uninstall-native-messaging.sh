@@ -25,3 +25,11 @@ uninstall_for_vendor() {
 for vendor_dir in "Google/Chrome" "Microsoft Edge" "BraveSoftware/Brave-Browser"; do
     uninstall_for_vendor "$vendor_dir"
 done
+
+gecko_id='notetaker@apercallc.dev'
+firefox_manifest_path="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts/$host_name.json"
+if [ -f "$firefox_manifest_path" ] &&
+    grep -Fq "\"$gecko_id\"" "$firefox_manifest_path" &&
+    grep -Fq "\"path\":\"$host_binary\"" "$firefox_manifest_path"; then
+    rm -f "$firefox_manifest_path"
+fi

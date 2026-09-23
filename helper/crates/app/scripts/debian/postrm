@@ -21,3 +21,11 @@ remove_manifest '/etc/opt/chrome/native-messaging-hosts'
 remove_manifest '/etc/chromium/native-messaging-hosts'
 remove_manifest '/etc/opt/microsoft/msedge/native-messaging-hosts'
 remove_manifest '/etc/brave/native-messaging-hosts'
+
+gecko_id='notetaker@apercallc.dev'
+firefox_manifest_path="/usr/lib/mozilla/native-messaging-hosts/$host_name.json"
+if [ -f "$firefox_manifest_path" ] &&
+    grep -Fq "\"$gecko_id\"" "$firefox_manifest_path" &&
+    grep -Fq "\"path\":\"$host_binary\"" "$firefox_manifest_path"; then
+    rm -f "$firefox_manifest_path"
+fi
