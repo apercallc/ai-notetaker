@@ -359,8 +359,16 @@ accessibility failures):*
 - [x] Cross-meeting search (extension local archive and webapp meeting list)
       — the extension searches titles, summaries, transcripts, and action
       items; the webapp searches titles, summaries, and transcript text.
-- [ ] Calendar integration (Google Calendar / Outlook) to auto-label
-      meetings and pre-fill attendees
+- [x] Calendar integration — extension-only (metadata enrichment, not AI
+      pipeline work). BYOK OAuth per user via chrome.identity.launchWebAuthFlow
+      + PKCE, not a project-owned OAuth client (avoids Google's consent-
+      screen verification requirement entirely). Best-effort: any failure
+      falls back to today's default title with no attendees, never blocks
+      a recording. See
+      `docs/superpowers/specs/2026-09-22-calendar-integration-design.md`.
+      A live OAuth popup and real Google/Microsoft account responses
+      remain release-owner/manual verification — no such account exists
+      in this sandbox.
 - [x] Action-item tracking across meetings (extension and webapp action inboxes)
 - [x] Export (Markdown/plain text/browser Print-to-PDF) for a meeting's notes
       — available in both extension and webapp meeting details.

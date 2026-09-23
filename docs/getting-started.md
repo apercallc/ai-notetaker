@@ -280,6 +280,34 @@ For a local/private Docker deployment instead, run the Compose flow in
 [`webapp/README.md`](../webapp/README.md#deploy-with-docker-compose), then
 paste `http://127.0.0.1:3000` and the same `AUTH_TOKEN` into the extension.
 
+## Optional: connect your calendar
+
+Auto-labels a meeting's title and attendees from Google Calendar or
+Outlook Calendar when you start recording. This is entirely optional and
+never blocks a recording if it's skipped or fails.
+
+Like your provider API keys, this uses **your own** OAuth app — never one
+run by this project — so no calendar data passes through a third-party
+server. Register a free app with the provider you use:
+
+- Google: [Google Cloud Console — create OAuth client credentials](https://developers.google.com/identity/protocols/oauth2)
+  (application type: Chrome Extension), enable the Google Calendar API,
+  and add the `calendar.readonly` scope.
+- Microsoft: [Microsoft Entra ID — register an application](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app)
+  (public client), and add the `Calendars.Read` and `offline_access`
+  Microsoft Graph permissions.
+
+Then, in the extension:
+
+1. Open Settings → **Calendar**.
+2. Pick your provider. Copy the redirect URI shown and add it to your
+   OAuth app's registered redirect URIs.
+3. Paste the Client ID (Google also needs its Client Secret — see the
+   design note in
+   [`docs/superpowers/specs/2026-09-22-calendar-integration-design.md`](superpowers/specs/2026-09-22-calendar-integration-design.md)
+   for why this is safe to store locally for this OAuth client type).
+4. Click **Connect** and approve access in the popup.
+
 ## Troubleshooting
 
 ### “Helper not detected”
