@@ -1,0 +1,58 @@
+import Link from "next/link";
+import { requireSession } from "@/lib/currentUser";
+import { prisma } from "@/lib/db";
+import { AddMemberForm } from "./AddMemberForm";
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+export default async function TeamPage() {
+  const session = await requireSession();
+
+  if (session.role !== "owner") {
+    return (
+      <div className="container">
+        <Link href="/meetings" className="back-link">
+          ← Meetings
+        </Link>
+        <p className="empty-state">Only the workspace owner can manage team members.</p>
+      </div>
+    );
+  }
+
+  const members = await prisma.workspaceMembership.findMany({
+    where: { workspaceId: session.workspaceId },
+    include: { user: { select: { email: true, createdAt: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return (
+    <div className="container">
+      <Link href="/meetings" className="back-link">
+        ← Meetings
+      </Link>
+      <div className="page-header">
+        <h1>Team</h1>
+      </div>
+
+      <ul className="meeting-list">
+        {members.map((membership) => (
+          <li key={membership.id} className="meeting-card">
+            <div className="title">{membership.user.email}</div>
+            <div className="meta">
+              {membership.role} · joined {formatDate(membership.createdAt)}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <h2 className="section-title">Add a teammate</h2>
+      <p className="muted-copy">
+        They&apos;ll sign in with the email and one-time password shown after you add them — share it however
+        you already communicate (there&apos;s no email sending built in).
+      </p>
+      <AddMemberForm />
+    </div>
+  );
+}

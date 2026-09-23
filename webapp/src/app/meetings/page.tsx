@@ -21,7 +21,7 @@ export default async function MeetingsPage({
 }: {
   searchParams: Promise<{ q?: string; page?: string; error?: string }>;
 }) {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, role } = await requireSession();
   const { q: rawQuery, page: rawPage, error } = await searchParams;
   // Keep a pasted or hand-crafted URL from turning a normal page view into a
   // validation error; the API still rejects oversized queries explicitly.
@@ -50,6 +50,7 @@ export default async function MeetingsPage({
         <h1>Meetings</h1>
         <div className="header-links">
           <Link href="/actions">Action items</Link>
+          {role === "owner" && <Link href="/team">Team</Link>}
           <span className="total-count">{total} total</span>
         </div>
       </div>
