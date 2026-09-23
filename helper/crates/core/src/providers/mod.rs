@@ -388,7 +388,9 @@ mod tests {
     #[tokio::test]
     async fn default_open_streaming_session_is_unsupported() {
         let provider = BatchOnlyProvider;
-        let result = provider.open_streaming_session(AudioChannel::Mic, 16000).await;
+        let result = provider
+            .open_streaming_session(AudioChannel::Mic, 16000)
+            .await;
         assert!(matches!(result, Err(ProviderError::Unreachable(_))));
     }
 

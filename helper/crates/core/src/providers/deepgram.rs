@@ -69,7 +69,9 @@ impl DeepgramProvider {
 
 struct DeepgramStreamingSession {
     write: futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
         WsMessage,
     >,
     inbound_rx: mpsc::UnboundedReceiver<Vec<TranscriptSegment>>,
@@ -81,7 +83,12 @@ struct DeepgramStreamingSession {
 #[async_trait]
 impl StreamingSession for DeepgramStreamingSession {
     async fn send_audio(&mut self, pcm16: &[u8]) -> Result<(), ProviderError> {
-        if self.write.send(WsMessage::Binary(pcm16.to_vec())).await.is_err() {
+        if self
+            .write
+            .send(WsMessage::Binary(pcm16.to_vec()))
+            .await
+            .is_err()
+        {
             self.closed.store(true, Ordering::Relaxed);
             return Err(ProviderError::Unreachable("deepgram stream closed".into()));
         }
@@ -278,7 +285,10 @@ fn parse_response(
 /// Returns `None` for anything that isn't a transcript result (e.g. the
 /// periodic `Metadata` message) or has no words yet.
 fn parse_streaming_message(body: &Value, channel: AudioChannel) -> Option<Vec<TranscriptSegment>> {
-    let is_final = body.get("is_final").and_then(Value::as_bool).unwrap_or(false);
+    let is_final = body
+        .get("is_final")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let alternative = body.pointer("/channel/alternatives/0")?;
     let segments = segments_from_alternative(alternative, channel, is_final);
     if segments.is_empty() {
@@ -549,7 +559,10 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        assert!(closed, "session should observe the server closing the connection");
+        assert!(
+            closed,
+            "session should observe the server closing the connection"
+        );
     }
 
     fn mic_chunk() -> AudioChunk {

@@ -228,7 +228,10 @@ impl Pipeline {
     ) -> Vec<HelperToExtension> {
         let (session, gap_start) = match channel {
             AudioChannel::Mic => (&mut self.mic_session, &mut self.mic_stream_gap_start),
-            AudioChannel::Speaker => (&mut self.speaker_session, &mut self.speaker_stream_gap_start),
+            AudioChannel::Speaker => (
+                &mut self.speaker_session,
+                &mut self.speaker_stream_gap_start,
+            ),
         };
 
         if session.is_none() || session.as_ref().is_some_and(|s| s.is_closed()) {
@@ -304,7 +307,7 @@ impl Pipeline {
                 saw_final = true;
                 let _ = self
                     .store
-                    .append_transcript_segments(meeting_id, &[segment.clone()]);
+                    .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
             }
             messages.push(HelperToExtension::TranscriptPartial {
                 meeting_id,
@@ -330,7 +333,7 @@ impl Pipeline {
                 if segment.is_final {
                     let _ = self
                         .store
-                        .append_transcript_segments(meeting_id, &[segment.clone()]);
+                        .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
                 }
                 messages.push(HelperToExtension::TranscriptPartial {
                     meeting_id,
@@ -346,7 +349,7 @@ impl Pipeline {
                 if segment.is_final {
                     let _ = self
                         .store
-                        .append_transcript_segments(meeting_id, &[segment.clone()]);
+                        .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
                 }
                 messages.push(HelperToExtension::TranscriptPartial {
                     meeting_id,
@@ -1323,7 +1326,8 @@ mod tests {
     #[async_trait]
     impl crate::providers::StreamingSession for DropsAfterOneSendSession {
         async fn send_audio(&mut self, _pcm16: &[u8]) -> Result<(), ProviderError> {
-            self.closed.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.closed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             Err(ProviderError::Unreachable("dropped".into()))
         }
         async fn try_recv_segments(&mut self) -> Vec<(TranscriptSegment, u32)> {
