@@ -174,10 +174,35 @@ keep visible attribution to [vb-cable.com](https://vb-audio.com/Cable/) and
 the donation option. It must never silently remove unrelated A+B/C+D
 variants.
 
+## macOS / Windows code signing
+
+`release-build.yml` is wired to sign and notarize automatically once the
+release owner adds the corresponding repository secrets — it does nothing
+different from today (unsigned artifacts) when they're absent, so this is
+safe to merge ahead of actually having a cert.
+
+- **macOS**: set `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
+  `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an
+  [app-specific password](https://support.apple.com/en-us/102654), not the
+  Apple ID password), and `APPLE_TEAM_ID`. Tauri's bundler imports the
+  certificate into a temporary keychain and notarizes automatically — see
+  [Tauri: Sign macOS applications](https://tauri.app/distribute/sign/macos/).
+  Requires an active Apple Developer Program membership (release-owner cost,
+  not something this repo can supply).
+- **Windows**: set `WINDOWS_CERTIFICATE` (base64 `.pfx`) and
+  `WINDOWS_CERTIFICATE_PASSWORD`. A post-build step signs every `.msi`/`.exe`
+  in the bundle output with `signtool` and a DigiCert timestamp server.
+  Requires a purchased Authenticode code-signing certificate (release-owner
+  cost).
+
 ## Release-only prerequisites
 
-macOS Developer ID signing/notarization, Windows Authenticode signing,
-macOS installer-helper execution, updater key generation, and uninstall runs
-on each native OS remain release-owner validation. The Linux build and config
-are locally compilable here; that is not proof of macOS/Windows signing or
-hardware audio behavior.
+Actually obtaining the Apple Developer Program membership and an Authenticode
+certificate, generating and protecting the Tauri updater key pair (see
+above — the doc for that step is intentionally owner-only, not something to
+automate here), macOS installer-helper execution, and uninstall runs on each
+native OS remain release-owner validation. The Linux build and config are
+locally compilable here; that is not proof of macOS/Windows signing or
+hardware audio behavior. CI is now wired to consume owner-supplied signing
+secrets the moment they exist — no further code change should be needed to
+turn signing on.

@@ -35,7 +35,7 @@ function renderStep1(): string {
   const downloadLabel =
     platform === "macos" ? "Install on macOS" : platform === "windows" ? "Install on Windows" : platform === "linux" ? "Install on Linux" : "Choose your OS";
   return `
-    <h1>1. Install the helper</h1>
+    <h1 tabindex="-1" data-view-heading>1. Install the helper</h1>
     <p>
       The helper is a small background app that creates a virtual
       microphone/speaker so it can capture your meetings, whichever app
@@ -76,7 +76,7 @@ function helperStatusCopy(): string {
 
 function renderStep2(): string {
   return `
-    <h1>2. Check your audio</h1>
+    <h1 tabindex="-1" data-view-heading>2. Check your audio</h1>
     <p>
       First select the AI Notetaker device in your meeting app, then use the
       checks below. Recording stays disabled until both microphone and meeting
@@ -122,7 +122,7 @@ function renderAudioStatusCopy(): string {
 
 function renderStep3(): string {
   return `
-    <h1>3. Add your AI provider key</h1>
+    <h1 tabindex="-1" data-view-heading>3. Add your AI provider key</h1>
     <p class="text-secondary">
       AI Notetaker never bills you — this key is yours, used directly with
       the provider, at cost (a few cents per meeting with the defaults
@@ -144,7 +144,7 @@ function renderStep3(): string {
 
 function renderStep4(): string {
   return `
-    <h1>4. You're set up</h1>
+    <h1 tabindex="-1" data-view-heading>4. You're set up</h1>
     <p>
       Meetings are saved locally on this device by default — no account
       needed. If you'd like persistent history across devices, you can
@@ -154,9 +154,13 @@ function renderStep4(): string {
       <label class="checkbox-row">
         <input type="checkbox" id="consent-ack" ${consentAcknowledged ? "checked" : ""} />
         <span>
-          I understand that recording conversations may require the consent
-          of other participants depending on my location, and it's my
-          responsibility to follow the law where I record.
+          I understand that some places require every participant's consent
+          before a conversation is recorded ("two-party consent"), while
+          others only require mine ("one-party consent") — the rule depends
+          on where I and the other participants are located, not on this
+          app. This notice is general information, not legal advice, and
+          it's my responsibility to check and follow the law that applies
+          to my recording.
         </span>
       </label>
     </div>
@@ -197,6 +201,10 @@ function render(): void {
     <p id="step-error" class="test-result invalid" role="alert"></p>
   `;
   wireEvents();
+  // Each render replaces the entire step. Move focus to the new step's
+  // heading instead of leaving keyboard users at document.body — this
+  // wizard is mandatory, so every Back/Continue click matters.
+  app.querySelector<HTMLElement>("[data-view-heading]")?.focus({ preventScroll: true });
 }
 
 function wireEvents(): void {

@@ -38,7 +38,7 @@ export default async function TeamPage() {
 
       <ul className="meeting-list">
         {members.map((membership) => (
-          <li key={membership.id} className="meeting-card">
+          <li key={membership.id} className="meeting-card static-row">
             <div className="title">{membership.user.email}</div>
             <div className="meta">
               {membership.role} · joined {formatDate(membership.createdAt)}

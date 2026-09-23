@@ -4,7 +4,7 @@
   --color-border: #e2e2e5;
   --color-text: #17171a;
   --color-text-muted: #63636b;
-  --color-accent: #2f6feb;
+  --color-accent: #1e56c9; /* was #2f6feb (~4.57:1 on white, right at the AA floor); darkened for headroom */
   --color-accent-contrast: #ffffff;
   --color-danger: #c0392b;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -185,6 +185,15 @@ a {
 
 .meeting-card:hover {
   border-color: var(--color-accent);
+}
+
+/* team/page.tsx reuses .meeting-card's layout for static, non-clickable
+   rows — this cancels the hover/focus cue that otherwise implies the row
+   is clickable like an actual meeting-list link (found in design review). */
+.meeting-card.static-row:hover,
+.meeting-card.static-row:focus-visible {
+  border-color: var(--color-border);
+  outline: none;
 }
 
 .meeting-card:focus-visible {
@@ -389,6 +398,16 @@ a {
   background: transparent;
   border-color: var(--color-danger);
   color: var(--color-danger);
+}
+
+.button-secondary {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.button-secondary:hover {
+  background: var(--color-surface);
 }
 
 .error-text {

@@ -76,6 +76,14 @@ pub fn initialize<R: Runtime>(
                 .cloned()
                 .ok_or("default tray icon is missing")?,
         )
+        // Marks the icon as a macOS template image so the system can render
+        // it monochrome/inverted to match the surrounding menu bar and the
+        // icon-selected state, instead of showing the full-color dock icon
+        // verbatim (a no-op on Windows/Linux). Reusing the dock icon asset
+        // is still a placeholder — see TODO.md for real tray-specific art —
+        // but this keeps whatever asset lands there native-looking on macOS
+        // without a second code change later.
+        .icon_as_template(true)
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "open-latest" => open_latest_note(&data_dir),
             "open-folder" => {

@@ -16,7 +16,7 @@ function isBudgetTier(s: NotetakerSettings): boolean {
 function render(): void {
   const budget = isBudgetTier(settings);
   app.innerHTML = `
-    <h1>Settings</h1>
+    <h1 tabindex="-1" data-view-heading>Settings</h1>
 
     <fieldset>
       <legend>AI provider</legend>
@@ -26,8 +26,8 @@ function render(): void {
         current per-meeting estimates.
       </p>
       <div class="tier-toggle" role="group" aria-label="Provider tier">
-        <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}">Default (best quality)</button>
-        <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}">Budget (lowest cost)</button>
+        <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}" aria-pressed="${!budget}">Default (best quality)</button>
+        <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}" aria-pressed="${budget}">Budget (lowest cost)</button>
       </div>
 
       <div class="cost-estimator">
@@ -85,10 +85,10 @@ function render(): void {
       <div class="field">
         <label for="webapp-token">Access token</label>
         <div class="key-row">
-          <input type="password" id="webapp-token" value="${escapeHtml(settings.webapp?.token ?? "")}" />
+          <input type="password" id="webapp-token" autocomplete="off" value="${escapeHtml(settings.webapp?.token ?? "")}" />
           <button type="button" class="secondary" id="test-webapp">Test connection</button>
         </div>
-        <p class="test-result" id="webapp-test-result"></p>
+        <p class="test-result" id="webapp-test-result" role="status" aria-live="polite"></p>
       </div>
     </fieldset>
 
@@ -99,6 +99,12 @@ function render(): void {
   `;
 
   wireEvents();
+  // Each render replaces the entire page. Move focus to the heading
+  // instead of leaving keyboard users at document.body — render() only
+  // fires from discrete clicks/changes (tier toggle, calendar
+  // connect/disconnect), never from continuous typing, so this can't
+  // steal focus mid-input.
+  app.querySelector<HTMLElement>("[data-view-heading]")?.focus({ preventScroll: true });
 }
 
 function meetingModeOptions(selected: NotetakerSettings["defaultMeetingMode"]): string {
@@ -163,6 +169,14 @@ function renderCalendarFields(): string {
       pendingCalendarProvider === "none"
         ? ""
         : `
+      <p class="field-hint text-secondary">
+        This is your own OAuth app, created once in
+        ${
+          pendingCalendarProvider === "google"
+            ? `<a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a> (enable the Calendar API, create an OAuth client, choose "Chrome extension" as the application type)`
+            : `<a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noreferrer">Azure Portal → App registrations</a> (add the Calendars.Read Microsoft Graph permission)`
+        } — never a shared one this extension provides for you.
+      </p>
       <div class="field">
         <label for="calendar-client-id">Client ID</label>
         <input type="text" id="calendar-client-id" autocomplete="off" />
@@ -182,7 +196,7 @@ function renderCalendarFields(): string {
           Redirect URI to register with your OAuth app: <code>${escapeHtml(chrome.identity.getRedirectURL())}</code>
         </p>
         <button type="button" class="secondary" id="connect-calendar">Connect</button>
-        <p class="test-result" id="calendar-test-result"></p>
+        <p class="test-result" id="calendar-test-result" role="status" aria-live="polite"></p>
       </div>
     `
     }
@@ -194,11 +208,11 @@ function renderKeyField(provider: keyof NotetakerSettings["apiKeys"], label: str
     <div class="field">
       <label for="key-${provider}">${label}</label>
       <div class="key-row">
-        <input type="password" id="key-${provider}" data-provider="${provider}" value="${escapeHtml(settings.apiKeys[provider] ?? "")}" />
+        <input type="password" id="key-${provider}" data-provider="${provider}" autocomplete="off" value="${escapeHtml(settings.apiKeys[provider] ?? "")}" />
         <button type="button" class="secondary test-key" data-provider="${provider}">Test</button>
       </div>
       <p class="field-hint text-secondary">${hint}</p>
-      <p class="test-result" id="test-result-${provider}"></p>
+      <p class="test-result" id="test-result-${provider}" role="status" aria-live="polite"></p>
     </div>
   `;
 }
@@ -376,7 +390,7 @@ async function init(): Promise<void> {
 
 function renderFailure(): void {
   app.innerHTML = `
-    <h1>Settings</h1>
+    <h1 tabindex="-1" data-view-heading>Settings</h1>
     <div class="empty-state" role="alert">
       <p>Settings could not be loaded.</p>
       <button type="button" class="primary" id="retry-settings">Try again</button>

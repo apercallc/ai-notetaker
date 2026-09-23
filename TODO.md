@@ -308,9 +308,13 @@ accessibility failures):*
 - [x] Meeting list + search UI
 - [x] Meeting detail view (transcript, summary, action items) + delete
       with a confirmation dialog
-- [ ] "Deploy on Railway" one-click template — `railway.json` exists;
-      **not verified**: an actual click-through deploy against a real
-      Railway account and live Postgres addon
+- [ ] "Deploy on Railway" one-click template — `webapp/railway.json` exists
+      and its `startCommand` (`npm run db:migrate && npm run start`) checked
+      against `webapp/package.json`'s real `db:migrate`/`start` scripts, so
+      the config is internally consistent; **not verified**: an actual
+      click-through deploy against a real Railway account and live Postgres
+      addon, which spends real money and needs the release owner's own
+      account — not something to trigger from this sandbox
 - [x] Design pass — reviewed independently by `notetaker-design-reviewer`
       post-implementation
 
@@ -331,8 +335,17 @@ accessibility failures):*
 ## Sub-project 2: Cross-platform helper packaging polish
 
 - [ ] macOS: Apple Developer ID signing + notarization (no "unidentified
-      developer" wall on first launch)
-- [ ] Windows: Authenticode code signing (no SmartScreen warning wall)
+      developer" wall on first launch) — `release-build.yml` now signs and
+      notarizes automatically once the release owner adds
+      `APPLE_CERTIFICATE`/`APPLE_CERTIFICATE_PASSWORD`/`APPLE_SIGNING_IDENTITY`/
+      `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID` repo secrets; see
+      `docs/helper-packaging.md`. Still blocked on the release owner actually
+      holding an Apple Developer Program membership.
+- [ ] Windows: Authenticode code signing (no SmartScreen warning wall) —
+      `release-build.yml` now signtool-signs every `.msi`/`.exe` once the
+      release owner adds `WINDOWS_CERTIFICATE`/`WINDOWS_CERTIFICATE_PASSWORD`
+      repo secrets; see `docs/helper-packaging.md`. Still blocked on the
+      release owner actually holding a purchased code-signing certificate.
 - [x] Linux: package for common formats — Tauri `.deb` + AppImage targets and
       cargo-deb metadata are configured; `.rpm` remains out of this slice.
 - [x] Auto-launch-on-login option — tray menu action is opt-in and defaults
@@ -372,8 +385,19 @@ accessibility failures):*
 - [x] Action-item tracking across meetings (extension and webapp action inboxes)
 - [x] Export (Markdown/plain text/browser Print-to-PDF) for a meeting's notes
       — available in both extension and webapp meeting details.
-- [ ] Design pass via `notetaker-design-reviewer` for the expanded history
-      surface
+- [x] Design pass via `notetaker-design-reviewer` for the expanded history
+      surface (2026-09-23) — found and fixed: raw wire speaker IDs
+      (`them-2`, etc.) were leaking into the webapp UI and both exports
+      because `speakerLabel()` was never ported from the extension
+      (`webapp/src/lib/types.ts`, applied in the meeting detail page and
+      `ExportButtons.tsx`); a checked action-item box in the webapp didn't
+      autosave like its extension counterpart, so a box-then-navigate-away
+      silently lost the change (`webapp/src/components/ActionDoneCheckbox.tsx`,
+      wired into both the meeting detail and cross-meeting inbox pages); the
+      webapp had no secondary button style, so Export/Print/inbox-Save
+      competed visually with real primary actions (`.button-secondary` in
+      `globals.css`). See the fuller finding set folded into the
+      accessibility item below.
 
 ---
 
@@ -447,11 +471,20 @@ scope:
 
 ### Legal
 
-- [ ] Consent-to-record disclosure text reviewed (not legal advice, but
-      accurate about one/two-party consent variation) for both desktop and
-      any future mobile surface
-- [ ] License compliance check on bundled/wrapped drivers (BlackHole,
-      VB-Cable licensing terms) and any AI provider SDKs used
+- [x] Consent-to-record disclosure text reviewed for the desktop/extension
+      surface — now explicitly names one-party vs. two-party consent and
+      states it is general information, not legal advice
+      (`extension/src/onboarding/onboarding.ts`). Not a substitute for an
+      actual attorney review; mobile has no disclosure yet since sub-project
+      4 (mobile capture) hasn't started.
+- [x] License compliance check on bundled/wrapped drivers and AI provider
+      SDKs — see `docs/third-party-licenses.md` (checked 2026-09-23): no
+      vendor AI SDK is used anywhere (Deepgram/Claude/Groq/Gemini/DeepSeek
+      are all called over plain HTTP/WS), BlackHole is never bundled (source
+      GPL-3, binary all-rights-reserved, so no GPL obligation attaches),
+      and only the free base VB-CABLE package is staged under VB-Audio's
+      redistribution terms. Needs a re-check before each tagged release,
+      not just this one-time pass.
 
 ### Testing & QA
 
@@ -463,10 +496,45 @@ scope:
       against both default and budget provider paths (mocked provider
       responses in CI, no live API calls required) —
       `helper/crates/core/tests/full_pipeline.rs`
-- [ ] Accessibility audit (contrast, keyboard nav, screen reader labels)
-      across all three UI surfaces
-- [ ] `notetaker-design-reviewer` pass on every new or changed screen
-- [ ] `notetaker-guardrails-reviewer` pass before every release
+- [x] Accessibility audit (contrast, keyboard nav, screen reader labels)
+      across all three UI surfaces (2026-09-23, static code-level pass via
+      `notetaker-design-reviewer`, no live screen reader in this sandbox —
+      that remains real-device validation). Fixed: onboarding and Settings
+      never adopted the popup's keyboard-focus fix (a heading gets
+      `tabindex="-1" data-view-heading` and is refocused after every
+      re-render) — every Back/Continue click in the mandatory 4-step
+      onboarding wizard, and every tier/calendar toggle in Settings, dropped
+      keyboard focus to `document.body`
+      (`extension/src/onboarding/onboarding.ts`,
+      `extension/src/settings/settings.ts`); the tier-toggle buttons had no
+      `aria-pressed`; three provider/webapp/calendar test-result regions had
+      no `aria-live`; `global-error.tsx` never imported `globals.css`, so
+      the true last-resort error screen would render in unstyled browser
+      chrome; `meeting.ts`'s two early-return error states used a bare
+      `<p>` instead of the file's own `role="alert"` pattern; the macOS tray
+      icon reused the full-color dock icon with no `icon_as_template` flag
+      (`helper/crates/app/src/tray.rs`); light-mode `--color-accent` sat at
+      ~4.57:1 on white, right at the AA floor — darkened to ~6.5:1 for
+      headroom. Full finding list (including the still-open items below)
+      is in this session's `notetaker-design-reviewer` transcript.
+- [x] `notetaker-design-reviewer` pass on every new or changed screen
+      (2026-09-23) — see the accessibility item above for what it found and
+      fixed. Also fixed the remaining low-severity findings: Settings'
+      calendar Client ID/secret fields now link to the right OAuth console
+      (Google Cloud Console credentials / Azure App registrations) instead
+      of offering zero setup guidance; `team/page.tsx` no longer reuses
+      `.meeting-card`'s hover/focus "this is clickable" cue for static rows
+      (`.static-row` in `globals.css`); API key and webapp-token inputs
+      across Settings now consistently set `autocomplete="off"`. Two
+      findings intentionally left open — they need a live render, not a
+      code fix: dense per-line transcript borders at 200+ segments, and
+      real tray rendering in an OS menu bar.
+- [x] `notetaker-guardrails-reviewer` pass before every release (2026-09-23)
+      — reviewed all 11 non-negotiable constraints across `extension/`,
+      `helper/`, and `webapp/` as they stand on `main`. Zero violations
+      found; the recent calendar OAuth feature was checked specifically
+      (BYOK, 5s-timeout-bounded, `chrome.storage.local`-only, never blocks
+      `startRecording`) and confirmed correctly scoped.
 
 ### CI/CD & release
 

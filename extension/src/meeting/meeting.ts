@@ -2,8 +2,10 @@ import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, updateMee
 import { escapeHtml } from "../lib/html";
 import { syncMeetingToWebapp } from "../lib/webappSync";
 import { speakerLabel } from "../types";
+import type { BackgroundToUiMessage } from "../lib/internalMessages";
 
 const app = document.getElementById("app")!;
+let removeLiveListener: (() => void) | null = null;
 
 function showMeetingError(message: string): void {
   let error = document.getElementById("meeting-error");
@@ -73,15 +75,18 @@ async function render(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const id = params.get("id");
   if (!id) {
-    app.innerHTML = `<p>No meeting specified.</p>`;
+    app.innerHTML = `<p class="text-warning" role="alert">No meeting specified.</p>`;
     return;
   }
 
   const meeting = await getMeeting(id);
   if (!meeting) {
-    app.innerHTML = `<p>Meeting not found. It may have been deleted.</p>`;
+    app.innerHTML = `<p class="text-warning" role="alert">Meeting not found. It may have been deleted.</p>`;
     return;
   }
+
+  removeLiveListener?.();
+  removeLiveListener = null;
 
   app.innerHTML = `
     <h1>${escapeHtml(meeting.title)}</h1>
@@ -191,6 +196,22 @@ async function render(): Promise<void> {
         showMeetingError("Could not save the due date. Check the helper/webapp connection and try again.");
       }
     });
+  }
+
+  // A meeting opened mid-summarization showed "Still processing…" forever
+  // with no way to see the finished summary short of manually reloading
+  // the tab (found in design review) — listen for the same SUMMARY_READY
+  // event the popup already reacts to, and re-render once it lands.
+  if (meeting.status === "processing") {
+    function liveListener(message: BackgroundToUiMessage): void {
+      if (message.type === "SUMMARY_READY" && message.meetingId === id) {
+        removeLiveListener?.();
+        removeLiveListener = null;
+        void render().catch(renderFailure);
+      }
+    }
+    chrome.runtime.onMessage.addListener(liveListener);
+    removeLiveListener = () => chrome.runtime.onMessage.removeListener(liveListener);
   }
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import type { MeetingDetailResponse } from "@/lib/types";
+import { speakerLabel, type MeetingDetailResponse } from "@/lib/types";
 
 function safeFilename(title: string, extension: string): string {
   const normalized = title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "meeting";
@@ -24,7 +24,7 @@ function markdownFor(meeting: MeetingDetailResponse): string {
       : ["_None_"]),
     "",
     "## Transcript",
-    ...meeting.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`),
+    ...meeting.transcript.map((segment) => `**${speakerLabel(segment.speaker)}:** ${segment.text}`),
   ].join("\n");
 }
 
@@ -44,7 +44,7 @@ function plainTextFor(meeting: MeetingDetailResponse): string {
       : ["None"]),
     "",
     "TRANSCRIPT",
-    ...meeting.transcript.map((segment) => `${segment.speaker}: ${segment.text}`),
+    ...meeting.transcript.map((segment) => `${speakerLabel(segment.speaker)}: ${segment.text}`),
   ].join("\n");
 }
 
@@ -63,13 +63,13 @@ function download(meeting: MeetingDetailResponse, contents: string, extension: s
 export function ExportButtons({ meeting }: { meeting: MeetingDetailResponse }) {
   return (
     <div className="export-actions" aria-label="Export meeting">
-      <button type="button" className="button button-primary" onClick={() => download(meeting, markdownFor(meeting), "md", "text/markdown")}>
+      <button type="button" className="button button-secondary" onClick={() => download(meeting, markdownFor(meeting), "md", "text/markdown")}>
         Markdown
       </button>
-      <button type="button" className="button button-primary" onClick={() => download(meeting, plainTextFor(meeting), "txt", "text/plain")}>
+      <button type="button" className="button button-secondary" onClick={() => download(meeting, plainTextFor(meeting), "txt", "text/plain")}>
         Plain text
       </button>
-      <button type="button" className="button button-primary" onClick={() => window.print()}>
+      <button type="button" className="button button-secondary" onClick={() => window.print()}>
         Print / Save PDF
       </button>
     </div>

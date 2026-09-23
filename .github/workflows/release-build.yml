@@ -88,6 +88,8 @@ jobs:
     defaults:
       run:
         working-directory: helper
+    env:
+      WINDOWS_SIGNING_CONFIGURED: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,7 +123,41 @@ jobs:
             -ExpectedSha256 $env:VB_CABLE_SHA256
       - name: Build native bundles
         working-directory: helper/crates/app
+        env:
+          # macOS: Tauri's bundler signs and notarizes automatically once these
+          # are set (https://tauri.app/distribute/sign/macos/) — it decodes
+          # APPLE_CERTIFICATE (base64 .p12) into a temporary keychain itself.
+          # No-op on Linux/Windows and a no-op unsigned build on macOS when the
+          # release owner has not yet supplied these repository secrets.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx --yes @tauri-apps/cli@latest build --bundles ${{ matrix.bundle }}
+      - name: Authenticode-sign Windows bundles
+        # Post-build signtool pass rather than a tauri.conf.json certificateThumbprint,
+        # so it works from a secret-supplied .pfx without a pre-imported machine cert
+        # store entry. Skips cleanly (unsigned build, unchanged from today) until the
+        # release owner supplies these repository secrets.
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNING_CONFIGURED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP "ai-notetaker-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $signtool = (Get-ChildItem -Path "C:/Program Files (x86)/Windows Kits/10/bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1).FullName
+          $targets = Get-ChildItem -Path "target/release/bundle" -Recurse -Include *.msi, *.exe
+          foreach ($target in $targets) {
+            & $signtool sign /f $pfxPath /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 `
+              /tr http://timestamp.digicert.com /td sha256 $target.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed on $($target.FullName)" }
+          }
+          Remove-Item $pfxPath
       - uses: actions/upload-artifact@v4
         with:
           name: helper-${{ matrix.os }}-${{ github.ref_name }}

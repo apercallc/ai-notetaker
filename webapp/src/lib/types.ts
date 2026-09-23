@@ -37,6 +37,20 @@ export interface MeetingSummaryResponse {
   openActionItems: number;
 }
 
+/**
+ * Renders a wire-level speaker id ("you", "them", "them-2", ...) into a
+ * display label. Mirrors extension/src/types.ts's speakerLabel() — the
+ * extension sends the raw wire value in every synced meeting
+ * (see lib/webappSync.ts on the extension side), so this app must apply
+ * the same transform at every display/export site rather than showing the
+ * wire value directly.
+ */
+export function speakerLabel(speaker: string): string {
+  if (speaker === "you") return "You";
+  const match = /^them-(\d+)$/.exec(speaker);
+  return match ? `Them ${match[1]}` : "Them";
+}
+
 export interface MeetingDetailResponse {
   id: string;
   title: string;

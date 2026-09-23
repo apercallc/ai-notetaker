@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMeeting } from "@/lib/meetings";
+import { speakerLabel } from "@/lib/types";
+import { ActionDoneCheckbox } from "@/components/ActionDoneCheckbox";
 import { requireSession } from "@/lib/currentUser";
 import { DeleteButton } from "./DeleteButton";
 import { ExportButtons } from "./ExportButtons";
@@ -52,10 +54,11 @@ export default async function MeetingDetailPage({
                 <form action={updateActionItemAction} className="detail-action-form">
                   <input type="hidden" name="id" value={item.id} />
                   <input type="hidden" name="meetingId" value={meeting.id} />
-                  <label className="action-checkbox">
-                    <span className="sr-only">Mark “{item.text}” {item.status === "done" ? "open" : "done"}</span>
-                    <input type="checkbox" name="done" value="1" defaultChecked={item.status === "done"} />
-                  </label>
+                  <ActionDoneCheckbox
+                    name="done"
+                    label={`Mark "${item.text}" ${item.status === "done" ? "open" : "done"}`}
+                    defaultChecked={item.status === "done"}
+                  />
                   <span className="action-text">
                     {item.text}
                     {item.owner && <span className="meeting-owner"> — {item.owner}</span>}
@@ -79,7 +82,7 @@ export default async function MeetingDetailPage({
             {meeting.transcript.map((segment, i) => (
               <div key={i} className="transcript-line">
                 <span className="speaker">
-                  {segment.speaker} · {formatTime(segment.timestamp)}
+                  {speakerLabel(segment.speaker)} · {formatTime(segment.timestamp)}
                 </span>
                 <span>{segment.text}</span>
               </div>

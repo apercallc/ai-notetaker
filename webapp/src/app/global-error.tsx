@@ -1,5 +1,11 @@
 "use client";
 
+// This screen replaces the root layout entirely (it defines its own
+// <html>/<body>) when the layout itself throws, so it doesn't inherit
+// layout.tsx's globals.css import — without this it would render in
+// unstyled default browser chrome at the worst possible moment.
+import "./globals.css";
+
 export default function GlobalError({
   reset,
 }: {

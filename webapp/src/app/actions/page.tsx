@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listActionItems } from "@/lib/meetings";
 import { requireSession } from "@/lib/currentUser";
 import { updateActionItemAction } from "@/app/meetings/[id]/actions";
+import { ActionDoneCheckbox } from "@/components/ActionDoneCheckbox";
 
 type ActionStatus = "open" | "done";
 
@@ -60,10 +61,11 @@ export default async function ActionItemsPage({
               <form action={updateActionItemAction} className="action-inbox-form">
                 <input type="hidden" name="id" value={item.id} />
                 <input type="hidden" name="meetingId" value={item.meeting.id} />
-                <label className="action-checkbox">
-                  <span className="sr-only">Mark “{item.text}” {item.status === "done" ? "open" : "done"}</span>
-                  <input type="checkbox" name="done" value="1" defaultChecked={item.status === "done"} />
-                </label>
+                <ActionDoneCheckbox
+                  name="done"
+                  label={`Mark "${item.text}" ${item.status === "done" ? "open" : "done"}`}
+                  defaultChecked={item.status === "done"}
+                />
                 <div className="action-content">
                   <div className="action-title">{item.text}</div>
                   <div className="action-context">
@@ -76,7 +78,7 @@ export default async function ActionItemsPage({
                   <span>Due</span>
                   <input type="date" name="dueAt" defaultValue={dateInputValue(item.dueAt)} aria-label={`Due date for ${item.text}`} />
                 </label>
-                <button type="submit" className="button button-primary action-save">Save</button>
+                <button type="submit" className="button button-secondary action-save">Save</button>
               </form>
             </li>
           ))}
