@@ -22,9 +22,12 @@ beforeEach(async () => {
   await prisma.actionItem.deleteMany();
   await prisma.transcriptSegment.deleteMany();
   await prisma.meeting.deleteMany();
+  await prisma.workspace.deleteMany();
+  await prisma.workspace.create({ data: { name: "Test workspace", isDefault: true } });
 });
 
 afterAll(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.$disconnect();
 });
 
