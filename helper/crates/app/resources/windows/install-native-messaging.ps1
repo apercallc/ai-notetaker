@@ -9,7 +9,11 @@ $hostName = 'com.ainotetaker.helper'
 $extensionId = 'jidooookkdbbbhkkdmcajnnnhhphodok'
 $hostBinary = [IO.Path]::GetFullPath((Join-Path $InstallDir 'notetaker-nm-host.exe'))
 $manifestPath = Join-Path $InstallDir "$hostName.json"
-$registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+$registryPaths = @(
+    "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName",
+    "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName",
+    "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$hostName"
+)
 
 if (-not (Test-Path -LiteralPath $hostBinary -PathType Leaf)) {
     throw "Native Messaging host was not found at $hostBinary"
@@ -23,10 +27,12 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     }
 }
 
-if (Test-Path -LiteralPath $registryPath) {
-    $existingRegistration = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
-    if ($existingRegistration -and $existingRegistration -ne $manifestPath) {
-        throw "Refusing to replace a different Native Messaging registration at $registryPath"
+foreach ($registryPath in $registryPaths) {
+    if (Test-Path -LiteralPath $registryPath) {
+        $existingRegistration = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
+        if ($existingRegistration -and $existingRegistration -ne $manifestPath) {
+            throw "Refusing to replace a different Native Messaging registration at $registryPath"
+        }
     }
 }
 
@@ -41,5 +47,7 @@ $manifest = [ordered]@{
 $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
 [IO.File]::WriteAllText($manifestPath, "$manifest`r`n", $utf8NoBom)
 
-New-Item -Path $registryPath -Force | Out-Null
-New-ItemProperty -Path $registryPath -Name '(default)' -PropertyType String -Value $manifestPath -Force | Out-Null
+foreach ($registryPath in $registryPaths) {
+    New-Item -Path $registryPath -Force | Out-Null
+    New-ItemProperty -Path $registryPath -Name '(default)' -PropertyType String -Value $manifestPath -Force | Out-Null
+}

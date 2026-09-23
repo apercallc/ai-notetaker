@@ -9,7 +9,11 @@ $hostName = 'com.ainotetaker.helper'
 $extensionId = 'jidooookkdbbbhkkdmcajnnnhhphodok'
 $hostBinary = [IO.Path]::GetFullPath((Join-Path $InstallDir 'notetaker-nm-host.exe'))
 $manifestPath = Join-Path $InstallDir "$hostName.json"
-$registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+$registryPaths = @(
+    "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName",
+    "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName",
+    "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$hostName"
+)
 
 if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     try {
@@ -23,9 +27,11 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
     }
 }
 
-if (Test-Path -LiteralPath $registryPath) {
-    $registeredManifest = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
-    if ($registeredManifest -eq $manifestPath) {
-        Remove-Item -LiteralPath $registryPath -Recurse -Force
+foreach ($registryPath in $registryPaths) {
+    if (Test-Path -LiteralPath $registryPath) {
+        $registeredManifest = (Get-ItemProperty -LiteralPath $registryPath -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
+        if ($registeredManifest -eq $manifestPath) {
+            Remove-Item -LiteralPath $registryPath -Recurse -Force
+        }
     }
 }
