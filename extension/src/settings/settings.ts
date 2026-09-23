@@ -3,6 +3,7 @@ import { normalizeWebappUrl, testWebappHealth } from "../lib/providerTest";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { escapeHtml } from "../lib/html";
 import { estimateMeetingCost } from "../lib/costEstimate";
+import { connectCalendar } from "../lib/calendar";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
 
 const app = document.getElementById("app")!;
@@ -59,6 +60,16 @@ function render(): void {
         <label for="custom-summary-instructions">Custom summary instructions</label>
         <textarea id="custom-summary-instructions" rows="4" placeholder="For example: always call out launch risks and unanswered questions.">${escapeHtml(settings.customSummaryInstructions)}</textarea>
       </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Calendar (optional)</legend>
+      <p class="text-secondary field-hint">
+        Auto-label a meeting's title and attendees from your calendar when you
+        start recording. Uses your own OAuth app (like an API key) — never a
+        shared one — so nothing here goes through a project-run server.
+      </p>
+      ${renderCalendarFields()}
     </fieldset>
 
     <fieldset>
@@ -120,6 +131,61 @@ function renderBudgetTierFields(): string {
       </select>
     </div>
     ${renderKeyField(settings.summarizationProvider === "deepseek" ? "deepseek" : "gemini", `${settings.summarizationProvider === "deepseek" ? "DeepSeek" : "Gemini"} API key`, "Summarization")}
+  `;
+}
+
+// Only held while the user is filling in a new connection — cleared once
+// `settings.calendar` is set (or the user picks "None"). Not part of
+// NotetakerSettings since it's meaningless once saved/connected.
+let pendingCalendarProvider: "none" | "google" | "outlook" = settings.calendar?.provider ?? "none";
+
+function renderCalendarFields(): string {
+  if (settings.calendar) {
+    const label = settings.calendar.provider === "google" ? "Google Calendar" : "Outlook Calendar";
+    return `
+      <div class="field">
+        <p>Connected to ${label}.</p>
+        <button type="button" class="secondary" id="disconnect-calendar">Disconnect</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="field">
+      <label for="calendar-provider">Provider</label>
+      <select id="calendar-provider">
+        <option value="none" ${pendingCalendarProvider === "none" ? "selected" : ""}>None</option>
+        <option value="google" ${pendingCalendarProvider === "google" ? "selected" : ""}>Google Calendar</option>
+        <option value="outlook" ${pendingCalendarProvider === "outlook" ? "selected" : ""}>Outlook Calendar</option>
+      </select>
+    </div>
+    ${
+      pendingCalendarProvider === "none"
+        ? ""
+        : `
+      <div class="field">
+        <label for="calendar-client-id">Client ID</label>
+        <input type="text" id="calendar-client-id" autocomplete="off" />
+      </div>
+      ${
+        pendingCalendarProvider === "google"
+          ? `
+        <div class="field">
+          <label for="calendar-client-secret">Client secret</label>
+          <input type="password" id="calendar-client-secret" autocomplete="off" />
+        </div>
+      `
+          : ""
+      }
+      <div class="field">
+        <p class="field-hint text-secondary">
+          Redirect URI to register with your OAuth app: <code>${escapeHtml(chrome.identity.getRedirectURL())}</code>
+        </p>
+        <button type="button" class="secondary" id="connect-calendar">Connect</button>
+        <p class="test-result" id="calendar-test-result"></p>
+      </div>
+    `
+    }
   `;
 }
 
@@ -214,6 +280,43 @@ function wireEvents(): void {
     });
   }
 
+  document.getElementById("calendar-provider")?.addEventListener("change", () => {
+    pendingCalendarProvider = (document.getElementById("calendar-provider") as HTMLSelectElement).value as typeof pendingCalendarProvider;
+    render();
+  });
+
+  document.getElementById("connect-calendar")?.addEventListener("click", async () => {
+    const connectButton = document.getElementById("connect-calendar") as HTMLButtonElement;
+    const resultEl = document.getElementById("calendar-test-result")!;
+    const clientId = (document.getElementById("calendar-client-id") as HTMLInputElement)?.value.trim();
+    const clientSecret = (document.getElementById("calendar-client-secret") as HTMLInputElement | null)?.value.trim();
+    if (!clientId || (pendingCalendarProvider === "none")) {
+      resultEl.textContent = "Enter a Client ID first.";
+      resultEl.className = "test-result invalid";
+      return;
+    }
+    connectButton.disabled = true;
+    resultEl.textContent = "Opening the sign-in window…";
+    resultEl.className = "test-result text-secondary";
+    try {
+      const provider = pendingCalendarProvider as "google" | "outlook";
+      settings.calendar = await connectCalendar(provider, clientId, clientSecret || undefined);
+      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+      render();
+    } catch {
+      resultEl.textContent = "Could not connect. Check your Client ID/secret and redirect URI, then try again.";
+      resultEl.className = "test-result invalid";
+      connectButton.disabled = false;
+    }
+  });
+
+  document.getElementById("disconnect-calendar")?.addEventListener("click", async () => {
+    settings.calendar = null;
+    pendingCalendarProvider = "none";
+    await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+    render();
+  });
+
   document.getElementById("test-webapp")?.addEventListener("click", async () => {
     const testButton = document.getElementById("test-webapp") as HTMLButtonElement;
     const url = (document.getElementById("webapp-url") as HTMLInputElement).value.trim();
@@ -267,6 +370,7 @@ function wireEvents(): void {
 
 async function init(): Promise<void> {
   settings = await getSettings();
+  pendingCalendarProvider = settings.calendar?.provider ?? "none";
   render();
 }
 

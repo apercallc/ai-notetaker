@@ -4,6 +4,9 @@ import { BackgroundController, type NativeClientLike } from "../src/lib/backgrou
 import { getMeeting, saveSettings } from "../src/lib/storage";
 import { DEFAULT_SETTINGS } from "../src/types";
 
+vi.mock("../src/lib/calendar", () => ({ findCurrentEvent: vi.fn() }));
+import { findCurrentEvent } from "../src/lib/calendar";
+
 function createFakeClient(): NativeClientLike & {
   emit: (type: string, payload: Record<string, unknown>) => void;
   emitStatus: (status: string) => void;
@@ -78,6 +81,71 @@ describe("BackgroundController", () => {
     expect(client.startRecording).toHaveBeenCalledWith(meetingId, "general");
     const stored = await getMeeting(meetingId);
     expect(stored?.status).toBe("recording");
+  });
+
+  it("titles the meeting from the matching calendar event when one is connected", async () => {
+    vi.mocked(findCurrentEvent).mockResolvedValue({
+      title: "Roadmap sync",
+      attendees: ["Alex", "Sam"],
+      startsAt: new Date().toISOString(),
+      endsAt: new Date().toISOString(),
+    });
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      calendar: {
+        provider: "google",
+        clientId: "x",
+        accessToken: "a",
+        refreshToken: "r",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+
+    const meetingId = await controller.startRecording();
+    const meeting = await getMeeting(meetingId);
+
+    expect(meeting?.title).toBe("Roadmap sync");
+    expect(meeting?.attendees).toEqual(["Alex", "Sam"]);
+  });
+
+  it("falls back to the default title when no calendar is connected", async () => {
+    vi.mocked(findCurrentEvent).mockResolvedValue(null);
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true });
+
+    const meetingId = await controller.startRecording();
+    const meeting = await getMeeting(meetingId);
+
+    expect(meeting?.title).toContain("Meeting on");
+    expect(meeting?.attendees).toBeUndefined();
+  });
+
+  it("falls back to the default title when the calendar lookup throws", async () => {
+    vi.mocked(findCurrentEvent).mockRejectedValue(new Error("network error"));
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      calendar: {
+        provider: "google",
+        clientId: "x",
+        accessToken: "a",
+        refreshToken: "r",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+
+    const meetingId = await controller.startRecording();
+    const meeting = await getMeeting(meetingId);
+    expect(meeting?.title).toContain("Meeting on");
   });
 
   it("tracks a helper recording_started event for an existing meeting", async () => {

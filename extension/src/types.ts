@@ -3,6 +3,8 @@
  * Keep these in sync with those docs — they are the contract, not this file.
  */
 
+import type { CalendarConnection } from "./lib/calendar";
+
 export type TranscriptionProvider = "deepgram" | "groq";
 export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
@@ -55,6 +57,7 @@ export interface NotetakerSettings {
   customSummaryInstructions: string;
   onboardingComplete: boolean;
   consentDisclosureAcknowledged: boolean;
+  calendar: CalendarConnection | null;
 }
 
 export const DEFAULT_SETTINGS: NotetakerSettings = {
@@ -67,6 +70,7 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   customSummaryInstructions: "",
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
+  calendar: null,
 };
 
 export type Speaker = "you" | `them${"" | `-${number}`}`;
@@ -113,6 +117,7 @@ export interface MeetingRecord {
   mode?: MeetingMode;
   status: "recording" | "processing" | "complete" | "error";
   errorMessage?: string;
+  attendees?: string[];
 }
 
 // ---- Native Messaging: extension -> helper ----

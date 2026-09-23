@@ -10,6 +10,7 @@ import type { HelperConnectionStatus } from "./nativeMessaging";
 import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
+import { findCurrentEvent } from "./calendar";
 import type { AudioProbeResult, AudioStatus, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, TranscriptSegment } from "../types";
 
 export interface NativeClientLike {
@@ -116,9 +117,22 @@ export class BackgroundController {
       return "";
     }
     const meetingId = generateMeetingId();
+    let title = `Meeting on ${new Date().toLocaleString()}`;
+    let attendees: string[] | undefined;
+    if (this.settings?.calendar) {
+      try {
+        const event = await findCurrentEvent(this.settings.calendar);
+        if (event) {
+          if (event.title) title = event.title;
+          if (event.attendees.length > 0) attendees = event.attendees;
+        }
+      } catch {
+        // Calendar enrichment is best-effort — never block a recording on it.
+      }
+    }
     const meeting: MeetingRecord = {
       id: meetingId,
-      title: `Meeting on ${new Date().toLocaleString()}`,
+      title,
       startedAt: new Date().toISOString(),
       endedAt: null,
       transcript: [],
@@ -126,6 +140,7 @@ export class BackgroundController {
       actionItems: [],
       mode: meetingMode,
       status: "recording",
+      ...(attendees ? { attendees } : {}),
     };
     await saveMeeting(meeting);
     this.activeMeetingId = meetingId;
