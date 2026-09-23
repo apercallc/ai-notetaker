@@ -47,9 +47,11 @@ afterAll(async () => {
 });
 
 describe("bootstrap", () => {
+  const SETUP_TOKEN = process.env.AUTH_TOKEN ?? "";
+
   it("creates the first user as owner and sets a resolvable session cookie", async () => {
     await expect(
-      bootstrap(formData({ email: "owner@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
+      bootstrap(formData({ setupToken: SETUP_TOKEN, email: "owner@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
     ).rejects.toThrow("REDIRECT:/meetings");
 
     const user = await prisma.user.findUniqueOrThrow({ where: { email: "owner@example.com" } });
@@ -65,14 +67,24 @@ describe("bootstrap", () => {
     await prisma.user.create({ data: { email: "existing@example.com", passwordHash: "irrelevant" } });
 
     await expect(
-      bootstrap(formData({ email: "new@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
+      bootstrap(formData({ setupToken: SETUP_TOKEN, email: "new@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
     ).rejects.toThrow("REDIRECT:/login");
     expect(await prisma.user.count()).toBe(1);
   });
 
   it("rejects mismatched passwords without creating a user", async () => {
     await expect(
-      bootstrap(formData({ email: "owner@example.com", password: "correct horse battery", confirmPassword: "different password" })),
+      bootstrap(formData({ setupToken: SETUP_TOKEN, email: "owner@example.com", password: "correct horse battery", confirmPassword: "different password" })),
+    ).rejects.toThrow(/REDIRECT:\/login/);
+    expect(await prisma.user.count()).toBe(0);
+  });
+
+  it("rejects a wrong or missing setup token without creating a user, even with valid credentials otherwise", async () => {
+    await expect(
+      bootstrap(formData({ setupToken: "wrong-token", email: "attacker@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
+    ).rejects.toThrow(/REDIRECT:\/login/);
+    await expect(
+      bootstrap(formData({ email: "attacker@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
     ).rejects.toThrow(/REDIRECT:\/login/);
     expect(await prisma.user.count()).toBe(0);
   });

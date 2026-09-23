@@ -19,13 +19,26 @@ export default async function LoginPage({
           <p className="muted-copy">
             Create the first account for this instance. You&apos;ll be its workspace owner.
           </p>
+          <label htmlFor="setupToken">Setup code</label>
+          <input
+            id="setupToken"
+            name="setupToken"
+            type="password"
+            className="text-input"
+            autoFocus
+            required
+            autoComplete="off"
+          />
+          <p className="muted-copy">
+            The <code>AUTH_TOKEN</code> value you set when deploying this instance — proves you&apos;re the
+            one who deployed it, not just the first person to find the URL.
+          </p>
           <label htmlFor="email">Email</label>
           <input
             id="email"
             name="email"
             type="email"
             className="text-input"
-            autoFocus
             required
             autoComplete="email"
           />

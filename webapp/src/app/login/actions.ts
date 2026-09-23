@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { isValidSetupToken } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/passwords";
 import { createSession, deleteSession } from "@/lib/sessions";
 import { createWorkspaceWithOwner, getDefaultWorkspaceId } from "@/lib/workspaces";
@@ -27,17 +28,26 @@ async function setSessionCookie(session: { id: string; expiresAt: Date }): Promi
 
 /** Creates the first account for a freshly deployed instance — that user
  * becomes the owner of the single default workspace this project supports.
- * No new required environment variable: whoever reaches the URL first
- * controls the instance, the same trust model as today's AUTH_TOKEN flow.
+ * No new required environment variable: the deploy-time AUTH_TOKEN doubles
+ * as the one-time setup code, so claiming ownership still requires knowing
+ * the same secret today's single-session flow required — without this
+ * check, the first anonymous visitor to the public URL (not necessarily
+ * its owner) could claim the account with an arbitrary email/password.
  */
 export async function bootstrap(formData: FormData): Promise<void> {
   if (await hasAnyUser()) redirect("/login");
 
+  const setupToken = String(formData.get("setupToken") ?? "");
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
-  if (!email || password.length < MIN_PASSWORD_LENGTH || password !== confirmPassword) {
+  if (
+    !isValidSetupToken(setupToken) ||
+    !email ||
+    password.length < MIN_PASSWORD_LENGTH ||
+    password !== confirmPassword
+  ) {
     redirect("/login?error=bootstrap");
   }
 

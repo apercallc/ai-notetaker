@@ -144,20 +144,28 @@ A running self-hosted instance must not break on upgrade:
 
 `/login` checks whether any `User` row exists:
 
-- **Zero users:** render "Create the first account" (email + password +
-  confirm). Submitting creates the `User`, hashes the password
-  (`node:crypto`'s `scrypt`, no new dependency — matches this file's
-  existing hand-rolled `timingSafeEqual` convention rather than adding
-  `bcrypt`/`argon2`), gives them an `owner` `WorkspaceMembership` in the
-  default workspace, creates a `Session`, and logs them in immediately.
+- **Zero users:** render "Create the first account" (setup code + email +
+  password + confirm). The setup code must match the deploy-time
+  `AUTH_TOKEN` (checked via `isValidSetupToken`, the same fail-closed,
+  constant-time comparison `isAuthorizedBearer` already uses) — without
+  this, the first anonymous visitor to a public Railway URL, not
+  necessarily its owner, could claim the account with an arbitrary
+  email/password and zero secret knowledge (an earlier draft of this
+  design missed this and was caught by
+  `notetaker-guardrails-reviewer`). Submitting creates the `User`, hashes
+  the password (`node:crypto`'s `scrypt`, no new dependency — matches
+  this file's existing hand-rolled `timingSafeEqual` convention rather
+  than adding `bcrypt`/`argon2`), gives them an `owner`
+  `WorkspaceMembership` in the default workspace, creates a `Session`,
+  and logs them in immediately.
 - **One or more users exist:** render the normal email + password sign-in
   form.
 
-No new required environment variable — the first person to open the
-deployed URL after `railway up` creates the account, exactly as today's
-flow has them set `AUTH_TOKEN` and then type it into `/login` themselves.
-The trust model is identical: whoever reaches the URL first controls the
-instance.
+No new required environment variable — `AUTH_TOKEN` already exists and is
+already required; it now doubles as the one-time setup code. The trust
+model is genuinely equivalent to today's flow: claiming the instance
+requires knowing the same deploy-time secret either way, not just being
+first to load the URL.
 
 ### Session mechanics
 

@@ -38,3 +38,23 @@ export function isAuthorizedBearer(authorizationHeader: string | null): boolean 
 
   return constantTimeEquals(provided, expected);
 }
+
+/**
+ * Gates the one-time "create the first account" bootstrap flow
+ * (src/app/login/actions.ts's bootstrap()) behind the same deploy-time
+ * secret as everything else. Without this, the first anonymous visitor
+ * to reach a freshly deployed instance's public URL — not necessarily
+ * its owner — could claim the owning account with an arbitrary email/
+ * password and no secret knowledge at all, a real regression from the
+ * old AUTH_TOKEN-gated single session (found in guardrails review).
+ * Reuses the exact fail-closed, constant-time comparison as
+ * isAuthorizedBearer — same secret, different presentation (a form
+ * field here instead of a header).
+ */
+export function isValidSetupToken(provided: string | null | undefined): boolean {
+  const expected = process.env.AUTH_TOKEN;
+  if (!expected) return false;
+  if (!provided) return false;
+
+  return constantTimeEquals(provided, expected);
+}
