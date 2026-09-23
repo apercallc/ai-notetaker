@@ -37,7 +37,7 @@ export interface AudioProbeResponse {
 
 export type BackgroundToUiMessage =
   | { type: "STATE"; state: BackgroundState }
-  | { type: "TRANSCRIPT_UPDATE"; meetingId: string; speaker: Speaker; text: string; isFinal: boolean }
+  | { type: "TRANSCRIPT_UPDATE"; meetingId: string; speaker: Speaker; text: string; isFinal: boolean; utteranceId: number }
   | { type: "SUMMARY_READY"; meetingId: string; summary: string; actionItems: ActionItem[] }
   | { type: "PROCESSING_WARNING"; meetingId: string; message: string }
   | { type: "RECORDING_ERROR"; meetingId: string | null; message: string }

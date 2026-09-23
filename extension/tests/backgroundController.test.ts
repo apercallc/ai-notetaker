@@ -160,6 +160,40 @@ describe("BackgroundController", () => {
     ]);
   });
 
+  it("replaces an in-progress line in place instead of appending", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    client.emit("transcript_partial", { meetingId, speaker: "you", text: "hello wor", isFinal: false, utteranceId: 1 });
+    await vi.waitFor(async () => {
+      expect((await getMeeting(meetingId))?.transcript).toHaveLength(1);
+    });
+
+    client.emit("transcript_partial", { meetingId, speaker: "you", text: "hello world", isFinal: true, utteranceId: 1 });
+    await vi.waitFor(async () => {
+      const meeting = await getMeeting(meetingId);
+      expect(meeting?.transcript).toHaveLength(1);
+      expect(meeting?.transcript[0].text).toBe("hello world");
+      expect(meeting?.transcript[0].isFinal).toBe(true);
+    });
+  });
+
+  it("starts a new row for a new utteranceId", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    client.emit("transcript_partial", { meetingId, speaker: "you", text: "first", isFinal: true, utteranceId: 1 });
+    client.emit("transcript_partial", { meetingId, speaker: "you", text: "second", isFinal: true, utteranceId: 2 });
+
+    await vi.waitFor(async () => {
+      expect((await getMeeting(meetingId))?.transcript).toHaveLength(2);
+    });
+  });
+
   it("serializes concurrent transcript updates instead of dropping one", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());

@@ -10,7 +10,7 @@ import type { HelperConnectionStatus } from "./nativeMessaging";
 import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
-import type { AudioProbeResult, AudioStatus, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind } from "../types";
+import type { AudioProbeResult, AudioStatus, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, TranscriptSegment } from "../types";
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -250,12 +250,21 @@ export class BackgroundController {
     msg: Extract<IncomingMessage, { type: "transcript_partial" }>,
   ): Promise<void> {
     const meeting = await updateMeeting(msg.meetingId, (current) => {
-      current.transcript.push({
+      const existingIndex = current.transcript.findIndex(
+        (segment) => segment.speaker === msg.speaker && segment.utteranceId === msg.utteranceId && !segment.isFinal,
+      );
+      const updated: TranscriptSegment = {
         speaker: msg.speaker,
         text: msg.text,
         isFinal: msg.isFinal,
+        utteranceId: msg.utteranceId,
         timestamp: new Date().toISOString(),
-      });
+      };
+      if (existingIndex >= 0) {
+        current.transcript[existingIndex] = updated;
+      } else {
+        current.transcript.push(updated);
+      }
       return current;
     });
     if (!meeting) return;
@@ -265,6 +274,7 @@ export class BackgroundController {
       speaker: msg.speaker,
       text: msg.text,
       isFinal: msg.isFinal,
+      utteranceId: msg.utteranceId,
     });
   }
 

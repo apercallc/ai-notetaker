@@ -89,6 +89,8 @@ export interface TranscriptSegment {
   text: string;
   timestamp: string;
   isFinal: boolean;
+  /** Absent on segments recorded before this field existed. */
+  utteranceId?: number;
 }
 
 export interface ActionItem {
