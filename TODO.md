@@ -395,8 +395,15 @@ scope:
 - [x] Richer summarization templates (meeting modes plus bounded custom
       instructions for sales calls, standups, 1:1s, interviews, and custom
       templates)
-- [ ] Cross-browser ports: Edge and Brave first (near-zero-cost, same
-      Manifest V3 base), Firefox as a real port (different extension APIs)
+- [x] Cross-browser ports — Edge/Brave: helper now registers its Native
+      Messaging host in both browsers' OS-specific locations (the actual
+      gap; the extension code needed no changes). Firefox: real port —
+      `browser_specific_settings.gecko.id`, `background.scripts`
+      alongside `service_worker`, and a separate Native Messaging host
+      manifest shape (`allowed_extensions`, not `allowed_origins`). See
+      `docs/superpowers/specs/2026-09-22-cross-browser-ports-design.md`.
+      Actually loading in real Edge/Brave/Firefox installs, and Mozilla
+      AMO signing, remain release-owner validation.
 - [ ] Multi-user auth for the webapp (team/workspace sharing) — schema
       already supports this per sub-project 1; build the auth + sharing UI
 
