@@ -404,8 +404,16 @@ scope:
       `docs/superpowers/specs/2026-09-22-cross-browser-ports-design.md`.
       Actually loading in real Edge/Brave/Firefox installs, and Mozilla
       AMO signing, remain release-owner validation.
-- [ ] Multi-user auth for the webapp (team/workspace sharing) — schema
-      already supports this per sub-project 1; build the auth + sharing UI
+- [x] Multi-user auth for the webapp — real per-user login (scrypt-hashed
+      passwords, DB-backed sessions replacing the shared-token browser
+      cookie), workspace-scoped meeting access, and an owner-only team
+      management page. The `/api/*` `AUTH_TOKEN` ingestion contract is
+      completely unchanged. Verified against a real Postgres via the
+      project's own `test:with-postgres` runner (82 tests) plus a real
+      `next build`, which caught two real Next.js constraints (a
+      `next/headers` import bleeding into the Middleware/client bundle,
+      and a non-function export from a `"use server"` file). See
+      `docs/superpowers/specs/2026-09-22-webapp-multi-user-auth-design.md`.
 
 ---
 

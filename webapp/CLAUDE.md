@@ -9,11 +9,15 @@ exists to avoid.
 
 ## Conventions
 
-- **Single-user by default, but the schema carries `user_id`/`workspace_id`
-  from day one.** MVP auth is a simple token the user generates on deploy —
-  don't build multi-user auth now, but don't paint the data model into a
-  single-user corner either, since team/workspace sharing is documented
-  future scope (spec §2, item 5).
+- **Multi-user auth exists now** (real per-user login, scrypt-hashed
+  passwords, DB-backed sessions, an owner/member `WorkspaceMembership`
+  model) — see
+  `docs/superpowers/specs/2026-09-22-webapp-multi-user-auth-design.md`.
+  One deployment supports exactly one workspace/team; there is no
+  multi-workspace or invite-by-email flow, by design (YAGNI until asked).
+  The `/api/*` ingestion contract (desktop helper sync) is completely
+  separate and still uses the single deploy-time `AUTH_TOKEN` — never
+  conflate the two auth mechanisms.
 - **The Railway "Deploy" template must stay one-click.** Any new required
   environment variable or manual setup step is a regression against the
   "simple, straightforward install" pillar — document it clearly in
@@ -24,13 +28,14 @@ exists to avoid.
   keeping it a thin storage+display layer means it never needs the user's
   AI provider keys, which reduces its blast radius if the deployment is
   ever compromised.
-- **Auth token, not the user's AI API keys, is what secures this app.**
-  Never design a flow where a Deepgram/Claude/etc. key would need to reach
-  the webapp.
-- **Every route checks the auth token, including reads.** There is no
+- **The deploy-time `AUTH_TOKEN` and per-user passwords, not the user's AI
+  API keys, are what secure this app.** Never design a flow where a
+  Deepgram/Claude/etc. key would need to reach the webapp.
+- **Every route requires authentication, including reads.** There is no
   "public by default" page or API route — a self-hosted instance sits on a
   public Railway URL, and an unauthenticated read path would expose a
-  user's meeting notes to anyone who finds that URL.
+  user's meeting notes to anyone who finds that URL. Enforced in one place
+  (`src/proxy.ts`), not re-implemented per route.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
