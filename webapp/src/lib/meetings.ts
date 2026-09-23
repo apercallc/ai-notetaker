@@ -218,7 +218,13 @@ export async function listMeetings(
   const [rows, total] = await Promise.all([
     prisma.meeting.findMany({
       where,
-      orderBy: { startedAt: "desc" },
+      // `id` breaks ties. Sorting on `startedAt` alone leaves rows that share
+      // a timestamp in whatever order Postgres happens to return, which
+      // differs between the two queries that make up a paginated read — so a
+      // meeting could appear on two consecutive pages while another is never
+      // shown at all. Back-to-back syncs land on the same second often
+      // enough for this to be real, not theoretical.
+      orderBy: [{ startedAt: "desc" }, { id: "desc" }],
       take: limit,
       skip: offset,
       include: { actionItems: { where: { status: "open" }, select: { id: true } } },
@@ -271,11 +277,21 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
   };
 }
 
+/**
+ * A single meeting may carry up to MAX_ACTION_ITEMS (1,000), so an archive
+ * of a few hundred meetings can hold six figures of rows — all of which the
+ * unbounded version of this query loaded into memory and rendered as one
+ * un-paginated list. The cap keeps the page responsive; the inbox is a
+ * working list, not the archive, and the filter links narrow it further.
+ */
+export const MAX_ACTION_ITEMS_PER_PAGE = 500;
+
 export async function listActionItems(workspaceId: string, status?: "open" | "done") {
   return prisma.actionItem.findMany({
     where: { meeting: { workspaceId }, ...(status ? { status } : {}) },
     orderBy: [{ status: "asc" }, { dueAt: "asc" }, { id: "asc" }],
     include: { meeting: { select: { id: true, title: true, startedAt: true } } },
+    take: MAX_ACTION_ITEMS_PER_PAGE,
   });
 }
 

@@ -10,6 +10,10 @@ export default defineConfig({
       include: [
         "src/types.ts",
         "src/lib/backgroundController.ts",
+        // OAuth token handling plus every calendar network call — exactly the
+        // kind of code the floor exists for, and it was the one tested lib/
+        // module the threshold did not actually apply to.
+        "src/lib/calendar.ts",
         "src/lib/costEstimate.ts",
         "src/lib/html.ts",
         "src/lib/install.ts",

@@ -21,11 +21,17 @@ npm run build
 
 cd ../webapp
 npx prisma generate
+npm run lint
+npm run typecheck
 npm run test:with-postgres
 npm run test:coverage
 npm run build
-npm run lint
 ```
+
+`npm run typecheck` is not redundant with `npm run build`: `next build`
+typechecks only what it bundles, which leaves every `*.test.ts` outside the
+type gate. Run it after `prisma generate`, or the generated client's types
+won't resolve.
 
 ## Coverage policy
 

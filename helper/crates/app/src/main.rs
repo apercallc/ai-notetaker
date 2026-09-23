@@ -93,6 +93,38 @@ fn write_pairing_token(path: &std::path::Path, token: &str) -> std::io::Result<(
     file.sync_all()
 }
 
+/// Reads a previously issued pairing token, treating a blank file as "never
+/// paired".
+///
+/// `write_pairing_token` opens with `truncate(true)`, so a crash or a full
+/// disk between that open and the write leaves a zero-byte file behind. Read
+/// verbatim, that empties into `Some("")`, which matches neither the
+/// first-pairing arm (`None`) nor the token-matches arm — every later
+/// handshake then fails `helper_not_paired` forever with no way out but
+/// deleting the file by hand.
+fn load_pairing_token(path: &std::path::Path) -> Option<String> {
+    let token = std::fs::read_to_string(path).ok()?;
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_string())
+}
+
+/// Compares a presented pairing token without leaking how much of it matched.
+///
+/// The socket directory is 0700, so this is defence in depth rather than the
+/// primary control — but a same-user process is exactly the attacker this
+/// token exists to stop, and a local loop is the one setting where timing a
+/// byte-by-byte `==` is genuinely practical.
+fn pairing_token_matches(expected: &str, provided: &str) -> bool {
+    if expected.len() != provided.len() {
+        return false;
+    }
+    expected
+        .bytes()
+        .zip(provided.bytes())
+        .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
+}
+
 fn secure_data_dir(root: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     #[cfg(unix)]
@@ -123,7 +155,7 @@ fn main() {
                 MeetingStore::new(&root)
                     .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?,
             );
-            let existing_token = std::fs::read_to_string(pairing_token_path(&root)).ok();
+            let existing_token = load_pairing_token(&pairing_token_path(&root));
             let audio: Arc<dyn AudioCapture> = build_audio_backend();
             let state = Arc::new(AppState {
                 store,
@@ -190,7 +222,7 @@ async fn handle_message(
                         pairing_token: token,
                     });
                 }
-                (Some(expected), Some(provided)) if *expected == provided => {
+                (Some(expected), Some(provided)) if pairing_token_matches(expected, &provided) => {
                     // Already paired and the token matches — nothing to
                     // send yet; recoverable-meeting notices go out next.
                 }
@@ -717,18 +749,31 @@ async fn send_meeting_message(state: &Arc<AppState>, meeting_id: Uuid, message: 
 }
 
 fn pending_processing_meeting_ids(root: &Path) -> Vec<Uuid> {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return vec![];
-    };
     let mut ids = HashSet::new();
-    for entry in entries.filter_map(Result::ok) {
-        if let Some(id) = entry.file_name().to_str().and_then(|name| {
-            let value = name.strip_prefix("retry-")?.strip_suffix(".json")?;
-            Uuid::parse_str(value).ok()
-        }) {
-            ids.insert(id);
+
+    // Queued retry chunks live as `<root>/retry-<uuid>.json`.
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.filter_map(Result::ok) {
+            if let Some(id) = entry.file_name().to_str().and_then(|name| {
+                let value = name.strip_prefix("retry-")?.strip_suffix(".json")?;
+                Uuid::parse_str(value).ok()
+            }) {
+                ids.insert(id);
+            }
         }
-        if let Ok(bytes) = std::fs::read(entry.path().join("meta.json")) {
+    }
+
+    // A meeting can owe a summary with no retry file at all — every chunk
+    // transcribed fine but summarization itself failed, so `summary_pending`
+    // is the only trace. Meeting metadata lives one level down, under
+    // `<root>/meetings/<uuid>/meta.json` (see MeetingStore's layout); scanning
+    // `<root>` directly, as this used to, never found a single one of them and
+    // left those summaries stranded across a helper restart.
+    if let Ok(entries) = std::fs::read_dir(root.join("meetings")) {
+        for entry in entries.filter_map(Result::ok) {
+            let Ok(bytes) = std::fs::read(entry.path().join("meta.json")) else {
+                continue;
+            };
             if let Ok(meta) = serde_json::from_slice::<notetaker_core::storage::MeetingMeta>(&bytes)
             {
                 if meta.summary_pending {
@@ -737,6 +782,7 @@ fn pending_processing_meeting_ids(root: &Path) -> Vec<Uuid> {
             }
         }
     }
+
     ids.into_iter().collect()
 }
 
@@ -828,5 +874,93 @@ fn build_audio_backend() -> Arc<dyn AudioCapture> {
     #[cfg(target_os = "windows")]
     {
         Arc::new(notetaker_audio::windows::WindowsAudioCapture::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notetaker_core::storage::MeetingStore;
+
+    #[test]
+    fn a_truncated_pairing_token_file_reads_as_never_paired() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pairing_token.txt");
+
+        // A crash between truncate and write leaves a zero-byte file. Read
+        // verbatim it becomes Some(""), which matches neither the
+        // first-pairing arm nor the token-matches arm, wedging the handshake
+        // permanently.
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(load_pairing_token(&path), None);
+
+        std::fs::write(&path, "   \n").unwrap();
+        assert_eq!(load_pairing_token(&path), None);
+
+        // A trailing newline (an editor, a shell redirect) must still pair.
+        std::fs::write(&path, "abc123\n").unwrap();
+        assert_eq!(load_pairing_token(&path), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn missing_pairing_token_file_reads_as_never_paired() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(load_pairing_token(&dir.path().join("absent.txt")), None);
+    }
+
+    #[test]
+    fn pairing_token_comparison_accepts_only_an_exact_match() {
+        let token = native_messaging::generate_pairing_token();
+        assert!(pairing_token_matches(&token, &token.clone()));
+        assert!(!pairing_token_matches(&token, &token[..token.len() - 1]));
+        assert!(!pairing_token_matches(&token, &format!("{token}x")));
+        assert!(!pairing_token_matches(&token, ""));
+
+        // Differs only in the last byte: a length-only check would pass it.
+        let mut nearly = token.clone();
+        nearly.pop();
+        nearly.push(if token.ends_with('0') { '1' } else { '0' });
+        assert!(!pairing_token_matches(&token, &nearly));
+    }
+
+    #[test]
+    fn pending_processing_finds_a_meeting_that_only_owes_a_summary() {
+        // Every chunk transcribed but summarization itself failed: there is
+        // no retry-<id>.json, and meta.json lives under <root>/meetings/<id>/,
+        // not <root>/<id>/. Scanning the root directly found none of these.
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, chrono::Utc::now()).unwrap();
+        store.mark_stopped(id, chrono::Utc::now()).unwrap();
+        store.mark_summary_pending(id).unwrap();
+
+        assert_eq!(pending_processing_meeting_ids(dir.path()), vec![id]);
+    }
+
+    #[test]
+    fn pending_processing_finds_queued_retry_chunks_and_ignores_finished_meetings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+
+        let retrying = Uuid::new_v4();
+        std::fs::write(dir.path().join(format!("retry-{retrying}.json")), "[]").unwrap();
+
+        let finished = Uuid::new_v4();
+        store.create_meeting(finished, chrono::Utc::now()).unwrap();
+        store.mark_stopped(finished, chrono::Utc::now()).unwrap();
+        store.mark_processed(finished).unwrap();
+
+        // Unrelated files in the data dir must not be mistaken for meetings.
+        std::fs::write(dir.path().join("pairing_token.txt"), "token").unwrap();
+        std::fs::write(dir.path().join("retry-not-a-uuid.json"), "[]").unwrap();
+
+        assert_eq!(pending_processing_meeting_ids(dir.path()), vec![retrying]);
+    }
+
+    #[test]
+    fn pending_processing_on_a_fresh_data_dir_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(pending_processing_meeting_ids(dir.path()).is_empty());
     }
 }

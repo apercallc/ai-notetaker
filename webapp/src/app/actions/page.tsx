@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listActionItems } from "@/lib/meetings";
+import { listActionItems, MAX_ACTION_ITEMS_PER_PAGE } from "@/lib/meetings";
 import { requireSession } from "@/lib/currentUser";
 import { updateActionItemAction } from "@/app/meetings/[id]/actions";
 import { ActionDoneCheckbox } from "@/components/ActionDoneCheckbox";
@@ -37,6 +37,14 @@ export default async function ActionItemsPage({
         </div>
         <span className="total-count">{items.length} shown</span>
       </div>
+
+      {items.length === MAX_ACTION_ITEMS_PER_PAGE && (
+        // Otherwise "500 shown" silently reads as "500 exist" — the reader
+        // has no way to tell the list was truncated.
+        <p className="muted-copy">
+          Showing the first {MAX_ACTION_ITEMS_PER_PAGE}. Filter by status, or open a meeting to see the rest.
+        </p>
+      )}
 
       <nav className="filter-links" aria-label="Action item filters">
         <Link href={filterHref()} aria-current={!status ? "page" : undefined}>All</Link>

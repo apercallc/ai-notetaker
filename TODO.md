@@ -28,8 +28,8 @@ them drift apart.
 ## Quality, error handling, and open-source operations (2026-09-21)
 
 - [x] Add reproducible coverage commands and CI artifacts for every surface;
-      the current deterministic gates report 91.26% Rust-core lines,
-      95.97% extension lines, and 92.81% webapp lines. Platform-native audio,
+      the current deterministic gates report 96.20% extension lines and
+      93.63% webapp lines, with 120 Rust tests green. Platform-native audio,
       Tauri tray, Chrome entrypoints, and rendered pages remain separate
       smoke-test concerns rather than being counted as fake unit coverage.
 - [x] Expand unit and integration coverage for protocol validation, native
@@ -105,6 +105,44 @@ only.
 - [x] Webapp meeting ingestion now caps streamed request bodies and aggregate
       transcript/action-item text, while the UI bounds pasted search URLs and
       serves static login assets without a session.
+
+## Repository-wide quality audit (2026-09-23)
+
+- [x] `escapeHtml` escapes quotes, so summarized action-item text (LLM
+      output) can no longer break out of the HTML attributes every extension
+      page interpolates it into and hang new attributes off the same tag.
+- [x] Ordinary Native Messaging disconnects back off like not-found ones.
+      "Helper installed but not running" makes the shim exit immediately,
+      which previously spawned a fresh OS process per disconnect forever.
+- [x] A stale Unix socket file left by an unclean shutdown is detected (by
+      probing, not assumption) and removed, instead of permanently bricking
+      the helper's IPC; the accept loop survives a transient accept error.
+- [x] Startup recovery scans `<root>/meetings/` for `summary_pending`, so a
+      meeting whose summarization failed with no queued chunks is picked back
+      up rather than stranded; giving up on a chunk now summarizes the rest of
+      the meeting instead of leaving it pending forever.
+- [x] Atomic metadata/retry writes are genuinely atomic on Windows (the
+      delete-then-rename special case opened a crash window that lost the
+      file); retry backoff is jittered so a burst of failures stops retrying
+      a rate-limited provider in lockstep.
+- [x] A blank `pairing_token.txt` (truncate-then-crash) reads as unpaired
+      instead of wedging the handshake forever; token comparison is
+      constant-time.
+- [x] Webapp user + membership creation is transactional — a half-created
+      user could neither sign in nor be cleaned up, and permanently blocked
+      bootstrap. Failed sign-ins are throttled per address (in-process; see
+      `src/lib/loginThrottle.ts` for the single-instance caveat), expired
+      sessions are reaped, meeting pagination has a tiebreaker, and the
+      action inbox is bounded.
+- [x] Team actions return expected failures instead of throwing them; Next
+      masks a Server Action's thrown message in production, so "only the
+      owner can add members" reached the user as a generic server error.
+- [x] Webapp CI runs the lint and typecheck gates that already existed as
+      scripts but nothing invoked; `calendar.ts` is inside the extension
+      coverage floor.
+- [ ] Move the login throttle into Postgres if this app is ever run with more
+      than one instance — the in-process counter does not hold across
+      replicas and resets on redeploy.
 
 ---
 

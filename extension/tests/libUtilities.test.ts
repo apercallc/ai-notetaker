@@ -17,6 +17,32 @@ describe("small deterministic extension utilities", () => {
     expect(escapeHtml(`<img src=x onerror="bad">`)).toContain("&lt;img");
   });
 
+  it("escapes quotes, so a value cannot break out of an HTML attribute", () => {
+    // Most call sites interpolate into a double-quoted attribute, and some of
+    // those values are LLM output (summarized action-item text) rather than
+    // anything the user typed — e.g.
+    // `aria-label="Mark action item ${escapeHtml(item.text)} complete"`.
+    // Escaping only the angle brackets let such a value close the attribute
+    // and hang new ones off the same tag.
+    const injected = `" style="background:url(https://evil.example)" data-x="`;
+    const escaped = escapeHtml(injected);
+    expect(escaped).not.toContain('"');
+    expect(escaped).toContain("&quot;");
+
+    const rendered = `<input value="${escaped}" />`;
+    const parsed = new DOMParser().parseFromString(rendered, "text/html");
+    const input = parsed.querySelector("input");
+    expect(input?.getAttribute("style")).toBeNull();
+    expect(input?.getAttribute("data-x")).toBeNull();
+    expect(input?.getAttribute("value")).toBe(injected);
+  });
+
+  it("escapes single quotes and ampersands without double-escaping", () => {
+    expect(escapeHtml("it's & more")).toBe("it&#39;s &amp; more");
+    expect(escapeHtml("")).toBe("");
+    expect(escapeHtml("plain text")).toBe("plain text");
+  });
+
   it("builds an install URL with detected platform and source", () => {
     expect(["macos", "windows", "linux", "unknown"]).toContain(detectInstallPlatform());
     const url = new URL(getInstallPageUrl("popup"));

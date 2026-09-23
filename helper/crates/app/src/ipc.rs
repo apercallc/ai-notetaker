@@ -119,15 +119,80 @@ pub type OutSender = tokio::sync::mpsc::UnboundedSender<HelperToExtension>;
 /// possible: a `start_recording` call kicks off audio capture whose frames
 /// arrive over time and get pushed through the same sender, not returned
 /// synchronously from the call that started them).
+/// Binds the listener, clearing a stale socket file left behind by an
+/// unclean shutdown.
+///
+/// On macOS (and any Linux without abstract-namespace support) the listener
+/// is a real file on disk. A crash or a SIGKILL leaves that file behind, and
+/// the next bind fails with `AddrInUse` — which, without this, permanently
+/// bricks the helper's IPC: every subsequent launch fails to bind, so the
+/// extension can never reach it again and the only fix is the user manually
+/// deleting a file inside the app-data directory.
+///
+/// "Stale" is decided by probing, never assumed: if something answers on the
+/// socket a second helper really is running, and removing the file would
+/// silently steal its address, so that case is left as the original error.
+fn bind_listener() -> std::io::Result<interprocess::local_socket::tokio::Listener> {
+    match ListenerOptions::new().name(socket_name()?).create_tokio() {
+        Ok(listener) => Ok(listener),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            if !remove_stale_socket_file() {
+                return Err(error);
+            }
+            ListenerOptions::new().name(socket_name()?).create_tokio()
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Returns true only if a genuinely-dead socket file was removed. Windows
+/// named pipes and Linux's abstract namespace have no file to go stale, so
+/// this is a no-op there.
+#[cfg(unix)]
+fn remove_stale_socket_file() -> bool {
+    if GenericNamespaced::is_supported() {
+        return false;
+    }
+    let path = socket_path();
+    if !path.exists() {
+        return false;
+    }
+    if std::os::unix::net::UnixStream::connect(&path).is_ok() {
+        // Something is listening: a second helper really is running, and
+        // removing the file would silently steal its address.
+        return false;
+    }
+    tracing::warn!(
+        "removing stale IPC socket at {} left by an unclean shutdown",
+        path.display()
+    );
+    std::fs::remove_file(&path).is_ok()
+}
+
+#[cfg(not(unix))]
+fn remove_stale_socket_file() -> bool {
+    false
+}
+
 pub async fn run_ipc_server<F, Fut>(handler: F) -> std::io::Result<()>
 where
     F: Fn(ExtensionToHelper, OutSender) -> Fut + Clone + Send + 'static,
     Fut: std::future::Future<Output = bool> + Send,
 {
     ensure_socket_directory()?;
-    let listener = ListenerOptions::new().name(socket_name()?).create_tokio()?;
+    let listener = bind_listener()?;
     loop {
-        let conn = listener.accept().await?;
+        let conn = match listener.accept().await {
+            Ok(conn) => conn,
+            // One connection failing to be accepted (a descriptor limit, a
+            // client that hung up mid-handshake) must not take the whole
+            // server down with it — returning here would end the accept loop
+            // permanently and leave the tray app running but unreachable.
+            Err(error) => {
+                tracing::warn!("ipc accept failed: {error}");
+                continue;
+            }
+        };
         let handler = handler.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_connection(conn, handler).await {

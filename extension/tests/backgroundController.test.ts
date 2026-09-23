@@ -83,6 +83,41 @@ describe("BackgroundController", () => {
     expect(stored?.status).toBe("recording");
   });
 
+  it("two overlapping start requests produce one recording, not two", async () => {
+    // activeMeetingId is only assigned after the calendar lookup's await, so
+    // a double-click (or the popup and a shortcut firing together) used to
+    // slip two requests through the guard and capture the same call twice.
+    let releaseCalendar: (() => void) | undefined;
+    vi.mocked(findCurrentEvent).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCalendar = () => resolve(null);
+        }),
+    );
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      calendar: {
+        provider: "google",
+        clientId: "x",
+        accessToken: "a",
+        refreshToken: "r",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+
+    const first = controller.startRecording();
+    const second = controller.startRecording();
+    releaseCalendar?.();
+    const [firstId, secondId] = await Promise.all([first, second]);
+
+    expect(firstId).toBe(secondId);
+    expect(client.startRecording).toHaveBeenCalledTimes(1);
+  });
+
   it("titles the meeting from the matching calendar event when one is connected", async () => {
     vi.mocked(findCurrentEvent).mockResolvedValue({
       title: "Roadmap sync",

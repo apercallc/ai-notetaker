@@ -35,6 +35,18 @@ function generateMeetingId(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * Helper errors that mean "still working on it", not "this meeting is dead".
+ * Kept in lockstep with the helper's pipeline by a test on the Rust side —
+ * see handleError below.
+ */
+const RETRYABLE_HELPER_ERROR_PREFIXES = [
+  "transcription failed, queued for retry:",
+  "transcript could not be persisted; queued for retry:",
+  "summary deferred until transcription retries finish",
+  "summarization failed:",
+] as const;
+
 export class BackgroundController {
   private settings: NotetakerSettings | null = null;
   private activeMeetingId: string | null = null;
@@ -42,6 +54,7 @@ export class BackgroundController {
   private helperStatus: HelperConnectionStatus = "connecting";
   private helperInfo: HelperInfo | null = null;
   private fetchImpl: typeof fetch = fetch;
+  private startInFlight: Promise<string> | null = null;
 
   constructor(
     private client: NativeClientLike,
@@ -97,6 +110,23 @@ export class BackgroundController {
 
   async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general"): Promise<string> {
     if (this.activeMeetingId) return this.activeMeetingId;
+    // activeMeetingId is only assigned after an await (the calendar lookup),
+    // so the guard above cannot catch a second START_RECORDING that arrives
+    // while the first is still in that gap — a double-click, or the popup
+    // and a keyboard shortcut firing together. Both would reach the helper
+    // with different meeting ids and capture the same call twice. Claim the
+    // slot synchronously instead.
+    if (this.startInFlight) return this.startInFlight;
+    const start = this.startRecordingUnguarded(meetingMode);
+    this.startInFlight = start;
+    try {
+      return await start;
+    } finally {
+      if (this.startInFlight === start) this.startInFlight = null;
+    }
+  }
+
+  private async startRecordingUnguarded(meetingMode: MeetingMode): Promise<string> {
     if (this.helperStatus !== "connected" || !this.helperInfo) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -334,12 +364,13 @@ export class BackgroundController {
         // helper. It is not a failed meeting: keep the recording active so a
         // later retry can append the recovered transcript and the user can
         // still stop normally.
-        if (
-          msg.message.startsWith("transcription failed, queued for retry:") ||
-          msg.message.startsWith("transcript could not be persisted; queued for retry:") ||
-          msg.message.startsWith("summary deferred until transcription retries finish") ||
-          msg.message.startsWith("summarization failed:")
-        ) {
+        //
+        // These prefixes are produced by the helper's pipeline (a separate
+        // package, so they cannot be a shared constant). The Rust side pins
+        // them in `retryable_errors_keep_the_wording_the_extension_matches_on`
+        // — change a string here and you must change it there too, or a
+        // retryable warning starts reading as a dead meeting.
+        if (RETRYABLE_HELPER_ERROR_PREFIXES.some((prefix) => msg.message.startsWith(prefix))) {
           this.broadcast({ type: "PROCESSING_WARNING", meetingId: msg.meetingId, message: msg.message });
           return;
         }

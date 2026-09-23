@@ -175,6 +175,32 @@ describe("upsertMeeting", () => {
 });
 
 describe("listMeetings", () => {
+  it("pages identical timestamps without skipping or repeating a meeting", async () => {
+    // Back-to-back syncs share a startedAt often enough for this to be real.
+    // Ordering by startedAt alone leaves the tie broken by whatever order
+    // Postgres returns, which need not agree between two paginated queries —
+    // so a meeting can land on two consecutive pages while another is never
+    // shown at all.
+    const sameInstant = "2026-09-21T15:00:00.000Z";
+    const ids = Array.from(
+      { length: 9 },
+      (_, index) => `44444444-4444-4444-4444-4444444444${String(index).padStart(2, "0")}`,
+    );
+    for (const id of ids) {
+      await upsertMeeting(sampleMeeting({ id, startedAt: sameInstant, endedAt: sameInstant }), WORKSPACE_ID);
+    }
+
+    const seen: string[] = [];
+    for (let offset = 0; offset < ids.length; offset += 3) {
+      const page = await listMeetings(WORKSPACE_ID, { limit: 3, offset });
+      seen.push(...page.meetings.map((meeting) => meeting.id));
+    }
+
+    expect(seen).toHaveLength(ids.length);
+    expect(new Set(seen).size).toBe(ids.length);
+    expect([...seen].sort()).toEqual([...ids].sort());
+  });
+
   it("lists meetings newest-first", async () => {
     await upsertMeeting(sampleMeeting({ id: "11111111-1111-1111-1111-111111111111", startedAt: "2026-09-20T10:00:00.000Z", endedAt: "2026-09-20T10:30:00.000Z" }), WORKSPACE_ID);
     await upsertMeeting(sampleMeeting({ id: "22222222-2222-2222-2222-222222222222", startedAt: "2026-09-21T10:00:00.000Z", endedAt: "2026-09-21T10:30:00.000Z" }), WORKSPACE_ID);

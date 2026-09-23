@@ -287,8 +287,20 @@ impl Pipeline {
         let session = match channel {
             AudioChannel::Mic => self.mic_session.as_mut(),
             AudioChannel::Speaker => self.speaker_session.as_mut(),
-        }
-        .expect("session was just ensured to be Some above");
+        };
+        // Unreachable — the block above either set this or returned — but a
+        // panic here runs on the audio callback path and would take the whole
+        // recording down. Audio is already durable on disk at this point, so
+        // degrading to "no live stream this frame" costs nothing: the gap
+        // marker below sends it through the batch retry path instead.
+        let Some(session) = session else {
+            let gap_start = match channel {
+                AudioChannel::Mic => &mut self.mic_stream_gap_start,
+                AudioChannel::Speaker => &mut self.speaker_stream_gap_start,
+            };
+            gap_start.get_or_insert(existing_len);
+            return messages;
+        };
 
         let streamed_through = existing_len + pcm16.len();
         if session.send_audio(pcm16).await.is_err() {
@@ -713,7 +725,8 @@ impl Pipeline {
                             }
                         }
                         Err(error) => {
-                            let _ = self.retry_queue.record_failure(job_id, now);
+                            let exhausted =
+                                matches!(self.retry_queue.record_failure(job_id, now), Ok(Some(_)));
                             messages.push(HelperToExtension::Error {
                                 meeting_id: Some(job.meeting_id),
                                 code: ErrorCode::DeviceNotFound,
@@ -721,6 +734,10 @@ impl Pipeline {
                                     "transcript could not be persisted; queued for retry: {error}"
                                 ),
                             });
+                            if exhausted {
+                                messages
+                                    .extend(self.summarize_after_giving_up(job.meeting_id).await);
+                            }
                         }
                     }
                 }
@@ -731,12 +748,34 @@ impl Pipeline {
                             code: error.to_error_code(),
                             message: format!("transcription retry exhausted: {error}"),
                         });
+                        messages.extend(self.summarize_after_giving_up(job.meeting_id).await);
                     }
                 }
             }
         }
 
         messages
+    }
+
+    /// Summarize whatever *did* transcribe once a chunk is permanently given
+    /// up on.
+    ///
+    /// `stop_recording` defers summarization while any retry is outstanding,
+    /// and a successful retry re-triggers it. An exhausted one used to do
+    /// neither: the job left the queue, nothing re-checked the meeting, and
+    /// `summary_pending` stayed set forever — so one chunk that never
+    /// transcribed (a revoked key, a provider down past the attempt ceiling)
+    /// silently cost the user the summary of the entire rest of the meeting.
+    /// A partial transcript is still worth summarizing; the failed chunk was
+    /// already reported separately, and the raw audio is still on disk.
+    async fn summarize_after_giving_up(&mut self, meeting_id: Uuid) -> Vec<HelperToExtension> {
+        if self.has_pending_retries(meeting_id) {
+            return vec![];
+        }
+        self.resummarize_if_finalized(meeting_id)
+            .await
+            .into_iter()
+            .collect()
     }
 
     async fn resummarize_if_finalized(&self, meeting_id: Uuid) -> Option<HelperToExtension> {
@@ -754,14 +793,9 @@ impl Pipeline {
                 });
             }
         };
-        let summary_options = self
-            .store
-            .load_meta(meeting_id)
-            .map(|meta| meta.summary_options)
-            .unwrap_or_else(|_| self.summary_options.clone());
         match self
             .summarization_provider
-            .summarize(&transcript, &summary_options)
+            .summarize(&transcript, &meta.summary_options)
             .await
         {
             Ok(summary) => {
@@ -1083,6 +1117,113 @@ mod tests {
             message,
             HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
         )));
+    }
+
+    /// The extension classifies an `error` message as recoverable-warning vs.
+    /// meeting-killing failure by matching these exact prefixes (see
+    /// `extension/src/lib/backgroundController.ts`'s `handleError`). Nothing
+    /// else couples the two packages that way, and nothing else would catch a
+    /// reword: a one-word edit here silently turns "still recording, queued
+    /// for retry" into "this meeting failed" in the UI, ending a live
+    /// recording the helper is perfectly happy to continue. Change a string
+    /// below and you must change the matching prefix over there.
+    const PREFIXES_THE_EXTENSION_TREATS_AS_WARNINGS: [&str; 4] = [
+        "transcription failed, queued for retry:",
+        "transcript could not be persisted; queued for retry:",
+        "summary deferred until transcription retries finish",
+        "summarization failed:",
+    ];
+
+    fn assert_extension_reads_as_warning(message: &str) {
+        assert!(
+            PREFIXES_THE_EXTENSION_TREATS_AS_WARNINGS
+                .iter()
+                .any(|prefix| message.starts_with(prefix)),
+            "the extension would treat this as a failed meeting, not a retryable warning: {message:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn retryable_errors_keep_the_wording_the_extension_matches_on() {
+        // A provider failure mid-recording: still recoverable, audio is safe.
+        let (_dir, mut pipeline) = build_pipeline(1);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3], 16_000)
+            .await;
+        let flushed = pipeline.flush_pending_audio(id).await;
+        let mut checked = 0;
+        for message in &flushed {
+            if let HelperToExtension::Error { message, .. } = message {
+                assert_extension_reads_as_warning(message);
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "expected a retryable transcription error");
+
+        // Stopping with a retry outstanding defers the summary rather than
+        // failing the meeting.
+        let (_dir2, mut deferring) = build_pipeline(1);
+        let deferred_id = Uuid::new_v4();
+        deferring.start_recording(deferred_id).unwrap();
+        deferring
+            .handle_audio_chunk(deferred_id, AudioChannel::Mic, &[1, 2, 3], 16_000)
+            .await;
+        deferring.flush_pending_audio(deferred_id).await;
+        let stopped = deferring.stop_recording(deferred_id).await.unwrap();
+        let deferral = stopped
+            .iter()
+            .find_map(|message| match message {
+                HelperToExtension::Error { message, .. } => Some(message),
+                _ => None,
+            })
+            .expect("expected a deferred-summary notice");
+        assert_extension_reads_as_warning(deferral);
+    }
+
+    #[tokio::test]
+    async fn giving_up_on_a_chunk_still_summarizes_the_rest_of_the_meeting() {
+        // Fails every attempt, so the job is eventually given up on rather
+        // than ever succeeding.
+        let (_dir, mut pipeline) = build_pipeline(usize::MAX);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[9, 8, 7], 16_000)
+            .await;
+        pipeline.flush_pending_audio(id).await;
+
+        let stopped = pipeline.stop_recording(id).await.unwrap();
+        assert!(
+            !stopped
+                .iter()
+                .any(|message| matches!(message, HelperToExtension::SummaryReady { .. })),
+            "the summary is deferred while the chunk is still retryable",
+        );
+
+        // Walk the clock past the attempt ceiling rather than sleeping
+        // through a backoff that grows to five minutes.
+        let mut now = Utc::now();
+        let mut messages = Vec::new();
+        for _ in 0..12 {
+            now += chrono::Duration::seconds(600);
+            messages.extend(pipeline.process_due_retries(now).await);
+        }
+
+        assert_eq!(pipeline.retry_queue_len(), 0, "the chunk was given up on");
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::Error { message, .. }
+                if message.starts_with("transcription retry exhausted")
+        )));
+        assert!(
+            messages.iter().any(|message| matches!(
+                message,
+                HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+            )),
+            "one permanently failed chunk must not strand the whole summary",
+        );
     }
 
     #[tokio::test]

@@ -142,4 +142,72 @@ describe("findCurrentEvent", () => {
     expect(event?.title).toBe("Standup");
     expect(event?.attendees).toEqual(["Sam"]);
   });
+
+  it("skips an all-day Google entry and picks the real meeting happening now", async () => {
+    // All-day entries use `start.date` (bare YYYY-MM-DD) and span the whole
+    // day, so "PTO" or a birthday would otherwise always win the "is this
+    // happening right now" check and become the meeting's title.
+    const validConnection = { ...baseConnection, expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    const today = new Date().toISOString().slice(0, 10);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        items: [
+          { summary: "Alex — PTO", start: { date: today }, end: { date: today } },
+          {
+            summary: "Design review",
+            start: { dateTime: new Date(Date.now() - 60_000).toISOString() },
+            end: { dateTime: new Date(Date.now() + 60_000).toISOString() },
+          },
+        ],
+      }),
+    });
+
+    const event = await findCurrentEvent(validConnection, fetchImpl as unknown as typeof fetch);
+    expect(event?.title).toBe("Design review");
+  });
+
+  it("skips an all-day Outlook entry", async () => {
+    const outlookConnection: CalendarConnection = { ...baseConnection, provider: "outlook", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        value: [
+          {
+            subject: "Company holiday",
+            isAllDay: true,
+            start: { dateTime: new Date(Date.now() - 3_600_000).toISOString() },
+            end: { dateTime: new Date(Date.now() + 3_600_000).toISOString() },
+          },
+        ],
+      }),
+    });
+
+    expect(await findCurrentEvent(outlookConnection, fetchImpl as unknown as typeof fetch)).toBeNull();
+  });
+
+  it("reads an offset-less Microsoft Graph timestamp as UTC, not local time", async () => {
+    // Graph returns `2026-09-23T14:00:00.0000000` with the zone in a sibling
+    // `timeZone` field. `new Date()` treats an offset-less date-time as local,
+    // so without normalization every Outlook event is wrong by the user's UTC
+    // offset — and in any non-UTC zone this event would not match at all.
+    const outlookConnection: CalendarConnection = { ...baseConnection, provider: "outlook", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    const graphFormat = (date: Date): string => `${date.toISOString().replace(/Z$/, "").padEnd(27, "0")}`;
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        value: [
+          {
+            subject: "Graph-formatted meeting",
+            start: { dateTime: graphFormat(new Date(Date.now() - 60_000)), timeZone: "UTC" },
+            end: { dateTime: graphFormat(new Date(Date.now() + 60_000)), timeZone: "UTC" },
+          },
+        ],
+      }),
+    });
+
+    const event = await findCurrentEvent(outlookConnection, fetchImpl as unknown as typeof fetch);
+    expect(event?.title).toBe("Graph-formatted meeting");
+    expect(event?.startsAt.endsWith("Z")).toBe(true);
+  });
 });

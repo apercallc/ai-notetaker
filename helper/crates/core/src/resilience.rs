@@ -10,7 +10,6 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -30,6 +29,28 @@ const MAX_BACKOFF_SECS: i64 = 300; // 5 minutes
 pub fn backoff_for_attempt(attempt: u32) -> Duration {
     let secs = BASE_BACKOFF_SECS.saturating_mul(1i64 << attempt.min(20));
     Duration::seconds(secs.min(MAX_BACKOFF_SECS))
+}
+
+/// Up to 25% of the backoff, subtracted so the delay never exceeds the
+/// documented ceiling.
+///
+/// A meeting fails its chunks in bursts — one expired key or one rate limit
+/// fails every in-flight chunk at nearly the same instant, and each of those
+/// jobs then gets the same `backoff_for_attempt` from the same `now`. Without
+/// jitter the whole batch retries in lockstep and re-triggers the same rate
+/// limit, over and over, in step with itself.
+fn jitter_for(backoff: Duration) -> Duration {
+    use rand::Rng;
+    let span = backoff.num_milliseconds() / 4;
+    if span <= 0 {
+        return Duration::zero();
+    }
+    Duration::milliseconds(rand::thread_rng().gen_range(0..=span))
+}
+
+fn jittered_backoff(attempt: u32) -> Duration {
+    let backoff = backoff_for_attempt(attempt);
+    backoff - jitter_for(backoff)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -66,15 +87,10 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
     }
 
     fn persist(&self) -> Result<(), RetryQueueError> {
-        let temp = self.path.with_extension("tmp");
-        let mut file = fs::File::create(&temp)?;
-        file.write_all(&serde_json::to_vec_pretty(&self.jobs)?)?;
-        file.sync_all()?;
-        #[cfg(windows)]
-        if self.path.exists() {
-            fs::remove_file(&self.path)?;
-        }
-        fs::rename(temp, &self.path)?;
+        // Shares storage's write-temp-then-rename helper rather than keeping
+        // a second copy of the same logic — the two had already drifted into
+        // repeating the same non-atomic Windows delete-then-rename bug.
+        crate::storage::atomic_write(&self.path, &serde_json::to_vec_pretty(&self.jobs)?)?;
         Ok(())
     }
 
@@ -119,7 +135,7 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
             self.persist()?;
             return Ok(Some(exhausted));
         }
-        job.next_retry_at = now + backoff_for_attempt(job.attempts);
+        job.next_retry_at = now + jittered_backoff(job.attempts);
         self.persist()?;
         Ok(None)
     }
@@ -189,6 +205,27 @@ mod tests {
         let due = queue.due_jobs(now);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].payload, "due-now");
+    }
+
+    #[test]
+    fn jitter_only_ever_shortens_the_backoff_and_spreads_retries_out() {
+        // Never past the documented ceiling, never into the past.
+        for attempt in 0..8 {
+            let full = backoff_for_attempt(attempt);
+            for _ in 0..50 {
+                let jittered = jittered_backoff(attempt);
+                assert!(jittered <= full, "jitter must not extend the backoff");
+                assert!(jittered >= full - Duration::milliseconds(full.num_milliseconds() / 4));
+                assert!(jittered > Duration::zero());
+            }
+        }
+
+        // The point of the jitter: chunks that failed together must not all
+        // come due at the same instant and re-trigger the same rate limit.
+        let distinct: std::collections::HashSet<i64> = (0..50)
+            .map(|_| jittered_backoff(3).num_milliseconds())
+            .collect();
+        assert!(distinct.len() > 1, "every retry landed on the same delay");
     }
 
     #[test]

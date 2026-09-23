@@ -144,6 +144,7 @@ describe("NativeMessagingClient", () => {
   });
 
   it("does not let a stale port disconnect a newer connection", async () => {
+    vi.useFakeTimers();
     const ports: Array<ReturnType<typeof createFakePort>> = [];
     chromeMock.runtime.connectNative.mockImplementation(() => {
       const port = createFakePort();
@@ -153,9 +154,11 @@ describe("NativeMessagingClient", () => {
     const client = new NativeMessagingClient();
     await client.connect();
     ports[0]?._emitDisconnect();
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(ports).toHaveLength(2);
 
     ports[0]?._emitDisconnect();
+    await vi.advanceTimersByTimeAsync(30_000);
     client.startRecording("meeting-1", "general");
 
     expect(ports[1]?.postMessage).toHaveBeenCalledWith({
@@ -241,7 +244,8 @@ describe("NativeMessagingClient", () => {
       expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(3);
     });
 
-    it("an ordinary disconnect (no lastError) still reconnects immediately, not with backoff", async () => {
+    it("an ordinary disconnect (no lastError) reports 'disconnected' and reconnects after a backoff", async () => {
+      vi.useFakeTimers();
       const ports: Array<ReturnType<typeof createFakePort>> = [];
       chromeMock.runtime.connectNative.mockImplementation(() => {
         const newPort = createFakePort();
@@ -257,7 +261,35 @@ describe("NativeMessagingClient", () => {
 
       expect(statuses).toContain("disconnected");
       expect(statuses).not.toContain("helper_not_found");
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not hot-loop when the helper is installed but not running", async () => {
+      // The common broken state: Chrome finds the host manifest and spawns
+      // notetaker-nm-host, that shim can't reach the tray app's socket and
+      // exits(1). Chrome reports an ordinary disconnect, not "not found", so
+      // an immediate retry spawned a fresh OS process per disconnect forever.
+      vi.useFakeTimers();
+      const ports: Array<ReturnType<typeof createFakePort>> = [];
+      chromeMock.runtime.connectNative.mockImplementation(() => {
+        const newPort = createFakePort();
+        ports.push(newPort);
+        // The shim dies the moment it's spawned.
+        queueMicrotask(() => newPort._emitDisconnect());
+        return newPort;
+      });
+      const client = new NativeMessagingClient();
+      await client.connect();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      // A full minute of a helper that never comes up costs a handful of
+      // spawns, not thousands: 1s + 2s + 4s + 8s + 16s + 30s caps out well
+      // under ten within the window.
+      expect(chromeMock.runtime.connectNative.mock.calls.length).toBeLessThan(10);
     });
 
     it("reports connected once a real message arrives, and resets the backoff", async () => {
@@ -279,6 +311,7 @@ describe("NativeMessagingClient", () => {
     // model that here so a reconnect's new listener doesn't land on the same
     // array the first port's _emitDisconnect is iterating (that mismatch
     // caused an infinite reconnect loop the first time this test was written).
+    vi.useFakeTimers();
     const ports: Array<ReturnType<typeof createFakePort>> = [];
     chromeMock.runtime.connectNative.mockImplementation(() => {
       const newPort = createFakePort();
@@ -289,6 +322,7 @@ describe("NativeMessagingClient", () => {
     await client.connect();
 
     ports[0]?._emitDisconnect();
+    await vi.advanceTimersByTimeAsync(1_000);
 
     // A second connectNative call means the client attempted to reconnect.
     expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);

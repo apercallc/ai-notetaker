@@ -17,7 +17,15 @@ export async function getSessionUser(
     include: { user: true },
   });
   if (!session) return null;
-  if (session.expiresAt.getTime() < Date.now()) return null;
+  if (session.expiresAt.getTime() < Date.now()) {
+    // Nothing else ever deletes these. Rows are only removed on an explicit
+    // sign-out, so every session a user simply abandons — a closed laptop, a
+    // cleared cookie jar, a new browser — stays in the table forever. Reaping
+    // the one we just proved dead costs a single delete on a path that
+    // already did a lookup, and needs no cron or new infrastructure.
+    await deleteSession(session.id);
+    return null;
+  }
   return { id: session.user.id, email: session.user.email };
 }
 

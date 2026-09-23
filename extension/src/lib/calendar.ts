@@ -93,6 +93,7 @@ interface OutlookEventAttendee {
 
 interface OutlookEventDateTime {
   dateTime?: string;
+  timeZone?: string;
 }
 
 interface OutlookEvent {
@@ -100,6 +101,25 @@ interface OutlookEvent {
   attendees?: OutlookEventAttendee[];
   start?: OutlookEventDateTime;
   end?: OutlookEventDateTime;
+  isAllDay?: boolean;
+}
+
+/**
+ * Microsoft Graph returns `2026-09-23T14:00:00.0000000` with the zone in a
+ * sibling `timeZone` field rather than in the string, and `calendarView`
+ * answers in UTC unless a `Prefer: outlook.timezone` header asks otherwise.
+ * `new Date()` reads a date-time with no offset as *local* time, so left
+ * alone every Outlook event lands wrong by the user's UTC offset — enough to
+ * match the previous meeting, or none at all.
+ */
+function outlookIsoString(value: OutlookEventDateTime | undefined): string {
+  const raw = value?.dateTime;
+  if (!raw) return "";
+  const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+  if (hasOffset) return raw;
+  // Anything other than UTC would need a real timezone database to resolve;
+  // we only ever request the default, which is UTC.
+  return value?.timeZone && value.timeZone.toUpperCase() !== "UTC" ? raw : `${raw}Z`;
 }
 
 const PROVIDER_CONFIG: Record<"google" | "outlook", ProviderConfig> = {
@@ -111,14 +131,23 @@ const PROVIDER_CONFIG: Record<"google" | "outlook", ProviderConfig> = {
       `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(dayStartIso)}&timeMax=${encodeURIComponent(dayEndIso)}`,
     parseEvents: (body) => {
       const items = (body as { items?: GoogleEvent[] }).items ?? [];
-      return items.map((item) => ({
-        title: item.summary ?? "",
-        attendees: (item.attendees ?? [])
-          .map((attendee) => attendee.displayName || attendee.email || "")
-          .filter((name) => name.length > 0),
-        startsAt: item.start?.dateTime ?? item.start?.date ?? "",
-        endsAt: item.end?.dateTime ?? item.end?.date ?? "",
-      }));
+      return (
+        items
+          // All-day entries carry `start.date` (a bare YYYY-MM-DD) instead of
+          // `start.dateTime`, and they span the entire day — so "PTO",
+          // "Conference", or a birthday would match as the current event and
+          // silently become the title of a real meeting. Only timed events
+          // describe something you could actually be in right now.
+          .filter((item) => !!item.start?.dateTime && !!item.end?.dateTime)
+          .map((item) => ({
+            title: item.summary ?? "",
+            attendees: (item.attendees ?? [])
+              .map((attendee) => attendee.displayName || attendee.email || "")
+              .filter((name) => name.length > 0),
+            startsAt: item.start?.dateTime ?? "",
+            endsAt: item.end?.dateTime ?? "",
+          }))
+      );
     },
   },
   outlook: {
@@ -129,14 +158,18 @@ const PROVIDER_CONFIG: Record<"google" | "outlook", ProviderConfig> = {
       `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(dayStartIso)}&endDateTime=${encodeURIComponent(dayEndIso)}`,
     parseEvents: (body) => {
       const items = (body as { value?: OutlookEvent[] }).value ?? [];
-      return items.map((item) => ({
-        title: item.subject ?? "",
-        attendees: (item.attendees ?? [])
-          .map((attendee) => attendee.emailAddress?.name || attendee.emailAddress?.address || "")
-          .filter((name) => name.length > 0),
-        startsAt: item.start?.dateTime ?? "",
-        endsAt: item.end?.dateTime ?? "",
-      }));
+      return items
+        // Same reason as Google's date-only filter: an all-day entry spans
+        // the whole day and would hijack a real meeting's title.
+        .filter((item) => item.isAllDay !== true)
+        .map((item) => ({
+          title: item.subject ?? "",
+          attendees: (item.attendees ?? [])
+            .map((attendee) => attendee.emailAddress?.name || attendee.emailAddress?.address || "")
+            .filter((name) => name.length > 0),
+          startsAt: outlookIsoString(item.start),
+          endsAt: outlookIsoString(item.end),
+        }));
     },
   },
 };

@@ -8,6 +8,7 @@ import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "@/lib/passwor
 import { createSession, deleteSession } from "@/lib/sessions";
 import { createWorkspaceWithOwner, getDefaultWorkspaceId } from "@/lib/workspaces";
 import { safeNextPath } from "@/lib/navigation";
+import { clearLoginFailures, isLoginThrottled, recordLoginFailure } from "@/lib/loginThrottle";
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -68,6 +69,15 @@ export async function login(formData: FormData): Promise<void> {
   // would turn the post-login redirect into an open redirect.
   const safeNext = safeNextPath(next);
 
+  // This instance is on a public URL, so an unlimited guessing loop is worth
+  // far more to an attacker than a stolen hash. The same generic error as a
+  // wrong password: saying "too many attempts" would confirm the address is
+  // worth attacking, which is exactly what the dummy-hash timing defence
+  // below exists to avoid leaking.
+  if (isLoginThrottled(email)) {
+    redirect(`/login?error=1&next=${encodeURIComponent(safeNext)}`);
+  }
+
   const user = await prisma.user.findUnique({ where: { email } });
   // Always pay scrypt's cost, even for an email with no account — otherwise
   // an unknown email returns fast (skips verifyPassword entirely) while a
@@ -75,9 +85,11 @@ export async function login(formData: FormData): Promise<void> {
   // enumerate registered emails by timing the response.
   const passwordMatches = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || !passwordMatches) {
+    recordLoginFailure(email);
     redirect(`/login?error=1&next=${encodeURIComponent(safeNext)}`);
   }
 
+  clearLoginFailures(email);
   const session = await createSession(user.id);
   await setSessionCookie(session);
 

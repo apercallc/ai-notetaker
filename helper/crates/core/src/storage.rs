@@ -358,17 +358,21 @@ fn default_sample_rate() -> u32 {
     16_000
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+/// Write-to-temp-then-rename, so a reader never observes a half-written
+/// file and a crash mid-write leaves the previous contents intact.
+///
+/// The rename really is atomic on every platform we ship: `std::fs::rename`
+/// is `rename(2)` on Unix and `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`
+/// on Windows, both of which replace an existing destination in one step.
+/// An earlier version deleted the destination first on Windows, which did
+/// the opposite of what it intended — it opened a window where a crash left
+/// no `meta.json` at all, losing a meeting's state rather than keeping the
+/// older copy.
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
     let temp = path.with_extension("tmp");
     let mut file = fs::File::create(&temp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    // Windows does not replace an existing destination with rename. Remove
-    // it only on that platform; Unix keeps the atomic rename semantics.
-    #[cfg(windows)]
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
     fs::rename(temp, path)?;
     Ok(())
 }

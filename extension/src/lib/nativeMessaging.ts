@@ -22,9 +22,17 @@ import {
 const HOST_NAME = "com.ainotetaker.helper";
 const TEST_PROVIDER_KEY_TIMEOUT_MS = 10_000;
 const AUDIO_DIAGNOSTICS_TIMEOUT_MS = 8_000;
-const MIN_NOT_FOUND_BACKOFF_MS = 1_000;
-const MAX_NOT_FOUND_BACKOFF_MS = 30_000;
+const MIN_RECONNECT_BACKOFF_MS = 1_000;
+const MAX_RECONNECT_BACKOFF_MS = 30_000;
 const HELPER_RETRY_ALARM = "ai-notetaker-helper-retry";
+/**
+ * chrome.alarms clamps anything under 30s up to 30s, so the early steps of
+ * the backoff schedule would be flattened if every retry went through an
+ * alarm. Short delays use setTimeout (the service worker is still alive
+ * that soon after a disconnect); longer ones use the alarm, which survives
+ * the worker being suspended.
+ */
+const MIN_ALARM_DELAY_MS = 30_000;
 
 type Listener<T> = (message: T) => void;
 type IncomingMessageType = IncomingMessage["type"];
@@ -46,7 +54,7 @@ export class NativeMessagingClient {
   private listeners: Map<IncomingMessageType, Set<Listener<IncomingMessage>>> = new Map();
   private statusListeners: Set<Listener<HelperConnectionStatus>> = new Set();
   private currentStatus: HelperConnectionStatus | null = null;
-  private notFoundBackoffMs = MIN_NOT_FOUND_BACKOFF_MS;
+  private reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
 
   connect(): Promise<void> {
     if (this.connectPromise) return this.connectPromise;
@@ -127,12 +135,16 @@ export class NativeMessagingClient {
       return;
     }
 
-    // An ordinary disconnect (helper restarted, OS tore down the pipe) is
-    // expected to succeed again immediately — the helper (which owns the
-    // pipeline) is the source of truth for in-progress recording state,
-    // not this client's in-memory state, so reconnecting fast here is safe.
+    // An ordinary disconnect still needs a backoff, not an instant retry.
+    // The common cause is "helper installed but not running": Chrome finds
+    // the host manifest, spawns notetaker-nm-host, that shim can't reach the
+    // tray app's socket and exits(1). Chrome reports an ordinary disconnect
+    // (not "not found"), so reconnecting immediately spawned a fresh OS
+    // process per disconnect as fast as Chrome would allow. Share the same
+    // schedule as the not-found path; a real reconnect resets it in
+    // handleMessage.
     this.setStatus("disconnected");
-    void this.connect();
+    this.scheduleReconnect();
   }
 
   /**
@@ -144,16 +156,21 @@ export class NativeMessagingClient {
    */
   private handleHostMissing(): void {
     this.setStatus("helper_not_found");
-    const delay = this.notFoundBackoffMs;
-    this.notFoundBackoffMs = Math.min(this.notFoundBackoffMs * 2, MAX_NOT_FOUND_BACKOFF_MS);
-    if (chrome.alarms?.create) {
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    const delay = this.reconnectBackoffMs;
+    this.reconnectBackoffMs = Math.min(this.reconnectBackoffMs * 2, MAX_RECONNECT_BACKOFF_MS);
+    if (delay >= MIN_ALARM_DELAY_MS && chrome.alarms?.create) {
+      // An alarm wakes a suspended MV3 service worker; setTimeout does not.
       void chrome.alarms.create(HELPER_RETRY_ALARM, { delayInMinutes: delay / 60_000 });
-    } else {
-      // The fallback keeps the client usable in non-Chrome test harnesses and
-      // older Chromium variants; production MV3 uses the alarm above so a
-      // suspended service worker is woken for the retry.
-      setTimeout(() => void this.connect(), delay);
+      return;
     }
+    // Short delays (and non-Chrome test harnesses / older Chromium variants
+    // with no chrome.alarms) use a plain timer, which chrome.alarms would
+    // otherwise round up to its 30s floor.
+    setTimeout(() => void this.connect(), delay);
   }
 
   retryFromAlarm(): void {
@@ -163,9 +180,9 @@ export class NativeMessagingClient {
   private handleMessage(raw: unknown): void {
     if (!isIncomingMessage(raw)) return;
     // Any real message proves the helper is genuinely there and
-    // responsive — reset the not-found backoff so a helper that gets
-    // installed later doesn't stay throttled at a stale, longer delay.
-    this.notFoundBackoffMs = MIN_NOT_FOUND_BACKOFF_MS;
+    // responsive — reset the backoff so a helper that gets installed (or
+    // started) later doesn't stay throttled at a stale, longer delay.
+    this.reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
     this.setStatus("connected");
     if (raw.type === "paired") {
       void savePairingToken(raw.pairingToken);

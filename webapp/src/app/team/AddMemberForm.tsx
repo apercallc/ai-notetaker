@@ -1,20 +1,17 @@
 "use client";
 
 import { useActionState } from "react";
-import { addMember } from "./actions";
+import { addMember, type AddMemberResult } from "./actions";
 
-type ActionResult = { email: string; temporaryPassword: string } | { error: string } | null;
-
-async function submit(_previous: ActionResult, formData: FormData): Promise<ActionResult> {
-  try {
-    return await addMember(formData);
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "Could not add member." };
-  }
+async function submit(_previous: AddMemberResult | null, formData: FormData): Promise<AddMemberResult> {
+  // addMember returns its expected failures rather than throwing them (see
+  // its doc comment) — a throw here would be a genuine bug, and Next's own
+  // error boundary is the right place for it.
+  return addMember(formData);
 }
 
 export function AddMemberForm() {
-  const [result, formAction, pending] = useActionState<ActionResult, FormData>(submit, null);
+  const [result, formAction, pending] = useActionState<AddMemberResult | null, FormData>(submit, null);
 
   return (
     <div>
@@ -25,13 +22,13 @@ export function AddMemberForm() {
           {pending ? "Adding…" : "Add member"}
         </button>
       </form>
-      {result && "temporaryPassword" in result && (
+      {result?.ok === true && (
         <p role="status" className="empty-state">
           Added {result.email}. One-time password (copy this now — it won&apos;t be shown again):{" "}
           <code>{result.temporaryPassword}</code>
         </p>
       )}
-      {result && "error" in result && (
+      {result?.ok === false && (
         <p role="alert" className="error-text">
           {result.error}
         </p>
