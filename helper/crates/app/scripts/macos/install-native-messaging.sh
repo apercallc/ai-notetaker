@@ -25,8 +25,11 @@ install_for_vendor() {
         ! grep -Fq "chrome-extension://$extension_id/" "$manifest_path" ||
         ! grep -Fq "\"path\":\"$host_binary\"" "$manifest_path";
     }; then
+        # Skip this vendor only — an unrelated manifest for one browser must
+        # not block registering the others (set -eu would otherwise abort
+        # the whole script on a non-zero return from inside the loop).
         echo "Refusing to overwrite an unrelated Native Messaging manifest: $manifest_path" >&2
-        return 1
+        return 0
     fi
 
     umask 022
@@ -56,7 +59,7 @@ install_firefox() {
         ! grep -Fq "\"path\":\"$host_binary\"" "$manifest_path";
     }; then
         echo "Refusing to overwrite an unrelated Native Messaging manifest: $manifest_path" >&2
-        return 1
+        return 0
     fi
 
     umask 022
