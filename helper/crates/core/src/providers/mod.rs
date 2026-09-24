@@ -58,11 +58,25 @@ pub struct Summary {
     pub action_items: Vec<ActionItem>,
 }
 
+/// A moment the user flagged during the call. Persisted with the meeting so a
+/// summary that is retried after a restart still knows what mattered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlaggedMoment {
+    pub offset_ms: u64,
+    #[serde(default)]
+    pub note: String,
+    /// How far through the call the flag was placed (0-100), when known.
+    #[serde(default)]
+    pub position_percent: Option<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryOptions {
     pub mode: MeetingMode,
     pub vocabulary: Vec<String>,
     pub custom_instructions: Option<String>,
+    #[serde(default)]
+    pub flagged_moments: Vec<FlaggedMoment>,
 }
 
 impl Default for SummaryOptions {
@@ -71,6 +85,7 @@ impl Default for SummaryOptions {
             mode: MeetingMode::General,
             vocabulary: vec![],
             custom_instructions: None,
+            flagged_moments: vec![],
         }
     }
 }
@@ -317,8 +332,51 @@ pub fn summary_system_prompt(options: &SummaryOptions) -> String {
         .as_deref()
         .filter(|text| !text.trim().is_empty())
         .unwrap_or("No additional instructions provided.");
+    let flagged = flagged_moments_prompt(&options.flagged_moments);
     format!(
-        "You are summarizing a {mode}. {vocabulary} Additional instructions: {custom} Produce a concise, useful summary followed by concrete action items. Each action item should name an owner when the transcript makes one clear, and be phrased as a specific task, not a vague topic. Respond ONLY with JSON matching this shape: {{\"summary\": string, \"action_items\": [{{\"text\": string, \"owner\": string | null}}]}}"
+        "You are summarizing a {mode}. {vocabulary} Additional instructions: {custom}{flagged} Produce a concise, useful summary followed by concrete action items. Each action item should name an owner when the transcript makes one clear, and be phrased as a specific task, not a vague topic. Respond ONLY with JSON matching this shape: {{\"summary\": string, \"action_items\": [{{\"text\": string, \"owner\": string | null}}]}}"
+    )
+}
+
+fn format_offset(offset_ms: u64) -> String {
+    let total_seconds = offset_ms / 1000;
+    let (hours, minutes, seconds) = (
+        total_seconds / 3600,
+        (total_seconds % 3600) / 60,
+        total_seconds % 60,
+    );
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+/// Tells the summarizer what the user marked as important. The transcript it
+/// receives carries no timestamps, so each flag also says roughly how far
+/// through the call it was placed.
+fn flagged_moments_prompt(moments: &[FlaggedMoment]) -> String {
+    if moments.is_empty() {
+        return String::new();
+    }
+    let lines = moments
+        .iter()
+        .take(50)
+        .map(|moment| {
+            let when = format_offset(moment.offset_ms);
+            let place = moment
+                .position_percent
+                .map(|percent| format!(", about {percent}% of the way through the call"))
+                .unwrap_or_default();
+            match moment.note.trim() {
+                "" => format!("{when}{place} (no note)"),
+                note => format!("{when}{place}: {note}"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        " The user flagged these moments as important while the call was happening (time from the start): {lines}. The transcript is in chronological order, so use the time hints to find what was being discussed, and make sure the summary or action items cover those topics."
     )
 }
 
@@ -361,10 +419,41 @@ mod tests {
             mode: MeetingMode::Sales,
             vocabulary: vec!["Acme".into(), "QBR".into()],
             custom_instructions: Some("Call out objections separately.".into()),
+            flagged_moments: vec![],
         });
         assert!(prompt.contains("sales call"));
         assert!(prompt.contains("Acme, QBR"));
         assert!(prompt.contains("Call out objections separately."));
+        assert!(!prompt.contains("flagged"));
+    }
+
+    #[test]
+    fn summary_prompt_tells_the_model_which_moments_the_user_flagged() {
+        let prompt = summary_system_prompt(&SummaryOptions {
+            flagged_moments: vec![
+                FlaggedMoment {
+                    offset_ms: 125_000,
+                    note: "Pricing decision".into(),
+                    position_percent: Some(40),
+                },
+                FlaggedMoment {
+                    offset_ms: 3_725_000,
+                    note: "  ".into(),
+                    position_percent: None,
+                },
+            ],
+            ..SummaryOptions::default()
+        });
+        assert!(prompt.contains("2:05, about 40% of the way through the call: Pricing decision"));
+        assert!(prompt.contains("1:02:05 (no note)"));
+        assert!(prompt.contains("chronological order"));
+    }
+
+    #[test]
+    fn summary_options_from_before_flagged_moments_still_load() {
+        let old = r#"{"mode":"general","vocabulary":[],"custom_instructions":null}"#;
+        let options: SummaryOptions = serde_json::from_str(old).expect("old meta.json must load");
+        assert!(options.flagged_moments.is_empty());
     }
 
     struct BatchOnlyProvider;

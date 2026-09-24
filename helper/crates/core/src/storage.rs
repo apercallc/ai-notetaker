@@ -17,7 +17,7 @@
 //! ```
 
 use crate::native_messaging::MeetingMode;
-use crate::providers::{Summary, SummaryOptions, TranscriptSegment};
+use crate::providers::{FlaggedMoment, Summary, SummaryOptions, TranscriptSegment};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -164,6 +164,38 @@ impl MeetingStore {
         let mut meta = self.load_meta(id)?;
         meta.ended_at = Some(ended_at);
         meta.state = MeetingState::Stopped;
+        self.write_meta(&meta)
+    }
+
+    /// Records what the user flagged so a summary retried after a restart
+    /// still knows. Bounded, because the input is user-controlled and ends up
+    /// in a prompt.
+    ///
+    /// A position the caller measured (the extension knows when the user
+    /// really pressed stop) wins; otherwise it is derived from `now`.
+    pub fn mark_flagged_moments(
+        &self,
+        id: Uuid,
+        moments: &[FlaggedMoment],
+        now: DateTime<Utc>,
+    ) -> Result<(), StorageError> {
+        const MAX_MOMENTS: usize = 200;
+        const MAX_NOTE_CHARS: usize = 280;
+        let mut meta = self.load_meta(id)?;
+        let call_length_ms = (now - meta.started_at).num_milliseconds().max(0) as u64;
+        meta.summary_options.flagged_moments = moments
+            .iter()
+            .take(MAX_MOMENTS)
+            .map(|moment| FlaggedMoment {
+                offset_ms: moment.offset_ms,
+                note: moment.note.trim().chars().take(MAX_NOTE_CHARS).collect(),
+                position_percent: moment.position_percent.map(|p| p.min(100)).or_else(|| {
+                    (call_length_ms > 0).then(|| {
+                        ((moment.offset_ms.saturating_mul(100)) / call_length_ms).min(100) as u8
+                    })
+                }),
+            })
+            .collect();
         self.write_meta(&meta)
     }
 
@@ -390,6 +422,67 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = MeetingStore::new(dir.path()).unwrap();
         (dir, store)
+    }
+
+    fn flag(offset_ms: u64, note: &str, position_percent: Option<u8>) -> FlaggedMoment {
+        FlaggedMoment {
+            offset_ms,
+            note: note.into(),
+            position_percent,
+        }
+    }
+
+    #[test]
+    fn flagged_moments_are_stored_with_their_position_and_bounded() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        let started = Utc::now();
+        store.create_meeting(id, started).unwrap();
+        let now = started + Duration::milliseconds(10_000);
+        let long_note = "x".repeat(1_000);
+
+        store
+            .mark_flagged_moments(
+                id,
+                &[
+                    flag(2_500, "  pricing  ", None),
+                    flag(25_000, &long_note, None),
+                    flag(5_000, "", None),
+                    flag(1_000, "measured by the extension", Some(80)),
+                ],
+                now,
+            )
+            .unwrap();
+
+        let moments = store.load_meta(id).unwrap().summary_options.flagged_moments;
+        assert_eq!(moments.len(), 4);
+        assert_eq!(moments[3].position_percent, Some(80));
+        assert_eq!(moments[0].note, "pricing");
+        assert_eq!(moments[0].position_percent, Some(25));
+        // A flag past the recorded length clamps rather than overflowing 100%.
+        assert_eq!(moments[1].position_percent, Some(100));
+        assert_eq!(moments[1].note.chars().count(), 280);
+        assert_eq!(moments[2].position_percent, Some(50));
+    }
+
+    #[test]
+    fn at_most_two_hundred_flagged_moments_are_kept() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        let many: Vec<FlaggedMoment> = (0..500).map(|i| flag(i, "n", None)).collect();
+
+        store.mark_flagged_moments(id, &many, Utc::now()).unwrap();
+
+        assert_eq!(
+            store
+                .load_meta(id)
+                .unwrap()
+                .summary_options
+                .flagged_moments
+                .len(),
+            200
+        );
     }
 
     #[test]

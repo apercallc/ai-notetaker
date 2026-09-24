@@ -109,6 +109,9 @@ pub enum ExtensionToHelper {
     StopRecording {
         #[serde(rename = "meetingId")]
         meeting_id: Uuid,
+        /// Moments the user flagged during the call; older extensions omit this.
+        #[serde(rename = "flaggedMoments", default)]
+        flagged_moments: Vec<FlaggedMomentWire>,
     },
     ResumeRecording {
         #[serde(rename = "meetingId")]
@@ -136,6 +139,19 @@ pub enum CaptureSource {
     #[default]
     Desktop,
     Meet,
+}
+
+/// A flagged moment as the extension sends it at stop time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FlaggedMomentWire {
+    #[serde(rename = "offsetMs")]
+    pub offset_ms: u64,
+    #[serde(default)]
+    pub note: String,
+    /// How far through the call the flag was placed (0-100), measured by the
+    /// extension at the moment the user pressed stop.
+    #[serde(rename = "positionPercent", default)]
+    pub position_percent: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -333,6 +349,37 @@ pub fn generate_pairing_token() -> String {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn stop_recording_accepts_flagged_moments_and_older_extensions_that_omit_them() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let with_flags: ExtensionToHelper = serde_json::from_str(&format!(
+            r#"{{"type":"stop_recording","meetingId":"{id}","flaggedMoments":[{{"offsetMs":125000,"note":"Pricing","positionPercent":40}},{{"offsetMs":9}}]}}"#
+        ))
+        .unwrap();
+        match with_flags {
+            ExtensionToHelper::StopRecording {
+                flagged_moments, ..
+            } => {
+                assert_eq!(flagged_moments.len(), 2);
+                assert_eq!(flagged_moments[0].offset_ms, 125_000);
+                assert_eq!(flagged_moments[0].note, "Pricing");
+                assert_eq!(flagged_moments[0].position_percent, Some(40));
+                assert_eq!(flagged_moments[1].position_percent, None);
+                assert_eq!(flagged_moments[1].note, "");
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+
+        let legacy: ExtensionToHelper = serde_json::from_str(&format!(
+            r#"{{"type":"stop_recording","meetingId":"{id}"}}"#
+        ))
+        .unwrap();
+        assert!(matches!(
+            legacy,
+            ExtensionToHelper::StopRecording { flagged_moments, .. } if flagged_moments.is_empty()
+        ));
+    }
 
     #[test]
     fn round_trips_hello_message() {

@@ -9,8 +9,8 @@
 
 use crate::native_messaging::{ActionItem, ErrorCode, HelperToExtension};
 use crate::providers::{
-    AudioChannel, AudioChunk, StreamingSession, SummarizationProvider, SummaryOptions,
-    TranscriptionProvider,
+    AudioChannel, AudioChunk, FlaggedMoment, StreamingSession, SummarizationProvider,
+    SummaryOptions, TranscriptionProvider,
 };
 use crate::resilience::RetryQueue;
 use crate::storage::{MeetingState, MeetingStore, MIC_FILE, SPEAKER_FILE};
@@ -470,6 +470,19 @@ impl Pipeline {
                 }]
             }
         }
+    }
+
+    /// Remembers what the user flagged during the call (offset in ms, note).
+    /// Persisted, so it also applies to a summary that is retried later.
+    pub fn record_flagged_moments(
+        &mut self,
+        meeting_id: Uuid,
+        moments: &[FlaggedMoment],
+    ) -> Result<(), PipelineError> {
+        self.store
+            .mark_flagged_moments(meeting_id, moments, Utc::now())?;
+        self.summary_options = self.store.load_meta(meeting_id)?.summary_options;
+        Ok(())
     }
 
     pub async fn stop_recording(
@@ -932,6 +945,88 @@ mod tests {
             retry_queue,
         );
         (dir, pipeline)
+    }
+
+    struct CapturingSummarizer {
+        seen: Arc<std::sync::Mutex<Option<SummaryOptions>>>,
+    }
+
+    #[async_trait]
+    impl SummarizationProvider for CapturingSummarizer {
+        fn id(&self) -> SummarizationProviderId {
+            SummarizationProviderId::Claude
+        }
+        async fn summarize(
+            &self,
+            _transcript: &[TranscriptSegment],
+            options: &SummaryOptions,
+        ) -> Result<Summary, ProviderError> {
+            *self.seen.lock().unwrap() = Some(options.clone());
+            Ok(Summary {
+                summary: "captured".into(),
+                action_items: vec![],
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn flagged_moments_reach_the_summarizer_with_their_position_in_the_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(FakeTranscriber {
+                fail_times: Arc::new(AtomicUsize::new(0)),
+                return_empty: false,
+            }),
+            Box::new(CapturingSummarizer { seen: seen.clone() }),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2], 16000)
+            .await;
+
+        pipeline
+            .record_flagged_moments(
+                id,
+                &[
+                    FlaggedMoment {
+                        offset_ms: 0,
+                        note: "Kickoff".into(),
+                        position_percent: None,
+                    },
+                    FlaggedMoment {
+                        offset_ms: 5_000,
+                        note: String::new(),
+                        position_percent: Some(60),
+                    },
+                ],
+            )
+            .unwrap();
+        pipeline.stop_recording(id).await.unwrap();
+
+        let options = seen.lock().unwrap().clone().expect("summarizer ran");
+        assert_eq!(options.flagged_moments.len(), 2);
+        assert_eq!(options.flagged_moments[0].note, "Kickoff");
+        assert_eq!(options.flagged_moments[0].offset_ms, 0);
+        assert_eq!(options.flagged_moments[1].offset_ms, 5_000);
+        assert_eq!(options.flagged_moments[1].position_percent, Some(60));
+    }
+
+    #[tokio::test]
+    async fn a_meeting_stopped_without_flags_summarizes_exactly_as_before() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        let messages = pipeline.stop_recording(id).await.unwrap();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
     }
 
     #[tokio::test]

@@ -16,7 +16,7 @@ use notetaker_core::native_messaging::{
 };
 use notetaker_core::pipeline::{Pipeline, RetryableChunk};
 use notetaker_core::providers::test_provider_key;
-use notetaker_core::providers::SummaryOptions;
+use notetaker_core::providers::{FlaggedMoment, SummaryOptions};
 use notetaker_core::resilience::RetryQueue;
 use notetaker_core::storage::MeetingStore;
 use notetaker_core::{
@@ -488,13 +488,35 @@ async fn handle_message(
             true
         }
 
-        ExtensionToHelper::StopRecording { meeting_id } => {
+        ExtensionToHelper::StopRecording {
+            meeting_id,
+            flagged_moments,
+        } => {
             if let Some(active) = state.active.lock().await.remove(&meeting_id) {
                 if let Some(audio) = active.audio {
                     let _ = audio.stop_capture().await;
                 }
             }
             if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
+                if !flagged_moments.is_empty() {
+                    let moments: Vec<FlaggedMoment> = flagged_moments
+                        .into_iter()
+                        .map(|moment| FlaggedMoment {
+                            offset_ms: moment.offset_ms,
+                            note: moment.note,
+                            position_percent: moment.position_percent,
+                        })
+                        .collect();
+                    // A summary without flags is still a good summary, so a
+                    // failure to store them must never block stopping.
+                    if let Err(error) = pipeline
+                        .lock()
+                        .await
+                        .record_flagged_moments(meeting_id, &moments)
+                    {
+                        tracing::warn!(%meeting_id, %error, "could not store flagged moments");
+                    }
+                }
                 let messages = pipeline.lock().await.stop_recording(meeting_id).await;
                 tray.set_recording(false);
                 match messages {
@@ -917,6 +939,7 @@ fn summary_options(
         custom_instructions: instructions
             .filter(|value| !value.trim().is_empty())
             .map(|value| value.chars().take(4_000).collect()),
+        flagged_moments: vec![],
     }
 }
 
