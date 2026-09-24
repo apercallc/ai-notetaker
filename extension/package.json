@@ -1,7 +1,7 @@
 {
   "name": "ai-notetaker-extension",
   "version": "0.1.0",
-  "description": "AI Notetaker Chrome extension — BYOK meeting notes, no subscription.",
+  "description": "AI Notetaker Chrome extension — botless meeting notes with local BYOK or optional hosted AI.",
   "private": true,
   "type": "module",
   "scripts": {

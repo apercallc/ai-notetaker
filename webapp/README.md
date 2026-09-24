@@ -1,16 +1,18 @@
-# AI Notetaker — Self-Hosted History Web App
+# AI Notetaker — History and Managed Processing Web App
 
-Optional companion to the AI Notetaker extension/helper. Entirely additive
-— the extension works with zero setup using local storage. Deploy this only
-if you want persistent, cross-device access to your past meetings.
+Optional companion to the AI Notetaker extension/helper. Entirely additive:
+the extension works with zero setup using local BYOK storage. Deploy this for
+persistent, cross-device history, or configure managed processing for signed-in
+workspaces.
 
 Most users should begin with the [main getting-started guide](../docs/getting-started.md)
 and skip this component. The webapp is an optional server you deploy and own;
 it is never required for recording or local meeting history.
 
-You deploy and own this instance yourself. Nothing here is run by the
-AI Notetaker project — your meeting notes never touch a server anyone else
-controls.
+Self-hosted deployments remain user-owned and BYOK. A managed operator can run
+the same app with server-side provider credentials, private object storage,
+worker credentials, and Stripe billing; the extension never receives provider
+secrets.
 
 ## Deploy with the prebuilt container image
 
@@ -31,6 +33,12 @@ mirror, for example
 the optional authenticated history webapp; it does not capture audio or run the
 desktop helper.
 
+For managed processing with the prebuilt image, include the worker profile:
+
+```bash
+docker compose -f docker-compose.registry.yml --env-file .env --profile managed up -d
+```
+
 To update a registry deployment without rebuilding locally:
 
 ```bash
@@ -38,8 +46,16 @@ docker compose -f docker-compose.registry.yml --env-file .env pull
 docker compose -f docker-compose.registry.yml --env-file .env up -d
 ```
 
+Add `--profile managed` to both commands when running hosted processing.
+
 The entrypoint applies pending Prisma migrations before the server starts.
-Back up the Postgres volume before upgrades.
+Back up the Postgres volume before upgrades. The registry Compose file passes
+the managed worker, provider, Stripe, and S3-compatible storage variables from
+`.env`; leave managed variables blank for a local/BYOK-only deployment.
+
+Managed API CORS is restricted to the fixed Chrome extension origin by
+default. Set `MANAGED_EXTENSION_ORIGIN` only when using a controlled extension
+fork with a different manifest key; arbitrary origins are rejected.
 
 ## Deploy with Docker Compose
 
@@ -60,6 +76,20 @@ before Next.js starts, and Postgres data persists in the
 `ai-notetaker-postgres` named volume. Back up that volume and put HTTPS and
 network controls in front of the service before exposing it remotely.
 
+For managed processing, start the first-party worker profile as well:
+
+```bash
+docker compose --profile managed up -d --build
+```
+
+The worker polls the authenticated job endpoint and is not started for the
+default local/BYOK-only profile. It shares the webapp image but does not
+publish an HTTP port.
+
+Managed API sign-in, billing, entitlement, and worker routes are also disabled
+unless `MANAGED_HOSTING=true`; leaving that flag unset keeps this deployment a
+self-hosted history/BYOK service even if unrelated Stripe variables exist.
+
 To stop the containers without deleting notes:
 
 ```bash
@@ -75,16 +105,30 @@ the Postgres volume and all stored meeting history.
    create a new Railway project, add this repo's `webapp/` directory as a
    service, and add a Postgres database to the same project.
 2. Railway links `DATABASE_URL` from its Postgres addon automatically.
-3. Set one environment variable yourself: `AUTH_TOKEN` — a long random
-   string. Generate one with `openssl rand -hex 32`. This is the token
-   you'll paste into the extension's settings and use to log into the
-   webapp's UI.
-4. Deploy. The start command (`railway.json`) runs pending database
+3. Set `AUTH_TOKEN` — a long random string. Generate one with `openssl rand
+   -hex 32`. This is the token for self-hosted extension sync.
+4. For project-operated multi-tenant hosting, also set `MANAGED_HOSTING=true`
+   and configure the managed worker/provider, private S3-compatible object
+   storage, and Stripe secrets from `.env.example`; hosted visitors can then
+   create isolated workspaces from `/login`. Leave it `false` for the
+   one-workspace self-hosted flow. See
+   [`docs/hosted-deployment.md`](../docs/hosted-deployment.md) for the
+   acceptance and operations checklist.
+5. Deploy. The start command (`railway.json`) runs pending database
    migrations automatically before starting the server — no manual
    migration step.
-5. Open the deployed URL, go to `/login`, and enter your `AUTH_TOKEN`.
+6. For managed hosting, create a second Railway service from the same
+   `webapp/` source and select `railway-worker.json` as its Railway config.
+   Give it the same `DATABASE_URL`, `AUTH_TOKEN`, and `MANAGED_WORKER_TOKEN`,
+   plus `MANAGED_WORKER_WEBAPP_URL` pointing at the webapp service. Its start
+   command is `npm run managed:worker`; without this worker, hosted jobs stay
+   queued.
+7. Open the deployed URL and use `/login` for the web history UI. Workspace
+   owners can manage hosted payment from `/billing` when Stripe is configured.
 
-That's the whole setup — one token, no other required configuration.
+For self-hosted history, that's the whole setup — one token and the linked
+Postgres addon. Managed hosting additionally requires the worker service,
+provider/object-storage secrets, and Stripe configuration described above.
 
 ## Local development
 
@@ -128,23 +172,27 @@ parallel would let one file's cleanup race another's assertions.
 
 ## Architecture notes
 
-- **Every route requires `AUTH_TOKEN`, including reads** — enforced once,
+- **Every route requires authentication, including reads** — enforced once,
   in `src/proxy.ts` (Next.js 16's replacement for `middleware.ts`), not
-  re-implemented per route. The one exception is `GET /api/health`, which
-  exists only so the extension's settings page can confirm "is this URL
-  even a webapp instance" before asking for a token — see
-  `docs/webapp-api.md`.
+  re-implemented per route. `/api/health` is public and reports managed
+  readiness when `MANAGED_HOSTING=true`; legacy `/api/*` uses
+  `AUTH_TOKEN`, managed `/api/v1/*` uses a per-user session, and expiring
+  `/share/*` links are bearer capabilities — see `docs/webapp-api.md`.
 - Two auth mechanisms for two kinds of client: a `Bearer` token for the
   JSON API (`/api/*`, used by the extension and future mobile clients, per
   `docs/webapp-api.md`), and a session cookie for the browser UI (set once
   via `/login`, so a human isn't retyping the token on every page).
-- The Prisma schema carries `userId`/`workspaceId` on every table from day
-  one even though v1 has no real multi-user concept — see the architecture
-  spec §3.5, §7. All v1 reads/writes use the constant `LOCAL_USER_ID`
-  (`src/lib/auth.ts`).
-- This app never calls transcription/LLM provider APIs and never needs the
-  user's Deepgram/Claude/etc. keys — it only stores and serves finished
-  notes the extension/helper already produced.
+- Managed hosting uses real per-user sessions and workspace-scoped reads and
+  writes; each hosted signup receives an isolated owner workspace. Self-hosted
+  deployments retain the legacy single default workspace and `AUTH_TOKEN`
+  ingestion contract.
+- In local/BYOK mode this app only stores and serves finished notes. In managed
+  mode the worker calls the configured Deepgram/Anthropic providers using
+  server-side secrets after an authenticated, checksummed upload. Provider
+  requests have bounded cancellation and transient retry behavior. Managed
+  uploads use the configured private S3-compatible bucket when `S3_BUCKET` is
+  set; otherwise they use the local filesystem backend for single-node
+  self-hosted/Docker deployments.
 - The authenticated `/actions` page is a cross-meeting action-item inbox. It
   supports open/completed filtering, completion toggles, and due dates, while
   keeping the meeting detail page as the source context for each item.
@@ -169,3 +217,6 @@ Not verified in this build (needs a real deploy to confirm):
   fresh Postgres addon wasn't exercised here.
 - Behavior under real concurrent multi-request load (all testing here was
   single-session, sequential).
+- A real S3-compatible bucket has not been exercised in this workspace; set
+  `S3_BUCKET`, `S3_REGION`, optional `S3_ENDPOINT`, and the server-side
+  credentials before using a multi-instance managed deployment.

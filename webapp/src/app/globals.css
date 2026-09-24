@@ -86,6 +86,42 @@ a {
   gap: var(--space-3);
 }
 
+.billing-status,
+.billing-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.billing-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.billing-card ul {
+  padding-left: 20px;
+  color: var(--color-text-muted);
+}
+
+.billing-card button,
+.secondary-button {
+  border: 0;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  cursor: pointer;
+  font: inherit;
+}
+
+.secondary-button {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
 .filter-links {
   display: flex;
   gap: var(--space-3);
@@ -118,6 +154,25 @@ a {
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
+}
+
+.share-section {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.share-form,
+.share-result {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.share-result input {
+  min-width: min(34rem, 100%);
+  flex: 1;
 }
 
 .export-actions {

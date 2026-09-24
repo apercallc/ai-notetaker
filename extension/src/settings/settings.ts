@@ -7,39 +7,52 @@ import { connectCalendar } from "../lib/calendar";
 import { connectGoogleDrive } from "../lib/drive";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
+import { loginManaged, managedBillingUrl, managedSignupUrl } from "../lib/managedClient";
 
 const app = document.getElementById("app")!;
 let settings: NotetakerSettings = DEFAULT_SETTINGS;
+let managedSetupVisible = settings.processingMode.kind === "managed";
 
 function isBudgetTier(s: NotetakerSettings): boolean {
   return s.transcriptionProvider === "groq";
 }
 
+function safeManagedBillingUrl(baseUrl: string): string {
+  try {
+    return managedBillingUrl(baseUrl);
+  } catch {
+    return "";
+  }
+}
+
 function render(): void {
   const budget = isBudgetTier(settings);
+  const managedView = managedSetupVisible;
   app.innerHTML = `
     <h1 tabindex="-1" data-view-heading>Settings</h1>
+    <p class="page-intro text-secondary">Choose how meetings are processed, then tailor the notes you get back.</p>
+
+    ${renderModeFields()}
 
     <fieldset>
       <legend>AI provider</legend>
       <p class="text-secondary field-hint">
-        Every recording uses exactly two provider keys: one transcription key
-        and one summarization key. AI Notetaker never bills you — you bring
-        your own keys and pay the providers directly. See the cost table in
-        the README for current per-meeting estimates.
+        ${managedView
+          ? "Hosted AI uses platform-managed provider credentials. They never enter this extension."
+          : "Every local recording uses exactly two provider keys: one transcription key and one summarization key. They stay on this device; Meet uses the browser path and desktop calls use the helper."}
       </p>
-      <div class="tier-toggle" role="group" aria-label="Provider tier">
-        <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}" aria-pressed="${!budget}">Default: Deepgram + Claude</button>
-        <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}" aria-pressed="${budget}">Budget: Groq + Gemini/DeepSeek</button>
-      </div>
-
-      <div class="cost-estimator">
-        <label for="meeting-minutes">Estimated meeting length (minutes)</label>
-        <input type="number" id="meeting-minutes" min="1" max="480" step="1" value="45" />
-        <p class="field-hint text-secondary" id="cost-estimate" aria-live="polite"></p>
-      </div>
-
-      ${!budget ? renderDefaultTierFields() : renderBudgetTierFields()}
+      ${managedView ? `<div class="callout"><strong>${settings.processingMode.kind === "managed" ? "Managed mode is active." : "Hosted mode setup"}</strong><p class="text-secondary">Local-first recordings are uploaded only to your authenticated workspace for processing.</p></div>` : `
+        <div class="tier-toggle" role="group" aria-label="Provider tier">
+          <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}" aria-pressed="${!budget}">Default: Deepgram + Claude</button>
+          <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}" aria-pressed="${budget}">Budget: Groq + Gemini/DeepSeek</button>
+        </div>
+        <div class="cost-estimator">
+          <label for="meeting-minutes">Estimated meeting length (minutes)</label>
+          <input type="number" id="meeting-minutes" min="1" max="480" step="1" value="45" />
+          <p class="field-hint text-secondary" id="cost-estimate" aria-live="polite"></p>
+        </div>
+        ${!budget ? renderDefaultTierFields() : renderBudgetTierFields()}
+      `}
     </fieldset>
 
     <fieldset>
@@ -133,6 +146,29 @@ function render(): void {
   // connect/disconnect), never from continuous typing, so this can't
   // steal focus mid-input.
   app.querySelector<HTMLElement>("[data-view-heading]")?.focus({ preventScroll: true });
+}
+
+function renderModeFields(): string {
+  const managed = managedSetupVisible;
+  const billingLink = settings.managedService ? safeManagedBillingUrl(settings.managedService.baseUrl) : "";
+  return `
+    <fieldset>
+      <legend>Processing mode</legend>
+      <div class="tier-toggle" role="group" aria-label="Processing mode">
+        <button type="button" id="mode-local" class="${managed ? "secondary" : "primary active"}" aria-pressed="${!managed}">Free local BYOK</button>
+        <button type="button" id="mode-managed" class="${managed ? "primary active" : "secondary"}" aria-pressed="${managed}">Hosted AI</button>
+      </div>
+      ${managed ? settings.processingMode.kind === "managed" ? `<p class="field-hint text-secondary">Hosted account <strong>${escapeHtml(settings.managedService?.accountId ?? "unknown")}</strong> · plan <strong>${escapeHtml(settings.managedService?.plan ?? "unknown")}</strong></p>${billingLink ? `<p class="field-hint"><a href="${escapeHtml(billingLink)}" target="_blank" rel="noreferrer">Manage hosted billing</a></p>` : ""}<button type="button" class="secondary" id="managed-sign-out">Use local BYOK instead</button>` : `<p class="field-hint text-secondary">Sign in to a hosted workspace to enable managed AI. You can also keep the free local BYOK mode with no account.</p><div class="field"><label for="managed-url">Hosted service URL (optional)</label><input type="url" id="managed-url" placeholder="https://notes.example.com" /></div><div class="field"><label for="managed-email">Account email</label><input type="email" id="managed-email" autocomplete="username" /></div><div class="field"><label for="managed-password">Account password</label><input type="password" id="managed-password" autocomplete="current-password" /></div><button type="button" class="secondary" id="managed-sign-in">Sign in to hosted AI</button><button type="button" class="secondary" id="managed-signup" disabled>Create hosted account</button><p class="test-result" id="managed-sign-in-result" role="status" aria-live="polite"></p>` : `
+        <p class="field-hint text-secondary">No account or subscription is required. Google Meet uses the browser path; desktop calls use the helper. Both use the provider keys stored locally.</p>
+        <div class="field"><label for="managed-url">Hosted service URL (optional)</label><input type="url" id="managed-url" placeholder="https://notes.example.com" /></div>
+        <div class="field"><label for="managed-email">Account email</label><input type="email" id="managed-email" autocomplete="username" /></div>
+        <div class="field"><label for="managed-password">Account password</label><input type="password" id="managed-password" autocomplete="current-password" /></div>
+        <button type="button" class="secondary" id="managed-sign-in">Sign in to hosted AI</button>
+        <button type="button" class="secondary" id="managed-signup" disabled>Create hosted account</button>
+        <p class="test-result" id="managed-sign-in-result" role="status" aria-live="polite"></p>
+      `}
+    </fieldset>
+  `;
 }
 
 function meetingModeOptions(selected: NotetakerSettings["defaultMeetingMode"]): string {
@@ -290,11 +326,11 @@ function renderKeyField(provider: keyof NotetakerSettings["apiKeys"], label: str
 
 function readFormIntoSettings(): void {
   const budget = isBudgetTier(settings);
-  if (!budget) {
+  if (!managedSetupVisible && !budget) {
     settings.apiKeys.deepgram = (document.getElementById("key-deepgram") as HTMLInputElement)?.value;
     settings.apiKeys.claude = (document.getElementById("key-claude") as HTMLInputElement)?.value;
     settings.summarizationProvider = "claude";
-  } else {
+  } else if (!managedSetupVisible) {
     settings.apiKeys.groq = (document.getElementById("key-groq") as HTMLInputElement)?.value;
     const summarizer = (document.getElementById("budget-summarizer") as HTMLSelectElement)?.value as SummarizationProvider;
     settings.summarizationProvider = summarizer;
@@ -327,7 +363,73 @@ function wireEvents(): void {
   };
   const budgetTier = () => (isBudgetTier(settings) ? "budget" : "default") as "budget" | "default";
   minutesInput?.addEventListener("input", updateCostEstimate);
-  updateCostEstimate();
+  if (minutesInput) updateCostEstimate();
+
+  document.getElementById("mode-local")?.addEventListener("click", () => {
+    readFormIntoSettings();
+    settings.processingMode = { kind: "local_byok" };
+    settings.managedService = null;
+    managedSetupVisible = false;
+    render();
+  });
+  document.getElementById("managed-sign-out")?.addEventListener("click", () => {
+    settings.processingMode = { kind: "local_byok" };
+    settings.managedService = null;
+    managedSetupVisible = false;
+    render();
+  });
+  document.getElementById("mode-managed")?.addEventListener("click", () => {
+    managedSetupVisible = true;
+    render();
+    document.getElementById("managed-url")?.focus();
+  });
+  document.getElementById("managed-sign-in")?.addEventListener("click", async () => {
+    const resultEl = document.getElementById("managed-sign-in-result")!;
+    const button = document.getElementById("managed-sign-in") as HTMLButtonElement;
+    const baseUrl = (document.getElementById("managed-url") as HTMLInputElement).value.trim();
+    const email = (document.getElementById("managed-email") as HTMLInputElement).value.trim();
+    const password = (document.getElementById("managed-password") as HTMLInputElement).value;
+    button.disabled = true;
+    resultEl.textContent = "Signing in…";
+    resultEl.className = "test-result text-secondary";
+    try {
+      const result = await loginManaged(baseUrl, email, password);
+      settings.managedService = result.config;
+      settings.processingMode = { kind: "managed", accountId: result.config.accountId, workspaceId: result.config.workspaceId, plan: result.config.plan };
+      managedSetupVisible = true;
+      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+      render();
+    } catch (error) {
+      resultEl.textContent = error instanceof Error ? error.message : "Hosted sign-in failed.";
+      resultEl.className = "test-result invalid";
+    } finally {
+      button.disabled = false;
+    }
+  });
+  const managedUrlInput = document.getElementById("managed-url") as HTMLInputElement | null;
+  const managedSignupButton = document.getElementById("managed-signup") as HTMLButtonElement | null;
+  const updateManagedSignupState = (): void => {
+    if (!managedSignupButton) return;
+    try {
+      managedSignupUrl(managedUrlInput?.value.trim() ?? "");
+      managedSignupButton.disabled = false;
+    } catch {
+      managedSignupButton.disabled = true;
+    }
+  };
+  managedUrlInput?.addEventListener("input", updateManagedSignupState);
+  updateManagedSignupState();
+  managedSignupButton?.addEventListener("click", () => {
+    try {
+      chrome.tabs.create({ url: managedSignupUrl(managedUrlInput?.value.trim() ?? "") });
+    } catch (error) {
+      const resultEl = document.getElementById("managed-sign-in-result");
+      if (resultEl) {
+        resultEl.textContent = error instanceof Error ? error.message : "Enter a valid hosted service URL first.";
+        resultEl.className = "test-result invalid";
+      }
+    }
+  });
 
   void readShortcuts().then((shortcuts) => {
     const summary = document.getElementById("shortcut-summary");

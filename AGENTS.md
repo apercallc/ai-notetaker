@@ -12,10 +12,15 @@ continue with normal repository tools and do not create an index.
 
 ## Non-negotiable architecture
 
-- No subscription or project-operated backend. The webapp is optional and
-  self-hosted by each user.
-- The Rust/Tauri helper owns capture, transcription, summarization, retries,
-  and crash recovery. The Manifest V3 extension is a thin UI.
+- Two modes are supported: free local BYOK, and optional paid managed AI. The
+  managed service is project-operated and multi-tenant; self-hosted history
+  remains supported for users who want their own deployment.
+- Google Meet capture is extension-owned and helperless. The Rust/Tauri helper
+  owns long-running desktop-call capture, transcription/summarization,
+  retries, and crash recovery for Zoom, Teams, Slack, and other desktop apps.
+- Raw audio is persisted locally before any provider call or managed upload.
+- Local BYOK keys stay in `chrome.storage.local`; managed provider secrets stay
+  server-side and never reach the extension.
 - Extension ↔ helper communication is Chrome Native Messaging plus the
   local Unix socket/named-pipe relay. Never add an open TCP/localhost port.
 - Wrap BlackHole, base VB-CABLE, or a PulseAudio/PipeWire null sink; do not

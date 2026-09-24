@@ -5,7 +5,7 @@
  * and the root CLAUDE.md non-negotiable constraints list). Do not add a
  * `.sync` call anywhere in this file.
  */
-import { DEFAULT_SETTINGS, type MeetingRecord, type NotetakerSettings } from "../types";
+import { DEFAULT_SETTINGS, type MeetingRecord, type NotetakerSettings, type ProcessingMode } from "../types";
 
 const KEYS = {
   settings: "notetaker.settings",
@@ -16,6 +16,10 @@ const KEYS = {
   remindedCalls: "notetaker.remindedCalls",
   widgetPosition: "notetaker.widget.position",
 } as const;
+
+function validManagedIdentity(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 200 && !/[\u0000-\u001f\u007f]/.test(value);
+}
 
 function storageGet<T>(key: string | string[]): Promise<T | undefined> {
   return new Promise((resolve, reject) => {
@@ -63,6 +67,30 @@ export async function getSettings(): Promise<NotetakerSettings> {
     ...DEFAULT_SETTINGS,
     ...stored,
     apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...(stored.apiKeys ?? {}) },
+    processingMode:
+      stored.processingMode?.kind === "managed" &&
+      stored.managedService &&
+      validManagedIdentity(stored.managedService.accountId) &&
+      validManagedIdentity(stored.managedService.workspaceId) &&
+      validManagedIdentity(stored.managedService.accessToken) &&
+      validManagedIdentity(stored.managedService.baseUrl)
+        ? {
+            kind: "managed",
+            accountId: stored.managedService.accountId,
+            workspaceId: stored.managedService.workspaceId,
+            plan: stored.managedService.plan,
+          }
+        : ({ kind: "local_byok" } satisfies ProcessingMode),
+    managedService:
+      stored.managedService && typeof stored.managedService === "object"
+        ? {
+            baseUrl: typeof stored.managedService.baseUrl === "string" ? stored.managedService.baseUrl.replace(/\/$/, "") : "",
+            accessToken: typeof stored.managedService.accessToken === "string" ? stored.managedService.accessToken : "",
+            accountId: typeof stored.managedService.accountId === "string" ? stored.managedService.accountId : "",
+            workspaceId: typeof stored.managedService.workspaceId === "string" ? stored.managedService.workspaceId : "",
+            plan: typeof stored.managedService.plan === "string" ? stored.managedService.plan : "free",
+          }
+        : DEFAULT_SETTINGS.managedService,
     defaultMeetingMode: stored.defaultMeetingMode ?? DEFAULT_SETTINGS.defaultMeetingMode,
     customVocabulary: Array.isArray(stored.customVocabulary)
       ? stored.customVocabulary.filter((term): term is string => typeof term === "string").slice(0, 100)
@@ -88,6 +116,16 @@ export async function getPairingToken(): Promise<string | null> {
 
 export async function savePairingToken(token: string): Promise<void> {
   await storageSet({ [KEYS.pairingToken]: token });
+}
+
+/**
+ * Removes only the local browser copy of the Native Messaging pairing token.
+ * The helper requests a fresh token on the next hello, which lets a new
+ * Chrome profile recover after its local storage was cleared without asking
+ * the user to find and delete an app-data file by hand.
+ */
+export async function clearPairingToken(): Promise<void> {
+  await storageRemove(KEYS.pairingToken);
 }
 
 /**

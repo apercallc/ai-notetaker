@@ -1,11 +1,13 @@
 # extension/ — Chrome Extension
 
-Manifest V3. This package is a **thin UI only** — it displays what the
-helper streams to it and forwards user actions (start/stop recording,
-settings) down to the helper. See the root `CLAUDE.md` and
-`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md` (§3.2)
-for why: service workers die after ~30s idle and can't own a pipeline that
-needs to run for a 45-minute meeting.
+Manifest V3. This package owns the Google Meet browser path: its offscreen
+document captures the tab and microphone, and IndexedDB persists chunks before
+local BYOK processing or Hosted AI upload. For desktop-call sources it is a
+**thin UI** that forwards start/stop and settings to the native helper. See the root `CLAUDE.md` and
+`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`
+for why: service workers die after ~30s idle and cannot own the long-running
+desktop pipeline; the offscreen Meet path is explicitly durable and rehydrates
+from IndexedDB after service-worker suspension.
 
 ## Conventions
 
@@ -13,15 +15,17 @@ needs to run for a 45-minute meeting.
   WebSocket to `127.0.0.1` for extension↔helper control — any webpage's JS
   can connect to an open local port. Native Messaging is OS-enforced and
   allowlisted to this extension's ID.
-- **API keys and tokens live in `chrome.storage.local`, never `.sync`.**
-  `.sync` ships data to Google's sync servers — unacceptable for secrets.
-- **Do not call transcription/LLM provider APIs directly from the
-  extension.** That's the helper's job. If you find yourself importing an
-  API client for Deepgram/Claude/etc. here, stop — the request should go to
-  the helper over Native Messaging instead.
-- **No accounts, no login, no telemetry to a project-operated server.**
-  The only outbound sync target is the user's own self-hosted webapp URL,
-  which they configure themselves — never a default/hardcoded endpoint.
+- **Local BYOK keys and tokens live in `chrome.storage.local`, never `.sync`.**
+  Managed provider keys remain server-side and never reach the extension.
+- **Meet BYOK provider calls are direct from the extension only for the
+  browser-owned Meet path.** Raw mic/speaker chunks must already be in
+  IndexedDB before a call. Desktop-call BYOK remains helper-routed, and
+  managed mode uses the authenticated hosted service; never send local keys
+  to that service.
+- **Local mode requires no account.** Managed mode may authenticate to the
+  project-operated hosted service, but requests must be explicit,
+  authenticated, workspace-scoped, and visible in settings. Never send local
+  BYOK keys to the hosted service.
 - Keep it a standard WebExtension where the API allows, even though Chrome
   is the primary target — an Edge/Brave/Firefox port later shouldn't
   require a rewrite (see spec §7).

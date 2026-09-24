@@ -15,7 +15,14 @@ describe("manifest.json cross-browser fields", () => {
     expect(manifest.content_scripts).toHaveLength(1);
     expect(manifest.content_scripts[0]?.matches).toEqual(["https://meet.google.com/*"]);
     expect(manifest.content_scripts[0]?.js).toEqual(["content/meetWidget.js"]);
-    expect(manifest.host_permissions).toEqual(["https://meet.google.com/*"]);
+    expect(manifest.host_permissions).toEqual([
+      "https://meet.google.com/*",
+      "https://api.deepgram.com/*",
+      "https://api.groq.com/*",
+      "https://api.anthropic.com/*",
+      "https://generativelanguage.googleapis.com/*",
+      "https://api.deepseek.com/*",
+    ]);
   });
 
   it("registers the two Meet shortcuts the widget advertises", () => {
@@ -31,6 +38,6 @@ describe("manifest.json cross-browser fields", () => {
     expect([...manifest.permissions].sort()).toEqual(
       ["activeTab", "alarms", "identity", "nativeMessaging", "notifications", "offscreen", "storage", "tabCapture"].sort(),
     );
-    expect(manifest.host_permissions).toEqual(["https://meet.google.com/*"]);
+    expect(manifest.host_permissions).toContain("https://meet.google.com/*");
   });
 });

@@ -1,10 +1,9 @@
 // AI Notetaker webapp schema.
 //
-// Every model carries userId/workspaceId from day one even though v1 auth
-// is a single shared deploy-time token with no real multi-user concept yet.
-// This is deliberate forward-compatibility (see architecture spec §3.5, §7)
-// so that team/workspace sharing later doesn't require a schema migration.
-// v1 always writes/reads with userId = "local" (see src/lib/constants.ts).
+// Legacy ingestion models retain userId/workspaceId while browser UI auth uses
+// real per-user sessions and workspace memberships. The deploy-time
+// AUTH_TOKEN remains the separate trusted ingestion contract for self-hosted
+// helper/API clients.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,11 +23,17 @@ model Meeting {
   startedAt   DateTime
   endedAt     DateTime
   summary     String    @db.Text
+  captureSource String  @default("desktop")
+  processingMode String @default("local_byok")
+  recordingObjectKey String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   transcript  TranscriptSegment[]
   actionItems ActionItem[]
+  uploads     ManagedUpload[]
+  processingJobs ProcessingJob[]
+  shareTokens MeetingShareToken[]
 
   @@index([userId, startedAt])
 }
@@ -82,9 +87,15 @@ model Workspace {
   id        String   @id @default(uuid())
   name      String
   isDefault Boolean  @default(false)
+  retentionDays Int?
   createdAt DateTime @default(now())
 
   memberships WorkspaceMembership[]
+  uploads ManagedUpload[]
+  processingJobs ProcessingJob[]
+  usageEntries UsageLedgerEntry[]
+  subscription WorkspaceSubscription?
+  shareTokens MeetingShareToken[]
 
   // Exactly one workspace has isDefault = true — the ingestion target for
   // every meeting synced via the AUTH_TOKEN Bearer contract, and the
@@ -116,4 +127,130 @@ model Session {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+model ManagedUpload {
+  id             String   @id @default(uuid())
+  workspaceId    String
+  meetingId      String
+  idempotencyKey String
+  totalChunks    Int
+  totalBytes     Int
+  status         String   @default("created")
+  objectKey      String?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+  completedAt    DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  chunks    UploadChunk[]
+  jobs      ProcessingJob[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, meetingId])
+}
+
+model UploadChunk {
+  id        String   @id @default(uuid())
+  uploadId  String
+  chunkIndex Int
+  channel   String   @default("speaker")
+  byteLength Int
+  checksum  String
+  objectKey String
+  createdAt DateTime @default(now())
+
+  upload ManagedUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@unique([uploadId, chunkIndex])
+}
+
+model ProcessingJob {
+  id             String   @id @default(uuid())
+  workspaceId    String
+  meetingId      String
+  uploadId       String
+  idempotencyKey String
+  status         String   @default("queued")
+  errorMessage   String?  @db.Text
+  providerCostMicros Int  @default(0)
+  createdAt      DateTime @default(now())
+  startedAt      DateTime?
+  leaseToken     String?
+  completedAt    DateTime?
+  updatedAt      DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  upload    ManagedUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, createdAt])
+}
+
+model UsageLedgerEntry {
+  id             String   @id @default(uuid())
+  workspaceId    String
+  periodStart    DateTime
+  kind           String
+  units          Int
+  idempotencyKey String
+  releasedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, periodStart, kind])
+}
+
+model WorkspaceSubscription {
+  id                   String   @id @default(uuid())
+  workspaceId          String   @unique
+  stripeCustomerId     String?  @unique
+  stripeSubscriptionId String?  @unique
+  plan                 String   @default("local")
+  status               String   @default("inactive")
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  graceEndsAt           DateTime?
+  lastBillingEventCreatedAt Int?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model MeetingShareToken {
+  id          String   @id @default(uuid())
+  workspaceId String
+  meetingId   String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, meetingId])
+}
+
+model BillingEvent {
+  id          String   @id
+  type        String
+  eventCreatedAt Int?
+  processedAt DateTime @default(now())
+}
+
+// Shared failed-login budget for managed hosting. Keeping this in Postgres
+// makes the throttle effective across web replicas and survives a deploy.
+model LoginThrottle {
+  emailKey       String   @id
+  failures       Int      @default(0)
+  firstFailureAt DateTime
+  updatedAt      DateTime @updatedAt
+
+  @@index([firstFailureAt])
 }

@@ -1,5 +1,9 @@
 # Cross-Browser Ports Implementation Plan
 
+Status: Deferred historical plan. The current product target is Chrome-first;
+do not treat this document's original no-subscription wording as the current
+commercial contract. See the 2026-09-24 Scribbl dual-mode product design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the built Chrome extension work unmodified in Edge and
@@ -343,7 +347,7 @@ JSON import typing will also flag `browser_specific_settings` as unknown
   "manifest_version": 3,
   "name": "AI Notetaker",
   "short_name": "Notetaker",
-  "description": "BYOK meeting transcripts, summaries, and action items. No subscription, open source.",
+  "description": "Botless meeting notes with free local BYOK or optional hosted AI.",
   "version": "0.1.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4K2Qmk5RfHSNTe7xD+KH626c5l6kNO7FpEiLNpdjnmxR7grcXy5wFIddPzg/aQKlQX4rKHpUz5lH6WUkZ0M6hdl7aLAmCWwb1FoK/s50BkL+9OcNUhIWFG41HgLmwf3RAGfAFI1wagJ/T4yYJOyamtU7wppGPYEQqLRU1lBN/x47GQC/yU5PQhcta3C+eAqALfvfNuXQZS0ud1E4Mj0PFBvXGVfyeBO/AoxiW4RL2CgJFzR8F0rg5ZU2w8VsuI+TVlh56CA0ZsVSZ4Y9LzbjaJrwftIQNVYls0lvwC5hOGgf8Z+XxKeMBNwepYEPaFJCRU+uBTJJXDNm/8ELyarIBQIDAQAB",
   "browser_specific_settings": {

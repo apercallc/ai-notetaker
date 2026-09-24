@@ -5,7 +5,7 @@ import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } fro
 import { isMeetUrl, meetTitleForTab } from "./meetContext";
 
 export interface StartMeetOptions {
-  tabId: number | undefined;
+  tabId?: number;
   meetingMode?: MeetingMode;
   titleHint?: string;
 }
@@ -40,19 +40,37 @@ export async function startMeetRecording(
   capture: MeetCaptureController,
   options: StartMeetOptions,
 ): Promise<string> {
-  const meetingId = await controller.startRecording(options.meetingMode, "meet", options.titleHint);
+  const discoveredTab = typeof options.tabId === "number" ? undefined : await discoverActiveMeetTab();
+  const tabId = options.tabId ?? discoveredTab?.id;
+  const titleHint = options.titleHint ?? (discoveredTab ? meetTitleForTab(discoveredTab) : undefined);
+  const meetingId = await controller.startRecording(options.meetingMode, "meet", titleHint);
   if (!meetingId) return "";
-  if (typeof options.tabId !== "number") {
+  if (typeof tabId !== "number") {
     await controller.failRecording(meetingId, "Choose the active Google Meet tab before starting browser capture.");
     return "";
   }
   try {
-    await capture.start(options.tabId, meetingId);
+    await capture.start(tabId, meetingId);
   } catch (error) {
     await controller.failRecording(meetingId, describeCaptureFailure(error));
     return "";
   }
   return meetingId;
+}
+
+/**
+ * Popup callers do not have a sender tab. Find the active Meet tab in the
+ * focused browser window so starting from the toolbar behaves like starting
+ * from the in-call widget, without asking the user to copy a tab id.
+ */
+async function discoverActiveMeetTab(): Promise<{ id: number; url?: string; title?: string } | undefined> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const tab = tabs.find((candidate) => typeof candidate.id === "number" && isMeetUrl(candidate.url));
+    return tab && typeof tab.id === "number" ? { id: tab.id, url: tab.url, title: tab.title } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function stopMeetRecording(

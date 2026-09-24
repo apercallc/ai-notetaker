@@ -1,4 +1,5 @@
 import type { WidgetState } from "../lib/internalMessages";
+import type { ErrorRecoveryCategory } from "../types";
 
 export type WidgetView =
   | "disconnected"
@@ -13,6 +14,7 @@ export type WidgetView =
 export interface WidgetUi {
   starting: boolean;
   error: string | null;
+  errorRecovery?: ErrorRecoveryCategory;
   /** The finished meeting whose "notes ready" card the user already closed. */
   dismissedMeetingId: string | null;
   /** True once the extension was reloaded under this page; only a tab reload recovers. */
@@ -42,10 +44,16 @@ export function deriveView(state: WidgetState | null, ui: WidgetUi, now: number 
 }
 
 export function canStart(state: WidgetState | null): boolean {
-  return state?.helperStatus === "connected";
+  // The Meet widget is browser-owned capture. Desktop calls use the popup's
+  // desktop-helper path, so a missing helper must not block Meet recording.
+  return !!state?.onboardingComplete && !!state?.consentAcknowledged;
 }
 
 export function helperNotice(state: WidgetState | null): string | null {
+  // Meet capture persists its own mic/speaker chunks in the extension and can
+  // process them with BYOK or Hosted AI. The helper is only required for
+  // desktop-call capture, which is not initiated from this Meet widget.
+  if (state?.onboardingComplete && state.consentAcknowledged) return null;
   switch (state?.helperStatus) {
     case "connected":
       return null;

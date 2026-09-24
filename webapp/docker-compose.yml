@@ -20,12 +20,58 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-notetaker}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Docker Compose}@db:5432/${POSTGRES_DB:-ainotetaker}
       AUTH_TOKEN: ${AUTH_TOKEN:?Set AUTH_TOKEN before starting Docker Compose}
+      MANAGED_HOSTING: ${MANAGED_HOSTING:-false}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      MANAGED_WORKER_TOKEN: ${MANAGED_WORKER_TOKEN:-}
+      MANAGED_DEEPGRAM_API_KEY: ${MANAGED_DEEPGRAM_API_KEY:-}
+      MANAGED_ANTHROPIC_API_KEY: ${MANAGED_ANTHROPIC_API_KEY:-}
+      MANAGED_SUMMARY_MODEL: ${MANAGED_SUMMARY_MODEL:-claude-3-5-sonnet-latest}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_HOSTED_PRO: ${STRIPE_PRICE_HOSTED_PRO:-}
+      STRIPE_PRICE_HOSTED_TEAM: ${STRIPE_PRICE_HOSTED_TEAM:-}
+      OBJECT_STORAGE_DIR: ${OBJECT_STORAGE_DIR:-/app/.data/objects}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      S3_PREFIX: ${S3_PREFIX:-ai-notetaker}
     ports:
       - "${AI_NOTETAKER_WEBAPP_BIND:-127.0.0.1}:${AI_NOTETAKER_WEBAPP_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ai-notetaker-objects:/app/.data
+    restart: unless-stopped
+
+  # The hosted profile includes a first-party worker so queued managed jobs
+  # are processed without requiring a separate scheduler product. It is
+  # opt-in because local/BYOK-only deployments do not need provider workers.
+  worker:
+    profiles: ["managed"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-notetaker}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Docker Compose}@db:5432/${POSTGRES_DB:-ainotetaker}
+      AUTH_TOKEN: ${AUTH_TOKEN:?Set AUTH_TOKEN before starting Docker Compose}
+      MANAGED_WORKER_TOKEN: ${MANAGED_WORKER_TOKEN:?Set MANAGED_WORKER_TOKEN for the managed worker}
+      MANAGED_WORKER_WEBAPP_URL: http://webapp:3000
+      MANAGED_WORKER_POLL_MS: ${MANAGED_WORKER_POLL_MS:-5000}
+      MANAGED_WORKER_ERROR_BACKOFF_MS: ${MANAGED_WORKER_ERROR_BACKOFF_MS:-10000}
+    command: ["node", "scripts/managed-worker.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+      webapp:
+        condition: service_healthy
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
 volumes:
   ai-notetaker-postgres:
+  ai-notetaker-objects:

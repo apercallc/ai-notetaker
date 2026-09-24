@@ -4,7 +4,7 @@ PackageLocale: en-US
 Publisher: AI Notetaker contributors
 PackageName: AI Notetaker
 License: MIT
-ShortDescription: Local-first, self-hosted AI meeting notetaker
+ShortDescription: Botless meeting notes with free local BYOK or optional hosted AI
 PackageUrl: https://apercallc.github.io/ai-notetaker/
 Installers:
   - Architecture: x64

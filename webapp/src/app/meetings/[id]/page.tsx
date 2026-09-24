@@ -6,6 +6,7 @@ import { ActionDoneCheckbox } from "@/components/ActionDoneCheckbox";
 import { requireSession } from "@/lib/currentUser";
 import { DeleteButton } from "./DeleteButton";
 import { ExportButtons } from "./ExportButtons";
+import { ShareMeeting } from "./ShareMeeting";
 import { updateActionItemAction } from "./actions";
 
 function formatDate(iso: string): string {
@@ -95,6 +96,11 @@ export default async function MeetingDetailPage({
         <ExportButtons meeting={meeting} />
         <DeleteButton meetingId={meeting.id} meetingTitle={meeting.title} />
       </div>
+      <section className="share-section" aria-labelledby="share-heading">
+        <h2 id="share-heading" className="section-title">Share privately</h2>
+        <p className="text-secondary">Anyone with the link can view this meeting until it expires. Links are revocable and never expose your workspace or provider credentials.</p>
+        <ShareMeeting meetingId={meeting.id} />
+      </section>
     </div>
   );
 }

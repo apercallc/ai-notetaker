@@ -117,6 +117,7 @@ async function render(): Promise<void> {
     <section>
       <h2>Summary</h2>
       <p>${meeting.summary ? escapeHtml(meeting.summary) : meeting.status === "processing" ? "Still processing…" : meeting.status === "error" ? `Failed: ${escapeHtml(meeting.errorMessage ?? "unknown error")}` : "No summary yet."}</p>
+      ${meeting.status === "error" && meeting.captureSource === "meet" ? `<button type="button" class="secondary" id="retry-processing">Retry saved Meet processing</button>` : ""}
     </section>
 
     <section>
@@ -195,6 +196,17 @@ async function render(): Promise<void> {
       await render();
     } catch {
       showMeetingError("Drive export could not be retried. Your local meeting is still safe.");
+      button.disabled = false;
+    }
+  });
+  document.getElementById("retry-processing")?.addEventListener("click", async () => {
+    const button = document.getElementById("retry-processing") as HTMLButtonElement;
+    button.disabled = true;
+    try {
+      await chrome.runtime.sendMessage({ type: "RETRY_MEETING_PROCESSING", meetingId: id });
+      await render();
+    } catch (error) {
+      showMeetingError(error instanceof Error ? error.message : "Saved Meet processing could not be retried.");
       button.disabled = false;
     }
   });

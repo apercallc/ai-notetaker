@@ -1,8 +1,18 @@
 # Google Meet Browser Capture and Google Drive Export Implementation Plan
 
+> **Historical plan notice:** The “no hosted backend, subscription, or
+> billing” constraint below was superseded on 2026-09-24. Use
+> [`2026-09-24-scribbl-dual-mode-product-migration.md`](2026-09-24-scribbl-dual-mode-product-migration.md)
+> for current work. The Meet and Drive details remain useful as implementation
+> history and compatibility requirements.
+
+> **Capture ownership amendment:** The current dual-mode implementation makes
+> the Chrome extension the source of truth for Meet chunks in IndexedDB. The
+> helper is optional for Meet and remains required for desktop-call sources.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a reliable, low-setup Google Meet browser capture mode and an optional local-first Google Drive meeting-notes export while preserving helper ownership of the AI pipeline.
+**Goal:** Add a reliable, low-setup Google Meet browser capture mode and an optional local-first Google Drive meeting-notes export. Meet may finish through the extension's local BYOK or Hosted AI path; the helper remains the desktop-call pipeline owner.
 
 **Architecture:** The Meet offscreen document captures the active Meet tab's remote audio and the user's microphone, then streams bounded PCM16 chunks over the existing authenticated Native Messaging port. The Rust helper starts the existing `Pipeline` in external-capture mode and persists each independent channel before any provider call. Drive export is a separate least-privilege OAuth integration in the extension, with a pure formatter and best-effort export state attached to the local meeting.
 
@@ -12,13 +22,19 @@
 
 ## Global Constraints
 
-- No project-operated backend, subscription, account, billing, telemetry, or upload proxy.
-- The helper owns capture state, raw persistence, provider calls, retries, and crash recovery; the extension is orchestration/UI.
+- The original no-backend/subscription constraint is historical; the current
+  product also supports optional authenticated Hosted AI with billing and
+  usage enforcement.
+- The helper owns desktop capture state, raw persistence, provider calls,
+  retries, and crash recovery; the extension owns Meet capture, local chunk
+  persistence, and direct BYOK or managed processing for Meet.
 - Extension↔helper communication uses Native Messaging plus the local Unix/named-pipe relay; never TCP or an open localhost port.
 - Mic and speaker are independent channels and raw PCM is persisted before provider calls.
-- API keys and OAuth tokens live only in `chrome.storage.local`.
+- Local API keys and OAuth tokens live only in `chrome.storage.local`; managed
+  provider secrets remain server-side.
 - Keep `extension/manifest.json`'s committed `key` unchanged and keep both helper binaries.
-- Desktop capture remains the default; Meet is explicit browser capture; Slack Huddles, Zoom, and Teams remain helper capture.
+- Meet is the first-run browser capture path; Slack Huddles, Zoom, and Teams
+  remain helper capture.
 - Existing Calendar OAuth is not treated as Drive authorization; Drive uses its own connection and `https://www.googleapis.com/auth/drive.file`.
 - Every changed surface gets focused tests, then the required extension/helper release-floor checks.
 

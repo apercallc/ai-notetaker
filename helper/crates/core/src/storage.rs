@@ -36,6 +36,8 @@ pub enum MeetingState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingMeta {
     pub id: Uuid,
+    #[serde(default)]
+    pub title: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub state: MeetingState,
@@ -51,6 +53,24 @@ pub struct MeetingMeta {
     pub speaker_sample_rate_hz: u32,
     #[serde(default)]
     pub summary_pending: bool,
+    /// Managed-mode capture has stopped and still needs to be uploaded or
+    /// watched. These fields are deliberately independent of `state`: the
+    /// local meeting remains `Stopped` while hosted processing continues.
+    #[serde(default)]
+    pub managed_pending: bool,
+    #[serde(default)]
+    pub managed_job_id: Option<String>,
+    #[serde(default)]
+    pub managed_upload_id: Option<String>,
+    #[serde(default)]
+    pub managed_next_chunk: usize,
+    /// Tenant identity that authorized the managed upload. Pending recordings
+    /// must never be replayed into a different hosted workspace after the
+    /// user switches accounts or workspaces.
+    #[serde(default)]
+    pub managed_account_id: Option<String>,
+    #[serde(default)]
+    pub managed_workspace_id: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -84,6 +104,7 @@ impl MeetingStore {
         fs::create_dir_all(&dir)?;
         let meta = MeetingMeta {
             id,
+            title: None,
             started_at,
             ended_at: None,
             state: MeetingState::Recording,
@@ -93,6 +114,12 @@ impl MeetingStore {
             mic_sample_rate_hz: default_sample_rate(),
             speaker_sample_rate_hz: default_sample_rate(),
             summary_pending: false,
+            managed_pending: false,
+            managed_job_id: None,
+            managed_upload_id: None,
+            managed_next_chunk: 0,
+            managed_account_id: None,
+            managed_workspace_id: None,
         };
         self.write_meta(&meta)?;
         Ok(())
@@ -110,6 +137,7 @@ impl MeetingStore {
         fs::create_dir_all(&dir)?;
         let meta = MeetingMeta {
             id,
+            title: None,
             started_at,
             ended_at: None,
             state: MeetingState::Recording,
@@ -119,6 +147,12 @@ impl MeetingStore {
             mic_sample_rate_hz: default_sample_rate(),
             speaker_sample_rate_hz: default_sample_rate(),
             summary_pending: false,
+            managed_pending: false,
+            managed_job_id: None,
+            managed_upload_id: None,
+            managed_next_chunk: 0,
+            managed_account_id: None,
+            managed_workspace_id: None,
         };
         self.write_meta(&meta)
     }
@@ -136,6 +170,16 @@ impl MeetingStore {
         }
         let bytes = fs::read(path)?;
         Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    pub fn set_title(&self, id: Uuid, title: &str) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        let title = title.trim();
+        if !title.is_empty() {
+            meta.title = Some(title.chars().take(200).collect());
+            self.write_meta(&meta)?;
+        }
+        Ok(())
     }
 
     /// Appends raw PCM16 bytes to the given channel's file for this
@@ -209,6 +253,64 @@ impl MeetingStore {
     pub fn mark_summary_pending(&self, id: Uuid) -> Result<(), StorageError> {
         let mut meta = self.load_meta(id)?;
         meta.summary_pending = true;
+        self.write_meta(&meta)
+    }
+
+    /// Marks a managed capture as requiring hosted upload/processing. This is
+    /// written before capture begins so an unexpected shutdown cannot make a
+    /// managed meeting indistinguishable from a completed local one.
+    pub fn mark_managed_pending(&self, id: Uuid) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        meta.managed_pending = true;
+        self.write_meta(&meta)
+    }
+
+    pub fn mark_managed_pending_for_identity(
+        &self,
+        id: Uuid,
+        account_id: &str,
+        workspace_id: &str,
+    ) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        meta.managed_pending = true;
+        meta.managed_account_id = Some(account_id.to_owned());
+        meta.managed_workspace_id = Some(workspace_id.to_owned());
+        self.write_meta(&meta)
+    }
+
+    pub fn set_managed_job_id(&self, id: Uuid, job_id: &str) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        meta.managed_pending = true;
+        meta.managed_job_id = Some(job_id.to_string());
+        self.write_meta(&meta)
+    }
+
+    /// Retain the durable managed upload after a terminal hosted-job failure,
+    /// but forget the failed job cursor so the next authenticated settings
+    /// refresh can enqueue the same idempotent work again.
+    pub fn clear_managed_job_id(&self, id: Uuid) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        meta.managed_pending = true;
+        meta.managed_job_id = None;
+        self.write_meta(&meta)
+    }
+
+    pub fn set_managed_upload_progress(
+        &self,
+        id: Uuid,
+        upload_id: &str,
+        next_chunk: usize,
+    ) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        meta.managed_pending = true;
+        meta.managed_upload_id = Some(upload_id.to_string());
+        meta.managed_next_chunk = next_chunk;
+        self.write_meta(&meta)
+    }
+
+    pub fn mark_managed_complete(&self, id: Uuid) -> Result<(), StorageError> {
+        let mut meta = self.load_meta(id)?;
+        meta.managed_pending = false;
         self.write_meta(&meta)
     }
 
@@ -351,6 +453,30 @@ impl MeetingStore {
         self.meeting_dir(id).join(channel_file)
     }
 
+    /// Returns the durable byte length for one of the two audio channels
+    /// without loading its contents. A channel that was never captured is
+    /// treated as empty, matching `read_audio_all`'s legacy behavior.
+    pub fn audio_len(&self, id: Uuid, channel_file: &str) -> Result<usize, StorageError> {
+        if !matches!(channel_file, MIC_FILE | SPEAKER_FILE) {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid audio channel",
+            )));
+        }
+        let path = self.audio_path(id, channel_file);
+        let length = match fs::metadata(path) {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(StorageError::Io(error)),
+        };
+        usize::try_from(length).map_err(|_| {
+            StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "saved audio is too large for this platform",
+            ))
+        })
+    }
+
     /// Read the exact byte range captured for a retry job. Only the two
     /// channel files can be addressed; retry metadata is persisted on disk,
     /// so accepting an arbitrary filename here would turn it into a path
@@ -380,6 +506,20 @@ impl MeetingStore {
         let mut bytes = vec![0u8; length];
         file.read_exact(&mut bytes)?;
         Ok(bytes)
+    }
+
+    /// Reads one complete durable channel for managed upload or export. The
+    /// caller still controls chunking and checksums; this method only exposes
+    /// bytes that were already persisted locally.
+    pub fn read_audio_all(&self, id: Uuid, channel_file: &str) -> Result<Vec<u8>, StorageError> {
+        let path = self.audio_path(id, channel_file);
+        if !matches!(channel_file, MIC_FILE | SPEAKER_FILE) {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid audio channel",
+            )));
+        }
+        Ok(fs::read(path).unwrap_or_default())
     }
 }
 
@@ -528,6 +668,36 @@ mod tests {
     }
 
     #[test]
+    fn audio_len_reads_metadata_without_loading_the_channel() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+
+        store.append_audio(id, MIC_FILE, &[1, 2, 3, 4]).unwrap();
+
+        assert_eq!(store.audio_len(id, MIC_FILE).unwrap(), 4);
+        assert_eq!(store.audio_len(id, SPEAKER_FILE).unwrap(), 0);
+        assert!(store.audio_len(id, "meta.json").is_err());
+    }
+
+    #[test]
+    fn managed_pending_identity_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+
+        store
+            .mark_managed_pending_for_identity(id, "account-1", "workspace-1")
+            .unwrap();
+
+        let reopened = MeetingStore::new(dir.path()).unwrap();
+        let meta = reopened.load_meta(id).unwrap();
+        assert_eq!(meta.managed_account_id.as_deref(), Some("account-1"));
+        assert_eq!(meta.managed_workspace_id.as_deref(), Some("workspace-1"));
+    }
+
+    #[test]
     fn mark_stopped_transitions_state_and_sets_ended_at() {
         let (_dir, store) = temp_store();
         let id = Uuid::new_v4();
@@ -540,6 +710,79 @@ mod tests {
         let meta = store.load_meta(id).unwrap();
         assert_eq!(meta.state, MeetingState::Stopped);
         assert_eq!(meta.ended_at, Some(end));
+    }
+
+    #[test]
+    fn managed_processing_state_survives_upload_and_completion_transitions() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+
+        store.mark_managed_pending(id).unwrap();
+        store.set_managed_job_id(id, "job-123").unwrap();
+        let pending = store.load_meta(id).unwrap();
+        assert!(pending.managed_pending);
+        assert_eq!(pending.managed_job_id.as_deref(), Some("job-123"));
+
+        store.mark_managed_complete(id).unwrap();
+        let complete = store.load_meta(id).unwrap();
+        assert!(!complete.managed_pending);
+        assert_eq!(complete.managed_job_id.as_deref(), Some("job-123"));
+    }
+
+    #[test]
+    fn failed_managed_job_cursor_can_be_cleared_without_losing_pending_upload() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store.mark_managed_pending(id).unwrap();
+        store.set_managed_job_id(id, "failed-job").unwrap();
+
+        store.clear_managed_job_id(id).unwrap();
+        let meta = store.load_meta(id).unwrap();
+        assert!(meta.managed_pending);
+        assert!(meta.managed_job_id.is_none());
+    }
+
+    #[test]
+    fn managed_upload_progress_survives_restart_and_keeps_the_next_chunk_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store.mark_managed_pending(id).unwrap();
+        store
+            .set_managed_upload_progress(id, "upload-123", 7)
+            .unwrap();
+
+        let reopened = MeetingStore::new(dir.path()).unwrap();
+        let meta = reopened.load_meta(id).unwrap();
+        assert!(meta.managed_pending);
+        assert_eq!(meta.managed_upload_id.as_deref(), Some("upload-123"));
+        assert_eq!(meta.managed_next_chunk, 7);
+    }
+
+    #[test]
+    fn old_metadata_without_managed_upload_fields_still_loads_as_local_state() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+
+        let path = store.meeting_dir(id).join("meta.json");
+        let mut old_meta: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let object = old_meta.as_object_mut().unwrap();
+        object.remove("managed_pending");
+        object.remove("managed_job_id");
+        object.remove("managed_upload_id");
+        object.remove("managed_next_chunk");
+        fs::write(&path, serde_json::to_vec(&old_meta).unwrap()).unwrap();
+
+        let loaded = store.load_meta(id).unwrap();
+        assert!(!loaded.managed_pending);
+        assert!(loaded.managed_job_id.is_none());
+        assert!(loaded.managed_upload_id.is_none());
+        assert_eq!(loaded.managed_next_chunk, 0);
     }
 
     #[test]

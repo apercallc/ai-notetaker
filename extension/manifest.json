@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AI Notetaker",
   "short_name": "Notetaker",
-  "description": "BYOK meeting transcripts, summaries, and action items. No subscription, open source.",
+  "description": "Botless Google Meet and desktop-call notes with free local BYOK or optional hosted AI.",
   "version": "0.1.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4K2Qmk5RfHSNTe7xD+KH626c5l6kNO7FpEiLNpdjnmxR7grcXy5wFIddPzg/aQKlQX4rKHpUz5lH6WUkZ0M6hdl7aLAmCWwb1FoK/s50BkL+9OcNUhIWFG41HgLmwf3RAGfAFI1wagJ/T4yYJOyamtU7wppGPYEQqLRU1lBN/x47GQC/yU5PQhcta3C+eAqALfvfNuXQZS0ud1E4Mj0PFBvXGVfyeBO/AoxiW4RL2CgJFzR8F0rg5ZU2w8VsuI+TVlh56CA0ZsVSZ4Y9LzbjaJrwftIQNVYls0lvwC5hOGgf8Z+XxKeMBNwepYEPaFJCRU+uBTJJXDNm/8ELyarIBQIDAQAB",
   "browser_specific_settings": {
@@ -12,6 +12,7 @@
     }
   },
   "permissions": ["storage", "nativeMessaging", "alarms", "identity", "activeTab", "tabCapture", "offscreen", "notifications"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js",
     "scripts": ["background.js"],
@@ -25,7 +26,14 @@
       "128": "icons/icon128.png"
     }
   },
-  "host_permissions": ["https://meet.google.com/*"],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://api.deepgram.com/*",
+    "https://api.groq.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.deepseek.com/*"
+  ],
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],

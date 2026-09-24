@@ -2,6 +2,8 @@ import Link from "next/link";
 import { requireSession } from "@/lib/currentUser";
 import { prisma } from "@/lib/db";
 import { AddMemberForm } from "./AddMemberForm";
+import { RetentionPolicyForm } from "./RetentionPolicyForm";
+import { managedHostingEnabled } from "@/lib/managedAuth";
 
 function formatDate(date: Date): string {
   return date.toLocaleDateString(undefined, { dateStyle: "medium" });
@@ -26,6 +28,7 @@ export default async function TeamPage() {
     include: { user: { select: { email: true, createdAt: true } } },
     orderBy: { createdAt: "asc" },
   });
+  const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: session.workspaceId }, select: { retentionDays: true } });
 
   return (
     <div className="container">
@@ -53,6 +56,18 @@ export default async function TeamPage() {
         you already communicate (there&apos;s no email sending built in).
       </p>
       <AddMemberForm />
+
+      {managedHostingEnabled() ? (
+        <>
+          <h2 className="section-title">Hosted retention</h2>
+          <p className="muted-copy">
+            Set how long managed meeting history should remain on the hosted service. The worker applies this policy asynchronously.
+          </p>
+          <RetentionPolicyForm retentionDays={workspace.retentionDays} />
+        </>
+      ) : (
+        <p className="muted-copy">Hosted retention controls are available only on the project-operated managed service.</p>
+      )}
     </div>
   );
 }

@@ -9,20 +9,27 @@
 mod ipc;
 mod tray;
 
+use async_trait::async_trait;
 use notetaker_audio::{AudioCapture, AudioDiagnostics};
 use notetaker_core::native_messaging::{
-    decode_browser_audio_chunk, BrowserAudioChannel, CaptureSource, ErrorCode, ExtensionToHelper,
-    HelperToExtension, MeetingMode,
+    decode_browser_audio_chunk, ActionItem, BrowserAudioChannel, CaptureCapabilitiesMessage,
+    CaptureSource, ErrorCode, ExtensionToHelper, HelperToExtension, ManagedServiceConfig,
+    MeetingMode, ProcessingMode,
 };
 use notetaker_core::pipeline::{Pipeline, RetryableChunk};
 use notetaker_core::providers::test_provider_key;
-use notetaker_core::providers::{FlaggedMoment, SummaryOptions};
+use notetaker_core::providers::{
+    AudioChunk, FlaggedMoment, ProviderError, SummarizationProvider, Summary, SummaryOptions,
+    TranscriptSegment, TranscriptionProvider,
+};
 use notetaker_core::resilience::RetryQueue;
 use notetaker_core::storage::MeetingStore;
 use notetaker_core::{
     build_summarization_provider, build_transcription_provider, native_messaging,
 };
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,14 +37,165 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+const MAX_MANAGED_UPLOAD_ATTEMPTS: u32 = 3;
+const MANAGED_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const MANAGED_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn managed_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(MANAGED_CONNECT_TIMEOUT)
+        .timeout(MANAGED_REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| format!("managed HTTP client could not be configured: {error}"))
+}
+
+fn managed_retry_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_secs(2_u64.saturating_pow(attempt.saturating_add(1)).min(30))
+}
+
+fn should_reset_managed_job_cursor(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED
+            | reqwest::StatusCode::FORBIDDEN
+            | reqwest::StatusCode::NOT_FOUND
+    )
+}
+
+fn managed_identity_matches(
+    meta: &notetaker_core::storage::MeetingMeta,
+    service: &ManagedServiceConfig,
+) -> bool {
+    meta.managed_account_id.as_deref() == Some(service.account_id.as_str())
+        && meta.managed_workspace_id.as_deref() == Some(service.workspace_id.as_str())
+}
+
+async fn retry_managed_upload<F, Fut>(attempt: F) -> Result<String, String>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<String, String>>,
+{
+    retry_managed_upload_with_wait(attempt, |delay| async move {
+        tokio::time::sleep(delay).await;
+    })
+    .await
+}
+
+async fn retry_managed_upload_with_wait<F, Fut, W, WaitFut>(
+    mut attempt: F,
+    mut wait: W,
+) -> Result<String, String>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<String, String>>,
+    W: FnMut(std::time::Duration) -> WaitFut,
+    WaitFut: Future<Output = ()>,
+{
+    let mut last_error = None;
+    for attempt_number in 0..MAX_MANAGED_UPLOAD_ATTEMPTS {
+        match attempt().await {
+            Ok(job_id) => return Ok(job_id),
+            Err(error) => {
+                tracing::warn!(attempt = attempt_number + 1, %error, "managed upload attempt failed");
+                last_error = Some(error);
+                if attempt_number + 1 < MAX_MANAGED_UPLOAD_ATTEMPTS {
+                    wait(managed_retry_delay(attempt_number)).await;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "managed upload failed without an error".to_string()))
+}
+
+/// Managed capture intentionally does not call a local AI provider. It keeps
+/// the durable audio pipeline alive while the stop handler uploads the saved
+/// channel files to the hosted worker, which owns provider execution.
+struct ManagedCaptureTranscription;
+
+#[async_trait]
+impl TranscriptionProvider for ManagedCaptureTranscription {
+    fn id(&self) -> native_messaging::TranscriptionProviderId {
+        native_messaging::TranscriptionProviderId::Deepgram
+    }
+
+    fn is_streaming(&self) -> bool {
+        false
+    }
+
+    async fn transcribe_chunk(
+        &self,
+        _chunk: &AudioChunk,
+    ) -> Result<Vec<TranscriptSegment>, ProviderError> {
+        Ok(Vec::new())
+    }
+}
+
+struct ManagedCaptureSummarization;
+
+#[async_trait]
+impl SummarizationProvider for ManagedCaptureSummarization {
+    fn id(&self) -> native_messaging::SummarizationProviderId {
+        native_messaging::SummarizationProviderId::Claude
+    }
+
+    async fn summarize(
+        &self,
+        _transcript: &[TranscriptSegment],
+        _options: &SummaryOptions,
+    ) -> Result<Summary, ProviderError> {
+        Ok(Summary {
+            summary: String::new(),
+            action_items: Vec::new(),
+        })
+    }
+}
+
 #[derive(Clone)]
 struct Settings {
     inner: native_messaging::ExtensionToHelper, // holds the Settings variant; validated on use
 }
 
+#[derive(Clone)]
 struct ActiveRecording {
     audio: Option<Arc<dyn AudioCapture>>,
+    audio_processing: Arc<AudioProcessingQueue>,
     capture_source: CaptureSource,
+    processing_mode: ProcessingMode,
+}
+
+struct PersistedAudioChunk {
+    channel: notetaker_core::providers::AudioChannel,
+    pcm16: Vec<u8>,
+    sample_rate_hz: u32,
+    existing_len: usize,
+}
+
+/// Separates durable audio ingress from provider work. The sender is removed
+/// during `finish`, so the worker drains every already-enqueued frame and then
+/// exits; a slow provider can no longer block the Native Messaging reader from
+/// persisting the next frame.
+struct AudioProcessingQueue {
+    sender: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<PersistedAudioChunk>>>,
+    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl AudioProcessingQueue {
+    fn enqueue(&self, chunk: PersistedAudioChunk) -> bool {
+        let Ok(sender) = self.sender.lock() else {
+            return false;
+        };
+        sender
+            .as_ref()
+            .is_some_and(|sender| sender.send(chunk).is_ok())
+    }
+
+    async fn finish(&self) {
+        let sender = self.sender.lock().ok().and_then(|mut sender| sender.take());
+        drop(sender);
+        if let Some(task) = self.task.lock().await.take() {
+            let _ = task.await;
+        }
+    }
 }
 
 struct AppState {
@@ -49,6 +207,7 @@ struct AppState {
     active: Mutex<HashMap<Uuid, ActiveRecording>>,
     pipelines: Mutex<HashMap<Uuid, Arc<Mutex<Pipeline>>>>,
     retry_tasks: Mutex<HashMap<Uuid, RetryWorker>>,
+    managed_tasks: Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>,
     subscribers: Mutex<HashMap<Uuid, Vec<ipc::OutSender>>>,
 }
 
@@ -71,6 +230,472 @@ fn data_dir() -> std::path::PathBuf {
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("ai-notetaker")
+}
+
+async fn managed_service_from_state(state: &AppState) -> Result<ManagedServiceConfig, String> {
+    let settings = state
+        .settings
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "managed settings are not configured".to_string())?;
+    let ExtensionToHelper::Settings {
+        processing_mode,
+        managed_service,
+        ..
+    } = settings.inner
+    else {
+        return Err("managed settings are invalid".into());
+    };
+    let ProcessingMode::Managed {
+        account_id,
+        workspace_id,
+        ..
+    } = processing_mode
+    else {
+        return Err("managed processing is not selected".into());
+    };
+    let service =
+        managed_service.ok_or_else(|| "hosted service credentials are missing".to_string())?;
+    if service.base_url.is_empty()
+        || service.access_token.is_empty()
+        || service.account_id.is_empty()
+        || service.workspace_id.is_empty()
+    {
+        return Err("hosted service URL or session is missing".into());
+    }
+    if service.account_id != account_id || service.workspace_id != workspace_id {
+        return Err(
+            "managed processing identity does not match the hosted service workspace".into(),
+        );
+    }
+    Ok(service)
+}
+
+async fn upload_managed_recording(
+    store: &MeetingStore,
+    meeting_id: Uuid,
+    service: &ManagedServiceConfig,
+) -> Result<String, String> {
+    let meta = store
+        .load_meta(meeting_id)
+        .map_err(|error| error.to_string())?;
+    if !managed_identity_matches(&meta, service) {
+        return Err("managed recording belongs to a different hosted workspace; sign in to that workspace before retrying".into());
+    }
+    const CHUNK_BYTES: usize = 4 * 1024 * 1024;
+    let channels = [
+        ("mic", notetaker_core::storage::MIC_FILE),
+        ("speaker", notetaker_core::storage::SPEAKER_FILE),
+    ];
+    let channel_lengths = channels
+        .iter()
+        .map(|(_, file)| {
+            store
+                .audio_len(meeting_id, file)
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let total_bytes = channel_lengths.iter().try_fold(0usize, |total, length| {
+        total
+            .checked_add(*length)
+            .ok_or_else(|| "managed recording is too large".to_string())
+    })?;
+    if total_bytes == 0 {
+        return Err("managed recording contains no persisted audio".into());
+    }
+    let total_chunks = channel_lengths
+        .iter()
+        .map(|length| length.div_ceil(CHUNK_BYTES))
+        .sum::<usize>();
+    let client = managed_http_client()?;
+    let base = service.base_url.trim_end_matches('/');
+    let meeting_payload = serde_json::json!({
+        "id": meeting_id.to_string(),
+        "title": meta
+            .title
+            .clone()
+            .unwrap_or_else(|| format!("Meeting on {}", meta.started_at.format("%Y-%m-%d"))),
+        "startedAt": meta.started_at.to_rfc3339(),
+        "endedAt": meta.ended_at.unwrap_or_else(chrono::Utc::now).to_rfc3339(),
+        "summary": "",
+        "transcript": [],
+        "actionItems": [],
+        "mode": serde_json::to_value(meta.summary_options.mode).unwrap_or_else(|_| serde_json::json!("general")),
+        "captureSource": "desktop",
+        "processingMode": "managed",
+    });
+    let response = client
+        .post(format!("{base}/api/v1/meetings"))
+        .bearer_auth(&service.access_token)
+        .header("x-workspace-id", &service.workspace_id)
+        .json(&meeting_payload)
+        .send()
+        .await
+        .map_err(|error| format!("managed meeting registration failed: {error}"))?;
+    ensure_managed_success(response, "managed meeting registration").await?;
+
+    let idempotency_key = format!("meeting:{meeting_id}");
+    let manifest = serde_json::json!({
+        "meetingId": meeting_id.to_string(),
+        "totalChunks": total_chunks,
+        "totalBytes": total_bytes,
+        "idempotencyKey": idempotency_key,
+    });
+    let response = client
+        .post(format!("{base}/api/v1/uploads"))
+        .bearer_auth(&service.access_token)
+        .header("x-workspace-id", &service.workspace_id)
+        .json(&manifest)
+        .send()
+        .await
+        .map_err(|error| format!("managed upload creation failed: {error}"))?;
+    let upload_body = ensure_managed_success(response, "managed upload creation").await?;
+    let upload_id = upload_body
+        .get("uploadId")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "managed service returned no upload id".to_string())?
+        .to_owned();
+
+    // Persist the server-issued upload identity before sending the first
+    // chunk. If the helper exits mid-upload, the next worker run reuses the
+    // same idempotent upload and resumes at the last acknowledged chunk;
+    // replaying one acknowledged chunk remains safe because the API treats
+    // identical checksums as an idempotent retry.
+    let mut next_chunk = if meta.managed_upload_id.as_deref() == Some(upload_id.as_str()) {
+        meta.managed_next_chunk.min(total_chunks)
+    } else {
+        0
+    };
+    store
+        .set_managed_upload_progress(meeting_id, &upload_id, next_chunk)
+        .map_err(|error| format!("managed upload state could not be persisted: {error}"))?;
+
+    let mut index = 0usize;
+    for ((channel, channel_file), channel_length) in channels.iter().copied().zip(channel_lengths) {
+        let mut offset = 0usize;
+        while offset < channel_length {
+            let end = offset.saturating_add(CHUNK_BYTES).min(channel_length);
+            if index < next_chunk {
+                index += 1;
+                offset = end;
+                continue;
+            }
+            let chunk = store
+                .read_audio_range(meeting_id, channel_file, offset, end)
+                .map_err(|error| format!("managed audio could not be read: {error}"))?;
+            let checksum = format!("{:x}", Sha256::digest(&chunk));
+            let response = client
+                .put(format!("{base}/api/v1/uploads/{upload_id}/chunks/{index}"))
+                .bearer_auth(&service.access_token)
+                .header("x-workspace-id", &service.workspace_id)
+                .header("x-chunk-sha256", &checksum)
+                .header("x-audio-channel", channel)
+                .body(chunk)
+                .send()
+                .await
+                .map_err(|error| format!("managed audio upload failed: {error}"))?;
+            ensure_managed_success(response, "managed audio upload").await?;
+            index += 1;
+            next_chunk = index;
+            store
+                .set_managed_upload_progress(meeting_id, &upload_id, next_chunk)
+                .map_err(|error| format!("managed upload state could not be persisted: {error}"))?;
+            offset = end;
+        }
+    }
+    let response = client
+        .post(format!("{base}/api/v1/uploads/{upload_id}/complete"))
+        .bearer_auth(&service.access_token)
+        .header("x-workspace-id", &service.workspace_id)
+        .send()
+        .await
+        .map_err(|error| format!("managed upload completion failed: {error}"))?;
+    ensure_managed_success(response, "managed upload completion").await?;
+    let response = client
+        .post(format!("{base}/api/v1/meetings/{meeting_id}/process"))
+        .bearer_auth(&service.access_token)
+        .header("x-workspace-id", &service.workspace_id)
+        .json(&serde_json::json!({ "uploadId": upload_id, "idempotencyKey": idempotency_key }))
+        .send()
+        .await
+        .map_err(|error| format!("managed processing enqueue failed: {error}"))?;
+    let job = ensure_managed_success(response, "managed processing enqueue").await?;
+    job.get("jobId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "managed service returned no job id".into())
+}
+
+async fn ensure_managed_success(
+    response: reqwest::Response,
+    operation: &str,
+) -> Result<serde_json::Value, String> {
+    let status = response.status();
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
+    if !status.is_success() {
+        let message = body
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown error");
+        return Err(format!("{operation} failed ({status}): {message}"));
+    }
+    Ok(body)
+}
+
+/// The helper is persistent even when Chrome's MV3 worker is suspended, so it
+/// owns the managed-job watch as well as the upload. This keeps a completed
+/// hosted summary from being stranded in the service merely because the
+/// browser was closed after clicking Stop.
+async fn poll_managed_job(
+    state: Arc<AppState>,
+    service: ManagedServiceConfig,
+    meeting_id: Uuid,
+    job_id: String,
+) {
+    let client = match managed_http_client() {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::error!(%meeting_id, %error, "managed job client could not be configured");
+            send_meeting_message(
+                &state,
+                meeting_id,
+                HelperToExtension::ManagedJobStatus {
+                    meeting_id,
+                    job_id,
+                    status: "error".into(),
+                    message: Some("Hosted processing could not be contacted. Saved audio remains available for retry.".into()),
+                    summary: None,
+                    action_items: None,
+                },
+            )
+            .await;
+            return;
+        }
+    };
+    let base = service.base_url.trim_end_matches('/');
+    let url = format!("{base}/api/v1/jobs/{job_id}");
+    let mut last_status = "queued".to_string();
+
+    for attempt in 0..150 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        let response = match client
+            .get(&url)
+            .bearer_auth(&service.access_token)
+            .header("x-workspace-id", &service.workspace_id)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+        if should_reset_managed_job_cursor(response.status()) {
+            if let Err(error) = state.store.clear_managed_job_id(meeting_id) {
+                tracing::warn!(%meeting_id, %error, "could not clear managed job cursor after hosted access failure");
+            }
+            send_meeting_message(
+                &state,
+                meeting_id,
+                HelperToExtension::ManagedJobStatus {
+                    meeting_id,
+                    job_id: job_id.clone(),
+                    status: "error".into(),
+                    message: Some("Hosted access expired or the job is no longer available. Sign in again to retry; saved audio remains available.".into()),
+                    summary: None,
+                    action_items: None,
+                },
+            )
+            .await;
+            return;
+        }
+        if !response.status().is_success() {
+            continue;
+        }
+        let body = match response.json::<serde_json::Value>().await {
+            Ok(body) => body,
+            Err(_) => continue,
+        };
+        let status = body
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("queued");
+        if status == "error" {
+            if let Err(error) = state.store.clear_managed_job_id(meeting_id) {
+                tracing::warn!(%meeting_id, %error, "could not clear failed managed job cursor");
+            }
+            send_meeting_message(
+                &state,
+                meeting_id,
+                HelperToExtension::ManagedJobStatus {
+                    meeting_id,
+                    job_id: job_id.clone(),
+                    status: "error".into(),
+                    message: body
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                    summary: None,
+                    action_items: None,
+                },
+            )
+            .await;
+            return;
+        }
+        if status == "complete" {
+            let summary = body
+                .get("meeting")
+                .and_then(|meeting| meeting.get("summary"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let action_items = body
+                .get("meeting")
+                .and_then(|meeting| meeting.get("actionItems"))
+                .and_then(serde_json::Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| {
+                            let text = item.get("text")?.as_str()?.to_owned();
+                            let owner = item
+                                .get("owner")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned);
+                            Some(ActionItem { text, owner })
+                        })
+                        .collect::<Vec<_>>()
+                });
+            let _ = state.store.mark_managed_complete(meeting_id);
+            send_meeting_message(
+                &state,
+                meeting_id,
+                HelperToExtension::ManagedJobStatus {
+                    meeting_id,
+                    job_id,
+                    status: "complete".into(),
+                    message: None,
+                    summary,
+                    action_items,
+                },
+            )
+            .await;
+            return;
+        }
+        if status != last_status {
+            last_status = status.to_string();
+            send_meeting_message(
+                &state,
+                meeting_id,
+                HelperToExtension::ManagedJobStatus {
+                    meeting_id,
+                    job_id: job_id.clone(),
+                    status: status.to_string(),
+                    message: None,
+                    summary: None,
+                    action_items: None,
+                },
+            )
+            .await;
+        }
+    }
+
+    send_meeting_message(
+        &state,
+        meeting_id,
+        HelperToExtension::ManagedJobStatus {
+            meeting_id,
+            job_id,
+            status: "error".into(),
+            message: Some("managed job status polling timed out; the hosted job may still be retried from the workspace".into()),
+            summary: None,
+            action_items: None,
+        },
+    )
+    .await;
+}
+
+/// Runs one durable managed-processing attempt. If the helper stopped before
+/// it received a job id, the meeting/upload endpoints' idempotency keys make a
+/// replay safe; if it already has a job id, only polling is resumed.
+async fn run_managed_processing(
+    state: Arc<AppState>,
+    service: ManagedServiceConfig,
+    meeting_id: Uuid,
+    existing_job_id: Option<String>,
+) {
+    let job_id = match existing_job_id {
+        Some(job_id) => job_id,
+        None => match retry_managed_upload(|| {
+            upload_managed_recording(&state.store, meeting_id, &service)
+        })
+        .await
+        {
+            Ok(job_id) => {
+                if let Err(error) = state.store.set_managed_job_id(meeting_id, &job_id) {
+                    tracing::error!(%meeting_id, %error, "could not persist managed job id");
+                }
+                job_id
+            }
+            Err(error) => {
+                send_meeting_message(
+                    &state,
+                    meeting_id,
+                    HelperToExtension::ManagedJobStatus {
+                        meeting_id,
+                        job_id: String::new(),
+                        status: "error".into(),
+                        message: Some(error),
+                        summary: None,
+                        action_items: None,
+                    },
+                )
+                .await;
+                return;
+            }
+        },
+    };
+
+    send_meeting_message(
+        &state,
+        meeting_id,
+        HelperToExtension::ManagedJobStatus {
+            meeting_id,
+            job_id: job_id.clone(),
+            status: "queued".into(),
+            message: None,
+            summary: None,
+            action_items: None,
+        },
+    )
+    .await;
+    poll_managed_job(state, service, meeting_id, job_id).await;
+}
+
+async fn start_managed_worker(
+    state: Arc<AppState>,
+    service: ManagedServiceConfig,
+    meeting_id: Uuid,
+    existing_job_id: Option<String>,
+) {
+    let mut tasks = state.managed_tasks.lock().await;
+    if tasks
+        .get(&meeting_id)
+        .is_some_and(|task| !task.is_finished())
+    {
+        return;
+    }
+    if let Some(task) = tasks.remove(&meeting_id) {
+        task.abort();
+    }
+    let task_state = state.clone();
+    let task = tokio::spawn(async move {
+        run_managed_processing(task_state, service, meeting_id, existing_job_id).await;
+    });
+    tasks.insert(meeting_id, task);
 }
 
 fn pairing_token_path(root: &std::path::Path) -> std::path::PathBuf {
@@ -100,10 +725,8 @@ fn write_pairing_token(path: &std::path::Path, token: &str) -> std::io::Result<(
 ///
 /// `write_pairing_token` opens with `truncate(true)`, so a crash or a full
 /// disk between that open and the write leaves a zero-byte file behind. Read
-/// verbatim, that empties into `Some("")`, which matches neither the
-/// first-pairing arm (`None`) nor the token-matches arm — every later
-/// handshake then fails `helper_not_paired` forever with no way out but
-/// deleting the file by hand.
+/// verbatim, that empties into `Some("")`; treating it as `None` lets the next
+/// hello repair the pairing instead of wedging the profile permanently.
 fn load_pairing_token(path: &std::path::Path) -> Option<String> {
     let token = std::fs::read_to_string(path).ok()?;
     let token = token.trim();
@@ -125,6 +748,14 @@ fn pairing_token_matches(expected: &str, provided: &str) -> bool {
         .zip(provided.bytes())
         .fold(0u8, |difference, (a, b)| difference | (a ^ b))
         == 0
+}
+
+/// A missing browser token means the extension profile was freshly installed
+/// or its local storage was cleared. Native Messaging has already enforced
+/// the extension origin, so issue a new local token instead of stranding that
+/// profile behind an app-data file the user cannot reasonably find.
+fn should_issue_pairing_token(existing: Option<&str>, presented: Option<&str>) -> bool {
+    existing.is_none() || presented.is_none()
 }
 
 fn secure_data_dir(root: &std::path::Path) -> std::io::Result<()> {
@@ -168,6 +799,7 @@ fn main() {
                 active: Mutex::new(HashMap::new()),
                 pipelines: Mutex::new(HashMap::new()),
                 retry_tasks: Mutex::new(HashMap::new()),
+                managed_tasks: Mutex::new(HashMap::new()),
                 subscribers: Mutex::new(HashMap::new()),
             });
             let tray = tray::initialize(app.handle(), root.clone())?;
@@ -204,31 +836,29 @@ async fn handle_message(
     match msg {
         ExtensionToHelper::Hello { pairing_token } => {
             let mut current = state.pairing_token.lock().await;
-            match (&*current, pairing_token) {
-                (None, _) => {
-                    // First ever pairing (or the token file didn't survive
-                    // a reinstall) — issue a new one.
-                    let token = native_messaging::generate_pairing_token();
-                    if let Err(error) =
-                        write_pairing_token(&pairing_token_path(&state.data_dir), &token)
-                    {
-                        let _ = out_tx.send(HelperToExtension::Error {
-                            meeting_id: None,
-                            code: ErrorCode::DeviceNotFound,
-                            message: format!("could not persist pairing token: {error}"),
-                        });
-                        return false;
-                    }
-                    *current = Some(token.clone());
-                    let _ = out_tx.send(HelperToExtension::Paired {
-                        pairing_token: token,
+            if should_issue_pairing_token(current.as_deref(), pairing_token.as_deref()) {
+                // First-ever pairing, a reinstall, or a fresh Chrome profile
+                // whose local storage no longer contains the browser copy —
+                // issue a new token rather than forcing manual app-data
+                // surgery. Native Messaging has already allowlisted this
+                // extension origin before this code runs.
+                let token = native_messaging::generate_pairing_token();
+                if let Err(error) =
+                    write_pairing_token(&pairing_token_path(&state.data_dir), &token)
+                {
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: None,
+                        code: ErrorCode::DeviceNotFound,
+                        message: format!("could not persist pairing token: {error}"),
                     });
+                    return false;
                 }
-                (Some(expected), Some(provided)) if pairing_token_matches(expected, &provided) => {
-                    // Already paired and the token matches — nothing to
-                    // send yet; recoverable-meeting notices go out next.
-                }
-                _ => {
+                *current = Some(token.clone());
+                let _ = out_tx.send(HelperToExtension::Paired {
+                    pairing_token: token,
+                });
+            } else if let (Some(expected), Some(provided)) = (&*current, pairing_token.as_deref()) {
+                if !pairing_token_matches(expected, provided) {
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: None,
                         code: ErrorCode::HelperNotPaired,
@@ -236,6 +866,15 @@ async fn handle_message(
                     });
                     return false;
                 }
+                // Already paired and the token matches — nothing to send yet;
+                // recoverable-meeting notices go out next.
+            } else {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: None,
+                    code: ErrorCode::HelperNotPaired,
+                    message: "pairing token missing or mismatched".into(),
+                });
+                return false;
             }
             drop(current);
 
@@ -269,13 +908,18 @@ async fn handle_message(
             let settings = Settings { inner: msg };
             *state.settings.lock().await = Some(settings.clone());
             start_pending_retry_workers(state.clone(), settings, out_tx.clone()).await;
+            if let Ok(service) = managed_service_from_state(&state).await {
+                start_pending_managed_workers(state.clone(), service, out_tx.clone()).await;
+            }
             true
         }
 
         ExtensionToHelper::StartRecording {
             meeting_id,
+            title,
             meeting_mode,
             capture_source,
+            processing_mode,
         } => {
             subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
             let settings_guard = state.settings.lock().await;
@@ -301,18 +945,32 @@ async fn handle_message(
                 unreachable!("Settings.inner is always the Settings variant");
             };
 
-            let (transcription_key, summarization_key) =
-                match resolve_keys(transcription_provider, summarization_provider, &api_keys) {
-                    Ok(keys) => keys,
-                    Err(message) => {
-                        let _ = out_tx.send(HelperToExtension::Error {
-                            meeting_id: Some(meeting_id),
-                            code: ErrorCode::ProviderAuthFailed,
-                            message,
-                        });
-                        return true;
-                    }
-                };
+            let (transcription, summarization): (
+                Box<dyn TranscriptionProvider>,
+                Box<dyn SummarizationProvider>,
+            ) = if matches!(processing_mode, ProcessingMode::Managed { .. }) {
+                (
+                    Box::new(ManagedCaptureTranscription),
+                    Box::new(ManagedCaptureSummarization),
+                )
+            } else {
+                let (transcription_key, summarization_key) =
+                    match resolve_keys(transcription_provider, summarization_provider, &api_keys) {
+                        Ok(keys) => keys,
+                        Err(message) => {
+                            let _ = out_tx.send(HelperToExtension::Error {
+                                meeting_id: Some(meeting_id),
+                                code: ErrorCode::ProviderAuthFailed,
+                                message,
+                            });
+                            return true;
+                        }
+                    };
+                (
+                    build_transcription_provider(transcription_provider, transcription_key),
+                    build_summarization_provider(summarization_provider, summarization_key),
+                )
+            };
 
             let retry_path = state.data_dir.join(format!("retry-{meeting_id}.json"));
             let retry_queue: RetryQueue<RetryableChunk> =
@@ -329,8 +987,8 @@ async fn handle_message(
                 };
             let mut pipeline = Pipeline::new(
                 state.store.as_ref().clone(),
-                build_transcription_provider(transcription_provider, transcription_key),
-                build_summarization_provider(summarization_provider, summarization_key),
+                transcription,
+                summarization,
                 retry_queue,
             )
             .with_summary_options(summary_options(
@@ -356,6 +1014,43 @@ async fn handle_message(
                 }
             }
 
+            if matches!(processing_mode, ProcessingMode::Managed { .. }) {
+                let identity = match &processing_mode {
+                    ProcessingMode::Managed {
+                        account_id,
+                        workspace_id,
+                        ..
+                    } => Some((account_id.as_str(), workspace_id.as_str())),
+                    ProcessingMode::LocalByok => None,
+                };
+                let mark_result = identity.map_or_else(
+                    || state.store.mark_managed_pending(meeting_id),
+                    |(account_id, workspace_id)| {
+                        state.store.mark_managed_pending_for_identity(
+                            meeting_id,
+                            account_id,
+                            workspace_id,
+                        )
+                    },
+                );
+                if let Err(error) = mark_result {
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message: format!("could not persist managed processing state: {error}"),
+                    });
+                    let _ = pipeline.stop_capture_only(meeting_id);
+                    tray.set_recording(false);
+                    return true;
+                }
+            }
+
+            if let Some(title) = title.as_deref() {
+                if let Err(error) = state.store.set_title(meeting_id, title) {
+                    tracing::warn!(%meeting_id, %error, "could not persist meeting title");
+                }
+            }
+
             let pipeline = Arc::new(Mutex::new(pipeline));
             state
                 .pipelines
@@ -368,13 +1063,17 @@ async fn handle_message(
                 .lock()
                 .await
                 .insert(meeting_id, retry_task);
+            let audio_processing =
+                spawn_audio_processing_queue(meeting_id, pipeline.clone(), state.clone());
 
             if capture_source == CaptureSource::Meet {
                 state.active.lock().await.insert(
                     meeting_id,
                     ActiveRecording {
                         audio: None,
+                        audio_processing,
                         capture_source,
+                        processing_mode: processing_mode.clone(),
                     },
                 );
                 tray.set_recording(true);
@@ -383,25 +1082,40 @@ async fn handle_message(
 
             let audio = state.audio.clone();
             let state_for_audio = state.clone();
-            let pipeline_for_audio = pipeline.clone();
+            let audio_processing_for_audio = audio_processing.clone();
             let result = audio
                 .start_capture(Box::new(move |frame| {
                     let state = state_for_audio.clone();
-                    let pipeline = pipeline_for_audio.clone();
+                    let audio_processing = audio_processing_for_audio.clone();
                     tokio::spawn(async move {
-                        let messages = pipeline
-                            .lock()
-                            .await
-                            .handle_audio_chunk(
-                                meeting_id,
-                                frame.channel,
-                                &frame.pcm16,
-                                frame.sample_rate_hz,
-                            )
-                            .await;
-                        for m in messages {
-                            send_meeting_message(&state, meeting_id, m).await;
-                        }
+                        let existing_len = match persist_audio_frame(
+                            &state.store,
+                            meeting_id,
+                            frame.channel,
+                            &frame.pcm16,
+                            frame.sample_rate_hz,
+                        ) {
+                            Ok(existing_len) => existing_len,
+                            Err(message) => {
+                                send_meeting_message(
+                                    &state,
+                                    meeting_id,
+                                    HelperToExtension::Error {
+                                        meeting_id: Some(meeting_id),
+                                        code: ErrorCode::DeviceNotFound,
+                                        message,
+                                    },
+                                )
+                                .await;
+                                return;
+                            }
+                        };
+                        let _ = audio_processing.enqueue(PersistedAudioChunk {
+                            channel: frame.channel,
+                            pcm16: frame.pcm16,
+                            sample_rate_hz: frame.sample_rate_hz,
+                            existing_len,
+                        });
                     });
                 }))
                 .await;
@@ -412,11 +1126,14 @@ async fn handle_message(
                         meeting_id,
                         ActiveRecording {
                             audio: Some(audio),
+                            audio_processing,
                             capture_source,
+                            processing_mode: processing_mode.clone(),
                         },
                     );
                 }
                 Err(e) => {
+                    audio_processing.finish().await;
                     if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
                         worker.abort();
                     }
@@ -465,7 +1182,7 @@ async fn handle_message(
                     return true;
                 }
             };
-            let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() else {
+            let Some(active) = state.active.lock().await.get(&meeting_id).cloned() else {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
                     code: ErrorCode::DeviceNotFound,
@@ -477,14 +1194,29 @@ async fn handle_message(
                 BrowserAudioChannel::Mic => notetaker_core::providers::AudioChannel::Mic,
                 BrowserAudioChannel::Speaker => notetaker_core::providers::AudioChannel::Speaker,
             };
-            let messages = pipeline
-                .lock()
-                .await
-                .handle_audio_chunk(meeting_id, provider_channel, &pcm16, sample_rate_hz)
-                .await;
-            for message in messages {
-                send_meeting_message(&state, meeting_id, message).await;
-            }
+            let existing_len = match persist_audio_frame(
+                &state.store,
+                meeting_id,
+                provider_channel,
+                &pcm16,
+                sample_rate_hz,
+            ) {
+                Ok(existing_len) => existing_len,
+                Err(message) => {
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message,
+                    });
+                    return true;
+                }
+            };
+            let _ = active.audio_processing.enqueue(PersistedAudioChunk {
+                channel: provider_channel,
+                pcm16,
+                sample_rate_hz,
+                existing_len,
+            });
             true
         }
 
@@ -492,10 +1224,12 @@ async fn handle_message(
             meeting_id,
             flagged_moments,
         } => {
-            if let Some(active) = state.active.lock().await.remove(&meeting_id) {
-                if let Some(audio) = active.audio {
+            let active_recording = state.active.lock().await.remove(&meeting_id);
+            if let Some(active) = &active_recording {
+                if let Some(audio) = &active.audio {
                     let _ = audio.stop_capture().await;
                 }
+                active.audio_processing.finish().await;
             }
             if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
                 if !flagged_moments.is_empty() {
@@ -517,12 +1251,77 @@ async fn handle_message(
                         tracing::warn!(%meeting_id, %error, "could not store flagged moments");
                     }
                 }
-                let messages = pipeline.lock().await.stop_recording(meeting_id).await;
+                let managed = active_recording.as_ref().is_some_and(|active| {
+                    matches!(active.processing_mode, ProcessingMode::Managed { .. })
+                });
+                let messages = if managed {
+                    pipeline
+                        .lock()
+                        .await
+                        .stop_capture_only(meeting_id)
+                        .map(|message| vec![message])
+                } else {
+                    pipeline.lock().await.stop_recording(meeting_id).await
+                };
                 tray.set_recording(false);
                 match messages {
                     Ok(messages) => {
                         for m in messages {
                             send_meeting_message(&state, meeting_id, m).await;
+                        }
+                        if managed {
+                            match managed_service_from_state(&state).await {
+                                Ok(service) => match retry_managed_upload(|| {
+                                    upload_managed_recording(&state.store, meeting_id, &service)
+                                })
+                                .await
+                                {
+                                    Ok(job_id) => {
+                                        if let Err(error) =
+                                            state.store.set_managed_job_id(meeting_id, &job_id)
+                                        {
+                                            tracing::error!(%meeting_id, %error, "could not persist managed job id");
+                                        }
+                                        start_managed_worker(
+                                            state.clone(),
+                                            service,
+                                            meeting_id,
+                                            Some(job_id),
+                                        )
+                                        .await;
+                                    }
+                                    Err(error) => {
+                                        send_meeting_message(
+                                            &state,
+                                            meeting_id,
+                                            HelperToExtension::ManagedJobStatus {
+                                                meeting_id,
+                                                job_id: String::new(),
+                                                status: "error".into(),
+                                                message: Some(error),
+                                                summary: None,
+                                                action_items: None,
+                                            },
+                                        )
+                                        .await
+                                    }
+                                },
+                                Err(error) => {
+                                    send_meeting_message(
+                                        &state,
+                                        meeting_id,
+                                        HelperToExtension::ManagedJobStatus {
+                                            meeting_id,
+                                            job_id: String::new(),
+                                            status: "error".into(),
+                                            message: Some(error),
+                                            summary: None,
+                                            action_items: None,
+                                        },
+                                    )
+                                    .await
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -603,6 +1402,7 @@ async fn handle_message(
                 if let Some(audio) = active.audio {
                     let _ = audio.stop_capture().await;
                 }
+                active.audio_processing.finish().await;
                 tray.set_recording(false);
             }
             if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
@@ -625,6 +1425,7 @@ async fn handle_message(
                 if let Some(audio) = active.audio {
                     let _ = audio.stop_capture().await;
                 }
+                active.audio_processing.finish().await;
                 tray.set_recording(false);
             }
             if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
@@ -659,7 +1460,17 @@ async fn handle_message(
             let audio = state.audio.clone();
             let prepare_error = audio.prepare().err().map(|error| error.to_string());
             let diagnostics = audio.diagnostics();
-            let _ = out_tx.send(audio_status_message(diagnostics, prepare_error));
+            let _ = out_tx.send(audio_status_message(diagnostics.clone(), prepare_error));
+            let _ = out_tx.send(HelperToExtension::CaptureCapabilities {
+                capabilities: CaptureCapabilitiesMessage {
+                    platform: diagnostics.platform,
+                    native_loopback: diagnostics.native_loopback,
+                    microphone: diagnostics.microphone.is_some(),
+                    virtual_device_fallback: diagnostics.virtual_device_fallback,
+                    permission_required: diagnostics.permission_required,
+                    guidance: diagnostics.guidance,
+                },
+            });
             true
         }
 
@@ -727,6 +1538,9 @@ fn audio_status_message(
         speaker: diagnostics.speaker,
         ready,
         guidance,
+        native_loopback: diagnostics.native_loopback,
+        virtual_device_fallback: diagnostics.virtual_device_fallback,
+        permission_required: diagnostics.permission_required,
     }
 }
 
@@ -766,6 +1580,59 @@ fn spawn_retry_worker(
         stop_when_empty,
         _task: task,
     }
+}
+
+fn spawn_audio_processing_queue(
+    meeting_id: Uuid,
+    pipeline: Arc<Mutex<Pipeline>>,
+    state: Arc<AppState>,
+) -> Arc<AudioProcessingQueue> {
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<PersistedAudioChunk>();
+    let task = tokio::spawn(async move {
+        while let Some(chunk) = receiver.recv().await {
+            let messages = pipeline
+                .lock()
+                .await
+                .handle_persisted_audio_chunk(
+                    meeting_id,
+                    chunk.channel,
+                    &chunk.pcm16,
+                    chunk.sample_rate_hz,
+                    chunk.existing_len,
+                )
+                .await;
+            for message in messages {
+                send_meeting_message(&state, meeting_id, message).await;
+            }
+        }
+    });
+    Arc::new(AudioProcessingQueue {
+        sender: std::sync::Mutex::new(Some(sender)),
+        task: Mutex::new(Some(task)),
+    })
+}
+
+fn persist_audio_frame(
+    store: &MeetingStore,
+    meeting_id: Uuid,
+    channel: notetaker_core::providers::AudioChannel,
+    pcm16: &[u8],
+    sample_rate_hz: u32,
+) -> Result<usize, String> {
+    let channel_file = match channel {
+        notetaker_core::providers::AudioChannel::Mic => notetaker_core::storage::MIC_FILE,
+        notetaker_core::providers::AudioChannel::Speaker => notetaker_core::storage::SPEAKER_FILE,
+    };
+    let existing_len = std::fs::metadata(store.audio_path(meeting_id, channel_file))
+        .map(|metadata| metadata.len() as usize)
+        .unwrap_or(0);
+    store
+        .append_audio(meeting_id, channel_file, pcm16)
+        .map_err(|error| format!("failed to persist audio to disk: {error}"))?;
+    store
+        .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz)
+        .map_err(|error| format!("failed to persist audio metadata: {error}"))?;
+    Ok(existing_len)
 }
 
 async fn start_pending_retry_workers(
@@ -886,6 +1753,51 @@ fn pending_processing_meeting_ids(root: &Path) -> Vec<Uuid> {
     ids.into_iter().collect()
 }
 
+fn pending_managed_meetings(root: &Path) -> Vec<notetaker_core::storage::MeetingMeta> {
+    let mut meetings = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root.join("meetings")) else {
+        return meetings;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(bytes) = std::fs::read(entry.path().join("meta.json")) else {
+            continue;
+        };
+        let Ok(meta) = serde_json::from_slice::<notetaker_core::storage::MeetingMeta>(&bytes)
+        else {
+            continue;
+        };
+        if meta.managed_pending && meta.state == notetaker_core::storage::MeetingState::Stopped {
+            meetings.push(meta);
+        }
+    }
+    meetings.sort_by_key(|meta| meta.started_at);
+    meetings
+}
+
+async fn start_pending_managed_workers(
+    state: Arc<AppState>,
+    service: ManagedServiceConfig,
+    out_tx: ipc::OutSender,
+) {
+    for meta in pending_managed_meetings(&state.data_dir) {
+        if !managed_identity_matches(&meta, &service) {
+            tracing::warn!(
+                %meta.id,
+                "skipping pending managed recording for a different hosted workspace"
+            );
+            continue;
+        }
+        subscribe_meeting(&state, meta.id, out_tx.clone()).await;
+        start_managed_worker(
+            state.clone(),
+            service.clone(),
+            meta.id,
+            meta.managed_job_id.clone(),
+        )
+        .await;
+    }
+}
+
 fn build_retry_pipeline(
     data_dir: &Path,
     meeting_id: Uuid,
@@ -988,10 +1900,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("pairing_token.txt");
 
-        // A crash between truncate and write leaves a zero-byte file. Read
-        // verbatim it becomes Some(""), which matches neither the
-        // first-pairing arm nor the token-matches arm, wedging the handshake
-        // permanently.
+        // A crash between truncate and write leaves a zero-byte file. It is
+        // treated as an unpaired helper so the next hello can repair it.
         std::fs::write(&path, "").unwrap();
         assert_eq!(load_pairing_token(&path), None);
 
@@ -1022,6 +1932,20 @@ mod tests {
         nearly.pop();
         nearly.push(if token.ends_with('0') { '1' } else { '0' });
         assert!(!pairing_token_matches(&token, &nearly));
+    }
+
+    #[test]
+    fn a_missing_browser_token_can_repair_an_existing_helper_pairing() {
+        assert!(should_issue_pairing_token(None, None));
+        assert!(should_issue_pairing_token(Some("helper-token"), None));
+        assert!(!should_issue_pairing_token(
+            Some("helper-token"),
+            Some("helper-token")
+        ));
+        assert!(!should_issue_pairing_token(
+            Some("helper-token"),
+            Some("stale-token")
+        ));
     }
 
     #[test]
@@ -1063,5 +1987,117 @@ mod tests {
     fn pending_processing_on_a_fresh_data_dir_is_empty() {
         let dir = tempfile::tempdir().unwrap();
         assert!(pending_processing_meeting_ids(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn pending_managed_meetings_include_stopped_uploads_but_not_recording_or_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+
+        let stopped = Uuid::new_v4();
+        store.create_meeting(stopped, chrono::Utc::now()).unwrap();
+        store.mark_stopped(stopped, chrono::Utc::now()).unwrap();
+        store.mark_managed_pending(stopped).unwrap();
+        store.set_managed_job_id(stopped, "job-1").unwrap();
+
+        let recording = Uuid::new_v4();
+        store.create_meeting(recording, chrono::Utc::now()).unwrap();
+        store.mark_managed_pending(recording).unwrap();
+
+        let complete = Uuid::new_v4();
+        store.create_meeting(complete, chrono::Utc::now()).unwrap();
+        store.mark_stopped(complete, chrono::Utc::now()).unwrap();
+        store.mark_managed_pending(complete).unwrap();
+        store.mark_managed_complete(complete).unwrap();
+
+        let pending = pending_managed_meetings(dir.path());
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, stopped);
+        assert_eq!(pending[0].managed_job_id.as_deref(), Some("job-1"));
+    }
+
+    #[test]
+    fn managed_upload_retry_backoff_is_bounded_and_exponential() {
+        assert_eq!(managed_retry_delay(0), std::time::Duration::from_secs(2));
+        assert_eq!(managed_retry_delay(1), std::time::Duration::from_secs(4));
+        assert_eq!(managed_retry_delay(20), std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn hosted_access_failures_reset_only_the_managed_job_cursor() {
+        assert!(should_reset_managed_job_cursor(
+            reqwest::StatusCode::UNAUTHORIZED
+        ));
+        assert!(should_reset_managed_job_cursor(
+            reqwest::StatusCode::FORBIDDEN
+        ));
+        assert!(should_reset_managed_job_cursor(
+            reqwest::StatusCode::NOT_FOUND
+        ));
+        assert!(!should_reset_managed_job_cursor(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE
+        ));
+    }
+
+    #[test]
+    fn managed_retry_requires_the_original_workspace_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let meeting_id = Uuid::new_v4();
+        store
+            .create_meeting(meeting_id, chrono::Utc::now())
+            .unwrap();
+        store
+            .mark_managed_pending_for_identity(meeting_id, "account-1", "workspace-1")
+            .unwrap();
+        let meta = store.load_meta(meeting_id).unwrap();
+        let matching = ManagedServiceConfig {
+            base_url: "https://notes.example.com".into(),
+            access_token: "session".into(),
+            account_id: "account-1".into(),
+            workspace_id: "workspace-1".into(),
+            plan: "hosted_pro".into(),
+        };
+        let different = ManagedServiceConfig {
+            workspace_id: "workspace-2".into(),
+            ..matching.clone()
+        };
+
+        assert!(managed_identity_matches(&meta, &matching));
+        assert!(!managed_identity_matches(&meta, &different));
+    }
+
+    #[tokio::test]
+    async fn managed_upload_retries_transient_failures_before_reporting_error() {
+        let mut attempts = 0;
+        let mut waits = Vec::new();
+        let result = retry_managed_upload_with_wait(
+            || {
+                attempts += 1;
+                let current = attempts;
+                async move {
+                    if current < 3 {
+                        Err(format!("temporary failure {current}"))
+                    } else {
+                        Ok("job-123".to_string())
+                    }
+                }
+            },
+            |delay| {
+                waits.push(delay);
+                async {}
+            },
+        )
+        .await;
+
+        assert_eq!(result.as_deref(), Ok("job-123"));
+        assert_eq!(attempts, 3);
+        assert_eq!(
+            waits,
+            vec![
+                std::time::Duration::from_secs(2),
+                std::time::Duration::from_secs(4),
+            ]
+        );
     }
 }

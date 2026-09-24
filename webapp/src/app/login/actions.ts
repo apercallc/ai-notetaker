@@ -6,11 +6,12 @@ import { prisma } from "@/lib/db";
 import { isValidSetupToken } from "@/lib/auth";
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "@/lib/passwords";
 import { createSession, deleteSession } from "@/lib/sessions";
-import { createWorkspaceWithOwner, getDefaultWorkspaceId } from "@/lib/workspaces";
+import { createHostedWorkspaceWithOwner, createWorkspaceWithOwner, getDefaultWorkspaceId } from "@/lib/workspaces";
 import { safeNextPath } from "@/lib/navigation";
 import { clearLoginFailures, isLoginThrottled, recordLoginFailure } from "@/lib/loginThrottle";
 
 const MIN_PASSWORD_LENGTH = 12;
+const MAX_WORKSPACE_NAME_LENGTH = 100;
 
 async function hasAnyUser(): Promise<boolean> {
   return (await prisma.user.count()) > 0;
@@ -27,8 +28,8 @@ async function setSessionCookie(session: { id: string; expiresAt: Date }): Promi
   });
 }
 
-/** Creates the first account for a freshly deployed instance — that user
- * becomes the owner of the single default workspace this project supports.
+/** Creates the first account for a freshly deployed self-hosted instance —
+ * that user becomes the owner of its pre-created default workspace.
  * No new required environment variable: the deploy-time AUTH_TOKEN doubles
  * as the one-time setup code, so claiming ownership still requires knowing
  * the same secret today's single-session flow required — without this
@@ -74,7 +75,7 @@ export async function login(formData: FormData): Promise<void> {
   // wrong password: saying "too many attempts" would confirm the address is
   // worth attacking, which is exactly what the dummy-hash timing defence
   // below exists to avoid leaking.
-  if (isLoginThrottled(email)) {
+  if (await isLoginThrottled(email)) {
     redirect(`/login?error=1&next=${encodeURIComponent(safeNext)}`);
   }
 
@@ -85,15 +86,40 @@ export async function login(formData: FormData): Promise<void> {
   // enumerate registered emails by timing the response.
   const passwordMatches = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || !passwordMatches) {
-    recordLoginFailure(email);
+    await recordLoginFailure(email);
     redirect(`/login?error=1&next=${encodeURIComponent(safeNext)}`);
   }
 
-  clearLoginFailures(email);
+  await clearLoginFailures(email);
   const session = await createSession(user.id);
   await setSessionCookie(session);
 
   redirect(safeNext);
+}
+
+/** Managed hosting is the only public signup surface. Self-hosted instances
+ * remain claimable only through the deployer's AUTH_TOKEN bootstrap flow. */
+export async function signup(formData: FormData): Promise<void> {
+  if (process.env.MANAGED_HOSTING !== "true") redirect("/login?error=signup-disabled");
+
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
+  const workspaceName = String(formData.get("workspaceName") ?? "").trim().slice(0, MAX_WORKSPACE_NAME_LENGTH);
+  if (!email || email.length > 320 || workspaceName.length < 2 || password.length < MIN_PASSWORD_LENGTH || password !== confirmPassword) {
+    redirect("/login?error=signup");
+  }
+
+  try {
+    const passwordHash = await hashPassword(password);
+    const { userId } = await createHostedWorkspaceWithOwner(email, passwordHash, workspaceName);
+    const session = await createSession(userId);
+    await setSessionCookie(session);
+    redirect("/meetings");
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") redirect("/login?error=signup");
+    throw error;
+  }
 }
 
 /** End the browser session early on a shared or public machine. Deletes

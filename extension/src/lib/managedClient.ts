@@ -1,0 +1,253 @@
+import type { ActionItem, BrowserAudioChannel, ManagedEntitlements, ManagedServiceConfig, MeetingRecord } from "../types";
+
+export interface ManagedLoginResult {
+  config: ManagedServiceConfig;
+  expiresAt: string;
+}
+
+export interface ManagedChunk {
+  channel: BrowserAudioChannel;
+  index: number;
+  bytes: Uint8Array;
+}
+
+export interface ManagedUploadResult {
+  uploadId: string;
+  jobId: string;
+  meetingId: string;
+}
+
+const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_MAX_ATTEMPTS = 3;
+const REQUEST_RETRY_BASE_MS = 250;
+
+function retryableStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function retryDelayMs(attempt: number, response?: Response): number {
+  const retryAfter = response?.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 5_000);
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date)) return Math.min(Math.max(date - Date.now(), 0), 5_000);
+  }
+  return Math.min(REQUEST_RETRY_BASE_MS * 2 ** attempt, 2_000);
+}
+
+function waitForRetry(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function serviceUrl(baseUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error("Managed service URL is invalid");
+  }
+  if (!parsed.hostname || parsed.username || parsed.password || parsed.hash || (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1")) {
+    throw new Error("Managed service URL must use HTTPS");
+  }
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+  return parsed.toString().replace(/\/$/, "");
+}
+
+/** Open the hosted service's account-creation page without accepting an
+ * arbitrary non-HTTPS destination from onboarding input. */
+export function managedSignupUrl(baseUrl: string): string {
+  return `${serviceUrl(baseUrl)}/login?mode=signup`;
+}
+
+/** Builds the billing page link only after applying the same HTTPS/origin
+ * validation used for hosted sign-in. Persisted settings are untrusted input
+ * too, so UI rendering must not interpolate a raw service URL into href. */
+export function managedBillingUrl(baseUrl: string): string {
+  return `${serviceUrl(baseUrl)}/billing`;
+}
+
+/**
+ * Hosted mode is opt-in and the service URL is user-provided, so do not ship
+ * a permanent all-origins permission. Chrome asks for the exact origin when
+ * the user presses the explicit Hosted AI sign-in button. The no-op fallback
+ * keeps this library usable in Firefox/test harnesses that do not expose the
+ * permissions API.
+ */
+async function requestServiceOriginPermission(baseUrl: string): Promise<void> {
+  const permissions = chrome.permissions;
+  if (!permissions?.request) return;
+  const origin = new URL(serviceUrl(baseUrl)).origin;
+  const granted = await permissions.request({ origins: [`${origin}/*`] });
+  if (!granted) throw new Error("Allow access to the hosted service origin to sign in to Hosted AI");
+}
+
+async function requestJson(
+  config: ManagedServiceConfig,
+  path: string,
+  init: RequestInit,
+  fetchImpl: typeof fetch,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < REQUEST_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetchImpl(`${serviceUrl(config.baseUrl)}${path}`, {
+        ...init,
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${config.accessToken}`,
+          "X-Workspace-Id": config.workspaceId,
+          ...(init.headers ?? {}),
+        },
+        signal: controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      if (attempt === REQUEST_MAX_ATTEMPTS - 1) throw error;
+      await waitForRetry(retryDelayMs(attempt));
+      continue;
+    }
+    clearTimeout(timer);
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (response.ok) return body;
+    if (!retryableStatus(response.status) || attempt === REQUEST_MAX_ATTEMPTS - 1) {
+      throw new Error(typeof body.error === "string" ? body.error : `Managed service request failed (${response.status})`);
+    }
+    await waitForRetry(retryDelayMs(attempt, response));
+  }
+  throw new Error("Managed service request failed");
+}
+
+export async function loginManaged(
+  baseUrl: string,
+  email: string,
+  password: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManagedLoginResult> {
+  const normalizedBaseUrl = serviceUrl(baseUrl);
+  await requestServiceOriginPermission(normalizedBaseUrl);
+  const response = await fetchImpl(`${normalizedBaseUrl}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok || typeof body.accessToken !== "string" || typeof body.accountId !== "string" || typeof body.workspaceId !== "string") {
+    throw new Error(typeof body.error === "string" ? body.error : "Managed service sign-in failed");
+  }
+  return {
+    expiresAt: typeof body.expiresAt === "string" ? body.expiresAt : "",
+    config: {
+      baseUrl: normalizedBaseUrl,
+      accessToken: body.accessToken,
+      accountId: body.accountId,
+      workspaceId: body.workspaceId,
+      plan: typeof body.plan === "string" ? body.plan : "local",
+    },
+  };
+}
+
+/** Fetches server-authoritative plan/quota state before a managed recording starts. */
+export async function getManagedEntitlements(
+  config: ManagedServiceConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManagedEntitlements> {
+  const body = await requestJson(config, "/api/v1/entitlements", { method: "GET" }, fetchImpl);
+  const numberField = (name: string): number => (typeof body[name] === "number" && Number.isFinite(body[name]) ? body[name] as number : 0);
+  return {
+    plan: typeof body.plan === "string" ? body.plan : "local",
+    status: typeof body.status === "string" ? body.status : "inactive",
+    used: numberField("used"),
+    limit: numberField("limit"),
+    remaining: numberField("remaining"),
+    canProcess: body.canProcess === true,
+    inPaymentGrace: body.inPaymentGrace === true,
+  };
+}
+
+/**
+ * Register the durable meeting before creating its managed upload. The API
+ * deliberately keeps this separate from upload creation so retries can safely
+ * re-register the same meeting without duplicating it.
+ */
+export async function registerManagedMeeting(
+  config: ManagedServiceConfig,
+  meeting: MeetingRecord,
+  endedAt: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  await requestJson(config, "/api/v1/meetings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: meeting.id,
+      title: meeting.title,
+      mode: meeting.mode ?? "general",
+      startedAt: meeting.startedAt,
+      endedAt,
+      transcript: [],
+      summary: "",
+      actionItems: [],
+      captureSource: "meet",
+      processingMode: "managed",
+    }),
+  }, fetchImpl);
+}
+
+export async function uploadManagedMeeting(
+  config: ManagedServiceConfig,
+  meetingId: string,
+  chunks: ManagedChunk[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManagedUploadResult> {
+  if (chunks.length === 0) throw new Error("A managed meeting must contain at least one audio chunk");
+  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.bytes.byteLength, 0);
+  const idempotencyKey = `meeting:${meetingId}`;
+  const manifest = await requestJson(config, "/api/v1/uploads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ meetingId, totalChunks: chunks.length, totalBytes, idempotencyKey }),
+  }, fetchImpl);
+  const uploadId = typeof manifest.uploadId === "string" ? manifest.uploadId : "";
+  if (!uploadId) throw new Error("Managed service returned no upload id");
+
+  // A retry after a completed upload must go straight to processing. The
+  // server keeps the upload idempotent and correctly rejects PUTs against a
+  // completed manifest, so replaying every chunk here would turn a recoverable
+  // provider failure into a client-visible upload failure.
+  if (manifest.status !== "complete") {
+    for (const chunk of chunks) {
+      const bytes = chunk.bytes.slice();
+      const digest = await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer);
+      const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      await requestJson(config, `/api/v1/uploads/${encodeURIComponent(uploadId)}/chunks/${chunk.index}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream", "x-chunk-sha256": checksum, "x-audio-channel": chunk.channel },
+        body: bytes.buffer as ArrayBuffer,
+      }, fetchImpl);
+    }
+
+    await requestJson(config, `/api/v1/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST" }, fetchImpl);
+  }
+  const job = await requestJson(config, `/api/v1/meetings/${encodeURIComponent(meetingId)}/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uploadId, idempotencyKey }),
+  }, fetchImpl);
+  if (typeof job.jobId !== "string") throw new Error("Managed service returned no processing job id");
+  return { uploadId, jobId: job.jobId, meetingId };
+}
+
+export async function getManagedJob(config: ManagedServiceConfig, jobId: string, fetchImpl: typeof fetch = fetch): Promise<{ status: string; meetingId: string; message?: string; summary?: string; actionItems?: ActionItem[] }> {
+  const body = await requestJson(config, `/api/v1/jobs/${encodeURIComponent(jobId)}`, { method: "GET" }, fetchImpl);
+  const result = body.meeting as { summary?: unknown; actionItems?: unknown } | undefined;
+  return {
+    status: typeof body.status === "string" ? body.status : "error",
+    meetingId: typeof body.meetingId === "string" ? body.meetingId : "",
+    message: typeof body.message === "string" ? body.message : undefined,
+    summary: typeof result?.summary === "string" ? result.summary : undefined,
+    actionItems: Array.isArray(result?.actionItems) ? result.actionItems.filter((item): item is ActionItem => typeof item === "object" && item !== null && typeof (item as { text?: unknown }).text === "string") : undefined,
+  };
+}

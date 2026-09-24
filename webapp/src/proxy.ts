@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedBearer } from "./lib/auth";
+import { isManagedCorsOrigin, managedCorsHeaders } from "./lib/cors";
+import { requestIdFrom } from "./lib/requestId";
 import { getSessionUser } from "./lib/sessions";
 
 // Proxy files (Next.js 16's replacement for middleware.ts) always run on
@@ -29,20 +31,55 @@ import { getSessionUser } from "./lib/sessions";
  */
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
+  const requestId = requestIdFrom(request);
 
   if (pathname === "/api/health") {
     return NextResponse.next();
   }
 
   if (pathname.startsWith("/api/")) {
+    if (pathname.startsWith("/api/v1/")) {
+      const origin = request.headers.get("origin");
+      const corsHeaders = managedCorsHeaders(origin, request.nextUrl.origin);
+      if (!isManagedCorsOrigin(origin, request.nextUrl.origin)) {
+        return NextResponse.json({ error: "origin not allowed", requestId }, { status: 403, headers: { ...corsHeaders, "x-request-id": requestId } });
+      }
+      if (request.method === "OPTIONS") {
+        return new NextResponse(null, { status: 204, headers: { ...corsHeaders, "x-request-id": requestId } });
+      }
+      // Login is the one managed API route that must be reachable before a
+      // session exists. The route itself performs password verification and
+      // creates the opaque session used by every other managed endpoint.
+      if (pathname === "/api/v1/auth/login") return NextResponse.next();
+      if (((pathname.startsWith("/api/v1/jobs/") && pathname.endsWith("/run")) || pathname === "/api/v1/jobs/next") && process.env.MANAGED_WORKER_TOKEN && request.headers.get("x-worker-token") === process.env.MANAGED_WORKER_TOKEN) {
+        return NextResponse.next();
+      }
+      if (pathname === "/api/v1/billing/webhook" && request.headers.has("stripe-signature")) {
+        return NextResponse.next();
+      }
+      const authorization = request.headers.get("authorization");
+      const sessionId = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+      const user = sessionId && sessionId !== process.env.AUTH_TOKEN ? await getSessionUser(sessionId) : null;
+      if (!user) {
+        return NextResponse.json({ error: "managed session required", requestId }, { status: 401, headers: { ...corsHeaders, "x-request-id": requestId } });
+      }
+      return NextResponse.next();
+    }
     const authorized = isAuthorizedBearer(request.headers.get("authorization"));
     if (!authorized) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "unauthorized", requestId }, { status: 401, headers: { "x-request-id": requestId } });
     }
     return NextResponse.next();
   }
 
   if (pathname === "/login") {
+    return NextResponse.next();
+  }
+
+  // Share links are bearer capabilities themselves. The page validates the
+  // hashed, expiring token; requiring a browser session here would defeat the
+  // purpose of sharing a meeting with someone outside the workspace.
+  if (pathname.startsWith("/share/")) {
     return NextResponse.next();
   }
 

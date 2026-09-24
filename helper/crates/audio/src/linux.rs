@@ -1,4 +1,5 @@
-//! Linux virtual audio device: a PulseAudio/PipeWire null-sink (for the
+//! Linux capture prefers an existing PulseAudio/PipeWire monitor source and
+//! falls back to a virtual null-sink (for the
 //! "speaker" side, i.e. remote participants' audio) plus a loopback so the
 //! user still hears the meeting normally, and a remap-source alias of the
 //! real microphone (for the "mic" side). No custom driver — this is all
@@ -11,7 +12,9 @@
 //! while the null-sink monitor is captured through `parec`: cpal's ALSA
 //! enumeration cannot reliably see PipeWire/PulseAudio sources.
 
-use crate::{AudioCapture, AudioDiagnostics, AudioError, CapturedFrame, DriverStatus};
+use crate::{
+    capture_ready, AudioCapture, AudioDiagnostics, AudioError, CapturedFrame, DriverStatus,
+};
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
@@ -82,8 +85,9 @@ impl Default for LinuxAudioCapture {
 #[async_trait]
 impl AudioCapture for LinuxAudioCapture {
     fn driver_status(&self) -> DriverStatus {
-        match module_exists(SINK_NAME) {
-            Ok(true) => DriverStatus::Installed,
+        match native_monitor_source() {
+            Ok(Some(_)) => DriverStatus::Installed,
+            _ if matches!(module_exists(SINK_NAME), Ok(true)) => DriverStatus::Installed,
             _ => DriverStatus::NotInstalled {
                 install_guidance: "AI Notetaker sets up its virtual audio devices automatically on Linux via PulseAudio/PipeWire — if this still shows as missing, ensure `pactl` is installed and PulseAudio or PipeWire is running.".to_string(),
             },
@@ -91,47 +95,78 @@ impl AudioCapture for LinuxAudioCapture {
     }
 
     fn diagnostics(&self) -> AudioDiagnostics {
-        let driver_installed = matches!(self.driver_status(), DriverStatus::Installed);
+        let sources = run_pactl(&["list", "short", "sources"]).unwrap_or_default();
+        let native_monitor = monitor_source_from_sources(&sources);
+        let driver_installed =
+            native_monitor.is_some() || matches!(self.driver_status(), DriverStatus::Installed);
         let host = cpal::default_host();
         let microphone = host
             .default_input_device()
             .and_then(|device| device.name().ok());
-        let sources = run_pactl(&["list", "short", "sources"]).unwrap_or_default();
-        let speaker =
-            source_is_listed(&sources, SINK_MONITOR_NAME).then(|| SINK_MONITOR_NAME.to_string());
+        let permission_required = microphone.is_none();
+        let speaker = native_monitor.clone().or_else(|| {
+            source_is_listed(&sources, SINK_MONITOR_NAME).then(|| SINK_MONITOR_NAME.to_string())
+        });
+        let speaker_available = speaker.is_some();
         let mic_source_available = source_is_listed(&sources, MIC_SOURCE_NAME);
-        let ready =
-            driver_installed && microphone.is_some() && speaker.is_some() && mic_source_available;
+        let ready = capture_ready(
+            driver_installed,
+            microphone.is_some(),
+            speaker.is_some(),
+            native_monitor.is_some() || mic_source_available,
+            permission_required,
+        );
         AudioDiagnostics {
             platform: "linux".to_string(),
-            driver: SINK_DESCRIPTION.to_string(),
+            driver: if native_monitor.is_some() {
+                "PipeWire/PulseAudio monitor"
+            } else {
+                SINK_DESCRIPTION
+            }
+            .to_string(),
             driver_installed,
             microphone,
             speaker,
             ready,
             guidance: if ready {
-                "Audio devices are ready. In your meeting app, choose your physical/default microphone as Microphone and AI Notetaker as Speaker/Output. Keep your normal headphones or speakers as the system output.".to_string()
+                if native_monitor.is_some() {
+                    "PipeWire/PulseAudio monitor capture is ready. Keep your normal microphone and speakers selected in the meeting app.".to_string()
+                } else {
+                    "Audio devices are ready. In your meeting app, choose your physical/default microphone as Microphone and AI Notetaker as Speaker/Output. Keep your normal headphones or speakers as the system output.".to_string()
+                }
             } else if !driver_installed {
                 "AI Notetaker will create its PulseAudio/PipeWire devices when you check again. Make sure pactl and PulseAudio/PipeWire are available.".to_string()
             } else {
                 "The virtual device exists, but the microphone or PulseAudio/PipeWire sources are not available yet. Check the system audio service and try again.".to_string()
             },
+            native_loopback: native_monitor.is_some(),
+            virtual_device_fallback: native_monitor.is_none() && speaker_available,
+            permission_required,
         }
     }
 
     fn prepare(&self) -> Result<(), AudioError> {
-        self.ensure_virtual_devices()
+        if native_monitor_source()?.is_some() {
+            Ok(())
+        } else {
+            self.ensure_virtual_devices()
+        }
     }
 
     async fn start_capture(
         &self,
         on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
     ) -> Result<(), AudioError> {
-        self.ensure_virtual_devices()?;
-        let sources = run_pactl(&["list", "short", "sources"])?;
-        if !source_is_listed(&sources, SINK_MONITOR_NAME) {
-            return Err(AudioError::DeviceNotFound(SINK_MONITOR_NAME.to_string()));
-        }
+        let speaker_source = if let Some(source) = native_monitor_source()? {
+            source
+        } else {
+            self.ensure_virtual_devices()?;
+            let sources = run_pactl(&["list", "short", "sources"])?;
+            if !source_is_listed(&sources, SINK_MONITOR_NAME) {
+                return Err(AudioError::DeviceNotFound(SINK_MONITOR_NAME.to_string()));
+            }
+            SINK_MONITOR_NAME.to_string()
+        };
         self.running.store(true, Ordering::SeqCst);
 
         let (tx, rx) = std::sync::mpsc::channel::<CapturedFrame>();
@@ -150,7 +185,7 @@ impl AudioCapture for LinuxAudioCapture {
                 return;
             };
 
-            let mut parec = match spawn_parec() {
+            let mut parec = match spawn_parec_with_source("parec", &speaker_source) {
                 Ok(child) => child,
                 Err(error) => {
                     let _ = ready_tx.send(Err(error.to_string()));
@@ -259,15 +294,16 @@ fn build_input_stream(
     Ok(stream)
 }
 
-fn spawn_parec() -> Result<Child, AudioError> {
-    spawn_parec_with_program("parec")
+#[cfg(test)]
+fn spawn_parec_with_program(program: &str) -> Result<Child, AudioError> {
+    spawn_parec_with_source(program, SINK_MONITOR_NAME)
 }
 
-fn spawn_parec_with_program(program: &str) -> Result<Child, AudioError> {
+fn spawn_parec_with_source(program: &str, source: &str) -> Result<Child, AudioError> {
     Command::new(program)
         .args([
             "-d",
-            SINK_MONITOR_NAME,
+            source,
             "--raw",
             "--format=s16le",
             "--rate=48000",
@@ -334,6 +370,24 @@ fn source_is_listed(sources: &str, source_name: &str) -> bool {
     })
 }
 
+fn monitor_source_from_sources(sources: &str) -> Option<String> {
+    sources.lines().find_map(|line| {
+        let name = line.split_whitespace().nth(1)?;
+        (name.ends_with(".monitor") && name != SINK_MONITOR_NAME).then(|| name.to_string())
+    })
+}
+
+fn native_monitor_source() -> Result<Option<String>, AudioError> {
+    let sources = run_pactl(&["list", "short", "sources"])?;
+    if let Some(sink) = default_sink_name()? {
+        let preferred = format!("{sink}.monitor");
+        if source_is_listed(&sources, &preferred) {
+            return Ok(Some(preferred));
+        }
+    }
+    Ok(monitor_source_from_sources(&sources))
+}
+
 fn default_sink_name() -> Result<Option<String>, AudioError> {
     let info = run_pactl(&["info"]).unwrap_or_default();
     Ok(info
@@ -362,6 +416,15 @@ mod tests {
         assert!(source_is_listed(sources, SINK_MONITOR_NAME));
         assert!(source_is_listed(sources, MIC_SOURCE_NAME));
         assert!(!source_is_listed(sources, "notetaker_sink"));
+    }
+
+    #[test]
+    fn native_monitor_probe_ignores_the_helper_fallback_sink() {
+        let sources = "2 notetaker_sink.monitor module-null-sink.c s16le 2ch 48000Hz RUNNING\n3 alsa_output.pci.monitor module-alsa-card.c s16le 2ch 48000Hz IDLE\n";
+        assert_eq!(
+            monitor_source_from_sources(sources),
+            Some("alsa_output.pci.monitor".to_string())
+        );
     }
 
     #[test]

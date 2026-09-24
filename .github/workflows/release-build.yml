@@ -42,7 +42,7 @@ jobs:
           if (release.version !== extension.version || release.version !== webapp.version || release.version !== helperVersion) {
             throw new Error(`version mismatch: release=${release.version}, extension=${extension.version}, webapp=${webapp.version}, helper=${helperVersion}`);
           }
-          if (release.protocol.version !== 1) throw new Error(`unexpected protocol version ${release.protocol.version}`);
+          if (release.protocol.version !== 3) throw new Error(`unexpected protocol version ${release.protocol.version}`);
           NODE
 
   extension:
@@ -136,7 +136,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx --yes @tauri-apps/cli@latest build --bundles ${{ matrix.bundle }}
+        run: npx --yes @tauri-apps/cli@2.11.5 build --bundles ${{ matrix.bundle }}
       - name: Authenticode-sign Windows bundles
         # Post-build signtool pass rather than a tauri.conf.json certificateThumbprint,
         # so it works from a secret-supplied .pfx without a pre-imported machine cert

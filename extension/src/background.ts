@@ -6,7 +6,7 @@
  * event (see extension/CLAUDE.md and the architecture spec §3.2).
  */
 import { BackgroundController } from "./lib/backgroundController";
-import { getInstallPageUrl } from "./lib/install";
+import { getExtensionOnboardingUrl } from "./lib/install";
 import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/internalMessages";
 import { NativeMessagingClient } from "./lib/nativeMessaging";
 import { openReminderCall, runMeetReminders, syncReminderAlarm } from "./lib/reminderAlarm";
@@ -41,6 +41,26 @@ const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => {
   }
 });
 
+async function stopMeetCaptureForTab(tabId: number, reason: string): Promise<void> {
+  const meetingIds = await meetCapture.stopForTab(tabId);
+  await Promise.all(meetingIds.map((meetingId) => controller.failRecording(meetingId, reason)));
+}
+
+// A captured tab can disappear without the popup or content script getting a
+// final event. Stop the offscreen graph first, then persist a retryable error
+// through the helper-backed controller so already-received audio remains safe.
+chrome.tabs.onRemoved?.addListener((tabId) => {
+  void stopMeetCaptureForTab(tabId, "The Google Meet tab was closed. Audio already received is safe; start a new recording when you rejoin.").catch((error) => {
+    console.warn("Meet capture cleanup after tab removal failed", error);
+  });
+});
+chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
+  if (typeof changeInfo.url !== "string") return;
+  void stopMeetCaptureForTab(tabId, "The Google Meet tab navigated. Audio already received is safe; start a new recording on the active call.").catch((error) => {
+    console.warn("Meet capture cleanup after tab navigation failed", error);
+  });
+});
+
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === "ai-notetaker-helper-retry") client.retryFromAlarm();
   if (alarm.name === REMINDER_ALARM) void readyPromise.then(() => runMeetReminders(() => controller.getState().activeMeeting !== null));
@@ -48,14 +68,24 @@ chrome.alarms?.onAlarm.addListener((alarm) => {
 
 chrome.notifications?.onClicked.addListener((notificationId) => void openReminderCall(notificationId));
 
-// The onboarding wizard (helper install → select device → API key(s)) is
-// the architecture's whole "simple, straightforward install" pillar — it
-// did nothing on its own until this listener existed, since nothing else
-// ever opened it automatically on first install.
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install") {
-    void chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
-  }
+// Do not force a tab open on installation. Chrome already exposes the action
+// popup as the product entry point; opening the wizard here made every new
+// install land on the helper-download screen before the user could see the
+// Meet and local/managed choices. The popup can still open onboarding from
+// its explicit setup action, and the Meet widget can link to it when needed.
+// On extension updates, replace any already-open wizard with the canonical
+// Meet-first URL. Reloading an older helper-first tab is not enough because
+// Chrome preserves its old `mode=desktop` query string across the reload.
+// This is deliberately update-only; the explicit desktop action still opens
+// a desktop-mode wizard after the update.
+chrome.runtime.onInstalled?.addListener((details) => {
+  if (details.reason !== "update") return;
+  const onboardingUrl = chrome.runtime.getURL("onboarding/onboarding.html");
+  const meetFirstUrl = getExtensionOnboardingUrl(chrome.runtime.getURL(""), "meet");
+  void chrome.tabs
+    .query({ url: `${onboardingUrl}*` })
+    .then((tabs) => Promise.all(tabs.flatMap((tab) => (typeof tab.id === "number" ? [chrome.tabs.update(tab.id, { url: meetFirstUrl })] : []))))
+    .catch((error) => console.warn("Could not migrate an older onboarding tab after update", error));
 });
 
 chrome.commands?.onCommand.addListener((command, tab) => {
@@ -108,10 +138,12 @@ async function openExtensionPage(page: Extract<UiToBackgroundMessage, { type: "O
     return;
   }
   const urls: Record<Exclude<typeof page, "settings">, string> = {
-    onboarding: chrome.runtime.getURL("onboarding/onboarding.html"),
+    // All in-call widget setup actions originate from a Meet tab. Keep that
+    // path explicit so Chrome cannot restore an old desktop selection and
+    // send the user to the helper installer.
+    onboarding: getExtensionOnboardingUrl(chrome.runtime.getURL("")),
     microphone: chrome.runtime.getURL("meet/microphone.html"),
     shortcuts: "chrome://extensions/shortcuts",
-    install: getInstallPageUrl("meet-widget"),
   };
   await chrome.tabs.create({ url: urls[page] });
 }
@@ -160,15 +192,23 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
     case "OPEN_MEETING":
       await chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(message.meetingId)}`) });
       return {};
+    case "RETRY_MEETING_PROCESSING":
+      await controller.retryProcessing(message.meetingId);
+      return {};
     case "RETRY_DRIVE_EXPORT":
       await controller.retryDriveExport(message.meetingId);
       return {};
     case "MEET_AUDIO_CHUNK":
       try {
+        if (!meetCapture.isActive(message.meetingId) && controller.getState().activeMeeting?.id === message.meetingId) meetCapture.recover(message.meetingId);
         meetCapture.forwardChunk(message as MeetAudioChunk);
       } catch (error) {
         await controller.failRecording(message.meetingId, error instanceof Error ? error.message : "Meet audio capture failed.");
       }
+      return {};
+    case "MEET_CAPTURE_ERROR":
+      await meetCapture.stop(message.meetingId);
+      await controller.failRecording(message.meetingId, message.message.slice(0, 500) || "Meet audio capture failed.");
       return {};
     case "SAVE_SETTINGS":
       await controller.saveSettings(message.settings);

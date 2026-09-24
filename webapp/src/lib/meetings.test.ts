@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterAll } from "vitest";
 import { prisma } from "./db";
+import { getObject, putObject } from "./objectStorage";
 import {
   upsertMeeting,
   listMeetings,
@@ -67,6 +68,33 @@ describe("upsertMeeting", () => {
     expect(detail?.mode).toBe("general");
     expect(detail?.actionItems[0].status).toBe("open");
     expect(detail?.actionItems[0].id).toEqual(expect.any(String));
+  });
+
+  it("rejects a client meeting ID that belongs to another workspace", async () => {
+    const input = sampleMeeting();
+    await upsertMeeting(input, OTHER_WORKSPACE_ID);
+    await expect(upsertMeeting(input, WORKSPACE_ID)).rejects.toThrow("another workspace");
+    expect(await getMeeting(OTHER_WORKSPACE_ID, input.id)).not.toBeNull();
+  });
+
+  it("persists managed Meet metadata and the authenticated owner", async () => {
+    const ownerId = "managed-owner";
+    const input = sampleMeeting({ captureSource: "meet", processingMode: "managed" });
+    await upsertMeeting(input, WORKSPACE_ID, ownerId);
+    const row = await prisma.meeting.findUnique({ where: { id: input.id }, include: { transcript: true, actionItems: true } });
+    expect(row).toMatchObject({ userId: ownerId, workspaceId: WORKSPACE_ID, captureSource: "meet", processingMode: "managed" });
+    expect(row?.transcript.every((segment) => segment.userId === ownerId)).toBe(true);
+    expect(row?.actionItems.every((item) => item.userId === ownerId)).toBe(true);
+  });
+
+  it("does not erase a completed managed meeting when registration is replayed", async () => {
+    const input = sampleMeeting({ captureSource: "meet", processingMode: "managed" });
+    await upsertMeeting(input, WORKSPACE_ID, "managed-owner");
+    await upsertMeeting({ ...input, summary: "", transcript: [], actionItems: [], endedAt: "2026-09-21T16:00:00.000Z" }, WORKSPACE_ID, "managed-owner");
+    const detail = await getMeeting(WORKSPACE_ID, input.id);
+    expect(detail?.summary).toBe(input.summary);
+    expect(detail?.transcript).toHaveLength(input.transcript.length);
+    expect(detail?.actionItems).toHaveLength(input.actionItems.length);
   });
 
   it("persists meeting modes and lets the action inbox update status and due dates", async () => {
@@ -279,6 +307,29 @@ describe("deleteMeeting", () => {
 
   it("does not throw when deleting a meeting that doesn't exist", async () => {
     await expect(deleteMeeting(WORKSPACE_ID, "does-not-exist")).resolves.not.toThrow();
+  });
+
+  it("removes managed recording objects when the meeting is deleted", async () => {
+    const input = sampleMeeting();
+    await upsertMeeting(input, WORKSPACE_ID);
+    const objectKey = `test-delete/${input.id}.chunk`;
+    await putObject(objectKey, new TextEncoder().encode("recording"));
+    await prisma.managedUpload.create({
+      data: {
+        workspaceId: WORKSPACE_ID,
+        meetingId: input.id,
+        idempotencyKey: `delete-test-${input.id}`,
+        totalChunks: 1,
+        totalBytes: 9,
+        status: "complete",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        chunks: { create: { chunkIndex: 0, byteLength: 9, checksum: "test", objectKey } },
+      },
+    });
+
+    await expect(getObject(objectKey)).resolves.toEqual(new TextEncoder().encode("recording"));
+    await deleteMeeting(WORKSPACE_ID, input.id);
+    await expect(getObject(objectKey)).rejects.toThrow();
   });
 });
 

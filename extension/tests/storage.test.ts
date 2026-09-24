@@ -5,6 +5,7 @@ import {
   saveSettings,
   getPairingToken,
   savePairingToken,
+  clearPairingToken,
   listMeetings,
   saveMeeting,
   getMeeting,
@@ -59,6 +60,46 @@ describe("settings storage", () => {
     expect(settings.apiKeys.deepgram).toBe("legacy-key");
   });
 
+  it("falls back to local BYOK when a stored managed workspace identity is incomplete", async () => {
+    await chrome.storage.local.set({
+      "notetaker.settings": {
+        ...DEFAULT_SETTINGS,
+        processingMode: { kind: "managed", accountId: "acct", workspaceId: "   ", plan: "hosted_pro" },
+        managedService: {
+          baseUrl: "https://notes.example.com",
+          accessToken: "session",
+          accountId: "acct",
+          workspaceId: "   ",
+          plan: "hosted_pro",
+        },
+      },
+    });
+
+    await expect(getSettings()).resolves.toMatchObject({ processingMode: { kind: "local_byok" } });
+  });
+
+  it("round-trips hosted mode separately from the local BYOK mode", async () => {
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" },
+      managedService: {
+        baseUrl: "https://notes.example.com",
+        accessToken: "session-token",
+        accountId: "acct",
+        workspaceId: "ws",
+        plan: "hosted_pro",
+      },
+    });
+
+    await expect(getSettings()).resolves.toMatchObject({
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" },
+      managedService: { accessToken: "session-token", workspaceId: "ws" },
+    });
+
+    await saveSettings({ ...DEFAULT_SETTINGS, processingMode: { kind: "local_byok" }, managedService: null });
+    await expect(getSettings()).resolves.toMatchObject({ processingMode: { kind: "local_byok" }, managedService: null });
+  });
+
   it("never writes settings (or API keys) to chrome.storage.sync", async () => {
     await saveSettings({ ...DEFAULT_SETTINGS, apiKeys: { claude: "secret" } });
     expect(chromeMock.storage.sync.set).not.toHaveBeenCalled();
@@ -83,6 +124,13 @@ describe("pairing token storage", () => {
   it("round-trips a saved pairing token", async () => {
     await savePairingToken("abc123");
     expect(await getPairingToken()).toBe("abc123");
+  });
+
+  it("clears only the local pairing token for profile recovery", async () => {
+    await savePairingToken("stale-token");
+    await clearPairingToken();
+
+    expect(await getPairingToken()).toBeNull();
   });
 });
 

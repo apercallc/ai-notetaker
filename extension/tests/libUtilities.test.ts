@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { estimateMeetingCost } from "../src/lib/costEstimate";
 import { escapeHtml } from "../src/lib/html";
-import { detectInstallPlatform, getInstallPageUrl } from "../src/lib/install";
+import { detectInstallPlatform, getExtensionOnboardingUrl, getInstallPageUrl } from "../src/lib/install";
 import { testProviderKey } from "../src/lib/testProviderKey";
 
 describe("small deterministic extension utilities", () => {
@@ -49,6 +49,29 @@ describe("small deterministic extension utilities", () => {
     expect(url.origin).toBe("https://apercallc.github.io");
     expect(url.searchParams.get("source")).toBe("popup");
     expect(url.searchParams.get("platform")).toBeTruthy();
+    expect(url.searchParams.get("mode")).toBeNull();
+  });
+
+  it("keeps ordinary onboarding links on the Meet-first landing page", () => {
+    const url = new URL(getInstallPageUrl("onboarding"));
+    expect(url.searchParams.get("mode")).toBeNull();
+  });
+
+  it("marks only the explicit desktop installer link as desktop", () => {
+    const url = new URL(getInstallPageUrl("desktop"));
+    expect(url.searchParams.get("mode")).toBe("desktop");
+  });
+
+  it("builds internal setup links with an explicit Meet mode", () => {
+    const url = new URL(getExtensionOnboardingUrl("chrome-extension://stableid/"));
+    expect(url.pathname).toBe("/onboarding/onboarding.html");
+    expect(url.searchParams.get("mode")).toBe("meet");
+  });
+
+  it("allows only the deliberate desktop setup path to opt into desktop mode", () => {
+    const url = new URL(getExtensionOnboardingUrl("chrome-extension://stableid/", "desktop"));
+    expect(url.searchParams.get("mode")).toBe("desktop");
+    expect(url.searchParams.get("source")).toBe("desktop");
   });
 
   describe("testProviderKey", () => {

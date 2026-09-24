@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { FormEvent } from "react";
-import { MAX_SEARCH_LENGTH } from "@/lib/meetings";
+import { MAX_SEARCH_LENGTH } from "@/lib/meetingConstants";
 
 export function SearchForm({ initialQuery }: { initialQuery: string }) {
   const router = useRouter();

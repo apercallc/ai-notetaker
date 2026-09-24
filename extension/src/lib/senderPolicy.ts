@@ -1,5 +1,6 @@
 import type { UiToBackgroundMessage } from "./internalMessages";
 import { isMeetUrl } from "../meet/meetContext";
+import type { CaptureSource } from "../types";
 
 /** The only requests the Google Meet content script may make; everything else needs an extension page. */
 const CONTENT_SCRIPT_MESSAGES = new Set<UiToBackgroundMessage["type"]>([
@@ -44,7 +45,7 @@ export function resolveStartRequest(
   message: Extract<UiToBackgroundMessage, { type: "START_RECORDING" }>,
   kind: SenderKind,
   senderTabId: number | undefined,
-): { captureSource: "desktop" | "meet"; tabId: number | undefined } {
+): { captureSource: CaptureSource; tabId: number | undefined } {
   if (kind === "meet-content-script") return { captureSource: "meet", tabId: senderTabId };
   return { captureSource: message.captureSource ?? "desktop", tabId: message.tabId ?? senderTabId };
 }
@@ -59,7 +60,7 @@ export function isMessageAllowed(type: UiToBackgroundMessage["type"], kind: Send
     case "extension-page":
       return type !== "MEET_AUDIO_CHUNK";
     case "offscreen":
-      return type === "MEET_AUDIO_CHUNK";
+      return type === "MEET_AUDIO_CHUNK" || type === "MEET_CAPTURE_ERROR";
     case "meet-content-script":
       return CONTENT_SCRIPT_MESSAGES.has(type);
     default:

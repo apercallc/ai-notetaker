@@ -1,16 +1,16 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ValidationError } from "./meetings";
+import { safeRequestId } from "./requestId";
+
+// Keep the existing route import path stable while allowing the proxy to use
+// the dependency-light request-id utility without loading route validation or
+// Prisma-backed meeting code.
+export { requestIdFrom } from "./requestId";
 
 type ErrorResponseOptions = {
   requestId?: string;
   fallbackMessage?: string;
 };
-
-function safeRequestId(value: string | null | undefined): string {
-  const candidate = value?.trim();
-  return candidate && candidate.length <= 128 ? candidate : randomUUID();
-}
 
 /**
  * Keep API failures consistent and safe for clients. Validation failures are
@@ -35,10 +35,6 @@ export function apiErrorResponse(
     { error: options.fallbackMessage ?? "internal server error", requestId },
     { status: 500, headers: { "x-request-id": requestId } },
   );
-}
-
-export function requestIdFrom(request: Request): string {
-  return safeRequestId(request.headers.get("x-request-id"));
 }
 
 export function jsonError(

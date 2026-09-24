@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const { addMember } = await import("./actions");
+const { addMember, updateRetentionPolicy } = await import("./actions");
 
 function formData(fields: Record<string, string>): FormData {
   const data = new FormData();
@@ -109,5 +109,27 @@ describe("workspace membership creation", () => {
 
     const orphans = await prisma.user.findMany({ where: { memberships: { none: {} } } });
     expect(orphans).toEqual([]);
+  });
+});
+
+describe("retention policy", () => {
+  it("lets an owner save a bounded hosted retention policy", async () => {
+    const { userId: ownerId, workspaceId } = await createWorkspaceWithOwner("owner@example.com", "hash");
+    await sessionCookieFor(ownerId);
+
+    await expect(updateRetentionPolicy(formData({ retentionDays: "30" }))).resolves.toEqual({ ok: true, retentionDays: 30 });
+    await expect(prisma.workspace.findUnique({ where: { id: workspaceId }, select: { retentionDays: true } })).resolves.toEqual({ retentionDays: 30 });
+    await expect(updateRetentionPolicy(formData({ retentionDays: "never" }))).resolves.toEqual({ ok: true, retentionDays: null });
+  });
+
+  it("rejects invalid retention values and non-owner changes", async () => {
+    const { workspaceId } = await createWorkspaceWithOwner("owner@example.com", "hash");
+    const { userId: memberId } = await addWorkspaceMember(workspaceId, "member@example.com", "hash2");
+    await sessionCookieFor(memberId);
+    await expect(updateRetentionPolicy(formData({ retentionDays: "30" }))).resolves.toEqual({ ok: false, error: "Only the workspace owner can change retention." });
+
+    const { userId: ownerId } = await prisma.workspaceMembership.findFirstOrThrow({ where: { workspaceId, role: "owner" }, select: { userId: true } });
+    await sessionCookieFor(ownerId);
+    await expect(updateRetentionPolicy(formData({ retentionDays: "0" }))).resolves.toEqual({ ok: false, error: "Choose never or a value from 1 to 3650 days." });
   });
 });

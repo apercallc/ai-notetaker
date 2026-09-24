@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 build = "build.rs"
 default-run = "notetaker-helper"
-description = "Self-hosted AI meeting notetaker tray helper and Native Messaging relay"
+description = "Local-first AI meeting notetaker tray helper and Native Messaging relay"
 
 [[bin]]
 name = "notetaker-helper"
@@ -19,6 +19,9 @@ path = "src/nm_host_main.rs"
 notetaker-core = { path = "../core" }
 notetaker-audio = { path = "../audio" }
 tokio.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

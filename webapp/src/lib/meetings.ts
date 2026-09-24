@@ -1,7 +1,9 @@
 import { prisma } from "./db";
 import { LOCAL_USER_ID } from "./auth";
+import { deleteObject } from "./objectStorage";
 import { randomUUID } from "node:crypto";
-import type { CreateMeetingRequest, MeetingDetailResponse, MeetingMode, MeetingSummaryResponse } from "./types";
+import type { CaptureSource, CreateMeetingRequest, MeetingDetailResponse, MeetingMode, MeetingSummaryResponse, ProcessingMode } from "./types";
+import { MAX_SEARCH_LENGTH } from "./meetingConstants";
 
 export class ValidationError extends Error {}
 
@@ -42,6 +44,12 @@ function assertValid(input: unknown): CreateMeetingRequest {
   }
   if (body.mode !== undefined && !["general", "standup", "sales", "one_on_one", "interview", "custom"].includes(body.mode as string)) {
     throw new ValidationError("mode is invalid");
+  }
+  if (body.captureSource !== undefined && !["desktop", "meet"].includes(body.captureSource as string)) {
+    throw new ValidationError("captureSource is invalid");
+  }
+  if (body.processingMode !== undefined && !["local_byok", "managed"].includes(body.processingMode as string)) {
+    throw new ValidationError("processingMode is invalid");
   }
   if (body.summary.length > MAX_SUMMARY_LENGTH) {
     throw new ValidationError(`summary must be ${MAX_SUMMARY_LENGTH} characters or fewer`);
@@ -114,39 +122,65 @@ function defaultTitle(startedAt: string): string {
   return `Meeting on ${new Date(startedAt).toISOString().slice(0, 10)}`;
 }
 
-export async function upsertMeeting(rawInput: unknown, workspaceId: string): Promise<{ id: string; title: string }> {
+export async function upsertMeeting(rawInput: unknown, workspaceId: string, userId = LOCAL_USER_ID): Promise<{ id: string; title: string }> {
   const input = assertValid(rawInput);
   const title = input.title?.trim() ? input.title.trim() : defaultTitle(input.startedAt);
+  const captureSource: CaptureSource = input.captureSource ?? "desktop";
+  const processingMode: ProcessingMode = input.processingMode ?? "local_byok";
+
+  // IDs originate on clients. Never let a managed client re-use an ID from a
+  // different tenant, and do this check before deleting child rows.
+  const existing = await prisma.meeting.findUnique({
+    where: { id: input.id },
+    select: { workspaceId: true, summary: true, startedAt: true, endedAt: true },
+  });
+  if (existing && existing.workspaceId !== workspaceId) {
+    throw new ValidationError("meeting belongs to another workspace");
+  }
+  const isManagedRegistration = input.processingMode === "managed" && input.summary === "" && input.transcript.length === 0 && input.actionItems.length === 0;
+  // Registration is deliberately idempotent: a retry must not erase a
+  // transcript/summary that was already persisted by an earlier attempt,
+  // including a valid result whose summary happens to be empty.
+  const preserveExistingContent = Boolean(existing && isManagedRegistration);
+  const storedSummary = preserveExistingContent ? existing?.summary ?? "" : input.summary;
+  const storedStartedAt = preserveExistingContent ? existing?.startedAt ?? new Date(input.startedAt) : new Date(input.startedAt);
+  const storedEndedAt = preserveExistingContent ? existing?.endedAt ?? new Date(input.endedAt) : new Date(input.endedAt);
 
   await prisma.$transaction([
-    prisma.transcriptSegment.deleteMany({ where: { meetingId: input.id } }),
-    prisma.actionItem.deleteMany({ where: { meetingId: input.id } }),
+    ...(preserveExistingContent ? [] : [
+      prisma.transcriptSegment.deleteMany({ where: { meetingId: input.id } }),
+      prisma.actionItem.deleteMany({ where: { meetingId: input.id } }),
+    ]),
     prisma.meeting.upsert({
       where: { id: input.id },
       create: {
         id: input.id,
-        userId: LOCAL_USER_ID,
+        userId,
         workspaceId,
         title,
         mode: input.mode ?? "general",
-        startedAt: new Date(input.startedAt),
-        endedAt: new Date(input.endedAt),
-        summary: input.summary,
+        captureSource,
+        processingMode,
+        startedAt: storedStartedAt,
+        endedAt: storedEndedAt,
+        summary: storedSummary,
       },
       update: {
         title,
         mode: input.mode ?? "general",
-        startedAt: new Date(input.startedAt),
-        endedAt: new Date(input.endedAt),
-        summary: input.summary,
+        ...(input.captureSource ? { captureSource } : {}),
+        ...(input.processingMode ? { processingMode } : {}),
+        startedAt: storedStartedAt,
+        endedAt: storedEndedAt,
+        summary: storedSummary,
       },
     }),
-    ...(input.transcript.length > 0
+    ...(preserveExistingContent ? [] : input.transcript.length > 0
       ? [
           prisma.transcriptSegment.createMany({
             data: input.transcript.map((segment, index) => ({
               meetingId: input.id,
-              userId: LOCAL_USER_ID,
+              userId,
               speaker: segment.speaker,
               text: segment.text,
               timestamp: new Date(segment.timestamp),
@@ -155,13 +189,13 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string): Pro
           }),
         ]
       : []),
-    ...(input.actionItems.length > 0
+    ...(preserveExistingContent ? [] : input.actionItems.length > 0
       ? [
           prisma.actionItem.createMany({
             data: input.actionItems.map((item) => ({
               id: item.id ?? randomUUID(),
               meetingId: input.id,
-              userId: LOCAL_USER_ID,
+              userId,
               text: item.text,
               owner: item.owner ?? null,
               status: item.status ?? "open",
@@ -181,8 +215,6 @@ export interface ListMeetingsOptions {
   limit?: number;
   offset?: number;
 }
-
-export const MAX_SEARCH_LENGTH = 200;
 
 export async function listMeetings(
   workspaceId: string,
@@ -250,6 +282,7 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     include: {
       transcript: { orderBy: { order: "asc" } },
       actionItems: true,
+      uploads: { where: { status: "complete" }, select: { chunks: { select: { channel: true } } } },
     },
   });
   if (!row) return null;
@@ -261,6 +294,8 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     endedAt: row.endedAt.toISOString(),
     summary: row.summary,
     mode: row.mode as MeetingMode,
+    recordingAvailable: Boolean(row.recordingObjectKey) || row.uploads.some((upload) => upload.chunks.length > 0),
+    recordingChannels: [...new Set(row.uploads.flatMap((upload) => upload.chunks.map((chunk) => chunk.channel)).filter((channel): channel is "mic" | "speaker" => channel === "mic" || channel === "speaker"))],
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,
@@ -318,5 +353,34 @@ export async function updateActionItem(
 }
 
 export async function deleteMeeting(workspaceId: string, id: string): Promise<void> {
+  const meeting = await prisma.meeting.findFirst({
+    where: { id, workspaceId },
+    select: {
+      recordingObjectKey: true,
+      uploads: { select: { objectKey: true, chunks: { select: { objectKey: true } } } },
+    },
+  });
+  if (!meeting) return;
+
+  const objectKeys = [
+    meeting.recordingObjectKey,
+    ...meeting.uploads.flatMap((upload) => [upload.objectKey, ...upload.chunks.map((chunk) => chunk.objectKey)]),
+  ].filter((key): key is string => Boolean(key));
+
+  // Delete the database record first so a successful user-visible delete can
+  // never leave a recoverable meeting behind. Object storage is separate from
+  // Postgres, so clean it up after the cascading delete and log any orphaned
+  // object for operator repair rather than turning a completed delete into a
+  // misleading 500 response.
   await prisma.meeting.deleteMany({ where: { id, workspaceId } });
+  const cleanup = await Promise.allSettled(objectKeys.map((key) => deleteObject(key)));
+  const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failures.length) {
+    console.error("meeting object cleanup failed", {
+      meetingId: id,
+      workspaceId,
+      failedObjects: failures.length,
+      firstError: failures[0]?.reason instanceof Error ? failures[0].reason.message : String(failures[0]?.reason),
+    });
+  }
 }

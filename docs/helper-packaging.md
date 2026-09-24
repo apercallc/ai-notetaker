@@ -17,7 +17,7 @@ manually.
 From `helper/crates/app/`:
 
 ```sh
-npx --yes @tauri-apps/cli@latest build --bundles deb,appimage
+npx --yes @tauri-apps/cli@2.11.5 build --bundles deb,appimage
 ```
 
 The Tauri configuration also declares macOS `dmg` and Windows `msi`/`nsis`
@@ -121,7 +121,7 @@ disabled until the owner supplies a real signing key; enable
 generating and protecting the key pair:
 
 ```sh
-npx --yes @tauri-apps/cli@latest signer generate -w ~/.tauri/ai-notetaker.key
+npx --yes @tauri-apps/cli@2.11.5 signer generate -w ~/.tauri/ai-notetaker.key
 ```
 
 Only the owner may replace `REPLACE_WITH_OWNER_GENERATED_TAURI_UPDATER_PUBLIC_KEY`,

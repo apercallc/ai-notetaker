@@ -15,9 +15,24 @@ export function detectInstallPlatform(): InstallPlatform {
   return "unknown";
 }
 
-export function getInstallPageUrl(source: "onboarding" | "popup" | "meet-widget" = "onboarding"): string {
+export function getInstallPageUrl(source: "onboarding" | "popup" | "meet-widget" | "desktop" = "onboarding"): string {
   const url = new URL(INSTALL_PAGE_BASE_URL);
   url.searchParams.set("platform", detectInstallPlatform());
   url.searchParams.set("source", source);
+  // The public landing page is Meet-first. Only an explicit desktop-install
+  // action should open its helper section as the primary destination.
+  if (source === "desktop") url.searchParams.set("mode", "desktop");
+  return url.toString();
+}
+
+/**
+ * Builds an internal extension setup URL. Keep the default Meet mode explicit:
+ * Chrome can restore an old onboarding tab, and omitting the mode would make
+ * a future entry point depend on stale page state again.
+ */
+export function getExtensionOnboardingUrl(extensionBaseUrl: string, mode: "meet" | "desktop" = "meet"): string {
+  const url = new URL("onboarding/onboarding.html", extensionBaseUrl);
+  url.searchParams.set("mode", mode);
+  if (mode === "desktop") url.searchParams.set("source", "desktop");
   return url.toString();
 }

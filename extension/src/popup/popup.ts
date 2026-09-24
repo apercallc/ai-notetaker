@@ -2,12 +2,30 @@ import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
 import { speakerLabel, type AudioProbeResult, type AudioStatus, type CaptureSource, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
-import { getInstallPageUrl } from "../lib/install";
+import { getExtensionOnboardingUrl } from "../lib/install";
 import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
 let historyQuery = "";
+
+function onboardingUrl(): string {
+  return getExtensionOnboardingUrl(chrome.runtime.getURL(""));
+}
+
+const DESKTOP_ONBOARDING_INTENT_KEY = "notetaker.desktopOnboardingIntentAt";
+
+async function markDesktopOnboardingIntent(): Promise<void> {
+  const session = chrome.storage.session;
+  if (!session?.set) return;
+  await new Promise<void>((resolve) => {
+    try {
+      session.set({ [DESKTOP_ONBOARDING_INTENT_KEY]: Date.now() }, () => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
 
 function clearLiveListener(): void {
   removeLiveListener?.();
@@ -45,12 +63,14 @@ async function renderOnboardingPrompt(): Promise<void> {
   app.innerHTML = `
     ${renderHeader(false)}
     <div class="empty-state">
-      <p>Let's get you set up — connect the helper, route meeting audio, then add one transcription key and one summarization key.</p>
-      <button class="primary" id="start-onboarding">Start setup</button>
+      <h2>Record calls without a bot</h2>
+      <p>Start with Google Meet browser capture, or choose a desktop call during setup. Choose free local BYOK or Hosted AI after you pick where you will record.</p>
+      <button class="primary" id="start-onboarding">Start with Google Meet</button>
+      <p class="field-hint text-secondary">You can switch to Zoom, Teams, Slack, or another desktop call in the next step.</p>
     </div>
   `;
   document.getElementById("start-onboarding")?.addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
+    chrome.tabs.create({ url: onboardingUrl() });
   });
 }
 
@@ -80,20 +100,6 @@ async function renderRecoverableBanner(recoverableMeeting: NonNullable<Backgroun
     } catch (error) {
       renderFailure(error);
     }
-  });
-}
-
-function renderHelperMissingBanner(status: BackgroundState["helperStatus"], helperInfo: BackgroundState["helperInfo"]): void {
-  const container = document.createElement("div");
-  container.className = "banner missing-helper";
-  const incompatible = status === "incompatible";
-  container.innerHTML = `
-    <p><strong>${incompatible ? "Helper update required." : "Helper not detected."}</strong> ${incompatible ? `Version ${escapeHtml(helperInfo?.helperVersion ?? "unknown")} is not compatible with this extension.` : "Recording needs the AI Notetaker desktop helper installed and running."}</p>
-    <button class="secondary" id="open-helper-setup">${incompatible ? "Update desktop helper" : "Install desktop helper"}</button>
-  `;
-  app.prepend(container);
-  document.getElementById("open-helper-setup")?.addEventListener("click", () => {
-    chrome.tabs.create({ url: getInstallPageUrl("popup") });
   });
 }
 
@@ -128,7 +134,7 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
       <span class="recording-indicator">Recording</span>
       <button class="danger record-toggle" id="stop-recording">Stop</button>
     </div>
-    <p id="status" class="text-secondary" role="status" aria-live="polite"></p>
+    <p id="recording-status" class="text-secondary" role="status" aria-live="polite"></p>
     <div class="transcript-view" id="transcript-view" role="log" aria-label="Live transcript"></div>
   `;
   const transcriptView = document.getElementById("transcript-view")!;
@@ -163,7 +169,7 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
       void renderSafely();
     }
     if (message.type === "PROCESSING_WARNING" && message.meetingId === meetingId) {
-      const status = document.getElementById("status");
+      const status = document.getElementById("recording-status");
       if (status) status.textContent = "A transcription chunk will be retried automatically.";
     }
   }
@@ -198,36 +204,49 @@ function meetingModeOptions(selected: MeetingMode): string {
   return options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
 }
 
-async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]): Promise<void> {
+async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"], knownOnMeet?: boolean): Promise<void> {
   const statusEl = document.getElementById("audio-status");
   const checkButton = document.getElementById("check-audio") as HTMLButtonElement | null;
   const probeButton = document.getElementById("test-audio") as HTMLButtonElement | null;
   if (!statusEl) return;
   statusEl.textContent = "Checking audio devices…";
   statusEl.className = "text-secondary";
+  const captureSource = (document.getElementById("capture-source") as HTMLSelectElement | null)?.value;
+  if (captureSource === "meet") {
+    const onMeet = knownOnMeet ?? await activeTabIsMeet();
+    statusEl.textContent = onMeet
+      ? "Google Meet browser capture is ready. Chrome will ask for microphone and tab-audio permission when you start."
+      : "Open a Google Meet call in this tab to start browser capture. Desktop-call capture is optional below.";
+    statusEl.className = onMeet ? "text-success" : "text-secondary";
+    if (checkButton) checkButton.disabled = true;
+    if (probeButton) probeButton.disabled = true;
+    const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
+    if (startButton) startButton.disabled = !onMeet;
+    return;
+  }
+  if (checkButton) checkButton.disabled = false;
   try {
     const response = await sendToBackground<{ status: AudioStatus }>({ type: "GET_AUDIO_PREFLIGHT" });
     const status = response.status;
     const deviceLine = [status.microphone ? `Mic: ${status.microphone}` : "Mic: missing", status.speaker ? `Meeting audio: ${status.speaker}` : "Meeting audio: missing"].join(" · ");
+    const capturePath = status.nativeLoopback ? "Native system-audio capture." : status.virtualDeviceFallback ? "Virtual-device fallback active." : "System-audio capture unavailable.";
     const readiness = !status.driverInstalled
       ? "Audio driver missing."
       : status.ready
         ? "Audio ready."
         : "Audio routing incomplete.";
-    statusEl.textContent = `${readiness} ${deviceLine} ${status.guidance}`;
+    statusEl.textContent = `${readiness} ${deviceLine} ${capturePath} ${status.guidance}`;
     statusEl.className = status.ready ? "text-success" : "text-warning";
     if (checkButton) checkButton.textContent = status.ready ? "Refresh audio check" : "Check audio again";
     if (probeButton) probeButton.disabled = !status.ready;
     const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-    const captureSource = (document.getElementById("capture-source") as HTMLSelectElement | null)?.value;
-    if (startButton) startButton.disabled = helperStatus !== "connected" || (captureSource !== "meet" && !status.ready);
+    if (startButton) startButton.disabled = (captureSource !== "meet" && helperStatus !== "connected") || (captureSource !== "meet" && !status.ready);
   } catch {
     statusEl.textContent = "Audio check failed. Confirm the desktop helper is running, then try again.";
     statusEl.className = "text-warning";
     if (probeButton) probeButton.disabled = true;
     const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-    const captureSource = (document.getElementById("capture-source") as HTMLSelectElement | null)?.value;
-    if (startButton) startButton.disabled = helperStatus !== "connected" || captureSource !== "meet";
+    if (startButton) startButton.disabled = captureSource !== "meet" && helperStatus !== "connected";
   }
 }
 
@@ -261,17 +280,8 @@ async function activeTabIsMeet(): Promise<boolean> {
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
   const meetings = await listMeetings(historyQuery ? undefined : 5, historyQuery || undefined);
   const onMeet = await activeTabIsMeet();
-  const helperStatusCopy =
-    helperStatus === "connecting"
-      ? "Connecting to the desktop helper…"
-      : helperStatus === "disconnected"
-        ? "Desktop helper disconnected — start it before recording."
-        : helperStatus === "incompatible"
-          ? "Desktop helper needs an update before recording."
-        : "";
   app.innerHTML = `
     ${renderHeader(true)}
-    ${helperStatusCopy ? `<p class="text-secondary" role="status">${helperStatusCopy}</p>` : ""}
     <div class="record-controls">
       <button class="primary record-toggle" id="start-recording" disabled>Record</button>
       <label class="meeting-mode-picker" for="meeting-mode">Meeting mode
@@ -279,11 +289,15 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       </label>
       <label class="meeting-mode-picker" for="capture-source">Capture mode
         <select id="capture-source">
-          <option value="desktop"${onMeet ? "" : " selected"}>Zoom, Teams, Slack Huddle — desktop helper</option>
-          <option value="meet"${onMeet ? " selected" : ""}>Google Meet — capture this tab</option>
+          <option value="meet" selected>Google Meet — capture this tab</option>
+          <option value="desktop">Zoom, Teams, Slack Huddle — desktop helper</option>
         </select>
       </label>
       <p class="field-hint text-secondary capture-mode-hint" id="capture-mode-hint">Use the desktop helper for Zoom, Microsoft Teams, and Slack Huddles. Google Meet can use browser capture in the active tab.</p>
+      <div class="audio-check" id="desktop-helper-actions" hidden>
+        <p class="field-hint text-secondary">Desktop-call capture needs the native helper. Google Meet does not.</p>
+        <button type="button" class="secondary" id="open-helper-setup">Set up desktop capture</button>
+      </div>
       <div class="audio-check" aria-live="polite">
         <p id="audio-status" class="text-secondary">Checking audio devices…</p>
         <div class="audio-check-actions">
@@ -333,7 +347,18 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   });
   document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus(helperStatus));
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());
-  document.getElementById("capture-source")?.addEventListener("change", () => void renderAudioStatus(helperStatus));
+  document.getElementById("capture-source")?.addEventListener("change", () => {
+    const captureSource = (document.getElementById("capture-source") as HTMLSelectElement).value;
+    const helperActions = document.getElementById("desktop-helper-actions");
+    if (helperActions) helperActions.hidden = captureSource !== "desktop";
+    void renderAudioStatus(helperStatus, onMeet);
+  });
+  document.getElementById("open-helper-setup")?.addEventListener("click", async () => {
+    // This is an explicit desktop choice. Keep the ordinary popup entry point
+    // Meet-first, but preserve the user's deliberate request for helper setup.
+    await markDesktopOnboardingIntent();
+    chrome.tabs.create({ url: getExtensionOnboardingUrl(chrome.runtime.getURL(""), "desktop") });
+  });
   document.getElementById("open-action-inbox")?.addEventListener("click", () => {
     chrome.tabs.create({ url: chrome.runtime.getURL("actions/actions.html") });
   });
@@ -353,7 +378,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(id)}`) });
     });
   }
-  void renderAudioStatus(helperStatus);
+  void renderAudioStatus(helperStatus, onMeet);
 }
 
 async function render(): Promise<void> {
@@ -374,14 +399,6 @@ async function render(): Promise<void> {
 
   if (state.recoverableMeeting) {
     await renderRecoverableBanner(state.recoverableMeeting);
-  }
-
-  // Only worth surfacing once onboarding is done and there's no active
-  // recording already in view — a "helper not found" banner while the user
-  // is mid-setup, or stacked on top of a live recording that started
-  // before the helper dropped, would be noise rather than help.
-  if ((state.helperStatus === "helper_not_found" || state.helperStatus === "incompatible") && !state.activeMeeting) {
-    renderHelperMissingBanner(state.helperStatus, state.helperInfo);
   }
 
   // Each render replaces the entire view. Move focus to the new view's

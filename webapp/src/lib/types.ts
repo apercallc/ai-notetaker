@@ -17,6 +17,8 @@ export interface ActionItemInput {
 }
 
 export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
+export type CaptureSource = "desktop" | "meet";
+export type ProcessingMode = "local_byok" | "managed";
 
 export interface CreateMeetingRequest {
   id: string;
@@ -27,6 +29,10 @@ export interface CreateMeetingRequest {
   transcript: TranscriptSegmentInput[];
   summary: string;
   actionItems: ActionItemInput[];
+  /** Optional on the legacy self-hosted ingestion contract. */
+  captureSource?: CaptureSource;
+  /** Optional on the legacy self-hosted ingestion contract. */
+  processingMode?: ProcessingMode;
 }
 
 export interface MeetingSummaryResponse {
@@ -58,6 +64,8 @@ export interface MeetingDetailResponse {
   endedAt: string;
   summary: string;
   mode: MeetingMode;
+  recordingAvailable: boolean;
+  recordingChannels: ("mic" | "speaker")[];
   transcript: { speaker: string; text: string; timestamp: string }[];
   actionItems: {
     id: string;

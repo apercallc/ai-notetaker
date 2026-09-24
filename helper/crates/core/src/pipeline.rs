@@ -113,6 +113,23 @@ impl Pipeline {
         Ok(HelperToExtension::RecordingStarted { meeting_id })
     }
 
+    /// Stops capture after durable audio has been written without invoking a
+    /// local provider. Managed mode uses this path: the app uploads the two
+    /// saved channel files to the hosted job service, which owns provider
+    /// execution and billing.
+    pub fn stop_capture_only(
+        &mut self,
+        meeting_id: Uuid,
+    ) -> Result<HelperToExtension, PipelineError> {
+        self.accepting_audio = false;
+        self.pending_mic = None;
+        self.pending_speaker = None;
+        self.mic_session = None;
+        self.speaker_session = None;
+        self.store.mark_stopped(meeting_id, Utc::now())?;
+        Ok(HelperToExtension::RecordingStopped { meeting_id })
+    }
+
     /// Persists every callback frame immediately, then batches it for a
     /// provider call. A crash can therefore lose at most the in-memory
     /// transcription batch, never the raw audio.
@@ -147,6 +164,33 @@ impl Pipeline {
         let _ = self
             .store
             .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz);
+
+        self.handle_persisted_audio_chunk(meeting_id, channel, pcm16, sample_rate_hz, existing_len)
+            .await
+    }
+
+    /// Processes a frame that the caller has already persisted. The helper
+    /// app uses this split to keep the Native Messaging/audio ingress path
+    /// independent from provider latency: frames reach durable storage and
+    /// are queued before this method awaits any network call.
+    pub async fn handle_persisted_audio_chunk(
+        &mut self,
+        meeting_id: Uuid,
+        channel: AudioChannel,
+        pcm16: &[u8],
+        sample_rate_hz: u32,
+        existing_len: usize,
+    ) -> Vec<HelperToExtension> {
+        if !self.accepting_audio {
+            // The caller should drain the ingress queue before stopping, but
+            // keep this guard so a late callback cannot reopen a finalized
+            // meeting if a backend races shutdown.
+            return vec![];
+        }
+        let channel_file = match channel {
+            AudioChannel::Mic => MIC_FILE,
+            AudioChannel::Speaker => SPEAKER_FILE,
+        };
 
         if self.transcription_provider.is_streaming() {
             return self
@@ -1109,6 +1153,26 @@ mod tests {
             matches!(&messages[0], HelperToExtension::TranscriptPartial { speaker, .. } if speaker == "you")
         );
         // ...and the raw audio is genuinely on disk regardless.
+        let bytes = std::fs::read(pipeline.store.audio_path(id, MIC_FILE)).unwrap();
+        assert_eq!(bytes, vec![1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn an_already_persisted_chunk_is_not_written_twice_before_processing() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .store
+            .append_audio(id, MIC_FILE, &[1, 2, 3, 4])
+            .unwrap();
+
+        let messages = pipeline
+            .handle_persisted_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3, 4], 16_000, 0)
+            .await;
+        assert!(messages.is_empty(), "short frames stay buffered");
+
+        pipeline.flush_pending_audio(id).await;
         let bytes = std::fs::read(pipeline.store.audio_path(id, MIC_FILE)).unwrap();
         assert_eq!(bytes, vec![1, 2, 3, 4]);
     }

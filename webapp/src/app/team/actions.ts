@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { requireSession } from "@/lib/currentUser";
 import { hashPassword } from "@/lib/passwords";
-import { addWorkspaceMember } from "@/lib/workspaces";
+import { addWorkspaceMember, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, updateWorkspaceRetentionDays } from "@/lib/workspaces";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -53,4 +53,28 @@ export async function addMember(formData: FormData): Promise<AddMemberResult> {
 
   revalidatePath("/team");
   return { ok: true, email, temporaryPassword };
+}
+
+export type RetentionPolicyResult =
+  | { ok: true; retentionDays: number | null }
+  | { ok: false; error: string };
+
+export async function updateRetentionPolicy(formData: FormData): Promise<RetentionPolicyResult> {
+  const session = await requireSession();
+  if (session.role !== "owner") return { ok: false, error: "Only the workspace owner can change retention." };
+
+  const value = String(formData.get("retentionDays") ?? "").trim();
+  const retentionDays = value === "never" ? null : Number(value);
+  if (retentionDays !== null && (!Number.isSafeInteger(retentionDays) || retentionDays < MIN_RETENTION_DAYS || retentionDays > MAX_RETENTION_DAYS)) {
+    return { ok: false, error: `Choose never or a value from ${MIN_RETENTION_DAYS} to ${MAX_RETENTION_DAYS} days.` };
+  }
+
+  try {
+    await updateWorkspaceRetentionDays(session.workspaceId, retentionDays);
+  } catch (error) {
+    console.error("retention policy update failed", { error: error instanceof Error ? error.message : String(error) });
+    return { ok: false, error: "Could not save the retention policy. Try again." };
+  }
+  revalidatePath("/team");
+  return { ok: true, retentionDays };
 }

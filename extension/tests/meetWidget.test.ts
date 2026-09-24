@@ -151,14 +151,12 @@ describe("MeetWidget: idle", () => {
     expect(harness.$(".nt")?.dataset.align).toBe("right");
   });
 
-  it("disables Start with a plain-language reason when the helper is not running", async () => {
+  it("keeps Meet Start available when the desktop helper is not running", async () => {
     harness = await createHarness(baseState({ helperStatus: "helper_not_found" }));
     await harness.click("#toggle");
 
-    expect(harness.$<HTMLButtonElement>("#start")?.disabled).toBe(true);
-    expect(harness.$("#helper-note")?.textContent).toMatch(/isn't running/);
-    await harness.click("#helper-setup");
-    expect(harness.sent).toContainEqual({ type: "OPEN_PAGE", page: "install" });
+    expect(harness.$<HTMLButtonElement>("#start")?.disabled).toBe(false);
+    expect(harness.$("#helper-note")).toBeNull();
   });
 
   it("re-enables Start as soon as the helper connects", async () => {
@@ -650,18 +648,14 @@ describe("MeetWidget: edge cases and resilience", () => {
     (harness.$("#toggle") as HTMLElement).focus();
     harness.setState(baseState({ helperStatus: "helper_not_found" }));
     await harness.widget.refresh();
-    expect(harness.$("#helper-note")).not.toBeNull();
+    expect(harness.$("#helper-note")).toBeNull();
     expect(harness.shadow.activeElement?.id).toBe("toggle");
   });
 
-  it("re-checks the helper on request", async () => {
+  it("does not redirect Meet users to desktop-helper setup", async () => {
     harness = await createHarness(baseState({ helperStatus: "helper_not_found" }));
     await harness.click("#toggle");
-    harness.setState(baseState());
-    await harness.click("#helper-check");
-    await harness.flush();
-
-    expect(harness.sent).toContainEqual({ type: "CHECK_HELPER" });
+    expect(harness.$("#helper-setup")).toBeNull();
     expect(harness.$("#helper-note")).toBeNull();
   });
 
@@ -815,9 +809,9 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     expect(harness.sent).toContainEqual(expect.objectContaining({ type: "START_RECORDING", captureSource: "meet" }));
   });
 
-  it("hides the pill Start when recording cannot begin, so the pill never promises what it cannot do", async () => {
+  it("keeps the pill Start available for browser Meet capture without the helper", async () => {
     harness = await createHarness(baseState({ helperStatus: "helper_not_found" }));
-    expect(harness.$("#pill-start")).toBeNull();
+    expect(harness.$("#pill-start")).not.toBeNull();
   });
 
   it("puts the consent reminder above the Start button in plain, prominent words", async () => {

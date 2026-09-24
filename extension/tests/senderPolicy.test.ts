@@ -29,13 +29,14 @@ describe("isMessageAllowed", () => {
     for (const type of ["GET_WIDGET_STATE", "SAVE_WIDGET_POSITION", "START_RECORDING", "STOP_RECORDING", "ADD_BOOKMARK", "OPEN_PAGE", "OPEN_MEETING", "CHECK_HELPER"] as const) {
       expect(isMessageAllowed(type, "meet-content-script")).toBe(true);
     }
-    for (const type of ["SAVE_SETTINGS", "TEST_PROVIDER_KEY", "DELETE_MEETING", "DISCARD_RECORDING", "RESUME_RECORDING", "RETRY_DRIVE_EXPORT", "MEET_AUDIO_CHUNK", "GET_AUDIO_PREFLIGHT"] as const) {
+    for (const type of ["SAVE_SETTINGS", "TEST_PROVIDER_KEY", "DELETE_MEETING", "DISCARD_RECORDING", "RESUME_RECORDING", "RETRY_DRIVE_EXPORT", "RETRY_MEETING_PROCESSING", "MEET_AUDIO_CHUNK", "GET_AUDIO_PREFLIGHT"] as const) {
       expect(isMessageAllowed(type, "meet-content-script")).toBe(false);
     }
   });
 
   it("accepts audio chunks only from the offscreen page, and nothing else from it", () => {
     expect(isMessageAllowed("MEET_AUDIO_CHUNK", "offscreen")).toBe(true);
+    expect(isMessageAllowed("MEET_CAPTURE_ERROR", "offscreen")).toBe(true);
     expect(isMessageAllowed("SAVE_SETTINGS", "offscreen")).toBe(false);
     expect(isMessageAllowed("MEET_AUDIO_CHUNK", "extension-page")).toBe(false);
   });

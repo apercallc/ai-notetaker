@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Install AI Notetaker</title>
+  <title>Start AI Notetaker</title>
   <style>
     :root { color-scheme: light dark; font-family: system-ui, sans-serif; --bg: #f6f7fb; --card: #fff; --ink: #172033; --muted: #5c667a; --accent: #5b4bdb; --border: #dfe3ee; }
     @media (prefers-color-scheme: dark) { :root { --bg: #121522; --card: #1d2230; --ink: #f4f6ff; --muted: #b7bfd3; --border: #353d52; } }
@@ -27,11 +27,18 @@
 <body>
   <main>
     <p class="muted">AI Notetaker</p>
-    <h1>Install the pieces that fit your computer.</h1>
-    <p class="lede">The Chrome extension is the control panel. The native desktop helper owns audio capture, local storage, and the AI pipeline. Docker is optional and only hosts your history webapp.</p>
+    <h1>Start taking notes without a meeting bot.</h1>
+    <p class="lede">Start with Google Meet browser capture in Chrome. For Zoom, Teams, Slack, and other desktop calls, add the native helper. Choose free local BYOK or optional Hosted AI after setup.</p>
+
+    <section class="card" aria-labelledby="start">
+      <h2 id="start">1. Start with Google Meet</h2>
+      <p>Install the Chrome extension, open a Meet call, and choose <strong>Google Meet — capture this tab</strong>. No desktop helper or account is required for free local BYOK mode.</p>
+      <p id="extension-links">Checking the current release…</p>
+    </section>
 
     <section class="card" aria-labelledby="choose-os">
-      <h2 id="choose-os">1. Choose your desktop</h2>
+      <h2 id="choose-os">2. Add desktop-call capture (optional)</h2>
+      <p class="muted">Choose this path only if you want to record Zoom, Teams, Slack, or another desktop call. The helper captures your microphone and system audio locally.</p>
       <label for="platform">Detected platform</label>
       <select id="platform">
         <option value="macos">macOS</option>
@@ -42,12 +49,6 @@
       <div id="instructions" class="platforms" style="margin-top: 16px"></div>
     </section>
 
-    <section class="card" aria-labelledby="extension">
-      <h2 id="extension">2. Install the Chrome extension</h2>
-      <p class="muted">The extension is installed separately because Chrome does not allow a normal desktop installer to silently install browser extensions.</p>
-      <p id="extension-links">Checking the current release…</p>
-    </section>
-
     <section class="card" aria-labelledby="docker">
       <h2 id="docker">Optional: self-host history with Docker</h2>
       <p>Use Docker Compose for the authenticated webapp and Postgres. It never receives your provider keys and cannot replace the desktop helper.</p>
@@ -55,7 +56,7 @@
       <p><a href="https://github.com/apercallc/ai-notetaker/blob/main/webapp/README.md#deploy-with-the-prebuilt-container-image">Read the Docker deployment guide</a></p>
     </section>
 
-    <p class="muted warning">Audio drivers are OS-level components. macOS users install BlackHole from Existential Audio; Windows uses base VB-CABLE; Linux uses the helper's PulseAudio/PipeWire modules. The helper will confirm when audio is actually ready.</p>
+    <p class="muted warning">Audio drivers are only needed for desktop-call capture. macOS users install BlackHole from Existential Audio when the helper selects that fallback; Windows uses base VB-CABLE when native loopback is unavailable; Linux uses the helper's PulseAudio/PipeWire modules.</p>
   </main>
   <script>
     const releases = 'https://github.com/apercallc/ai-notetaker/releases/latest';
@@ -65,7 +66,19 @@
     const extensionLinks = document.querySelector('#extension-links');
     const dockerInstall = document.querySelector('#docker-install');
     const detected = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
-    const hinted = new URLSearchParams(location.search).get('platform');
+    const params = new URLSearchParams(location.search);
+    // Only an explicit desktop-install link may promote the optional helper
+    // path. Older extension builds and copied URLs may retain mode=desktop;
+    // treating that flag as sufficient would send ordinary Meet users back to
+    // the helper installer after an update.
+    const desktopMode = params.get('mode') === 'desktop' && params.get('source') === 'desktop';
+    const hinted = params.get('platform');
+    if (desktopMode) {
+      document.title = 'Install AI Notetaker desktop capture';
+      document.querySelector('#start').textContent = 'Google Meet is ready without the helper';
+      document.querySelector('#choose-os').textContent = 'Install desktop-call capture';
+      document.querySelector('#choose-os').scrollIntoView({ block: 'start' });
+    }
     platform.value = ['macos', 'windows', 'linux', 'unknown'].includes(hinted) ? hinted : detected.includes('mac') ? 'macos' : detected.includes('win') ? 'windows' : detected.includes('linux') ? 'linux' : 'unknown';
     const content = {
       macos: ['macOS', 'Download the signed DMG from the latest release or install the Homebrew Cask.', 'brew install --cask ai-notetaker', 'BlackHole is linked to the official Existential Audio installer and is never bundled.'],

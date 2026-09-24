@@ -67,7 +67,7 @@ async function assertMicrophoneAllowed(): Promise<void> {
 }
 
 export class MeetCaptureController {
-  private readonly activeMeetings = new Set<string>();
+  private readonly activeMeetings = new Map<string, number>();
 
   constructor(private readonly sendChunk: (chunk: Uint8Array, meetingId: string, channel: BrowserAudioChannel) => void = () => {}) {}
 
@@ -94,18 +94,46 @@ export class MeetCaptureController {
       await chrome.offscreen.closeDocument().catch(() => {});
       throw new Error(response.error ?? "Google Meet capture could not start.");
     }
-    this.activeMeetings.add(meetingId);
+    this.activeMeetings.set(meetingId, tabId);
   }
 
   async stop(meetingId: string): Promise<void> {
-    if (!chrome.offscreen) return;
-    await sendMessage({ type: "MEET_CAPTURE_STOP", meetingId });
-    this.activeMeetings.delete(meetingId);
-    await chrome.offscreen.closeDocument().catch(() => {});
+    if (!chrome.offscreen) {
+      this.activeMeetings.delete(meetingId);
+      return;
+    }
+    try {
+      await sendMessage({ type: "MEET_CAPTURE_STOP", meetingId });
+    } finally {
+      // A rejected runtime message must not leave the controller believing
+      // that a tab is still captured. The next start should be allowed to
+      // recreate the offscreen graph, and tab-removal cleanup must still be
+      // able to report the durable meeting as retryable.
+      this.activeMeetings.delete(meetingId);
+      await chrome.offscreen.closeDocument().catch(() => {});
+    }
+  }
+
+  /**
+   * Tear down every browser capture attached to a tab that was removed or
+   * navigated. The helper owns the durable audio already received; callers
+   * should mark the returned meetings retryable after this cleanup completes.
+   */
+  async stopForTab(tabId: number): Promise<string[]> {
+    const meetingIds = [...this.activeMeetings.entries()]
+      .filter(([, activeTabId]) => activeTabId === tabId)
+      .map(([meetingId]) => meetingId);
+    await Promise.allSettled(meetingIds.map((meetingId) => this.stop(meetingId)));
+    return meetingIds;
   }
 
   isActive(meetingId: string): boolean {
     return this.activeMeetings.has(meetingId);
+  }
+
+  /** Rehydrates the capture marker after an MV3 service-worker wake. */
+  recover(meetingId: string): void {
+    this.activeMeetings.set(meetingId, -1);
   }
 
   forwardChunk(message: MeetAudioChunk): void {

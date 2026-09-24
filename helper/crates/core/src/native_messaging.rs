@@ -22,7 +22,7 @@ pub const BROWSER_AUDIO_SAMPLE_RATE_HZ: u32 = 48_000;
 /// Increment when the JSON wire contract changes incompatibly. The extension
 /// uses the helper's advertised value to show an upgrade path instead of
 /// failing later with an opaque recording error.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FramingError {
@@ -69,6 +69,9 @@ pub fn write_message<W: Write>(
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// Settings is intentionally kept as one wire message so a reconnect can
+// restore the complete processing configuration atomically.
+#[allow(clippy::large_enum_variant)]
 pub enum ExtensionToHelper {
     Hello {
         #[serde(rename = "pairingToken")]
@@ -88,14 +91,22 @@ pub enum ExtensionToHelper {
         custom_vocabulary: Vec<String>,
         #[serde(rename = "customSummaryInstructions", default)]
         custom_summary_instructions: Option<String>,
+        #[serde(rename = "processingMode", default)]
+        processing_mode: ProcessingMode,
+        #[serde(rename = "managedService", default)]
+        managed_service: Option<ManagedServiceConfig>,
     },
     StartRecording {
         #[serde(rename = "meetingId")]
         meeting_id: Uuid,
+        #[serde(default)]
+        title: Option<String>,
         #[serde(rename = "meetingMode", default)]
         meeting_mode: MeetingMode,
         #[serde(rename = "captureSource", default)]
         capture_source: CaptureSource,
+        #[serde(rename = "processingMode", default)]
+        processing_mode: ProcessingMode,
     },
     AudioChunk {
         #[serde(rename = "meetingId")]
@@ -139,6 +150,36 @@ pub enum CaptureSource {
     #[default]
     Desktop,
     Meet,
+    DesktopLoopback,
+    DesktopVirtualDevice,
+    MeetTab,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessingMode {
+    #[default]
+    LocalByok,
+    Managed {
+        #[serde(rename = "accountId")]
+        account_id: String,
+        #[serde(rename = "workspaceId")]
+        workspace_id: String,
+        plan: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedServiceConfig {
+    #[serde(rename = "baseUrl")]
+    pub base_url: String,
+    #[serde(rename = "accessToken")]
+    pub access_token: String,
+    #[serde(rename = "accountId")]
+    pub account_id: String,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: String,
+    pub plan: String,
 }
 
 /// A flagged moment as the extension sends it at stop time.
@@ -253,6 +294,12 @@ pub enum HelperToExtension {
         speaker: Option<String>,
         ready: bool,
         guidance: String,
+        #[serde(rename = "nativeLoopback")]
+        native_loopback: bool,
+        #[serde(rename = "virtualDeviceFallback")]
+        virtual_device_fallback: bool,
+        #[serde(rename = "permissionRequired")]
+        permission_required: bool,
     },
     AudioProbeResult {
         #[serde(rename = "micFrames")]
@@ -262,6 +309,33 @@ pub enum HelperToExtension {
         passed: bool,
         message: String,
     },
+    ManagedJobStatus {
+        #[serde(rename = "meetingId")]
+        meeting_id: Uuid,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        status: String,
+        message: Option<String>,
+        summary: Option<String>,
+        #[serde(rename = "actionItems")]
+        action_items: Option<Vec<ActionItem>>,
+    },
+    CaptureCapabilities {
+        capabilities: CaptureCapabilitiesMessage,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaptureCapabilitiesMessage {
+    pub platform: String,
+    #[serde(rename = "nativeLoopback")]
+    pub native_loopback: bool,
+    pub microphone: bool,
+    #[serde(rename = "virtualDeviceFallback")]
+    pub virtual_device_fallback: bool,
+    #[serde(rename = "permissionRequired")]
+    pub permission_required: bool,
+    pub guidance: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -336,8 +410,8 @@ pub enum ErrorCode {
 }
 
 /// Generates a new pairing token. Per the protocol doc, this is sent to the
-/// extension exactly once (the "paired" message on first-ever connection)
-/// and stored by the extension for every subsequent `hello`.
+/// extension on first connection or browser-token recovery and stored by the
+/// extension for every subsequent `hello`.
 pub fn generate_pairing_token() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -415,6 +489,8 @@ mod tests {
             default_meeting_mode: MeetingMode::General,
             custom_vocabulary: vec![],
             custom_summary_instructions: None,
+            processing_mode: ProcessingMode::LocalByok,
+            managed_service: None,
         };
         let json = serde_json::to_vec(&msg).unwrap();
         let mut framed = Vec::new();
@@ -532,8 +608,10 @@ mod tests {
             decoded,
             ExtensionToHelper::StartRecording {
                 meeting_id: id,
+                title: None,
                 meeting_mode: MeetingMode::General,
                 capture_source: CaptureSource::Desktop,
+                processing_mode: ProcessingMode::LocalByok,
             }
         );
     }

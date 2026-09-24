@@ -131,7 +131,7 @@ export class MeetWidget {
         // example a pairing failure at connect time) belongs in the helper
         // status, not in a "couldn't take notes" card.
         if (message.meetingId !== null || this.ui.starting || this.state?.active) {
-          this.ui = { ...this.ui, starting: false, error: message.message };
+          this.ui = { ...this.ui, starting: false, error: message.message, errorRecovery: message.recovery };
         }
         void this.refresh();
         return;
@@ -320,13 +320,17 @@ export class MeetWidget {
       this.root.querySelector(selector)?.addEventListener("click", handler);
     };
     on("#reload", () => this.deps.reload());
-    const openPage = (page: "onboarding" | "shortcuts" | "microphone" | "install"): void => {
+    const openPage = (page: "onboarding" | "shortcuts" | "microphone"): void => {
       void this.deps.send({ type: "OPEN_PAGE", page }).catch(() => {});
     };
     on("#open-setup", () => openPage("onboarding"));
     on("#set-shortcut", () => openPage("shortcuts"));
     on("#allow-mic", () => openPage("microphone"));
-    on("#helper-setup", () => openPage("install"));
+    // Meet is the browser-first entry point. Reopen the mode chooser here so
+    // a missing helper never turns an in-call Meet widget into an unexplained
+    // desktop-installer redirect. Desktop users can still reach the installer
+    // from the desktop option in onboarding.
+    on("#helper-setup", () => openPage("onboarding"));
     on("#helper-check", () => void this.deps.send({ type: "CHECK_HELPER" }).then(() => this.refresh()).catch(() => {}));
     on("#open-notes", () => {
       const id = this.state?.latest?.id;

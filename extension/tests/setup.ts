@@ -38,17 +38,24 @@ function createStorageArea() {
 
 const storageLocal = createStorageArea();
 const storageSync = createStorageArea();
+const storageSession = createStorageArea();
 
 export const chromeMock = {
   storage: {
     local: storageLocal,
     sync: storageSync,
+    session: storageSession,
   },
   runtime: {
     id: "fake-extension-id",
     getURL: (path: string) => `chrome-extension://fake-extension-id/${path}`,
     connectNative: vi.fn(),
     sendMessage: vi.fn(),
+    openOptionsPage: vi.fn(),
+    onMessage: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
     lastError: undefined as { message: string } | undefined,
   },
   identity: {
@@ -57,6 +64,9 @@ export const chromeMock = {
   },
   tabs: {
     get: vi.fn(async () => ({ id: 1, url: "https://meet.google.com/test" })),
+    query: vi.fn(async (): Promise<Array<{ id?: number; url?: string; title?: string }>> => []),
+    create: vi.fn(async () => ({ id: 2 })),
+    update: vi.fn(async () => ({ id: 2 })),
   },
   offscreen: {
     Reason: { USER_MEDIA: "USER_MEDIA" },
@@ -67,14 +77,24 @@ export const chromeMock = {
   reset() {
     storageLocal._reset();
     storageSync._reset();
+    storageSession._reset();
     this.runtime.connectNative.mockReset();
     this.runtime.sendMessage.mockReset();
+    this.runtime.openOptionsPage.mockReset();
+    this.runtime.onMessage.addListener?.mockReset();
+    this.runtime.onMessage.removeListener?.mockReset();
     this.runtime.lastError = undefined;
     this.identity.launchWebAuthFlow.mockReset();
     this.identity.getRedirectURL.mockReset();
     this.identity.getRedirectURL.mockReturnValue("https://fake-extension-id.chromiumapp.org/");
     this.tabs.get.mockReset();
     this.tabs.get.mockResolvedValue({ id: 1, url: "https://meet.google.com/test" });
+    this.tabs.query?.mockReset();
+    this.tabs.query?.mockResolvedValue([]);
+    this.tabs.create?.mockReset();
+    this.tabs.create?.mockResolvedValue({ id: 2 });
+    this.tabs.update?.mockReset();
+    this.tabs.update?.mockResolvedValue({ id: 2 });
     this.offscreen.hasDocument.mockReset();
     this.offscreen.hasDocument.mockResolvedValue(false);
     this.offscreen.createDocument.mockReset();

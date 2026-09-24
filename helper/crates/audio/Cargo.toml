@@ -18,5 +18,17 @@ tokio = { workspace = true }
 # shelled out via std::process — no extra crate needed for that; cpal
 # itself talks to ALSA/PulseAudio for the actual capture.
 
+[target.'cfg(target_os = "windows")'.dependencies]
+# cpal does not expose Windows output-loopback capture. Keep the native
+# WASAPI implementation target-specific so Linux/macOS builds do not pull in
+# Windows bindings.
+wasapi = "0.24"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# ScreenCaptureKit captures the default system output without requiring a
+# virtual driver. BlackHole remains the explicit fallback when macOS Screen
+# Recording permission has not been granted.
+screencapturekit = { version = "11", features = ["macos_13_0"] }
+
 [dev-dependencies]
 tempfile = "3"

@@ -11,8 +11,8 @@
     "fallbackZipUrl": null
   },
   "protocol": {
-    "version": 1,
-    "minimumSupported": 1
+    "version": 3,
+    "minimumSupported": 3
   },
   "artifacts": [],
   "packageManagers": {

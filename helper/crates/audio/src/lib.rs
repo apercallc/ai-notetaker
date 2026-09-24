@@ -39,9 +39,10 @@ pub struct CapturedFrame {
     pub sample_rate_hz: u32,
 }
 
-/// Whether the OS-level virtual audio device this platform depends on
-/// (BlackHole, VB-CABLE, or the PulseAudio/PipeWire null-sink module) is
-/// currently installed and selectable.
+/// Whether this platform's system-audio capture path is currently available.
+/// Native loopback paths (ScreenCaptureKit/WASAPI/monitor sources) report
+/// `Installed` without requiring a virtual device; the documented virtual
+/// drivers remain explicit fallbacks.
 pub enum DriverStatus {
     Installed,
     /// Not installed. `install_guidance` is what the onboarding wizard
@@ -63,6 +64,31 @@ pub struct AudioDiagnostics {
     pub speaker: Option<String>,
     pub ready: bool,
     pub guidance: String,
+    pub native_loopback: bool,
+    pub virtual_device_fallback: bool,
+    pub permission_required: bool,
+}
+
+/// Applies the cross-platform readiness contract used by every backend.
+///
+/// A driver being present is not enough: both independent channels must have
+/// a route, the physical microphone must be visible, and a known permission
+/// gap must fail closed. Keeping this decision in the shared crate makes the
+/// platform adapters small and lets the matrix tests exercise missing-device
+/// and permission states without requiring the host OS to expose fake audio
+/// hardware.
+pub fn capture_ready(
+    driver_installed: bool,
+    microphone_available: bool,
+    speaker_available: bool,
+    mic_route_available: bool,
+    permission_required: bool,
+) -> bool {
+    driver_installed
+        && microphone_available
+        && speaker_available
+        && mic_route_available
+        && !permission_required
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -75,8 +101,8 @@ pub struct AudioProbe {
 
 #[async_trait]
 pub trait AudioCapture: Send + Sync {
-    /// Checks whether the platform's virtual audio device is installed and
-    /// ready to select as a mic/speaker in a meeting app.
+    /// Checks whether the platform's native or fallback system-audio path is
+    /// installed and ready to use.
     fn driver_status(&self) -> DriverStatus;
 
     /// Returns a non-invasive snapshot of the devices the backend would use.
@@ -134,6 +160,34 @@ pub trait AudioCapture: Send + Sync {
     }
 }
 
+/// Converts the native Windows loopback format (interleaved IEEE-754 f32)
+/// into the mono little-endian PCM16 frames consumed by the core pipeline.
+/// Keeping this conversion platform-neutral makes it testable on the host
+/// build even though the WASAPI reader itself is Windows-only.
+#[allow(dead_code)]
+pub(crate) fn interleaved_f32_to_mono_pcm16(data: &[u8], channels: usize) -> Vec<u8> {
+    if channels == 0 {
+        return Vec::new();
+    }
+
+    let bytes_per_frame = channels.saturating_mul(std::mem::size_of::<f32>());
+    if bytes_per_frame == 0 {
+        return Vec::new();
+    }
+
+    let frame_count = data.len() / bytes_per_frame;
+    let mut pcm16 = Vec::with_capacity(frame_count * std::mem::size_of::<i16>());
+    for frame in data[..frame_count * bytes_per_frame].chunks_exact(bytes_per_frame) {
+        let mut sum = 0.0_f32;
+        for sample in frame.as_chunks::<4>().0 {
+            sum += f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]);
+        }
+        let mono = (sum / channels as f32).clamp(-1.0, 1.0);
+        pcm16.extend_from_slice(&((mono * i16::MAX as f32).round() as i16).to_le_bytes());
+    }
+    pcm16
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +211,39 @@ mod tests {
         assert_eq!(result.mic_frames, 0);
         assert_eq!(result.speaker_frames, 0);
         assert!(!result.passed);
+    }
+
+    #[test]
+    fn interleaved_float_audio_is_downmixed_to_pcm16() {
+        let samples = [0.5_f32, -0.5_f32, 1.0, 1.0];
+        let bytes = samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect::<Vec<_>>();
+
+        let pcm16 = interleaved_f32_to_mono_pcm16(&bytes, 2);
+        let values = pcm16
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|sample| i16::from_le_bytes(*sample))
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![0, i16::MAX]);
+    }
+
+    #[test]
+    fn malformed_or_zero_channel_audio_produces_no_frames() {
+        assert!(interleaved_f32_to_mono_pcm16(&[0; 7], 2).is_empty());
+        assert!(interleaved_f32_to_mono_pcm16(&[0; 8], 0).is_empty());
+    }
+
+    #[test]
+    fn readiness_requires_both_independent_channels_and_permissions() {
+        assert!(capture_ready(true, true, true, true, false));
+        assert!(!capture_ready(false, true, true, true, false));
+        assert!(!capture_ready(true, false, true, true, false));
+        assert!(!capture_ready(true, true, false, true, false));
+        assert!(!capture_ready(true, true, true, false, false));
+        assert!(!capture_ready(true, true, true, true, true));
     }
 }

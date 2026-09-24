@@ -32,6 +32,8 @@
       }
     },
     "macOS": {
+      "minimumSystemVersion": "13.0",
+      "infoPlist": "Info.plist",
       "files": {
         "scripts/macos/install-native-messaging.sh": "Resources/scripts/install-native-messaging.sh",
         "scripts/macos/uninstall-native-messaging.sh": "Resources/scripts/uninstall-native-messaging.sh"

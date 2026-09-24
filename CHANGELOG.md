@@ -4,6 +4,12 @@ All notable changes to AI Notetaker are documented here.
 
 ## Unreleased
 
+- Added the dual-mode capture architecture: botless Google Meet browser
+  recording with free local BYOK, optional hosted AI processing with
+  workspace-scoped usage and billing, and native desktop-call capture for
+  macOS, Windows, and Linux.
+- Added Meet-first onboarding and stale-tab migration so desktop helper setup
+  appears only after an explicit desktop-capture choice.
 - Added local archive search across meeting titles, summaries, transcripts, and
   action items in the extension popup.
 - Added Markdown, plain-text, and print/PDF-friendly exports to meeting detail

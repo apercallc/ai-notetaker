@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT, describeCaptureFailure, handleMeetCommand, startMeetRecording, stopMeetRecording } from "../src/meet/session";
 import type { BackgroundController } from "../src/lib/backgroundController";
 import type { MeetCaptureController } from "../src/meet/meetCapture";
+import { chromeMock } from "./setup";
 
 function fakes(active: { id: string } | null = null) {
   const controller = {
@@ -21,7 +22,10 @@ function fakes(active: { id: string } | null = null) {
 
 const MEET_TAB = { id: 9, url: "https://meet.google.com/abc-defg-hij", title: "Roadmap - Google Meet" };
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  chromeMock.reset();
+});
 
 describe("describeCaptureFailure", () => {
   it("turns Chrome's activeTab refusal into an actionable instruction", () => {
@@ -54,6 +58,16 @@ describe("startMeetRecording", () => {
 
     expect(id).toBe("m1");
     expect(controller.startRecording).toHaveBeenCalledWith("sales", "meet", "Roadmap");
+    expect(capture.start).toHaveBeenCalledWith(9, "m1");
+  });
+
+  it("discovers the active Meet tab for a toolbar start", async () => {
+    const { controller, capture, asTypes } = fakes();
+    chromeMock.tabs.query.mockResolvedValue([MEET_TAB]);
+    const [c, k] = asTypes();
+
+    expect(await startMeetRecording(c, k, {})).toBe("m1");
+    expect(controller.startRecording).toHaveBeenCalledWith(undefined, "meet", "Roadmap");
     expect(capture.start).toHaveBeenCalledWith(9, "m1");
   });
 

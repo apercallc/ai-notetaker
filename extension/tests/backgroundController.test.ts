@@ -3,6 +3,9 @@ import { chromeMock } from "./setup";
 import { BackgroundController, type NativeClientLike } from "../src/lib/backgroundController";
 import { getMeeting, saveSettings, saveWidgetPosition } from "../src/lib/storage";
 import { DEFAULT_SETTINGS } from "../src/types";
+import * as browserStorage from "../src/meet/browserStorage";
+import * as browserProcessing from "../src/meet/browserProcessing";
+import * as managedClient from "../src/lib/managedClient";
 
 vi.mock("../src/lib/calendar", () => ({ findCurrentEvent: vi.fn() }));
 import { findCurrentEvent } from "../src/lib/calendar";
@@ -18,7 +21,7 @@ function createFakeClient(): NativeClientLike & {
   return {
     connect: vi.fn(async () => {
       for (const handler of handlers.get("helper_info") ?? []) {
-        handler({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 2, platform: "linux" });
+        handler({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 3, platform: "linux" });
       }
     }),
     on: vi.fn((type: string, handler: (msg: unknown) => void) => {
@@ -39,6 +42,9 @@ function createFakeClient(): NativeClientLike & {
       speaker: "test speaker",
       ready: true,
       guidance: "ready",
+      nativeLoopback: false,
+      virtualDeviceFallback: true,
+      permissionRequired: false,
     })),
     runAudioProbe: vi.fn(async () => ({ micFrames: 1, speakerFrames: 1, passed: true, message: "ok" })),
     testProviderKey: vi.fn(async () => ({ valid: true, message: "ok" })),
@@ -81,9 +87,176 @@ describe("BackgroundController", () => {
 
     const meetingId = await controller.startRecording();
 
-    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "general");
+    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "general", "desktop", { kind: "local_byok" }, expect.any(String));
     const stored = await getMeeting(meetingId);
     expect(stored?.status).toBe("recording");
+  });
+
+  it("pushes managed settings to the helper and preserves the mode on the meeting", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const managedSettings = {
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const,
+      managedService: {
+        baseUrl: "https://notes.example.com",
+        accessToken: "session",
+        accountId: "acct",
+        workspaceId: "workspace",
+        plan: "hosted_pro",
+      },
+    };
+
+    await controller.saveSettings(managedSettings);
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }), { status: 200 })));
+    expect(client.pushSettings).toHaveBeenLastCalledWith(expect.objectContaining({ processingMode: managedSettings.processingMode, managedService: managedSettings.managedService }));
+
+    const meetingId = await controller.startRecording("general", "desktop");
+    expect(client.startRecording).toHaveBeenLastCalledWith(meetingId, "general", "desktop", managedSettings.processingMode, expect.any(String));
+    expect((await getMeeting(meetingId))?.processingMode).toEqual(managedSettings.processingMode);
+
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode: { kind: "local_byok" }, managedService: null });
+    expect(client.pushSettings).toHaveBeenLastCalledWith(expect.objectContaining({ processingMode: { kind: "local_byok" }, managedService: null }));
+  });
+
+  it("resumes a managed Meet processing record after the service worker restarts", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    await saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "pending-managed-meet",
+      title: "Pending Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "processing",
+      captureSource: "meet",
+      processingMode,
+    });
+    vi.spyOn(browserStorage, "listBrowserMeetChunks").mockResolvedValue([{ channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) }]);
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(managedClient, "registerManagedMeeting").mockResolvedValue();
+    vi.spyOn(managedClient, "uploadManagedMeeting").mockResolvedValue({ uploadId: "upload-1", jobId: "job-1", meetingId: "pending-managed-meet" });
+    vi.spyOn(managedClient, "getManagedJob").mockResolvedValue({ status: "complete", meetingId: "pending-managed-meet", summary: "Recovered summary", actionItems: [] });
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+
+    await controller.init();
+
+    await vi.waitFor(async () => expect((await getMeeting("pending-managed-meet"))?.status).toBe("complete"));
+    expect(managedClient.uploadManagedMeeting).toHaveBeenCalledWith(managedService, "pending-managed-meet", [{ channel: "speaker", index: 0, bytes: new Uint8Array([1, 2]) }], expect.any(Function));
+  });
+
+  it("drains an errored managed Meet after a fresh hosted sign-in", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "new-session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "expired-session-meet",
+      title: "Expired session Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "error",
+      errorMessage: "Managed service session expired. Saved Meet audio is available for retry.",
+      captureSource: "meet",
+      processingMode,
+      managedProcessing: { uploadId: "upload-old", jobId: "job-old", status: "error", errorMessage: "session expired" },
+    });
+    vi.spyOn(browserStorage, "listBrowserMeetChunks").mockResolvedValue([{ channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) }]);
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(managedClient, "registerManagedMeeting").mockResolvedValue();
+    vi.spyOn(managedClient, "uploadManagedMeeting").mockResolvedValue({ uploadId: "upload-new", jobId: "job-new", meetingId: "expired-session-meet" });
+    vi.spyOn(managedClient, "getManagedJob").mockResolvedValue({ status: "complete", meetingId: "expired-session-meet", summary: "Recovered after sign-in", actionItems: [] });
+
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+
+    await vi.waitFor(async () => expect((await getMeeting("expired-session-meet"))?.status).toBe("complete"));
+    expect(managedClient.uploadManagedMeeting).toHaveBeenCalledWith(managedService, "expired-session-meet", [{ channel: "speaker", index: 0, bytes: new Uint8Array([1, 2]) }], expect.any(Function));
+  });
+
+  it("does not replay a pending managed Meet into another workspace", async () => {
+    const originalMode = { kind: "managed", accountId: "acct-old", workspaceId: "workspace-old", plan: "hosted_pro" } as const;
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "wrong-workspace-meet",
+      title: "Wrong workspace Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "error",
+      errorMessage: "session expired",
+      captureSource: "meet",
+      processingMode: originalMode,
+      managedProcessing: { status: "error", errorMessage: "session expired" },
+    });
+    const listChunks = vi.spyOn(browserStorage, "listBrowserMeetChunks");
+    const upload = vi.spyOn(managedClient, "uploadManagedMeeting");
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct-new", workspaceId: "workspace-new", plan: "hosted_pro" },
+      managedService: { baseUrl: "https://notes.example.com", accessToken: "new-session", accountId: "acct-new", workspaceId: "workspace-new", plan: "hosted_pro" },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(listChunks).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    await expect(getMeeting("wrong-workspace-meet")).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("keeps a completed Meet when IndexedDB cleanup fails", async () => {
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "cleanup-failure-meet",
+      title: "Cleanup failure Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "error",
+      errorMessage: "temporary provider error",
+      captureSource: "meet",
+      processingMode: { kind: "local_byok" },
+    });
+    vi.spyOn(browserStorage, "listBrowserMeetChunks").mockResolvedValue([{ channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) }]);
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockRejectedValue(new Error("IndexedDB unavailable"));
+    vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockResolvedValue({ transcript: [], summary: "Recovered", actionItems: [] });
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+
+    await controller.init();
+    await controller.retryProcessing("cleanup-failure-meet");
+
+    await expect(getMeeting("cleanup-failure-meet")).resolves.toMatchObject({ status: "complete", summary: "Recovered" });
+  });
+
+  it("blocks managed recording before creating a meeting when hosted quota is unavailable", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "local" },
+      managedService: { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "local" },
+    });
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "local", status: "inactive", used: 0, limit: 0, remaining: 0, canProcess: false, inPaymentGrace: false }), { status: 200 })));
+
+    expect(await controller.startRecording("general", "meet")).toBe("");
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", recovery: "check_billing" }));
   });
 
   it("two overlapping start requests produce one recording, not two", async () => {
@@ -220,7 +393,7 @@ describe("BackgroundController", () => {
 
     const meetingId = await controller.startRecording();
 
-    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "standup");
+    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "standup", "desktop", { kind: "local_byok" }, expect.any(String));
     expect((await getMeeting(meetingId))?.mode).toBe("standup");
   });
 
@@ -343,6 +516,23 @@ describe("BackgroundController", () => {
         completedAt: null,
       }),
     ]);
+  });
+
+  it("clears extension-owned Meet chunks when the helper completes managed processing", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }), { status: 200 })));
+    const clearChunks = vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+
+    const meetingId = await controller.startRecording("general", "meet");
+    client.emit("managed_job_status", { meetingId, jobId: "job-1", status: "complete", summary: "Managed summary", actionItems: [] });
+
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.status).toBe("complete"));
+    expect(clearChunks).toHaveBeenCalledWith(meetingId);
   });
 
   it("keeps local completion successful when Drive export fails", async () => {
@@ -489,7 +679,7 @@ describe("BackgroundController", () => {
     const controller = new BackgroundController(client, broadcast);
     await controller.init();
     client.emit("error", { meetingId: "unknown", code: "provider_error", message: "failed" });
-    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId: "unknown", message: "failed" }));
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId: "unknown", message: "failed", recovery: "retry" }));
     expect(await getMeeting("unknown")).toBeNull();
   });
 
@@ -506,7 +696,7 @@ describe("BackgroundController", () => {
       await controller.init();
       const meetingId = await controller.startRecording();
       client.emit("error", { meetingId, code: "temporary", message });
-      await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "PROCESSING_WARNING", meetingId, message }));
+      await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "PROCESSING_WARNING", meetingId, message, recovery: "retry" }));
       expect((await getMeeting(meetingId))?.status).toBe("recording");
     }
   });

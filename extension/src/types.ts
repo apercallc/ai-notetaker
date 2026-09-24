@@ -9,9 +9,69 @@ export type TranscriptionProvider = "deepgram" | "groq";
 export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
 export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
-export type CaptureSource = "desktop" | "meet";
+export type ErrorRecoveryCategory = "retry" | "check_provider_key" | "check_audio" | "check_billing" | "install_helper" | "update_helper" | "sign_in";
+
+/** Maps stable helper error codes to safe actions without exposing provider internals. */
+export function errorRecoveryCategory(code: string): ErrorRecoveryCategory {
+  switch (code) {
+    case "provider_auth_failed":
+      return "check_provider_key";
+    case "provider_rate_limited":
+    case "provider_unreachable":
+      return "retry";
+    case "device_not_found":
+      return "check_audio";
+    case "helper_not_paired":
+      // The host answered, so installation is present. The client clears its
+      // stale local token and re-pairs on the next connection attempt.
+      return "retry";
+    case "protocol_incompatible":
+      return "update_helper";
+    case "managed_auth_required":
+      return "sign_in";
+    case "managed_entitlement_unavailable":
+      return "check_billing";
+    default:
+      return "retry";
+  }
+}
+/**
+ * `desktop` and `meet` are retained for old stored meetings and helpers.
+ * New recordings should use the explicit source names.
+ */
+export type CaptureSource = "desktop" | "meet" | "desktop_loopback" | "desktop_virtual_device" | "meet_tab";
 export type BrowserAudioChannel = "mic" | "speaker";
 export type ActionItemStatus = "open" | "done";
+
+export type ProcessingMode =
+  | { kind: "local_byok" }
+  | { kind: "managed"; accountId: string; workspaceId: string; plan: string };
+
+export interface ManagedServiceConfig {
+  baseUrl: string;
+  accessToken: string;
+  accountId: string;
+  workspaceId: string;
+  plan: string;
+}
+
+export interface ManagedEntitlements {
+  plan: string;
+  status: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  canProcess: boolean;
+  inPaymentGrace: boolean;
+}
+
+export interface CaptureChannelMetadata {
+  channel: BrowserAudioChannel;
+  sampleRateHz: number;
+  bytesPersisted: number;
+  startedAt: string;
+  endedAt?: string;
+}
 
 export interface ProviderApiKeys {
   deepgram?: string;
@@ -51,6 +111,9 @@ export interface AudioStatus {
   speaker: string | null;
   ready: boolean;
   guidance: string;
+  nativeLoopback: boolean;
+  virtualDeviceFallback: boolean;
+  permissionRequired: boolean;
 }
 
 export interface AudioProbeResult {
@@ -58,6 +121,15 @@ export interface AudioProbeResult {
   speakerFrames: number;
   passed: boolean;
   message: string;
+}
+
+export interface CaptureCapabilities {
+  platform: HelperInfo["platform"];
+  nativeLoopback: boolean;
+  microphone: boolean;
+  virtualDeviceFallback: boolean;
+  permissionRequired: boolean;
+  guidance: string;
 }
 
 export interface HelperInfo {
@@ -71,6 +143,8 @@ export interface NotetakerSettings {
   summarizationProvider: SummarizationProvider;
   apiKeys: ProviderApiKeys;
   webapp: WebappConfig | null;
+  processingMode: ProcessingMode;
+  managedService: ManagedServiceConfig | null;
   defaultMeetingMode: MeetingMode;
   customVocabulary: string[];
   customSummaryInstructions: string;
@@ -89,6 +163,8 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   summarizationProvider: "claude",
   apiKeys: {},
   webapp: null,
+  processingMode: { kind: "local_byok" },
+  managedService: null,
   defaultMeetingMode: "general",
   customVocabulary: [],
   customSummaryInstructions: "",
@@ -164,6 +240,17 @@ export interface MeetingRecord {
   attendees?: string[];
   bookmarks?: Bookmark[];
   driveExport?: DriveExportState;
+  /** Explicit source/mode fields are optional for backward compatibility. */
+  captureSource?: CaptureSource;
+  processingMode?: ProcessingMode;
+  consentAcknowledged?: boolean;
+  captureChannels?: CaptureChannelMetadata[];
+  managedProcessing?: {
+    uploadId?: string;
+    jobId?: string;
+    status: "not_started" | "uploading" | "queued" | "processing" | "complete" | "error";
+    errorMessage?: string;
+  };
 }
 
 // ---- Native Messaging: extension -> helper ----
@@ -176,11 +263,13 @@ export type OutgoingMessage =
       summarizationProvider: SummarizationProvider;
       apiKeys: ProviderApiKeys;
       webapp: WebappConfig | null;
+      processingMode: ProcessingMode;
+      managedService: ManagedServiceConfig | null;
       defaultMeetingMode: MeetingMode;
       customVocabulary: string[];
       customSummaryInstructions: string;
     }
-  | { type: "start_recording"; meetingId: string; meetingMode: MeetingMode; captureSource?: CaptureSource }
+  | { type: "start_recording"; meetingId: string; meetingMode: MeetingMode; title?: string; captureSource?: CaptureSource; processingMode?: ProcessingMode }
   | { type: "audio_chunk"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string }
   | { type: "stop_recording"; meetingId: string; flaggedMoments?: FlaggedMomentWire[] }
   | { type: "resume_recording"; meetingId: string }
@@ -211,7 +300,7 @@ export type IncomingMessage =
       summary: string;
       actionItems: ActionItem[];
     }
-  | { type: "error"; meetingId: string | null; code: string; message: string }
+  | { type: "error"; meetingId: string | null; code: string; message: string; recovery?: ErrorRecoveryCategory; retryable?: boolean; retryAfterSeconds?: number }
   | { type: "recovered_recording"; meetingId: string; startedAt: string }
   | { type: "provider_key_test_result"; provider: ProviderKind; valid: boolean; message: string }
   | {
@@ -223,8 +312,13 @@ export type IncomingMessage =
       speaker: string | null;
       ready: boolean;
       guidance: string;
+      nativeLoopback: boolean;
+      virtualDeviceFallback: boolean;
+      permissionRequired: boolean;
     }
-  | { type: "audio_probe_result"; micFrames: number; speakerFrames: number; passed: boolean; message: string };
+  | { type: "audio_probe_result"; micFrames: number; speakerFrames: number; passed: boolean; message: string }
+  | { type: "capture_capabilities"; capabilities: CaptureCapabilities }
+  | { type: "managed_job_status"; meetingId: string; jobId: string; status: "queued" | "processing" | "complete" | "error"; message?: string; summary?: string; actionItems?: ActionItem[] };
 
 export function isIncomingMessage(value: unknown): value is IncomingMessage {
   if (typeof value !== "object" || value === null) return false;
@@ -236,6 +330,8 @@ export function isIncomingMessage(value: unknown): value is IncomingMessage {
     speaker === "you" || speaker === "them" || (typeof speaker === "string" && /^them-\d+$/.test(speaker));
   const isProvider = (provider: unknown): provider is ProviderKind =>
     provider === "deepgram" || provider === "groq" || provider === "claude" || provider === "gemini" || provider === "deepseek";
+  const isRecovery = (recovery: unknown): recovery is ErrorRecoveryCategory =>
+    recovery === "retry" || recovery === "check_provider_key" || recovery === "check_audio" || recovery === "check_billing" || recovery === "install_helper" || recovery === "update_helper" || recovery === "sign_in";
   const isActionItem = (item: unknown): item is ActionItem => {
     if (typeof item !== "object" || item === null) return false;
     const action = item as Record<string, unknown>;
@@ -265,18 +361,37 @@ export function isIncomingMessage(value: unknown): value is IncomingMessage {
       return hasNonEmptyString("meetingId") && isString("summary") && Array.isArray(message.actionItems) &&
         message.actionItems.length <= 1_000 && message.actionItems.every(isActionItem);
     case "error":
-      return isNullableString("meetingId") && isString("code") && isString("message");
+      return isNullableString("meetingId") && isString("code") && isString("message") &&
+        (message.recovery === undefined || isRecovery(message.recovery)) &&
+        (message.retryable === undefined || typeof message.retryable === "boolean") &&
+        (message.retryAfterSeconds === undefined || (Number.isSafeInteger(message.retryAfterSeconds) && (message.retryAfterSeconds as number) >= 0 && (message.retryAfterSeconds as number) <= 86_400));
     case "recovered_recording":
       return hasNonEmptyString("meetingId") && isString("startedAt");
     case "provider_key_test_result":
       return isProvider(message.provider) && typeof message.valid === "boolean" && isString("message");
     case "audio_status":
       return isString("platform") && isString("driver") && typeof message.driverInstalled === "boolean" &&
-        isNullableString("microphone") && isNullableString("speaker") && typeof message.ready === "boolean" && isString("guidance");
+        isNullableString("microphone") && isNullableString("speaker") && typeof message.ready === "boolean" && isString("guidance") &&
+        typeof message.nativeLoopback === "boolean" && typeof message.virtualDeviceFallback === "boolean" && typeof message.permissionRequired === "boolean";
     case "audio_probe_result":
       return Number.isSafeInteger(message.micFrames) && (message.micFrames as number) >= 0 &&
         Number.isSafeInteger(message.speakerFrames) && (message.speakerFrames as number) >= 0 &&
         typeof message.passed === "boolean" && isString("message");
+    case "capture_capabilities": {
+      const capabilities = message.capabilities;
+      if (typeof capabilities !== "object" || capabilities === null) return false;
+      const value = capabilities as Record<string, unknown>;
+      return (value.platform === "macos" || value.platform === "windows" || value.platform === "linux" || value.platform === "unknown") &&
+        typeof value.nativeLoopback === "boolean" && typeof value.microphone === "boolean" &&
+        typeof value.virtualDeviceFallback === "boolean" && typeof value.permissionRequired === "boolean" &&
+        typeof value.guidance === "string";
+    }
+    case "managed_job_status":
+      return hasNonEmptyString("meetingId") && (message.status === "error" ? isString("jobId") : hasNonEmptyString("jobId")) &&
+        (message.status === "queued" || message.status === "processing" || message.status === "complete" || message.status === "error") &&
+        (message.message === undefined || isString("message")) &&
+        (message.summary === undefined || isString("summary")) &&
+        (message.actionItems === undefined || (Array.isArray(message.actionItems) && message.actionItems.length <= 1_000 && message.actionItems.every(isActionItem)));
     default:
       return false;
   }

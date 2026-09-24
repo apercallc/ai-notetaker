@@ -1,7 +1,9 @@
 # Getting started
 
-This is the complete first-use guide for AI Notetaker. You only need the
-optional webapp if you want meeting history on more than one device.
+This is the complete first-use guide for AI Notetaker. The Chrome extension
+starts with botless Google Meet capture; choose a desktop call in its wizard
+when you want Zoom, Teams, Slack, or another system-audio source. You only
+need the optional webapp if you want meeting history on more than one device.
 
 For the release and installation model—including Homebrew Cask,
 WinGet/Chocolatey, OS prerequisite detection, release updates, and the
@@ -9,12 +11,14 @@ Docker-only webapp option—see the [distribution and installation architecture]
 
 ## What you are installing
 
-AI Notetaker has two required parts:
+AI Notetaker has one required part for Google Meet and two for desktop-call
+recording:
 
-1. The **desktop helper** is a small tray app. It owns audio capture, local
-   files, provider calls, transcription, summaries, retries, and recovery.
-2. The **Chrome extension** is the control panel. It starts and stops
-   recordings, shows the live transcript, and opens finished meetings.
+1. The **Chrome extension** owns Google Meet tab capture, saves mic/speaker
+   chunks in local IndexedDB, and finishes the BYOK or Hosted AI pipeline.
+2. The **desktop helper** is required for Zoom, Teams, Slack, and other
+   desktop-call sources. It owns native audio capture, local files, provider
+   calls, retries, and recovery for those sources.
 
 The optional **self-hosted webapp** stores finished meetings on a server you
 control. The extension works without it.
@@ -24,13 +28,16 @@ control. The extension works without it.
 Have these ready:
 
 - Chrome or a Chromium browser.
-- A supported virtual-audio device for your OS:
-  - macOS: [BlackHole](https://github.com/ExistentialAudio/BlackHole), which
-    AI Notetaker does not bundle.
-  - Windows: base [VB-CABLE](https://vb-audio.com/Cable/), with its own
-    licensing and attribution.
+- A supported audio path for your OS. Native loopback is preferred; the
+  virtual-device fallbacks are:
+  - macOS: ScreenCaptureKit on macOS 13+; [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+    is the fallback, and AI Notetaker does not bundle it.
+  - Windows: base [VB-CABLE](https://vb-audio.com/Cable/) when WASAPI
+    loopback is unavailable, with its own licensing and attribution.
   - Linux: PulseAudio or PipeWire with the helper's null-sink integration.
-- Two provider API keys: one transcription key and one summarization key.
+- For free local BYOK, two provider API keys: one transcription key and one
+  summarization key. Hosted AI users sign in and choose a paid plan instead;
+  hosted provider keys never enter the extension.
 - A meeting app that lets you choose its microphone and speakers.
 - Consent from the people you record when local law requires it.
 
@@ -40,10 +47,11 @@ history webapp, not for desktop audio capture.
 
 ## Install without cloning the repository
 
-Open the [install page](https://apercallc.github.io/ai-notetaker/) first. It
-detects your OS and displays only the channels that exist in the current
-published release. A native helper is required; the extension cannot capture
-audio by itself.
+Open the [install page](https://apercallc.github.io/ai-notetaker/) first when
+you want desktop-call capture. It detects your OS and displays only the
+channels that exist in the current published release. Google Meet browser
+capture does not require the native helper; it persists and processes audio in
+the extension.
 
 ### macOS
 
@@ -53,7 +61,10 @@ brew upgrade --cask ai-notetaker
 ```
 
 Homebrew Cask installs the same signed DMG used by the release page and runs
-the Native Messaging registration hook. AI Notetaker links to the official
+the Native Messaging registration hook. On first desktop capture, macOS asks
+for Microphone and Screen Recording permission. Grant both in System Settings;
+the native ScreenCaptureKit path does not require BlackHole. If Screen
+Recording permission cannot be granted, AI Notetaker links to the official
 BlackHole installer; it never bundles BlackHole.
 
 ### Windows
@@ -169,7 +180,7 @@ route on Linux is to build and install the Debian package:
 
 ```sh
 cd helper/crates/app
-npx --yes @tauri-apps/cli@latest build --bundles deb
+npx --yes @tauri-apps/cli@2.11.5 build --bundles deb
 sudo apt install ../../target/release/bundle/deb/*.deb
 cd ../../..
 ```
@@ -182,10 +193,10 @@ installer hooks can run:
 
 ```sh
 # macOS
-cd helper/crates/app && npx --yes @tauri-apps/cli@latest build --bundles dmg
+cd helper/crates/app && npx --yes @tauri-apps/cli@2.11.5 build --bundles dmg
 
 # Windows PowerShell
-cd helper\crates\app; npx --yes @tauri-apps/cli@latest build --bundles msi,nsis
+cd helper\crates\app; npx --yes @tauri-apps/cli@2.11.5 build --bundles msi,nsis
 ```
 
 The macOS DMG requires one extra post-copy step because a DMG has no
@@ -264,14 +275,27 @@ the extension isn't signed by Mozilla yet, so it only loads temporarily:
 
 ## Complete the first-run wizard
 
-Open the extension popup and choose **Start setup**. Complete each step:
+Open the extension popup and choose **Start with Google Meet**. Complete each
+step (or choose a desktop-call source in Step 1):
 
-### Step 1: Install the desktop helper
+### Step 1: Choose a capture path
 
-Start the tray helper before continuing. Leave it running while you record.
-The extension is only a UI; it cannot capture audio on its own.
+The wizard starts with **Google Meet in Chrome — browser capture**. Keep Meet's
+normal microphone and speaker selected; there is no virtual-audio routing to
+configure for this path. The helper still needs to be running before you
+record because it owns durable local audio storage and processing.
 
-### Step 2: Set up audio
+Choose **Another meeting app**, **Zoom**, **Microsoft Teams**, or **Slack** when
+you want desktop-call capture. Only that choice shows the desktop-helper
+installation and audio-routing setup.
+
+### Step 2: Install the desktop helper for desktop-call capture
+
+This step applies only to Zoom, Teams, Slack, and other desktop-call sources.
+Start the tray helper before continuing and leave it running while you record.
+Google Meet capture is extension-owned and does not require the helper.
+
+### Step 3: Set up audio
 
 Use this normal routing: in the meeting app, choose your **physical
 microphone** for Microphone/Input and the platform's **virtual meeting output**
@@ -300,13 +324,18 @@ Teams, and Slack Huddles use the desktop-helper routing below.
 
 Choose the devices in the meeting app, not only in the operating system:
 
-- **macOS:** In Audio MIDI Setup, create a Multi-Output Device containing
-  BlackHole and your headphones or speakers. Choose the Multi-Output Device
-  as the meeting app's Speaker and your physical microphone as Microphone.
-  Do not choose BlackHole alone or you will not hear the meeting.
-- **Windows:** Enable “Listen to this device” for CABLE Output and choose
-  your normal headphones for playback. Choose CABLE Input as the meeting
-  app's Speaker and your physical microphone as Microphone.
+- **macOS:** On macOS 13+, keep your physical microphone and normal speakers
+  or headphones selected; the helper captures system audio through
+  ScreenCaptureKit. Grant AI Notetaker Screen Recording permission when
+  prompted. If the helper reports the BlackHole fallback, create a
+  Multi-Output Device containing BlackHole and your normal speakers or
+  headphones, then choose it as the meeting app's Speaker. Do not choose
+  BlackHole alone or you will not hear the meeting.
+- **Windows:** The helper normally captures the default speaker/headphone
+  endpoint through WASAPI loopback, so no virtual device or routing change is
+  required. If the helper reports the VB-CABLE fallback, enable “Listen to
+  this device” for CABLE Output and choose CABLE Input as the meeting app's
+  Speaker; keep your physical microphone as Microphone.
 - **Linux:** Choose the helper's “AI Notetaker” PulseAudio/PipeWire virtual
   device as the meeting app's Speaker and your physical/default microphone as
   Microphone. Keep your normal speakers or headphones as the system output.
@@ -332,12 +361,18 @@ Microsoft's [Teams device settings guide](https://support.microsoft.com/en-US/Te
 Click **Check devices**, then **Run 2-second test**. Continue only when the
 wizard reports that both the microphone and meeting audio are ready.
 
-### Step 3: Add provider keys
+### Step 4: Choose local BYOK or Hosted AI
 
-Enter **two API keys**, one for each job. They are entered in **Step 3 of the
-browser setup wizard**; after setup, edit the same keys under the extension's
-**Settings → AI provider** section. A single key is not enough because
-transcription and summarization are separate provider calls.
+Choose **Free local BYOK** if you want to provide your own keys, or choose
+**Hosted AI** to sign in to a managed service and pay for its provider usage.
+Hosted AI keeps provider credentials on the service and does not require keys
+in the extension. The hosted service URL, account, plan, and usage are shown
+in Settings; open **Manage hosted billing** there to choose or change a plan.
+
+For local BYOK, enter **two API keys**, one for each job. After setup, edit the
+same keys under the extension's **Settings → AI provider** section. A single
+key is not enough because transcription and summarization are separate
+provider calls.
 
 The recommended default tier asks for:
 
@@ -355,15 +390,15 @@ The **Default** tier uses Deepgram + Claude. The **Budget** tier uses Groq +
 Gemini or DeepSeek; choose the summarizer in Settings. Budget transcription is
 batch-based, so live partial transcripts are less immediate.
 
-Enter each key, click **Test keys**, and continue only after both checks pass.
-Keys are stored in the browser's `chrome.storage.local`; they are not sent to
-the optional webapp.
+For local BYOK, enter each key, click **Test keys**, and continue only after
+both checks pass. Keys are stored in the browser's `chrome.storage.local` and
+are not sent to the optional webapp or Hosted AI service.
 
 You can switch between the Default and Budget tiers later in **Settings → AI
 provider**. The settings page labels every field by role and marks that both
 roles need a key.
 
-### Step 4: Acknowledge recording consent
+### Step 5: Acknowledge recording consent
 
 Read the disclosure and check the box only when you understand your local
 consent obligations. Finish the wizard.
@@ -372,17 +407,18 @@ consent obligations. Finish the wizard.
 
 1. Open the meeting app.
 2. For Zoom, Teams, or Slack Huddles, set its microphone and speaker to the AI
-   Notetaker devices from Step 2. For Google Meet, leave normal Meet devices
+   Notetaker devices from Step 3. For Google Meet, leave normal Meet devices
    selected and use the Notetaker pill on the call page (or **Google Meet —
    capture this tab** in the popup) instead.
 3. Open the extension popup.
 4. Choose **General**, **Standup**, **Sales call**, **1:1**, **Interview**, or
    a custom meeting mode.
 5. Confirm the popup says **Audio ready** for desktop-helper mode. Meet browser
-   mode does not require the virtual-output probe, but the helper still must
-   be connected because it owns local storage and the AI pipeline.
+   mode shows browser-capture readiness and does not require the helper or
+   virtual-output probe.
 6. Click **Record** and approve the browser capture prompts if shown.
-7. Keep the helper tray app running until you click **Stop recording**.
+7. Keep the helper tray app running until you click **Stop recording** only
+   for desktop-call capture.
 
 While recording, the extension shows live transcript lines and a recording
 indicator. If a provider request is temporarily unavailable, the helper keeps

@@ -114,6 +114,25 @@ describe("NativeMessagingClient", () => {
     expect(await storage.getPairingToken()).toBe("new-token-123");
   });
 
+  it("clears a stale token when the installed helper rejects pairing", async () => {
+    await storage.savePairingToken("stale-token");
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    port._emitMessage({
+      type: "error",
+      meetingId: null,
+      code: "helper_not_paired",
+      message: "pairing token missing or mismatched",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(await storage.getPairingToken()).toBeNull();
+  });
+
   it("dispatches helper compatibility information", async () => {
     const port = createFakePort();
     chromeMock.runtime.connectNative.mockReturnValue(port);
@@ -370,6 +389,22 @@ describe("NativeMessagingClient", () => {
     expect(port.postMessage).toHaveBeenCalledWith({ type: "start_recording", meetingId: "meeting-42", meetingMode: "general" });
   });
 
+  it("carries a bounded display title to the helper", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.startRecording("meeting-42", "general", "meet", { kind: "local_byok" }, ` ${"Roadmap ".repeat(40)} `);
+
+    expect(port.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "start_recording",
+      title: expect.stringMatching(/^Roadmap/),
+    }));
+    const message = port.postMessage.mock.calls.at(-1)?.[0] as { title?: string };
+    expect(message.title).toHaveLength(200);
+  });
+
   it("pushes current settings down to the helper", async () => {
     const port = createFakePort();
     chromeMock.runtime.connectNative.mockReturnValue(port);
@@ -419,7 +454,7 @@ describe("NativeMessagingClient", () => {
 
     const preflight = client.getAudioPreflight();
     expect(port.postMessage).toHaveBeenCalledWith({ type: "audio_preflight" });
-    port._emitMessage({ type: "audio_status", platform: "linux", driver: "PipeWire", driverInstalled: true, microphone: "Mic", speaker: "Monitor", ready: true, guidance: "ready" });
+    port._emitMessage({ type: "audio_status", platform: "linux", driver: "PipeWire", driverInstalled: true, microphone: "Mic", speaker: "Monitor", ready: true, guidance: "ready", nativeLoopback: false, virtualDeviceFallback: true, permissionRequired: false });
     await expect(preflight).resolves.toMatchObject({ ready: true, driver: "PipeWire" });
 
     const probe = client.runAudioProbe();

@@ -1,24 +1,28 @@
 # AI Notetaker — Chrome Extension
 
-The UI layer of AI Notetaker: popup (audio preflight, meeting mode, start/stop
+The browser layer of AI Notetaker: popup (audio preflight, meeting mode, start/stop
 and live transcript), a floating notes widget on Google Meet calls (one-click
-start, live transcript, flagged moments, calendar reminders), a settings page (BYOK provider keys, vocabulary, custom
-summary instructions, optional self-hosted webapp), a first-run onboarding
-wizard, meeting detail/history, and a cross-meeting action-item inbox. All
-recording/transcription/summarization logic lives in the desktop helper
-(`../helper/`) — see `../docs/native-messaging-protocol.md` for the wire
-contract between them, and `CLAUDE.md` in this directory for the conventions
-this package follows.
+start, browser capture, flagged moments, calendar reminders), a settings page
+(BYOK provider keys, vocabulary, custom summary instructions, optional
+self-hosted webapp), a first-run onboarding wizard, meeting detail/history, and
+a cross-meeting action-item inbox. Google Meet capture and browser-owned BYOK /
+Hosted AI processing run in this package; desktop-call capture and local
+processing remain in the native helper (`../helper/`).
 
 For the user-facing install and recording flow, start with
 [`../docs/getting-started.md`](../docs/getting-started.md). This package guide
 is for building and loading the extension during development.
 
-Normal users should install the extension from the Chrome Web Store and pair
-it with the native helper installed through Homebrew, WinGet, Chocolatey, or a
-Linux package. The released ZIP and unpacked build below are fallbacks for
-managed/private installations; npm is a development dependency path, not a
-replacement for the native helper.
+Hosted AI sign-in requests an optional Chrome permission for only the service
+origin the user enters. Free local BYOK never requests a hosted origin and
+keeps provider keys in `chrome.storage.local`.
+
+Normal users should install the extension from the Chrome Web Store first. Its
+setup wizard starts with Google Meet browser capture; users recording Zoom,
+Teams, Slack, or another desktop app choose that path and are sent to the
+native-helper installer. The released ZIP and unpacked build below are
+fallbacks for managed/private installations; npm is a development dependency
+path, not a replacement for the native helper.
 
 ## Develop
 
@@ -45,9 +49,10 @@ spec §3.2 for why this has to stay stable). It won't function fully without
 a running helper process registered as the `com.ainotetaker.helper` Native
 Messaging host — that's built separately in `../helper/`.
 
-Loading `dist/` is only the browser half of the setup. The desktop helper must
-also be running, and Chrome must have the Native Messaging manifest installed;
-see the complete [source-build and registration steps](../docs/getting-started.md#build-from-source).
+Loading `dist/` is sufficient for Google Meet browser capture. The native
+helper and its Native Messaging manifest are required only for Zoom, Teams,
+Slack, and other desktop-call sources. See the complete [source-build and
+registration steps](../docs/getting-started.md#build-from-source).
 
 ## Testing and verification
 
@@ -66,5 +71,5 @@ input on the widget. See "Verified in a real browser" in
 `../docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
 
 Still needing a person: a real Google Meet call with real participants, a click
-on a real desktop notification, real Google OAuth, and real provider API keys
-(the "test key" buttons are helper-routed).
+on a real desktop notification, real Google OAuth, and real provider API keys.
+Meet BYOK key use is browser-routed; desktop-call key tests remain helper-routed.

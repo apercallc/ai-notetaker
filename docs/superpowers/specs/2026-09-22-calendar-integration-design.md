@@ -1,7 +1,8 @@
 # Calendar Integration Design
 
 Date: 2026-09-22
-Status: Approved, implementation in progress
+Status: Implemented; real provider/account acceptance remains release-owner
+validation.
 
 ## Problem
 

@@ -1,7 +1,8 @@
 # Cross-Browser Ports Design
 
 Date: 2026-09-22
-Status: Approved, implementation in progress
+Status: Deferred historical design; the current release target is Chrome-first
+Google Meet capture with the documented Chrome Native Messaging path.
 
 ## Problem
 

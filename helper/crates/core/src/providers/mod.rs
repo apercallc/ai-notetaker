@@ -4,19 +4,10 @@
 //! provider must implement these traits and nothing else should need to
 //! change in the pipeline/orchestration code.
 //!
-//! **Scope note on Deepgram (flagged deviation, see helper implementation
-//! report):** the architecture spec calls for Deepgram's *live-streaming*
-//! WebSocket endpoint as the production default. What's implemented here is
-//! Deepgram's synchronous prerecorded (batch) REST endpoint instead, because
-//! it's realistically testable with a mocked HTTP server in this
-//! environment (no live API key, no WebSocket mock harness available). Both
-//! shapes satisfy the same `TranscriptionProvider` trait below, so swapping
-//! in the streaming client later touches only `deepgram.rs`, not the
-//! pipeline — but until that swap happens, the "live partial transcript"
-//! experience described in the spec does not yet exist for the default
-//! provider (it currently behaves like the "budget" batch tier for partials,
-//! while still using Deepgram's model/diarization quality for the final
-//! transcript).
+//! Deepgram uses its live-streaming WebSocket session for the default
+//! transcription path. Its synchronous batch REST endpoint remains available
+//! for key validation and retry/backfill after a streaming gap; both shapes
+//! satisfy the same `TranscriptionProvider` trait below.
 
 pub mod claude;
 pub mod deepgram;

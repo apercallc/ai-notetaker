@@ -90,6 +90,48 @@ describe("Google Meet capture orchestration", () => {
     expect(chromeMock.offscreen.closeDocument).toHaveBeenCalled();
   });
 
+  it("tracks the Meet tab and tears down its capture when that tab disappears", async () => {
+    grantStreamId("stream-abc");
+    const controller = new MeetCaptureController(vi.fn());
+    await controller.start(7, "meeting-1");
+
+    await expect(controller.stopForTab(7)).resolves.toEqual(["meeting-1"]);
+    expect(controller.isActive("meeting-1")).toBe(false);
+    expect(chromeMock.runtime.sendMessage).toHaveBeenLastCalledWith({ type: "MEET_CAPTURE_STOP", meetingId: "meeting-1" });
+    expect(chromeMock.offscreen.closeDocument).toHaveBeenCalled();
+    await expect(controller.stopForTab(7)).resolves.toEqual([]);
+  });
+
+  it("clears tracking and closes the offscreen document when stop messaging fails", async () => {
+    grantStreamId("stream-abc");
+    const controller = new MeetCaptureController(vi.fn());
+    await controller.start(7, "meeting-1");
+    chromeMock.runtime.sendMessage.mockRejectedValueOnce(new Error("offscreen gone"));
+
+    await expect(controller.stop("meeting-1")).rejects.toThrow("offscreen gone");
+    expect(controller.isActive("meeting-1")).toBe(false);
+    expect(chromeMock.offscreen.closeDocument).toHaveBeenCalled();
+  });
+
+  it("reuses an existing offscreen document instead of creating a second one", async () => {
+    grantStreamId("stream-abc");
+    chromeMock.offscreen.hasDocument.mockResolvedValue(true);
+
+    await new MeetCaptureController(vi.fn()).start(7, "meeting-1");
+
+    expect(chromeMock.offscreen.createDocument).not.toHaveBeenCalled();
+  });
+
+  it("returns tab-owned meetings for recovery even when offscreen teardown rejects", async () => {
+    grantStreamId("stream-abc");
+    const controller = new MeetCaptureController(vi.fn());
+    await controller.start(7, "meeting-1");
+    chromeMock.runtime.sendMessage.mockRejectedValueOnce(new Error("offscreen gone"));
+
+    await expect(controller.stopForTab(7)).resolves.toEqual(["meeting-1"]);
+    expect(controller.isActive("meeting-1")).toBe(false);
+  });
+
   it("refuses a non-Meet tab before asking for capture permission", async () => {
     chromeMock.tabs.get.mockResolvedValue({ id: 7, url: "https://zoom.us/j/123" });
     const controller = new MeetCaptureController(vi.fn());
@@ -138,11 +180,38 @@ describe("Google Meet capture orchestration", () => {
       expect(chromeMock.offscreen.createDocument).toHaveBeenCalled();
     });
 
-    it("does not block capture when the permission state cannot be read", async () => {
+  it("does not block capture when the permission state cannot be read", async () => {
       grantStreamId("stream-abc");
       stubMicrophone(new Error("unsupported"));
       await new MeetCaptureController(vi.fn()).start(7, "meeting-1");
       expect(chromeMock.offscreen.createDocument).toHaveBeenCalled();
     });
+  });
+
+  it("forwards independent mic and speaker chunks only for the active meeting", async () => {
+    grantStreamId("stream-abc");
+    const sendChunk = vi.fn();
+    const controller = new MeetCaptureController(sendChunk);
+    await controller.start(7, "meeting-1");
+
+    const pcm = btoa(String.fromCharCode(1, 2, 3, 4));
+    controller.forwardChunk({ type: "MEET_AUDIO_CHUNK", meetingId: "meeting-1", channel: "mic", sampleRateHz: 48_000, pcm16Base64: pcm });
+    controller.forwardChunk({ type: "MEET_AUDIO_CHUNK", meetingId: "meeting-1", channel: "speaker", sampleRateHz: 48_000, pcm16Base64: pcm });
+    controller.forwardChunk({ type: "MEET_AUDIO_CHUNK", meetingId: "other", channel: "speaker", sampleRateHz: 48_000, pcm16Base64: pcm });
+
+    expect(sendChunk).toHaveBeenCalledTimes(2);
+    expect(sendChunk).toHaveBeenNthCalledWith(1, new Uint8Array([1, 2, 3, 4]), "meeting-1", "mic");
+    expect(sendChunk).toHaveBeenNthCalledWith(2, new Uint8Array([1, 2, 3, 4]), "meeting-1", "speaker");
+  });
+
+  it("rejects malformed or mismatched Meet chunks before they reach the helper", async () => {
+    grantStreamId("stream-abc");
+    const controller = new MeetCaptureController(vi.fn());
+    await controller.start(7, "meeting-1");
+    const valid = btoa(String.fromCharCode(1, 2));
+
+    expect(() => controller.forwardChunk({ type: "MEET_AUDIO_CHUNK", meetingId: "meeting-1", channel: "mic", sampleRateHz: 44_100, pcm16Base64: valid })).toThrow("48 kHz");
+    expect(() => controller.forwardChunk({ type: "MEET_AUDIO_CHUNK", meetingId: "meeting-1", channel: "mic", sampleRateHz: 48_000, pcm16Base64: "%%%" })).toThrow("valid base64");
+    expect(() => controller.forwardChunk({ type: "MEET_AUDIO_CHUNK", meetingId: "meeting-1", channel: "mic", sampleRateHz: 48_000, pcm16Base64: btoa(String.fromCharCode(1)) })).toThrow("even-length");
   });
 });

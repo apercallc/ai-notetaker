@@ -23,7 +23,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            bundle: deb,appimage
+          - os: macos-latest
+            bundle: dmg
+          - os: windows-latest
+            bundle: msi,nsis
     defaults:
       run:
         working-directory: helper
@@ -33,6 +39,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install Linux Tauri and audio dev headers
         if: runner.os == 'Linux'
@@ -60,6 +70,13 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
+
+      # Exercise the real Tauri bundle configuration on every native runner.
+      # This is intentionally unsigned: signing, notarization, and installer
+      # execution require release-owner credentials and physical devices.
+      - name: Build unsigned native bundle
+        working-directory: helper/crates/app
+        run: npx --yes @tauri-apps/cli@2.11.5 build --bundles ${{ matrix.bundle }}
 
       # LLVM coverage is Linux-only here because the Tauri tray and native
       # audio backends are platform-specific. The report still covers the

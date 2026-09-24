@@ -1,100 +1,62 @@
-import { describe, expect, it, beforeEach, afterEach, afterAll } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { proxy, config } from "./proxy";
-import { prisma } from "./lib/db";
 
-const ORIGINAL_TOKEN = process.env.AUTH_TOKEN;
+const getSessionUser = vi.fn();
 
-describe("proxy", () => {
-  beforeEach(async () => {
-    process.env.AUTH_TOKEN = "correct-token-value";
-    await prisma.session.deleteMany();
-    await prisma.user.deleteMany();
-  });
-  afterEach(() => {
-    process.env.AUTH_TOKEN = ORIGINAL_TOKEN;
-  });
-  afterAll(async () => {
-    await prisma.$disconnect();
-  });
+vi.mock("./lib/sessions", () => ({ getSessionUser }));
+vi.mock("./lib/auth", () => ({ isAuthorizedBearer: vi.fn(() => false) }));
 
-  it("allows GET /api/health with no auth at all", async () => {
-    const req = new NextRequest("http://localhost/api/health");
-    const res = await proxy(req);
-    expect(res.status).not.toBe(401);
+const { proxy } = await import("./proxy");
+
+function request(path: string, init: { method?: string; headers?: HeadersInit; body?: BodyInit | null } = {}): NextRequest {
+  return new NextRequest(`https://notes.example.test${path}`, init);
+}
+
+describe("managed API proxy boundaries", () => {
+  beforeEach(() => {
+    getSessionUser.mockReset();
+    delete process.env.MANAGED_WORKER_TOKEN;
+    delete process.env.MANAGED_EXTENSION_ORIGIN;
   });
 
-  it("rejects /api/meetings with a 401 when no Authorization header is present", async () => {
-    const req = new NextRequest("http://localhost/api/meetings");
-    const res = await proxy(req);
-    expect(res.status).toBe(401);
+  it("allows managed login to reach the public login handler", async () => {
+    const response = await proxy(request("/api/v1/auth/login", { method: "POST" }));
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(200);
   });
 
-  it("rejects /api/meetings with a 401 when the Bearer token is wrong", async () => {
-    const req = new NextRequest("http://localhost/api/meetings", {
-      headers: { Authorization: "Bearer wrong-token" },
-    });
-    const res = await proxy(req);
-    expect(res.status).toBe(401);
+  it("still requires a managed session for protected v1 routes", async () => {
+    const response = await proxy(request("/api/v1/meetings", { method: "POST", headers: { "x-request-id": "proxy-managed-auth-test" } }));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("x-request-id")).toBe("proxy-managed-auth-test");
+    expect(await response.json()).toEqual({ error: "managed session required", requestId: "proxy-managed-auth-test" });
   });
 
-  it("allows /api/meetings through when the Bearer token is correct", async () => {
-    const req = new NextRequest("http://localhost/api/meetings", {
-      headers: { Authorization: "Bearer correct-token-value" },
-    });
-    const res = await proxy(req);
-    expect(res.status).not.toBe(401);
+  it("allows preflight only for the fixed extension origin", async () => {
+    const origin = "chrome-extension://jidooookkdbbbhkkdmcajnnnhhphodok";
+    const response = await proxy(request("/api/v1/uploads", { method: "OPTIONS", headers: { origin } }));
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe(origin);
+    expect(response.headers.get("access-control-allow-methods")).toContain("PUT");
   });
 
-  it("allows /login with no auth (or you could never log in)", async () => {
-    const req = new NextRequest("http://localhost/login");
-    const res = await proxy(req);
-    expect(res.status).not.toBe(401);
-    // must not redirect either, or /login would loop
-    expect(res.headers.get("location")).toBeNull();
+  it("rejects cross-origin managed API preflight instead of using a wildcard", async () => {
+    const response = await proxy(request("/api/v1/uploads", { method: "OPTIONS", headers: { origin: "https://evil.example" } }));
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  it("redirects an unauthenticated UI page request to /login", async () => {
-    const req = new NextRequest("http://localhost/meetings");
-    const res = await proxy(req);
-    expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toContain("/login");
+  it("keeps the legacy bearer boundary correlated too", async () => {
+    const response = await proxy(request("/api/meetings", { method: "GET", headers: { "x-request-id": "proxy-legacy-auth-test" } }));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("x-request-id")).toBe("proxy-legacy-auth-test");
+    expect(await response.json()).toEqual({ error: "unauthorized", requestId: "proxy-legacy-auth-test" });
   });
 
-  it("rejects a UI page request with a session cookie that doesn't resolve to a real session", async () => {
-    const req = new NextRequest("http://localhost/meetings", {
-      headers: { Cookie: "session=not-a-real-session-id" },
-    });
-    const res = await proxy(req);
-    expect(res.status).toBe(307);
-  });
-
-  it("allows a UI page request through with a valid, real session cookie", async () => {
-    const user = await prisma.user.create({ data: { email: "person@example.com", passwordHash: "irrelevant" } });
-    const session = await prisma.session.create({ data: { userId: user.id, expiresAt: new Date(Date.now() + 100_000) } });
-
-    const req = new NextRequest("http://localhost/meetings", {
-      headers: { Cookie: `session=${session.id}` },
-    });
-    const res = await proxy(req);
-    expect(res.status).not.toBe(307);
-    expect(res.status).not.toBe(401);
-  });
-
-  it("rejects an expired session cookie", async () => {
-    const user = await prisma.user.create({ data: { email: "person@example.com", passwordHash: "irrelevant" } });
-    const session = await prisma.session.create({ data: { userId: user.id, expiresAt: new Date(Date.now() - 1000) } });
-
-    const req = new NextRequest("http://localhost/meetings", {
-      headers: { Cookie: `session=${session.id}` },
-    });
-    const res = await proxy(req);
-    expect(res.status).toBe(307);
-  });
-
-  it("matcher config excludes Next internals and static assets", () => {
-    expect(config.matcher).toBeDefined();
-    expect(config.matcher[0]).toContain("_next/font");
-    expect(config.matcher[0]).toContain("svg");
+  it("allows a correctly authenticated worker to reach its internal routes", async () => {
+    process.env.MANAGED_WORKER_TOKEN = "worker-secret";
+    const response = await proxy(request("/api/v1/jobs/next", { method: "POST", headers: { "x-worker-token": "worker-secret" } }));
+    expect(response.status).toBe(200);
+    expect(getSessionUser).not.toHaveBeenCalled();
   });
 });

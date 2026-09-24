@@ -8,14 +8,15 @@ for the full rationale.
 
 ## Conventions
 
-- **This package owns the AI pipeline.** Audio chunking/streaming,
-  transcription API calls, and summarization API calls all happen here, not
-  in the extension. The extension is a display layer only.
-- **Wrap existing virtual-audio drivers — don't build one.** BlackHole
-  (macOS), VB-Cable (Windows), a PulseAudio/PipeWire null-sink module
-  (Linux). A new low-level audio driver in this package is almost certainly
-  the wrong move; if you think you need one, that's a decision to raise
-  explicitly, not build quietly.
+- **This package owns long-running capture and local durability.** In local
+  BYOK mode it also owns audio chunking, transcription, and summarization API
+  calls. In managed mode it owns authenticated, resumable upload and job
+  state; hosted workers perform provider calls without exposing their keys to
+  the extension.
+- **Prefer native loopback capture — don't build a driver.** Use
+  ScreenCaptureKit/native audio on macOS, WASAPI loopback on Windows, and
+  PipeWire/PulseAudio monitor sources on Linux. BlackHole, VB-CABLE, and a
+  null-sink module remain explicit fallbacks for unsupported routing cases.
 - **BlackHole and VB-Cable have different, verified redistribution terms —
   don't treat them the same.** macOS: never bundle Existential Audio's
   compiled BlackHole installer (GPL source, but the official binary and

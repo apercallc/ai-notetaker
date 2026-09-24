@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>AI Notetaker needs Screen Recording permission to capture meeting audio from your Mac.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>AI Notetaker needs microphone access to record your side of a meeting.</string>
+</dict>
+</plist>

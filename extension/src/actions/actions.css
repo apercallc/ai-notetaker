@@ -1,5 +1,5 @@
 body {
-  min-width: 420px;
+  min-width: min(420px, 100vw);
   max-width: 720px;
   margin: 0 auto;
 }

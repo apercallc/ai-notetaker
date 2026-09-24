@@ -80,6 +80,7 @@ html {
 
 body {
   margin: 0;
+  min-height: 100vh;
   font-family: var(--font-family);
   background: var(--color-bg);
   color: var(--color-text);
@@ -94,6 +95,28 @@ button {
   border-radius: var(--radius);
   border: 1px solid transparent;
   padding: var(--space-2) var(--space-3);
+}
+
+button.primary:hover:not(:disabled),
+button.danger:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--color-accent);
 }
 
 button.primary {
@@ -124,7 +147,11 @@ button:disabled {
 
 input[type="text"],
 input[type="password"],
-input[type="url"] {
+input[type="url"],
+input[type="search"],
+input[type="number"],
+select,
+textarea {
   font-family: inherit;
   font-size: inherit;
   color: var(--color-text);
@@ -133,6 +160,28 @@ input[type="url"] {
   border-radius: var(--radius);
   padding: var(--space-2);
   width: 100%;
+}
+
+input[type="date"] {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
+
+textarea {
+  line-height: 1.45;
+  min-height: 6rem;
+  resize: vertical;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 1;
 }
 
 .recording-indicator {
@@ -153,6 +202,11 @@ input[type="url"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  button,
+  a {
+    transition: none;
+  }
+
   .recording-indicator::before {
     animation: none;
   }

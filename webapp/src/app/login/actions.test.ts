@@ -14,6 +14,7 @@ import { getUserRole } from "@/lib/workspaces";
 // session id it was set to actually resolves via the real (unmocked)
 // getSessionUser.
 const cookieStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+const originalManagedHosting = process.env.MANAGED_HOSTING;
 vi.mock("next/headers", () => ({ cookies: vi.fn(async () => cookieStore) }));
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((url: string) => {
@@ -21,7 +22,7 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-const { bootstrap, login, logout } = await import("./actions");
+const { bootstrap, login, signup, logout } = await import("./actions");
 
 function formData(fields: Record<string, string>): FormData {
   const data = new FormData();
@@ -44,6 +45,8 @@ afterAll(async () => {
   await prisma.user.deleteMany();
   await prisma.workspace.deleteMany();
   await prisma.$disconnect();
+  if (originalManagedHosting === undefined) delete process.env.MANAGED_HOSTING;
+  else process.env.MANAGED_HOSTING = originalManagedHosting;
 });
 
 describe("bootstrap", () => {
@@ -87,6 +90,28 @@ describe("bootstrap", () => {
       bootstrap(formData({ email: "attacker@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
     ).rejects.toThrow(/REDIRECT:\/login/);
     expect(await prisma.user.count()).toBe(0);
+  });
+});
+
+describe("managed signup", () => {
+  it("creates a separate tenant owner when managed hosting is enabled", async () => {
+    process.env.MANAGED_HOSTING = "true";
+    await expect(
+      signup(formData({ workspaceName: "Acme Notes", email: "acme@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
+    ).rejects.toThrow("REDIRECT:/meetings");
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: "acme@example.com" } });
+    const membership = await prisma.workspaceMembership.findUniqueOrThrow({ where: { userId_workspaceId: { userId: user.id, workspaceId: (await prisma.workspace.findFirstOrThrow({ where: { name: "Acme Notes" } })).id } } });
+    expect(membership.role).toBe("owner");
+    expect(membership.workspaceId).not.toBe((await prisma.workspace.findFirstOrThrow({ where: { isDefault: true } })).id);
+  });
+
+  it("does not expose managed signup on self-hosted instances", async () => {
+    delete process.env.MANAGED_HOSTING;
+    await expect(
+      signup(formData({ workspaceName: "Should not exist", email: "blocked@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
+    ).rejects.toThrow("REDIRECT:/login?error=signup-disabled");
+    expect(await prisma.user.findUnique({ where: { email: "blocked@example.com" } })).toBeNull();
   });
 });
 

@@ -5,12 +5,18 @@ Sub-project 1 of the "best-in-class Google Meet notetaker" effort. Sub-projects
 integrations: Slack webhook, Notion, email recap) each get their own spec and
 plan; this document covers only the in-call experience.
 
+> **Current product contract:** the 2026-09-24 dual-mode design in
+> [`2026-09-24-scribbl-dual-mode-product-design.md`](2026-09-24-scribbl-dual-mode-product-design.md)
+> supersedes the BYOK-only wording below. The widget remains botless and
+> Meet-first, but it may feed either free local BYOK or optional Hosted AI.
+
 ## Goal
 
 Make taking notes on a Google Meet call one click, keep the live transcript
 visible while the call is on screen, and let the user flag important moments
 without leaving the call. The comparison point is Scribbl: bot-free capture,
-notes right after the call. Our edge is BYOK, local-first, and no meeting caps.
+notes right after the call. Our edge is local-first free BYOK plus an optional
+Hosted AI mode, with plan limits made explicit instead of hidden.
 
 ## Decisions
 
@@ -69,7 +75,8 @@ notes right after the call. Our edge is BYOK, local-first, and no meeting caps.
 9. **Consent and honesty in the copy.** Nobody else in the call is notified, so
    the panel says so above the Start button and asks the user to tell everyone;
    the toast after starting repeats it. Audio is described as saved on this
-   device and sent to the user's own transcription provider.
+   device, then either processed with the user's own BYOK providers or sent to
+   the explicitly selected Hosted AI workspace.
 10. **Design.** Always-dark, because the call surface is dark; the pill shows an
    unmistakable pulsing "Recording" state with elapsed time; red means recording
    and nothing else (problems are amber); the idle pill has a one-click Start;
@@ -80,9 +87,11 @@ notes right after the call. Our edge is BYOK, local-first, and no meeting caps.
    silent; keyboard events inside the widget never reach Meet's own single-key
    shortcuts; `prefers-reduced-motion` and forced-colors are honoured.
 
-## Boundaries (unchanged)
+## Boundaries (updated by the dual-mode migration)
 
-- No project-operated backend, account, billing, or telemetry.
+- The widget does not require an account for local BYOK. It may initiate an
+  explicitly selected Hosted AI flow, whose authenticated backend owns
+  provider credentials, usage, and billing.
 - The widget never calls a provider, never holds keys, and never touches
   `chrome.storage.local` except its own position key.
 - Native Messaging remains the only extension/helper transport.
@@ -145,8 +154,10 @@ OAuth. Those need a person and an account.
 
 - On a Meet call route the widget appears; elsewhere on `meet.google.com` it
   does not; it follows in-app navigation; it can be turned off in Settings.
-- With the helper connected and permissions granted, one click starts a Meet
-  recording, titled from the tab; the pill shows Recording and elapsed time.
+- With or without the helper, once onboarding and permissions are complete,
+  one click starts the extension-owned Meet recording, titled from the tab;
+  the pill shows Recording and elapsed time. A connected helper may also
+  receive browser chunks for live local processing.
 - Without Chrome's tab invocation, the widget shows the shortcut instruction; the
   shortcut then starts recording. Without microphone permission, the widget
   offers a one-time grant that then unblocks recording.
@@ -156,5 +167,5 @@ OAuth. Those need a person and an account.
   exports.
 - After Stop, the widget shows "Writing your notes…", then "Your notes are
   ready" with a link, and the card can be dismissed.
-- Helper missing, incompatible, or connecting is explained with a working
-  "Set up helper" / "Check again".
+- Helper missing, incompatible, or connecting is explained only for desktop
+  capture; Meet never redirects to desktop-helper setup.

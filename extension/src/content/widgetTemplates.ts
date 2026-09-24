@@ -90,7 +90,7 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
     case "setup":
       return `
           <div class="stack">
-            <div><h2>Finish setup to start</h2><p class="sub">Connect the desktop helper, add your API keys, and confirm the recording notice. It takes about two minutes.</p></div>
+            <div><h2>Set up Google Meet notes</h2><p class="sub">Choose local BYOK or Hosted AI and add the recording notice. Meet capture runs in Chrome; desktop calls can use the native helper later.</p></div>
             <button type="button" class="btn primary block" id="open-setup">Open setup</button>
           </div>`;
     case "starting":
@@ -141,10 +141,22 @@ function renderError(ctx: TemplateContext): string {
   const needsMic = message === MIC_PERMISSION_HINT;
   const shortcutHint =
     message === CAPTURE_PERMISSION_HINT && ctx.state?.shortcuts.toggle ? ` Or press ${keysHtml(ctx.state.shortcuts.toggle)} on this tab.` : "";
+  const recoveryHint =
+    ctx.ui.errorRecovery === "check_provider_key"
+      ? "Check the selected provider key in Settings."
+      : ctx.ui.errorRecovery === "check_audio"
+        ? "Check both microphone and meeting-audio devices before trying again."
+        : ctx.ui.errorRecovery === "update_helper"
+          ? "Install the matching desktop helper version, then check again."
+          : ctx.ui.errorRecovery === "check_billing"
+            ? "Open Hosted AI billing in Settings to choose a plan or resolve payment."
+          : ctx.ui.errorRecovery === "sign_in"
+            ? "Sign in to Hosted AI again before retrying."
+            : "";
   return `
           <div class="stack">
             <div><h2>Couldn't take notes</h2></div>
-            <p class="note error">${escapeHtml(message)}${shortcutHint}</p>
+            <p class="note error">${escapeHtml(message)}${shortcutHint}${recoveryHint ? ` ${escapeHtml(recoveryHint)}` : ""}</p>
             <div class="row">
               ${needsMic ? `<button type="button" class="btn primary" id="allow-mic">Allow microphone</button>` : ""}
               ${retryable ? `<button type="button" class="btn ${needsMic ? "secondary" : "primary"}" id="retry">Try again</button>` : `<button type="button" class="btn primary" id="open-notes">Open details</button>`}
@@ -169,7 +181,7 @@ function renderReady(ctx: TemplateContext): string {
         ${
           notice
             ? `<p class="note warn" role="status" id="helper-note">${escapeHtml(notice)}</p>
-               <div class="row"><button type="button" class="btn primary" id="helper-setup">Set up helper</button><button type="button" class="btn secondary" id="helper-check">Check again</button></div>`
+               <div class="row"><button type="button" class="btn primary" id="helper-setup">Open recording setup</button><button type="button" class="btn secondary" id="helper-check">Check again</button></div>`
             : ""
         }
         <div class="field">

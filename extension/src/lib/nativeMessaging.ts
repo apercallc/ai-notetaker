@@ -8,7 +8,7 @@
  * helper (which owns the pipeline) is the source of truth for in-progress
  * recording state, not this client's in-memory state.
  */
-import { getPairingToken, savePairingToken } from "./storage";
+import { clearPairingToken, getPairingToken, savePairingToken } from "./storage";
 import {
   isIncomingMessage,
   type IncomingMessage,
@@ -19,6 +19,7 @@ import {
   type FlaggedMomentWire,
   type MeetingMode,
   type NotetakerSettings,
+  type ProcessingMode,
   type ProviderKind,
 } from "../types";
 
@@ -192,6 +193,16 @@ export class NativeMessagingClient {
     if (raw.type === "paired") {
       void savePairingToken(raw.pairingToken);
     }
+    if (raw.type === "error" && raw.code === "helper_not_paired") {
+      // The helper is reachable, but this browser profile lost or has a
+      // stale token (for example after clearing extension storage). Clear the
+      // browser copy before the host closes the connection so the scheduled
+      // reconnect can perform a fresh, origin-allowlisted pairing handshake.
+      // This is deliberately not the same as a missing host: installation is
+      // already proven, and sending the old token forever would strand the
+      // profile until the user edited app data manually.
+      void clearPairingToken();
+    }
     const handlers = this.listeners.get(raw.type);
     if (!handlers) return;
     for (const handler of handlers) handler(raw);
@@ -219,7 +230,7 @@ export class NativeMessagingClient {
     this.port.postMessage(message);
   }
 
-  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions">): void {
+  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions"> & Partial<Pick<NotetakerSettings, "processingMode" | "managedService">>): void {
     // State sync, not a one-shot command. The helper holds settings in
     // memory only for its process lifetime and the controller re-pushes
     // whenever the connection is (re)established, so dropping the push
@@ -227,24 +238,30 @@ export class NativeMessagingClient {
     // throw, which would reject init() and wedge GET_STATE exactly in the
     // helper-missing case this client reports via onStatusChange.
     if (!this.port) return;
+    const modeFields = settings.processingMode || settings.managedService
+      ? { processingMode: settings.processingMode ?? { kind: "local_byok" }, managedService: settings.managedService ?? null }
+      : {};
     this.send({
       type: "settings",
       transcriptionProvider: settings.transcriptionProvider,
       summarizationProvider: settings.summarizationProvider,
       apiKeys: settings.apiKeys,
       webapp: settings.webapp,
+      ...modeFields,
       defaultMeetingMode: settings.defaultMeetingMode,
       customVocabulary: settings.customVocabulary,
       customSummaryInstructions: settings.customSummaryInstructions,
     });
   }
 
-  startRecording(meetingId: string, meetingMode: MeetingMode, captureSource: CaptureSource = "desktop"): void {
+  startRecording(meetingId: string, meetingMode: MeetingMode, captureSource: CaptureSource = "desktop", processingMode: ProcessingMode = { kind: "local_byok" }, title?: string): void {
     this.send({
       type: "start_recording",
       meetingId,
       meetingMode,
-      ...(captureSource === "meet" ? { captureSource } : {}),
+      ...(title?.trim() ? { title: title.trim().slice(0, 200) } : {}),
+      ...(captureSource !== "desktop" ? { captureSource } : {}),
+      ...(processingMode.kind !== "local_byok" ? { processingMode } : {}),
     });
   }
 
@@ -299,6 +316,9 @@ export class NativeMessagingClient {
         speaker: null,
         ready: false,
         guidance: "The helper did not respond. Install and start it, then check audio again.",
+        nativeLoopback: false,
+        virtualDeviceFallback: false,
+        permissionRequired: false,
       };
       const handler = (message: Extract<IncomingMessage, { type: "audio_status" }>): void => {
         settle(message);
@@ -353,10 +373,9 @@ export class NativeMessagingClient {
   }
 
   /**
-   * Routes "test this key" through the helper instead of calling the
-   * provider's API directly from the extension — see extension/CLAUDE.md
-   * ("Do not call transcription/LLM provider APIs directly from the
-   * extension") and docs/native-messaging-protocol.md. Resolves via a
+   * Routes desktop-call "test this key" through the helper. The browser-owned
+   * Meet path uses its own direct provider pipeline after IndexedDB
+   * persistence. Resolves via a
    * one-shot listener correlated on `provider` (the settings page only
    * ever has one test in flight per provider), with a timeout so a lost
    * reply (e.g. helper not running) doesn't hang the UI forever.

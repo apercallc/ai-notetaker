@@ -49,7 +49,14 @@ function attachProcessor(stream: MediaStream, channel: BrowserAudioChannel, meet
       channel,
       sampleRateHz: SAMPLE_RATE_HZ,
       pcm16Base64: toBase64(pcm16),
-    }).catch(() => stop());
+    }).catch(() => {
+      void chrome.runtime.sendMessage({
+        type: "MEET_CAPTURE_ERROR",
+        meetingId,
+        message: "The Meet capture service worker disconnected. Audio already received is safe; reconnect and start again.",
+      }).catch(() => undefined);
+      void stop();
+    });
   };
   source.connect(processor);
   // tabCapture mutes the tab while it is captured; reconnecting this source

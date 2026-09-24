@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { bootstrap, login } from "./actions";
+import { bootstrap, login, signup } from "./actions";
 import { SubmitButton } from "./SubmitButton";
 import { safeNextPath } from "@/lib/navigation";
 
@@ -10,8 +10,9 @@ export default async function LoginPage({
 }) {
   const { next = "/meetings", error } = await searchParams;
   const userCount = await prisma.user.count();
+  const managedHosting = process.env.MANAGED_HOSTING === "true";
 
-  if (userCount === 0) {
+  if (userCount === 0 && !managedHosting) {
     return (
       <div className="container">
         <form className="login-form" action={bootstrap}>
@@ -97,13 +98,29 @@ export default async function LoginPage({
           required
           autoComplete="current-password"
         />
-        {error && (
+        {error === "1" && (
           <p className="error-text" role="alert">
             That email or password isn&apos;t correct.
           </p>
         )}
         <SubmitButton />
       </form>
+      {managedHosting && (
+        <form className="login-form" action={signup}>
+          <h2>Create a hosted workspace</h2>
+          <p className="muted-copy">Start a separate tenant for your team. Your meetings and billing stay isolated from every other customer.</p>
+          <label htmlFor="signupWorkspaceName">Workspace name</label>
+          <input id="signupWorkspaceName" name="workspaceName" type="text" className="text-input" required maxLength={100} autoComplete="organization" />
+          <label htmlFor="signupEmail">Email</label>
+          <input id="signupEmail" name="email" type="email" className="text-input" required autoComplete="email" />
+          <label htmlFor="signupPassword">Password</label>
+          <input id="signupPassword" name="password" type="password" className="text-input" required minLength={12} autoComplete="new-password" />
+          <label htmlFor="signupConfirmPassword">Confirm password</label>
+          <input id="signupConfirmPassword" name="confirmPassword" type="password" className="text-input" required minLength={12} autoComplete="new-password" />
+          {error === "signup" && <p className="error-text" role="alert">Check the workspace name, email, and password, or use another email.</p>}
+          <SubmitButton />
+        </form>
+      )}
     </div>
   );
 }

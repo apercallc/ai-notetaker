@@ -6,7 +6,7 @@
  */
 import type { HelperConnectionStatus } from "./nativeMessaging";
 import type { Shortcuts } from "./shortcuts";
-import type { ActionItem, AudioProbeResult, AudioStatus, Bookmark, BrowserAudioChannel, CaptureSource, DriveExportState, HelperInfo, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, Speaker } from "../types";
+import type { ActionItem, AudioProbeResult, AudioStatus, Bookmark, BrowserAudioChannel, CaptureSource, DriveExportState, ErrorRecoveryCategory, HelperInfo, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, Speaker } from "../types";
 
 export type UiToBackgroundMessage =
   | { type: "GET_STATE" }
@@ -15,12 +15,14 @@ export type UiToBackgroundMessage =
   | { type: "RUN_AUDIO_PROBE" }
   | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number; titleHint?: string }
   | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string }
+  | { type: "MEET_CAPTURE_ERROR"; meetingId: string; message: string }
   | { type: "STOP_RECORDING"; meetingId: string }
   | { type: "ADD_BOOKMARK"; meetingId: string; note?: string }
   | { type: "GET_WIDGET_STATE" }
   | { type: "SAVE_WIDGET_POSITION"; position: { x: number; y: number } }
   | { type: "OPEN_MEETING"; meetingId: string }
-  | { type: "OPEN_PAGE"; page: "onboarding" | "settings" | "install" | "microphone" | "shortcuts" }
+  | { type: "RETRY_MEETING_PROCESSING"; meetingId: string }
+  | { type: "OPEN_PAGE"; page: "onboarding" | "settings" | "microphone" | "shortcuts" }
   | { type: "RETRY_DRIVE_EXPORT"; meetingId: string }
   | { type: "SAVE_SETTINGS"; settings: NotetakerSettings }
   | { type: "RESUME_RECORDING"; meetingId: string }
@@ -74,8 +76,8 @@ export type BackgroundToUiMessage =
   | { type: "STATE"; state: BackgroundState }
   | { type: "TRANSCRIPT_UPDATE"; meetingId: string; speaker: Speaker; text: string; isFinal: boolean; utteranceId: number }
   | { type: "SUMMARY_READY"; meetingId: string; summary: string; actionItems: ActionItem[] }
-  | { type: "PROCESSING_WARNING"; meetingId: string; message: string }
-  | { type: "RECORDING_ERROR"; meetingId: string | null; message: string }
+  | { type: "PROCESSING_WARNING"; meetingId: string; message: string; recovery?: ErrorRecoveryCategory }
+  | { type: "RECORDING_ERROR"; meetingId: string | null; message: string; recovery?: ErrorRecoveryCategory }
   | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
   | { type: "DRIVE_EXPORT"; meetingId: string; status: DriveExportState["status"]; webViewLink?: string; message?: string }
   | { type: "HELPER_STATUS"; status: HelperConnectionStatus }

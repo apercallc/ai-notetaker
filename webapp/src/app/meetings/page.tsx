@@ -1,8 +1,10 @@
 import Link from "next/link";
-import { listMeetings, MAX_SEARCH_LENGTH } from "@/lib/meetings";
+import { listMeetings } from "@/lib/meetings";
+import { MAX_SEARCH_LENGTH } from "@/lib/meetingConstants";
 import { requireSession } from "@/lib/currentUser";
 import { logout } from "@/app/login/actions";
 import { SearchForm } from "./SearchForm";
+import { managedHostingEnabled } from "@/lib/managedAuth";
 
 const PAGE_SIZE = 50;
 // The data layer caps offsets at 100,000; keeping the UI bound aligned avoids
@@ -51,6 +53,7 @@ export default async function MeetingsPage({
         <div className="header-links">
           <Link href="/actions">Action items</Link>
           {role === "owner" && <Link href="/team">Team</Link>}
+          {role === "owner" && managedHostingEnabled() && <Link href="/billing">Hosted AI</Link>}
           <span className="total-count">{total} total</span>
         </div>
       </div>

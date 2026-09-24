@@ -11,15 +11,18 @@ your own desktop helper and provider keys.
 
 ## Full description
 
-AI Notetaker records separate microphone and meeting-audio channels through a
-native desktop helper, shows a live transcript, and creates a summary with
-action items. Audio and meeting history stay on your machine by default. You
-bring your own transcription and summarization keys; the project has no
-account, subscription, analytics, or project-operated backend.
+AI Notetaker records separate microphone and meeting-audio channels without a
+meeting bot. Google Meet uses Chrome tab capture; Zoom, Teams, Slack, and
+other desktop calls can use the native helper. The free local BYOK mode keeps
+audio and meeting history on your machine and uses keys you provide. An
+optional Hosted AI mode lets users sign in to a managed service that performs
+provider calls, usage metering, and paid-plan billing without exposing
+provider keys to the extension.
 
-The extension is only the setup and recording UI. It communicates with the
-desktop helper through Chrome Native Messaging. The optional history webapp is
-self-hosted by the user and is not required to record meetings.
+The extension owns Google Meet capture and communicates with the desktop
+helper through Chrome Native Messaging for desktop-call capture. The optional
+self-hosted history webapp remains available; Hosted AI is a separate managed
+deployment path and is not required for local BYOK recording.
 
 Use the extension only after obtaining the consent required in your location
 and by your meeting participants.
@@ -29,13 +32,16 @@ and by your meeting participants.
 | Permission | Why it is requested |
 | --- | --- |
 | `storage` | Store provider keys, helper pairing state, settings, and local meeting records in `chrome.storage.local`. |
-| `nativeMessaging` | Send recording controls and receive transcripts from the user-installed desktop helper. |
+| `nativeMessaging` | Send desktop-call recording controls and receive transcripts from the user-installed desktop helper. |
 | `alarms` | Schedule bounded background retry/sync work when the MV3 service worker is inactive. |
+| `tabCapture`, `offscreen` | Capture the active Google Meet tab in an offscreen document without a bot joining the call. |
+| Meet/provider host permissions | Capture Google Meet and, in local BYOK mode, send audio to the provider domains selected by the user. Hosted mode requests its service origin only after explicit sign-in. |
 
 The extension creates extension-owned tabs for setup and meeting details using
-the tabs API without requesting broad browsing-history or host permissions. It
-does not call AI provider domains directly and does not open a TCP or localhost
-WebSocket service.
+the tabs API without requesting broad browsing-history permissions. It does not
+open a TCP or localhost WebSocket service. Provider keys are kept in protected
+local extension storage for BYOK mode; managed provider secrets remain on the
+hosted service.
 
 ## Submission checklist
 
