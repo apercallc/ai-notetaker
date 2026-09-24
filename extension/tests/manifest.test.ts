@@ -10,4 +10,27 @@ describe("manifest.json cross-browser fields", () => {
     expect(manifest.background.service_worker).toBe("background.js");
     expect(manifest.background.scripts).toEqual(["background.js"]);
   });
+
+  it("injects the Meet widget only on meet.google.com, with capture kept to that host", () => {
+    expect(manifest.content_scripts).toHaveLength(1);
+    expect(manifest.content_scripts[0]?.matches).toEqual(["https://meet.google.com/*"]);
+    expect(manifest.content_scripts[0]?.js).toEqual(["content/meetWidget.js"]);
+    expect(manifest.host_permissions).toEqual(["https://meet.google.com/*"]);
+  });
+
+  it("registers the two Meet shortcuts the widget advertises", () => {
+    expect(manifest.commands["toggle-recording"]?.suggested_key.default).toBe("Alt+Shift+R");
+    expect(manifest.commands["add-bookmark"]?.suggested_key.default).toBe("Alt+Shift+B");
+  });
+
+  it("keeps the committed extension key", () => {
+    expect(manifest.key).toMatch(/^MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4K2Qmk5R/);
+  });
+
+  it("asks only for the permissions the features need", () => {
+    expect([...manifest.permissions].sort()).toEqual(
+      ["activeTab", "alarms", "identity", "nativeMessaging", "notifications", "offscreen", "storage", "tabCapture"].sort(),
+    );
+    expect(manifest.host_permissions).toEqual(["https://meet.google.com/*"]);
+  });
 });

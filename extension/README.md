@@ -1,7 +1,8 @@
 # AI Notetaker — Chrome Extension
 
 The UI layer of AI Notetaker: popup (audio preflight, meeting mode, start/stop
-and live transcript), a settings page (BYOK provider keys, vocabulary, custom
+and live transcript), a floating notes widget on Google Meet calls (one-click
+start, live transcript, flagged moments, calendar reminders), a settings page (BYOK provider keys, vocabulary, custom
 summary instructions, optional self-hosted webapp), a first-run onboarding
 wizard, meeting detail/history, and a cross-meeting action-item inbox. All
 recording/transcription/summarization logic lives in the desktop helper
@@ -48,18 +49,22 @@ Loading `dist/` is only the browser half of the setup. The desktop helper must
 also be running, and Chrome must have the Native Messaging manifest installed;
 see the complete [source-build and registration steps](../docs/getting-started.md#build-from-source).
 
-## What's implemented vs. not yet verified live
+## Testing and verification
 
-Implemented and unit-tested (61 tests, all passing): local storage
-(settings/meetings, `chrome.storage.local` only, never `.sync`), the
-Native Messaging client and reconnect behavior, the background
-orchestration logic (transcript/summary handling, webapp sync, crash
-recovery state), and API-key/webapp health validation.
+`npm test` runs the unit suite (jsdom, no browser); `npm run test:coverage`
+enforces the coverage floor in `vitest.config.ts`; `npm run typecheck` runs
+`tsc`. The suite covers storage, the Native Messaging client, background
+orchestration, the Meet widget (rendering, drag, accessibility, sender rules),
+capture orchestration, calendar reminders, and the helper protocol.
 
-**Not verified in this environment** (no real Chrome browser or running
-helper process was available to test against): actually loading the
-unpacked extension in Chrome, the real Native Messaging handshake against
-a live helper, and real provider API calls (the "test key" buttons are
-helper-routed but still need real credentials — untested against real keys
-here). These need a manual pass once `helper/` is built and both are
-loaded together on a real machine.
+The Meet capture path was also exercised in real Chromium against a real helper
+over Native Messaging, using a local HTTPS stand-in for `meet.google.com`
+(strict CSP and Trusted Types on, fake capture devices): capture refusal
+without an invocation, a real shortcut start, separate mic/speaker files,
+flagged moments reaching the helper, alarm and notification, and real mouse
+input on the widget. See "Verified in a real browser" in
+`../docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
+
+Still needing a person: a real Google Meet call with real participants, a click
+on a real desktop notification, real Google OAuth, and real provider API keys
+(the "test key" buttons are helper-routed).

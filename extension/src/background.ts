@@ -6,9 +6,28 @@
  * event (see extension/CLAUDE.md and the architecture spec §3.2).
  */
 import { BackgroundController } from "./lib/backgroundController";
-import { NativeMessagingClient } from "./lib/nativeMessaging";
+import { getInstallPageUrl } from "./lib/install";
 import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/internalMessages";
+import { NativeMessagingClient } from "./lib/nativeMessaging";
+import { openReminderCall, runMeetReminders, syncReminderAlarm } from "./lib/reminderAlarm";
+import { REMINDER_ALARM } from "./lib/reminders";
+import { classifySender, isMessageAllowed, resolveStartRequest, type SenderKind } from "./lib/senderPolicy";
+import { saveWidgetPosition } from "./lib/storage";
 import { MeetCaptureController, type MeetAudioChunk } from "./meet/meetCapture";
+import { handleMeetCommand, startMeetRecording, stopMeetRecording } from "./meet/session";
+import { broadcastToMeetTabs } from "./meet/tabBroadcast";
+
+// API keys and calendar tokens live in chrome.storage.local. Keep it out of
+// reach of content scripts (the Meet widget runs next to a web page); every
+// widget need goes through a background message instead.
+async function restrictStorageToTrustedContexts(): Promise<void> {
+  try {
+    await chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" });
+  } catch (error) {
+    console.warn("Could not restrict chrome.storage.local to trusted contexts", error);
+  }
+}
+void restrictStorageToTrustedContexts();
 
 const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
@@ -24,7 +43,10 @@ const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => {
 
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === "ai-notetaker-helper-retry") client.retryFromAlarm();
+  if (alarm.name === REMINDER_ALARM) void readyPromise.then(() => runMeetReminders(() => controller.getState().activeMeeting !== null));
 });
+
+chrome.notifications?.onClicked.addListener((notificationId) => void openReminderCall(notificationId));
 
 // The onboarding wizard (helper install → select device → API key(s)) is
 // the architecture's whole "simple, straightforward install" pillar — it
@@ -36,10 +58,17 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
+chrome.commands?.onCommand.addListener((command, tab) => {
+  void readyPromise
+    .then(() => handleMeetCommand(command, tab, controller, meetCapture))
+    .catch((error) => console.warn("Meet shortcut failed", error));
+});
+
 function broadcastToUi(message: BackgroundToUiMessage): void {
   // No listener (e.g. popup closed) rejects this silently — that's fine,
   // the UI reads persisted state from storage when it next opens.
   chrome.runtime.sendMessage(message).catch(() => {});
+  void broadcastToMeetTabs(message);
 
   // A recording failure is exactly the moment the user is *not* looking at
   // the popup (they're in the call it just failed to capture) — without a
@@ -54,13 +83,40 @@ function broadcastToUi(message: BackgroundToUiMessage): void {
 }
 
 const readyPromise = controller.init();
+void readyPromise.then(syncReminderAlarm);
 
-chrome.runtime.onMessage.addListener((message: UiToBackgroundMessage, _sender, sendResponse) => {
-  void handleUiMessage(message).then(sendResponse);
+chrome.runtime.onMessage.addListener((message: UiToBackgroundMessage, sender, sendResponse) => {
+  // Extension pages and the offscreen capture page share this channel with the
+  // Meet content script, which runs next to a web page. Each sender may only
+  // send the requests it needs.
+  const kind = classifySender(sender, {
+    extensionId: chrome.runtime.id,
+    extensionBaseUrl: chrome.runtime.getURL(""),
+    offscreenUrl: chrome.runtime.getURL("meet/offscreen.html"),
+  });
+  if (typeof message?.type !== "string" || !isMessageAllowed(message.type, kind)) return false;
+  handleUiMessage(message, sender, kind).then(sendResponse, (error: unknown) => {
+    console.warn(`Handling ${message.type} failed`, error);
+    sendResponse({ error: error instanceof Error ? error.message : "The request failed." });
+  });
   return true; // keep the message channel open for the async response
 });
 
-async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown> {
+async function openExtensionPage(page: Extract<UiToBackgroundMessage, { type: "OPEN_PAGE" }>["page"]): Promise<void> {
+  if (page === "settings") {
+    await chrome.runtime.openOptionsPage();
+    return;
+  }
+  const urls: Record<Exclude<typeof page, "settings">, string> = {
+    onboarding: chrome.runtime.getURL("onboarding/onboarding.html"),
+    microphone: chrome.runtime.getURL("meet/microphone.html"),
+    shortcuts: "chrome://extensions/shortcuts",
+    install: getInstallPageUrl("meet-widget"),
+  };
+  await chrome.tabs.create({ url: urls[page] });
+}
+
+async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.runtime.MessageSender, kind: SenderKind): Promise<unknown> {
   await readyPromise;
   switch (message.type) {
     case "GET_STATE":
@@ -72,31 +128,37 @@ async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown>
       return { status: await controller.getAudioPreflight() };
     case "RUN_AUDIO_PROBE":
       return { result: await controller.runAudioProbe() };
-    case "START_RECORDING":
-      {
-        const captureSource = message.captureSource ?? "desktop";
-        const meetingId = await controller.startRecording(message.meetingMode, captureSource);
-        if (!meetingId) return { meetingId: "" };
-        if (captureSource === "meet") {
-          if (typeof message.tabId !== "number") {
-            await controller.failRecording(meetingId, "Choose the active Google Meet tab before starting browser capture.");
-            return { meetingId: "" };
-          }
-          try {
-            await meetCapture.start(message.tabId, meetingId);
-          } catch (error) {
-            await controller.failRecording(meetingId, error instanceof Error ? error.message : "Google Meet capture could not start.");
-            return { meetingId: "" };
-          }
-        }
-        return { meetingId };
-      }
+    case "START_RECORDING": {
+      // The in-call widget cannot know its own tab id; the sender does, and a
+      // page-side sender is never allowed to name another one.
+      const { captureSource, tabId } = resolveStartRequest(message, kind, sender.tab?.id);
+      const meetingId =
+        captureSource === "meet"
+          ? await startMeetRecording(controller, meetCapture, {
+              tabId,
+              ...(message.meetingMode ? { meetingMode: message.meetingMode } : {}),
+              ...(message.titleHint ? { titleHint: message.titleHint } : {}),
+            })
+          : await controller.startRecording(message.meetingMode, captureSource, message.titleHint);
+      return { meetingId };
+    }
     case "STOP_RECORDING":
-      try {
-        if (meetCapture.isActive(message.meetingId)) await meetCapture.stop(message.meetingId);
-      } finally {
-        await controller.stopRecording(message.meetingId);
-      }
+      // A page-side sender may only stop the recording that is actually live.
+      if (kind === "meet-content-script" && controller.getState().activeMeeting?.id !== message.meetingId) return {};
+      await stopMeetRecording(controller, meetCapture, message.meetingId);
+      return {};
+    case "ADD_BOOKMARK":
+      return { ok: await controller.addBookmark(message.meetingId, message.note) };
+    case "GET_WIDGET_STATE":
+      return controller.getWidgetState();
+    case "SAVE_WIDGET_POSITION":
+      await saveWidgetPosition(message.position);
+      return {};
+    case "OPEN_PAGE":
+      await openExtensionPage(message.page);
+      return {};
+    case "OPEN_MEETING":
+      await chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(message.meetingId)}`) });
       return {};
     case "RETRY_DRIVE_EXPORT":
       await controller.retryDriveExport(message.meetingId);
@@ -110,6 +172,7 @@ async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown>
       return {};
     case "SAVE_SETTINGS":
       await controller.saveSettings(message.settings);
+      await syncReminderAlarm();
       return {};
     case "RESUME_RECORDING":
       controller.resumeRecording(message.meetingId);

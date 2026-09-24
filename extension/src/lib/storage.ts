@@ -13,6 +13,8 @@ const KEYS = {
   meetingsIndex: "notetaker.meetings.index", // ordered list of meeting IDs
   meetingPrefix: "notetaker.meeting.", // + id
   webappSyncOutbox: "notetaker.webappSync.outbox",
+  remindedCalls: "notetaker.remindedCalls",
+  widgetPosition: "notetaker.widget.position",
 } as const;
 
 function storageGet<T>(key: string | string[]): Promise<T | undefined> {
@@ -69,6 +71,8 @@ export async function getSettings(): Promise<NotetakerSettings> {
       typeof stored.customSummaryInstructions === "string"
         ? stored.customSummaryInstructions.slice(0, 4_000)
         : DEFAULT_SETTINGS.customSummaryInstructions,
+    showMeetWidget: typeof stored.showMeetWidget === "boolean" ? stored.showMeetWidget : DEFAULT_SETTINGS.showMeetWidget,
+    calendarReminders: typeof stored.calendarReminders === "boolean" ? stored.calendarReminders : DEFAULT_SETTINGS.calendarReminders,
     drive: stored.drive && typeof stored.drive === "object" ? stored.drive : DEFAULT_SETTINGS.drive,
   };
 }
@@ -204,4 +208,47 @@ export async function queueWebappSync(meeting: MeetingRecord): Promise<void> {
 
 export async function removeWebappSyncOutbox(id: string): Promise<void> {
   await enqueueWebappOutboxMutation((outbox) => outbox.filter((meeting) => meeting.id !== id));
+}
+
+export interface RemindedCall {
+  url: string;
+  at: number;
+}
+
+/** Calls already reminded about, keyed by notification id, so a call is announced once. */
+export async function getRemindedCalls(): Promise<Record<string, RemindedCall>> {
+  const stored = await storageGet<Record<string, RemindedCall>>(KEYS.remindedCalls);
+  return stored && typeof stored === "object" ? stored : {};
+}
+
+export async function saveRemindedCalls(calls: Record<string, RemindedCall>): Promise<void> {
+  await storageSet({ [KEYS.remindedCalls]: calls });
+}
+
+export interface WidgetPosition {
+  x: number;
+  y: number;
+}
+
+/** Where the user last dropped the in-call widget. Owned here so the content script never touches storage. */
+export async function getWidgetPosition(): Promise<WidgetPosition | null> {
+  const stored = await storageGet<Partial<WidgetPosition>>(KEYS.widgetPosition);
+  return isWidgetPosition(stored) ? { x: stored.x, y: stored.y } : null;
+}
+
+export async function saveWidgetPosition(position: WidgetPosition): Promise<void> {
+  if (!isWidgetPosition(position)) return;
+  await storageSet({ [KEYS.widgetPosition]: { x: Math.round(position.x), y: Math.round(position.y) } });
+}
+
+function isWidgetPosition(value: unknown): value is WidgetPosition {
+  const candidate = value as Partial<WidgetPosition> | null | undefined;
+  return (
+    typeof candidate?.x === "number" &&
+    typeof candidate?.y === "number" &&
+    Number.isFinite(candidate.x) &&
+    Number.isFinite(candidate.y) &&
+    Math.abs(candidate.x) < 100_000 &&
+    Math.abs(candidate.y) < 100_000
+  );
 }

@@ -90,3 +90,51 @@ section h2 {
     display: none;
   }
 }
+
+.moments {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.moment {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  border-color: transparent;
+  margin-bottom: var(--space-1);
+}
+
+.moment:hover {
+  border-color: var(--color-border);
+}
+
+.moment:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.moment-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.transcript-line-highlight {
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.transcript-line:focus {
+  outline: none;
+}
+
+.transcript-line.transcript-line-highlight:focus {
+  outline: 2px solid var(--color-accent);
+}

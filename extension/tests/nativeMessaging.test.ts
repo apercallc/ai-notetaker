@@ -443,6 +443,28 @@ describe("NativeMessagingClient", () => {
     await expect(result).resolves.toMatchObject({ ready: false });
   });
 
+  it("sends flagged moments with stop only when there are some", async () => {
+    const ports: Array<ReturnType<typeof createFakePort>> = [];
+    chromeMock.runtime.connectNative.mockImplementation(() => {
+      const port = createFakePort();
+      ports.push(port);
+      return port;
+    });
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.stopRecording("plain");
+    client.stopRecording("flagged", [{ offsetMs: 125_000, note: "Pricing" }]);
+
+    const sent = ports[0]!.postMessage.mock.calls.map((call) => call[0]) as Array<Record<string, unknown>>;
+    expect(sent.find((message) => message.meetingId === "plain")).toEqual({ type: "stop_recording", meetingId: "plain" });
+    expect(sent.find((message) => message.meetingId === "flagged")).toEqual({
+      type: "stop_recording",
+      meetingId: "flagged",
+      flaggedMoments: [{ offsetMs: 125_000, note: "Pricing" }],
+    });
+  });
+
   it("sends lifecycle commands and reconnects when an alarm asks it to", async () => {
     const ports: Array<ReturnType<typeof createFakePort>> = [];
     chromeMock.runtime.connectNative.mockImplementation(() => {

@@ -3,6 +3,7 @@ import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMess
 import { speakerLabel, type AudioProbeResult, type AudioStatus, type CaptureSource, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
 import { getInstallPageUrl } from "../lib/install";
+import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
@@ -248,8 +249,18 @@ async function runAudioProbe(): Promise<void> {
   }
 }
 
+async function activeTabIsMeet(): Promise<boolean> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return isMeetUrl(tab?.url);
+  } catch {
+    return false;
+  }
+}
+
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
   const meetings = await listMeetings(historyQuery ? undefined : 5, historyQuery || undefined);
+  const onMeet = await activeTabIsMeet();
   const helperStatusCopy =
     helperStatus === "connecting"
       ? "Connecting to the desktop helper…"
@@ -268,8 +279,8 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       </label>
       <label class="meeting-mode-picker" for="capture-source">Capture mode
         <select id="capture-source">
-          <option value="desktop">Zoom, Teams, Slack Huddle — desktop helper</option>
-          <option value="meet">Google Meet — capture this tab</option>
+          <option value="desktop"${onMeet ? "" : " selected"}>Zoom, Teams, Slack Huddle — desktop helper</option>
+          <option value="meet"${onMeet ? " selected" : ""}>Google Meet — capture this tab</option>
         </select>
       </label>
       <p class="field-hint text-secondary capture-mode-hint" id="capture-mode-hint">Use the desktop helper for Zoom, Microsoft Teams, and Slack Huddles. Google Meet can use browser capture in the active tab.</p>
@@ -307,7 +318,14 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       const captureSource = (document.getElementById("capture-source") as HTMLSelectElement).value as CaptureSource;
       const tabs = captureSource === "meet" ? await chrome.tabs.query({ active: true, currentWindow: true }) : [];
       const tabId = tabs[0]?.id;
-      await sendToBackground({ type: "START_RECORDING", meetingMode, captureSource, ...(typeof tabId === "number" ? { tabId } : {}) });
+      const titleHint = captureSource === "meet" ? meetTitleForTab(tabs[0]) : undefined;
+      await sendToBackground({
+        type: "START_RECORDING",
+        meetingMode,
+        captureSource,
+        ...(typeof tabId === "number" ? { tabId } : {}),
+        ...(titleHint ? { titleHint } : {}),
+      });
       await renderSafely();
     } catch (error) {
       renderFailure(error);

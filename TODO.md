@@ -402,6 +402,42 @@ accessibility failures):*
       export remain release-owner validation; mocked REST and local protocol
       tests are green.
 
+### In-Meet notes widget (2026-09-24, sub-project 1)
+
+Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
+
+- [x] Floating shadow-DOM widget on Meet call pages: one-click start/stop,
+      Recording pill with elapsed time, live transcript with Jump to latest,
+      flagged moments with optional notes, draggable and position-remembering,
+      helper/setup/consent states, "notes ready" card, Settings toggle.
+- [x] `Alt+Shift+R` toggles recording and `Alt+Shift+B` flags a moment; both
+      ignore non-Meet tabs.
+- [x] Fixed Meet capture: the tab stream id is now requested in the service
+      worker (offscreen pages have no `chrome.tabCapture`), and microphone
+      permission has a one-time grant page plus a pre-check.
+- [x] Bookmarks stored on the meeting, shown in the meeting view with jump to
+      transcript, and included in Markdown/text exports and the Drive doc.
+- [x] Real-browser proof (real Chromium + real helper + local stand-in for
+      meet.google.com): capture refusal without invocation, real `Alt+Shift+R`
+      start, separate mic/speaker files, bookmark, stop, second start without a
+      new invocation, strict CSP + Trusted Types, alarm + notification.
+- [ ] Live proof on a real Google Meet call with real participants: widget
+      placement against Meet's layout and real audio end to end.
+- [ ] Click-through of a real desktop notification (needs a person).
+- [x] Calendar reminder (opt-out setting) and calendar-named call in the widget.
+- [x] Flagged moments passed to the summarizer (`stop_recording.flaggedMoments`,
+      backward compatible) and stored with the meeting.
+- [x] Chrome leaves suggested shortcuts unassigned in a fresh profile; the
+      widget and Settings read and adapt to the real bindings.
+- [ ] Helper: with a failing or invalid transcription provider, browser audio is
+      persisted at a fraction of real time and a stop waits behind the backlog
+      (seen with dummy keys). Audio is not lost, but persistence should not be
+      serialized behind provider network calls.
+- [ ] Helper: after a reinstall or new Chrome profile the helper answers
+      `pairing token missing or mismatched` with no recovery path in the UI.
+- [ ] Sub-project 2 (smarter notes: structured summaries, chat with a meeting)
+      and sub-project 3 (Slack webhook, Notion, email recap).
+
 ---
 
 ## Sub-project 2: Cross-platform helper packaging polish

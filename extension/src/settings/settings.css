@@ -102,3 +102,25 @@ textarea {
   box-sizing: border-box;
   font: inherit;
 }
+
+.checkbox-field label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.checkbox-field input[type="checkbox"] {
+  margin-top: 0.2rem;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.25rem;
+  padding: 0 var(--space-1);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font: 600 0.6875rem/1.25rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: center;
+}

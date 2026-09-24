@@ -279,12 +279,24 @@ for Speaker/Output. Keep your normal headphones or speakers as the operating
 system's output so other apps continue to work normally. The helper captures
 the physical/default microphone and listens to the virtual output's monitor.
 
-Google Meet has a lower-setup browser option: in the extension popup choose
-**Google Meet — capture this tab**. The extension asks for microphone and tab
-audio permission, keeps the two channels separate, and continues routing the
-tab audio so you can use Meet normally. If permission is denied or you switch
-tabs, retry from the popup. Zoom, Microsoft Teams, and Slack Huddles use the
-desktop-helper routing below.
+Google Meet has a lower-setup browser option. Join your call and a small
+**Notetaker** pill appears in the corner of the page (drag it anywhere; turn it
+off in Settings if you prefer the toolbar popup). Open it and choose **Start
+taking notes**. The extension keeps the microphone and the meeting's audio as
+two separate channels and continues routing the tab audio so you can use Meet
+normally.
+
+The first time, Chrome needs two one-time approvals, and the pill tells you
+which one is missing: click **Allow microphone** to grant the microphone, and
+click the **Notetaker icon in the Chrome toolbar** once while the Meet tab is
+open so Chrome lets the extension capture that tab's audio. (That approval
+lasts for the tab, so later starts from the pill are one click.) Optional
+keyboard shortcuts start or stop notes and flag a moment. Chrome only assigns
+the suggested ones when they are free, so check or change them at
+`chrome://extensions/shortcuts`; Settings shows what is currently set. Flagged
+moments appear in the finished notes and jump to the matching spot in the
+transcript. Zoom, Microsoft
+Teams, and Slack Huddles use the desktop-helper routing below.
 
 Choose the devices in the meeting app, not only in the operating system:
 
@@ -361,7 +373,8 @@ consent obligations. Finish the wizard.
 1. Open the meeting app.
 2. For Zoom, Teams, or Slack Huddles, set its microphone and speaker to the AI
    Notetaker devices from Step 2. For Google Meet, leave normal Meet devices
-   selected and choose **Google Meet — capture this tab** in the popup instead.
+   selected and use the Notetaker pill on the call page (or **Google Meet —
+   capture this tab** in the popup) instead.
 3. Open the extension popup.
 4. Choose **General**, **Standup**, **Sales call**, **1:1**, **Interview**, or
    a custom meeting mode.

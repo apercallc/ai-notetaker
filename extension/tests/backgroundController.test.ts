@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { BackgroundController, type NativeClientLike } from "../src/lib/backgroundController";
-import { getMeeting, saveSettings } from "../src/lib/storage";
+import { getMeeting, saveSettings, saveWidgetPosition } from "../src/lib/storage";
 import { DEFAULT_SETTINGS } from "../src/types";
 
 vi.mock("../src/lib/calendar", () => ({ findCurrentEvent: vi.fn() }));
@@ -683,5 +683,172 @@ describe("BackgroundController", () => {
 
     expect(client.testProviderKey).toHaveBeenCalledWith("deepgram", "some-key");
     expect(result).toEqual({ valid: true, message: "ok" });
+  });
+});
+
+describe("BackgroundController: in-call widget support", () => {
+  it("uses the tab-derived title hint when no calendar event names the call", async () => {
+    vi.mocked(findCurrentEvent).mockResolvedValue(null);
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+
+    const meetingId = await controller.startRecording("general", "meet", "Google Meet abc-defg-hij");
+
+    expect((await getMeeting(meetingId))?.title).toBe("Google Meet abc-defg-hij");
+  });
+
+  it("announces a started recording so open widgets can update", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+
+    const meetingId = await controller.startRecording();
+
+    expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId });
+  });
+
+  it("flags moments in the active recording as offsets from its start", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    expect(await controller.addBookmark(meetingId, "  decision on pricing ")).toBe(true);
+
+    const stored = await getMeeting(meetingId);
+    expect(stored?.bookmarks).toHaveLength(1);
+    expect(stored?.bookmarks?.[0]).toMatchObject({ note: "decision on pricing" });
+    expect(stored?.bookmarks?.[0]?.offsetMs).toBeGreaterThanOrEqual(0);
+    expect(broadcast).toHaveBeenLastCalledWith({ type: "MEETING_STATE_CHANGED", meetingId });
+  });
+
+  it("hands the flagged moments to the helper when the recording stops, so the summary can weigh them", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await controller.addBookmark(meetingId, "Pricing decision");
+    await controller.addBookmark(meetingId);
+
+    await controller.stopRecording(meetingId);
+
+    expect(client.stopRecording).toHaveBeenCalledWith(meetingId, [
+      expect.objectContaining({ offsetMs: expect.any(Number), note: "Pricing decision" }),
+      expect.objectContaining({ offsetMs: expect.any(Number), note: "" }),
+    ]);
+  });
+
+  it("stops exactly as before when nothing was flagged", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    await controller.stopRecording(meetingId);
+
+    expect(client.stopRecording).toHaveBeenCalledWith(meetingId);
+  });
+
+  it("refuses to flag a moment for a meeting that is not the active recording", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await controller.stopRecording(meetingId);
+
+    expect(await controller.addBookmark(meetingId, "too late")).toBe(false);
+    expect(await controller.addBookmark("someone-else", "nope")).toBe(false);
+    expect((await getMeeting(meetingId))?.bookmarks).toBeUndefined();
+  });
+
+  it("reports widget state for an idle helper with the latest meeting", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await controller.stopRecording(meetingId);
+
+    const state = await controller.getWidgetState();
+
+    expect(state).toMatchObject({
+      helperStatus: "connected",
+      onboardingComplete: true,
+      consentAcknowledged: true,
+      widgetEnabled: true,
+      active: null,
+      latest: { id: meetingId, status: "processing" },
+    });
+  });
+
+  it("reports widget state for an active recording with a bounded transcript and its bookmarks", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    for (let index = 0; index < 60; index += 1) {
+      client.emit("transcript_partial", { meetingId, speaker: "you", text: `line ${index}`, isFinal: true, utteranceId: index });
+    }
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.transcript).toHaveLength(60));
+    await controller.addBookmark(meetingId, "key point");
+
+    const state = await controller.getWidgetState();
+
+    expect(state.latest).toBeNull();
+    expect(state.active?.id).toBe(meetingId);
+    expect(state.active?.transcript).toHaveLength(40);
+    expect(state.active?.transcript.at(-1)?.text).toBe("line 59");
+    expect(state.active?.bookmarks.map((bookmark) => bookmark.note)).toEqual(["key point"]);
+  });
+
+  it("tells open widgets when settings change, since they cannot watch storage themselves", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    broadcast.mockClear();
+
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, showMeetWidget: false });
+
+    expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId: "" });
+  });
+
+  it("reports where the user left the widget", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    expect((await controller.getWidgetState()).position).toBeNull();
+    await saveWidgetPosition({ x: 40, y: 50 });
+    expect((await controller.getWidgetState()).position).toEqual({ x: 40, y: 50 });
+  });
+
+  it("lets the user turn the widget off from settings", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, showMeetWidget: false });
+
+    expect((await controller.getWidgetState()).widgetEnabled).toBe(false);
+  });
+
+  it("names the current call from the calendar without ever delaying the widget", async () => {
+    vi.mocked(findCurrentEvent).mockClear();
+    let release: (() => void) | undefined;
+    vi.mocked(findCurrentEvent).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ title: "Weekly sync", attendees: [], startsAt: new Date().toISOString(), endsAt: new Date().toISOString() });
+        }),
+    );
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      onboardingComplete: true,
+      consentDisclosureAcknowledged: true,
+      calendar: { provider: "google", clientId: "x", accessToken: "a", refreshToken: "r", expiresAt: new Date(Date.now() + 60_000).toISOString() },
+    });
+
+    expect((await controller.getWidgetState()).callTitle).toBeNull();
+    release?.();
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId: "" }));
+    expect((await controller.getWidgetState()).callTitle).toBe("Weekly sync");
+    expect(findCurrentEvent).toHaveBeenCalledTimes(1);
   });
 });

@@ -163,7 +163,8 @@ two-second test, and wait for **Audio ready**.
 
 1. In Zoom, Microsoft Teams, or Slack Huddles, choose the AI Notetaker devices
    shown by the wizard. In Google Meet, you can instead choose **Google Meet —
-   capture this tab** in the popup and keep Meet's normal devices.
+   capture this tab** in the popup, or the Notetaker pill that appears on the
+   call page, and keep Meet's normal devices.
 2. Open the extension popup and choose a meeting mode.
 3. Confirm the audio status is ready for helper mode; Meet browser mode only
    needs the helper connection and browser capture permission.

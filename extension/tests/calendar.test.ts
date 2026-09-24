@@ -1,8 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { chromeMock } from "./setup";
-import { generatePkcePair, connectCalendar, findCurrentEvent, type CalendarConnection } from "../src/lib/calendar";
+import { generatePkcePair, connectCalendar, findCurrentEvent, resetCalendarCaches, type CalendarConnection } from "../src/lib/calendar";
 
-beforeEach(() => chromeMock.reset());
+beforeEach(() => {
+  chromeMock.reset();
+  resetCalendarCaches();
+});
 
 describe("generatePkcePair", () => {
   it("produces a verifier and a distinct S256 challenge", async () => {

@@ -47,4 +47,22 @@ describe("meeting notes formatter", () => {
     expect(notes).toContain("_No summary available._");
     expect(notes).toContain("_None recorded._");
   });
+
+  it("adds flagged moments to the notes only when there are some", () => {
+    expect(formatMeetingNotes(meeting())).not.toContain("Flagged moments");
+
+    const notes = formatMeetingNotes(
+      meeting({
+        bookmarks: [
+          { id: "b1", offsetMs: 125_000, note: "Pricing decision", createdAt: "x" },
+          { id: "b2", offsetMs: 3_725_000, note: "", createdAt: "x" },
+        ],
+      }),
+    );
+    expect(notes).toContain("## Flagged moments");
+    expect(notes).toContain("- 2:05 — Pricing decision");
+    expect(notes).toContain("- 1:02:05 — Flagged moment");
+    expect(notes.indexOf("## Action items")).toBeLessThan(notes.indexOf("## Flagged moments"));
+    expect(notes.indexOf("## Flagged moments")).toBeLessThan(notes.indexOf("## Discussion highlights"));
+  });
 });

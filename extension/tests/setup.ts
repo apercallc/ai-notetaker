@@ -45,6 +45,8 @@ export const chromeMock = {
     sync: storageSync,
   },
   runtime: {
+    id: "fake-extension-id",
+    getURL: (path: string) => `chrome-extension://fake-extension-id/${path}`,
     connectNative: vi.fn(),
     sendMessage: vi.fn(),
     lastError: undefined as { message: string } | undefined,

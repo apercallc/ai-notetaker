@@ -5,6 +5,7 @@ import { escapeHtml } from "../lib/html";
 import { estimateMeetingCost } from "../lib/costEstimate";
 import { connectCalendar } from "../lib/calendar";
 import { connectGoogleDrive } from "../lib/drive";
+import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
 
 const app = document.getElementById("app")!;
@@ -39,6 +40,22 @@ function render(): void {
       </div>
 
       ${!budget ? renderDefaultTierFields() : renderBudgetTierFields()}
+    </fieldset>
+
+    <fieldset>
+      <legend>Google Meet</legend>
+      <div class="field checkbox-field">
+        <label for="show-meet-widget">
+          <input type="checkbox" id="show-meet-widget" ${settings.showMeetWidget ? "checked" : ""} />
+          Show the notes widget during Google Meet calls
+        </label>
+        <p class="field-hint text-secondary">
+          A small movable pill on the call page with one-click recording, the live transcript,
+          and a way to flag moments. Turn it off to use only the toolbar popup and shortcuts.
+        </p>
+      </div>
+      <p class="field-hint text-secondary" id="shortcut-summary" aria-live="polite">Checking your keyboard shortcuts…</p>
+      <button type="button" class="secondary" id="change-shortcuts">Change shortcuts</button>
     </fieldset>
 
     <fieldset>
@@ -166,6 +183,17 @@ function renderCalendarFields(): string {
         <p>Connected to ${label}.</p>
         <button type="button" class="secondary" id="disconnect-calendar">Disconnect</button>
       </div>
+      ${
+        settings.calendar.provider === "google"
+          ? `<div class="field checkbox-field">
+        <label for="calendar-reminders">
+          <input type="checkbox" id="calendar-reminders" ${settings.calendarReminders ? "checked" : ""} />
+          Remind me when a call with a Google Meet link is about to start
+        </label>
+        <p class="field-hint text-secondary">A desktop notification a minute before the call. Click it to open the call, then start notes from the pill. Uses your calendar connection only; nothing leaves this device.</p>
+      </div>`
+          : ""
+      }
     `;
   }
 
@@ -277,6 +305,8 @@ function readFormIntoSettings(): void {
   const webappUrl = (document.getElementById("webapp-url") as HTMLInputElement)?.value.trim();
   const webappToken = (document.getElementById("webapp-token") as HTMLInputElement)?.value.trim();
   settings.webapp = webappUrl && webappToken ? { url: webappUrl, token: webappToken } : null;
+  settings.calendarReminders = (document.getElementById("calendar-reminders") as HTMLInputElement | null)?.checked ?? settings.calendarReminders;
+  settings.showMeetWidget = (document.getElementById("show-meet-widget") as HTMLInputElement | null)?.checked ?? settings.showMeetWidget;
   settings.defaultMeetingMode = (document.getElementById("default-meeting-mode") as HTMLSelectElement)?.value as NotetakerSettings["defaultMeetingMode"];
   settings.customVocabulary = (document.getElementById("custom-vocabulary") as HTMLTextAreaElement)?.value
     .split(/\r?\n/)
@@ -298,6 +328,21 @@ function wireEvents(): void {
   const budgetTier = () => (isBudgetTier(settings) ? "budget" : "default") as "budget" | "default";
   minutesInput?.addEventListener("input", updateCostEstimate);
   updateCostEstimate();
+
+  void readShortcuts().then((shortcuts) => {
+    const summary = document.getElementById("shortcut-summary");
+    if (!summary) return;
+    const keys = (shortcut: string): string => shortcutKeys(shortcut).map((key) => `<kbd>${escapeHtml(key)}</kbd>`).join("");
+    summary.innerHTML = [
+      shortcuts.toggle ? `${keys(shortcuts.toggle)} starts or stops notes.` : "No shortcut is set to start or stop notes.",
+      shortcuts.bookmark ? `${keys(shortcuts.bookmark)} flags a moment.` : "No shortcut is set to flag a moment.",
+      "Chrome only assigns a suggested shortcut when it is free, so set your own below if needed.",
+    ].join(" ");
+  });
+
+  document.getElementById("change-shortcuts")?.addEventListener("click", () => {
+    void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
+  });
 
   document.getElementById("tier-default")?.addEventListener("click", () => {
     readFormIntoSettings();

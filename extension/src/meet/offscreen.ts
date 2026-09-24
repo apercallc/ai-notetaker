@@ -1,3 +1,4 @@
+import { isFromExtensionWorker } from "../lib/senderPolicy";
 import { float32ToPcm16 } from "./meetCapture";
 import type { BrowserAudioChannel } from "../types";
 
@@ -7,27 +8,18 @@ const PROCESSOR_BUFFER_SIZE = 4096;
 let streams: MediaStream[] = [];
 let context: AudioContext | null = null;
 let processors: ScriptProcessorNode[] = [];
-let activeMeetingId: string | null = null;
+
+/** DOMException (what getUserMedia rejects with) is not always an Error across realms. */
+function errorMessage(error: unknown): string {
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === "string" && message ? message : "Meet capture failed";
+}
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
-
-function streamId(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    chrome.tabCapture.getMediaStreamId({ targetTabId: currentTabId }, (id) => {
-      if (chrome.runtime.lastError || !id) {
-        reject(new Error(chrome.runtime.lastError?.message ?? "Google Meet tab audio could not be captured"));
-        return;
-      }
-      resolve(id);
-    });
-  });
-}
-
-let currentTabId = 0;
 
 async function stop(): Promise<void> {
   processors.forEach((processor) => processor.disconnect());
@@ -36,7 +28,6 @@ async function stop(): Promise<void> {
   streams = [];
   if (context) await context.close().catch(() => {});
   context = null;
-  activeMeetingId = null;
 }
 
 function attachProcessor(stream: MediaStream, channel: BrowserAudioChannel, meetingId: string): void {
@@ -71,29 +62,33 @@ function attachProcessor(stream: MediaStream, channel: BrowserAudioChannel, meet
   processors.push(processor);
 }
 
-async function start(tabId: number, meetingId: string): Promise<void> {
+async function start(capturedStreamId: string, meetingId: string): Promise<void> {
   await stop();
-  currentTabId = tabId;
-  activeMeetingId = meetingId;
   context = new AudioContext({ sampleRate: SAMPLE_RATE_HZ });
   if (context.sampleRate !== SAMPLE_RATE_HZ) throw new Error("The browser audio device could not run at 48 kHz");
 
-  const capturedStreamId = await streamId();
+  // Each stream is tracked the moment it exists: a captured tab stays locked
+  // ("Cannot capture a tab with an active stream") until its tracks stop, so a
+  // failure on any later step must release everything acquired so far.
   const speaker = await navigator.mediaDevices.getUserMedia({
     audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: capturedStreamId } } as MediaTrackConstraints,
   });
+  streams = [speaker];
   const mic = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: SAMPLE_RATE_HZ } });
   streams = [speaker, mic];
   attachProcessor(speaker, "speaker", meetingId);
   attachProcessor(mic, "mic", meetingId);
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-  const value = message as { type?: string; tabId?: number; meetingId?: string };
-  if (value.type === "MEET_CAPTURE_START" && typeof value.tabId === "number" && typeof value.meetingId === "string") {
-    void start(value.tabId, value.meetingId).then(() => sendResponse({ ok: true })).catch((error: unknown) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  // Runtime messages reach every extension context, including the Meet content
+  // script; only the service worker may drive capture.
+  if (!isFromExtensionWorker(sender, { extensionId: chrome.runtime.id, extensionBaseUrl: chrome.runtime.getURL("") })) return false;
+  const value = message as { type?: string; streamId?: string; meetingId?: string };
+  if (value.type === "MEET_CAPTURE_START" && typeof value.streamId === "string" && typeof value.meetingId === "string") {
+    void start(value.streamId, value.meetingId).then(() => sendResponse({ ok: true })).catch((error: unknown) => {
       void stop();
-      sendResponse({ ok: false, error: error instanceof Error ? error.message : "Meet capture failed" });
+      sendResponse({ ok: false, error: errorMessage(error) });
     });
     return true;
   }

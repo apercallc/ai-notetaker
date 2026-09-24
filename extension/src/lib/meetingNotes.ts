@@ -1,4 +1,5 @@
 import { speakerLabel, type MeetingRecord } from "../types";
+import { describeBookmark } from "./bookmarks";
 
 function dateOnly(value: string): string {
   return value.slice(0, 10);
@@ -47,6 +48,7 @@ export function formatMeetingNotes(meeting: MeetingRecord): string {
     "## Action items",
     ...actionItems,
     "",
+    ...(meeting.bookmarks?.length ? ["## Flagged moments", ...meeting.bookmarks.map((bookmark) => `- ${describeBookmark(bookmark)}`), ""] : []),
     "## Discussion highlights",
     "_See the transcript below._",
     "",

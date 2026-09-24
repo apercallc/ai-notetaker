@@ -5,14 +5,17 @@
  * against a fake client, instead of only being exercisable inside a real
  * service worker.
  */
-import type { BackgroundState, BackgroundToUiMessage } from "./internalMessages";
+import type { BackgroundState, BackgroundToUiMessage, WidgetState } from "./internalMessages";
+import { flaggedMomentsFor, withBookmark } from "./bookmarks";
+import { readShortcuts } from "./shortcuts";
+import { getWidgetPosition } from "./storage";
 import type { HelperConnectionStatus } from "./nativeMessaging";
-import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, saveMeeting, saveSettings, updateMeeting } from "./storage";
+import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, listMeetings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
-import type { AudioProbeResult, AudioStatus, BrowserAudioChannel, CaptureSource, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, TranscriptSegment } from "../types";
+import type { AudioProbeResult, AudioStatus, BrowserAudioChannel, CaptureSource, FlaggedMomentWire, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, TranscriptSegment } from "../types";
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -24,7 +27,7 @@ export interface NativeClientLike {
   pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions">): void;
   startRecording(meetingId: string, meetingMode: MeetingMode, captureSource?: CaptureSource): void;
   sendAudioChunk?: (meetingId: string, channel: BrowserAudioChannel, pcm16: Uint8Array, sampleRateHz?: number) => void;
-  stopRecording(meetingId: string): void;
+  stopRecording(meetingId: string, flaggedMoments?: FlaggedMomentWire[]): void;
   resumeRecording(meetingId: string): void;
   discardRecording(meetingId: string): void;
   deleteMeeting(meetingId: string): void;
@@ -57,6 +60,8 @@ export class BackgroundController {
   private helperInfo: HelperInfo | null = null;
   private fetchImpl: typeof fetch = fetch;
   private startInFlight: Promise<string> | null = null;
+  private currentEventCache: { at: number; title: string | null } | null = null;
+  private currentEventRefresh: Promise<void> | null = null;
 
   constructor(
     private client: NativeClientLike,
@@ -107,10 +112,17 @@ export class BackgroundController {
     this.settings = settings;
     await saveSettings(settings);
     this.pushCurrentSettings();
+    // Open widgets learn about a toggled setting from here; the content script
+    // has no storage access to watch it itself.
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId: "" });
     void flushWebappSyncOutbox(this.settings, this.fetchImpl);
   }
 
-  async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general", captureSource: CaptureSource = "desktop"): Promise<string> {
+  async startRecording(
+    meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general",
+    captureSource: CaptureSource = "desktop",
+    titleHint?: string,
+  ): Promise<string> {
     if (this.activeMeetingId) return this.activeMeetingId;
     // activeMeetingId is only assigned after an await (the calendar lookup),
     // so the guard above cannot catch a second START_RECORDING that arrives
@@ -119,7 +131,7 @@ export class BackgroundController {
     // with different meeting ids and capture the same call twice. Claim the
     // slot synchronously instead.
     if (this.startInFlight) return this.startInFlight;
-    const start = this.startRecordingUnguarded(meetingMode, captureSource);
+    const start = this.startRecordingUnguarded(meetingMode, captureSource, titleHint);
     this.startInFlight = start;
     try {
       return await start;
@@ -128,7 +140,7 @@ export class BackgroundController {
     }
   }
 
-  private async startRecordingUnguarded(meetingMode: MeetingMode, captureSource: CaptureSource): Promise<string> {
+  private async startRecordingUnguarded(meetingMode: MeetingMode, captureSource: CaptureSource, titleHint?: string): Promise<string> {
     if (this.helperStatus !== "connected" || !this.helperInfo) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -149,7 +161,7 @@ export class BackgroundController {
       return "";
     }
     const meetingId = generateMeetingId();
-    let title = `Meeting on ${new Date().toLocaleString()}`;
+    let title = titleHint?.trim().slice(0, 200) || `Meeting on ${new Date().toLocaleString()}`;
     let attendees: string[] | undefined;
     if (this.settings?.calendar) {
       try {
@@ -185,8 +197,19 @@ export class BackgroundController {
       await saveMeeting(meeting);
       this.activeMeetingId = null;
       this.broadcast({ type: "RECORDING_ERROR", meetingId, message: meeting.errorMessage });
+      return meetingId;
     }
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
     return meetingId;
+  }
+
+  /** Flags "this moment" in an active recording; a no-op once the meeting is no longer recording. */
+  async addBookmark(meetingId: string, note?: string): Promise<boolean> {
+    if (this.activeMeetingId !== meetingId) return false;
+    const updated = await updateMeeting(meetingId, (current) => (current.status === "recording" ? withBookmark(current, note) : current));
+    if (!updated) return false;
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
+    return true;
   }
 
   async failRecording(meetingId: string, message: string): Promise<void> {
@@ -213,7 +236,9 @@ export class BackgroundController {
     }
     if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
     try {
-      this.client.stopRecording(meetingId);
+      const flagged = meeting ? flaggedMomentsFor(meeting) : [];
+      if (flagged.length > 0) this.client.stopRecording(meetingId, flagged);
+      else this.client.stopRecording(meetingId);
     } catch {
       // The helper may disappear between the UI click and the native send.
       // Keep the durable meeting record visible, but make the uncertain
@@ -229,7 +254,9 @@ export class BackgroundController {
         meetingId,
         message: "The stop command could not reach the desktop helper. Reconnect it and recover this recording.",
       });
+      return;
     }
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
   }
 
   resumeRecording(meetingId: string): void {
@@ -278,6 +305,71 @@ export class BackgroundController {
       recoverableMeeting: this.recoverableMeeting,
       helperStatus: this.helperStatus,
       helperInfo: this.helperInfo,
+    };
+  }
+
+  /**
+   * The widget must render immediately, so the calendar is never awaited here:
+   * the last known title is returned and a stale one is refreshed in the
+   * background, after which open widgets are told to look again.
+   */
+  private currentCallTitle(settings: NotetakerSettings): string | null {
+    const calendar = settings.calendar;
+    if (!calendar) return null;
+    const stale = !this.currentEventCache || Date.now() - this.currentEventCache.at > 60_000;
+    if (stale && !this.currentEventRefresh) {
+      this.currentEventRefresh = (async () => {
+        const event = await findCurrentEvent(calendar).catch(() => null);
+        const title = event?.title?.trim() || null;
+        const changed = this.currentEventCache?.title !== title;
+        this.currentEventCache = { at: Date.now(), title };
+        if (changed) this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId: "" });
+      })().finally(() => {
+        this.currentEventRefresh = null;
+      });
+    }
+    return this.currentEventCache?.title ?? null;
+  }
+
+  async getWidgetState(): Promise<WidgetState> {
+    const settings = this.settings ?? (await getSettings());
+    const activeRecord = this.activeMeetingId ? await getMeeting(this.activeMeetingId) : null;
+    const latestRecord = activeRecord ? null : ((await listMeetings(1))[0] ?? null);
+    return {
+      helperStatus: this.helperStatus,
+      onboardingComplete: settings.onboardingComplete,
+      consentAcknowledged: settings.consentDisclosureAcknowledged,
+      widgetEnabled: settings.showMeetWidget !== false,
+      shortcuts: await readShortcuts(),
+      callTitle: this.currentCallTitle(settings),
+      position: await getWidgetPosition(),
+      defaultMeetingMode: settings.defaultMeetingMode,
+      active: activeRecord
+        ? {
+            id: activeRecord.id,
+            title: activeRecord.title,
+            startedAt: activeRecord.startedAt,
+            status: activeRecord.status,
+            ...(activeRecord.errorMessage ? { errorMessage: activeRecord.errorMessage } : {}),
+            bookmarks: activeRecord.bookmarks ?? [],
+            transcript: activeRecord.transcript.slice(-40).map(({ speaker, text, isFinal, utteranceId }) => ({
+              speaker,
+              text,
+              isFinal,
+              ...(utteranceId === undefined ? {} : { utteranceId }),
+            })),
+          }
+        : null,
+      latest: latestRecord
+        ? {
+            id: latestRecord.id,
+            title: latestRecord.title,
+            startedAt: latestRecord.startedAt,
+            endedAt: latestRecord.endedAt,
+            status: latestRecord.status,
+            ...(latestRecord.errorMessage ? { errorMessage: latestRecord.errorMessage } : {}),
+          }
+        : null,
     };
   }
 

@@ -16,6 +16,7 @@ import {
   type AudioStatus,
   type BrowserAudioChannel,
   type CaptureSource,
+  type FlaggedMomentWire,
   type MeetingMode,
   type NotetakerSettings,
   type ProviderKind,
@@ -268,8 +269,10 @@ export class NativeMessagingClient {
     });
   }
 
-  stopRecording(meetingId: string): void {
-    this.send({ type: "stop_recording", meetingId });
+  stopRecording(meetingId: string, flaggedMoments: FlaggedMomentWire[] = []): void {
+    // The field is omitted when empty, so a helper that predates it sees the
+    // same message as before.
+    this.send({ type: "stop_recording", meetingId, ...(flaggedMoments.length > 0 ? { flaggedMoments } : {}) });
   }
 
   resumeRecording(meetingId: string): void {

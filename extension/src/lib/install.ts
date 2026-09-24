@@ -15,7 +15,7 @@ export function detectInstallPlatform(): InstallPlatform {
   return "unknown";
 }
 
-export function getInstallPageUrl(source: "onboarding" | "popup" = "onboarding"): string {
+export function getInstallPageUrl(source: "onboarding" | "popup" | "meet-widget" = "onboarding"): string {
   const url = new URL(INSTALL_PAGE_BASE_URL);
   url.searchParams.set("platform", detectInstallPlatform());
   url.searchParams.set("source", source);

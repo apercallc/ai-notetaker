@@ -1,0 +1,573 @@
+/*
+ * In-call widget styles. Lives in a closed shadow root, so nothing here can
+ * leak into Meet and nothing in Meet can restyle it. Always dark: the call
+ * surface is dark, and a light card on it would glare at exactly the moment
+ * the user is trying to stay focused on people.
+ */
+:host {
+  all: initial;
+}
+
+.nt {
+  --bg: #202124;
+  --bg-raised: #2d2e31;
+  --bg-input: #171819;
+  --line: #3c4043;
+  --text: #e8eaed;
+  --muted: #a0a6ad;
+  --accent: #8ab4f8;
+  --accent-ink: #041e49;
+  --danger: #c5221f;
+  --warn: #fdd663;
+  --recording: #f28b82;
+  --ok: #81c995;
+  --radius: 14px;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.5);
+
+  position: relative;
+  font: 400 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.nt *,
+.nt *::before,
+.nt *::after {
+  box-sizing: border-box;
+}
+
+/* :where() keeps this reset at zero specificity so every component rule below wins. */
+:where(.nt button, .nt select, .nt input) {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.nt button {
+  cursor: pointer;
+}
+
+.nt :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- pill ---------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.pill.dragging {
+  cursor: grabbing;
+}
+
+.pill-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill-main:hover,
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.nt[data-view="recording"] .dot {
+  background: var(--recording);
+  box-shadow: 0 0 0 0 rgba(242, 139, 130, 0.6);
+  animation: pulse 1.8s ease-out infinite;
+}
+
+.nt[data-view="processing"] .dot,
+.nt[data-view="starting"] .dot {
+  background: var(--accent);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.nt[data-view="done"] .dot {
+  background: var(--ok);
+}
+
+/* Amber, never red: red means "recording right now" and nothing else. */
+.nt[data-view="error"] .dot,
+.nt[data-view="disconnected"] .dot {
+  background: var(--warn);
+}
+
+.elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+}
+
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line);
+}
+
+/* Neutral until hovered or focused: red on the pill would compete with the call. */
+.icon-btn.stop {
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.icon-btn.stop:hover,
+.icon-btn.stop:focus-visible {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.icon-btn.stop.armed {
+  width: auto;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+.pill-start {
+  height: 32px;
+  padding: 0 14px;
+  margin: 0 2px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 0;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.pill-start:hover {
+  filter: brightness(1.08);
+}
+
+.icon-btn.stop svg {
+  fill: currentColor;
+  stroke: none;
+  width: 14px;
+  height: 14px;
+}
+
+.icon-btn.chevron svg {
+  transition: transform 0.15s ease;
+}
+
+.nt[data-expanded="true"] .icon-btn.chevron svg {
+  transform: rotate(180deg);
+}
+
+/* ---------- panel ---------- */
+
+.panel {
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.nt[data-side="above"] .panel {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
+.nt[data-align="right"] .panel {
+  left: auto;
+  right: 0;
+}
+
+.nt[data-expanded="false"] .panel {
+  display: none;
+}
+
+.panel h2 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.panel p {
+  margin: 0;
+}
+
+.sub {
+  color: var(--muted);
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+select,
+input[type="text"] {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+input[type="text"]::placeholder {
+  color: var(--muted);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn.secondary {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.btn.secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: #d93025;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.block {
+  width: 100%;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.row > input {
+  flex: 1;
+  min-width: 0;
+}
+
+.consent {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.note {
+  padding: 10px 12px;
+  background: var(--bg-raised);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.note.warn {
+  color: var(--text);
+  border-left: 3px solid #fdd663;
+}
+
+.note.error {
+  color: var(--text);
+  border-left: 3px solid var(--recording);
+}
+
+.keys {
+  white-space: nowrap;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font: 600 12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: center;
+}
+
+/* ---------- live transcript ---------- */
+
+.transcript-wrap {
+  position: relative;
+}
+
+.transcript {
+  height: 210px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.transcript .empty {
+  color: var(--muted);
+  text-align: center;
+  padding-top: 84px;
+}
+
+.line {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.line .who {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.line[data-speaker="you"] .who {
+  color: var(--accent);
+}
+
+.line.provisional .txt {
+  color: var(--muted);
+}
+
+.jump {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  min-height: 28px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 0;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.jump[hidden] {
+  display: none;
+}
+
+/* ---------- bookmarks ---------- */
+
+.moments {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.moments li {
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.moments .at {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.moments .what {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.section-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  padding: 6px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+/* While the panel is open the toast stays in the DOM for screen readers only. */
+.nt[data-expanded="true"] .toast {
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.nt[data-side="above"] .toast {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- motion & contrast preferences ---------- */
+
+@keyframes pulse {
+  70% { box-shadow: 0 0 0 8px rgba(242, 139, 130, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(242, 139, 130, 0); }
+}
+
+@keyframes blink {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nt *,
+  .nt *::before,
+  .nt *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .dot {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+  }
+
+  .pill,
+  .panel,
+  .btn,
+  .icon-btn {
+    border: 1px solid CanvasText;
+  }
+}
+
+.link {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font-size: inherit;
+}

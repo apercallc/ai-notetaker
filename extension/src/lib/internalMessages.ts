@@ -5,16 +5,22 @@
  * UI pages never talk to the helper directly.
  */
 import type { HelperConnectionStatus } from "./nativeMessaging";
-import type { ActionItem, AudioProbeResult, AudioStatus, BrowserAudioChannel, CaptureSource, DriveExportState, HelperInfo, MeetingMode, NotetakerSettings, ProviderKind, Speaker } from "../types";
+import type { Shortcuts } from "./shortcuts";
+import type { ActionItem, AudioProbeResult, AudioStatus, Bookmark, BrowserAudioChannel, CaptureSource, DriveExportState, HelperInfo, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, Speaker } from "../types";
 
 export type UiToBackgroundMessage =
   | { type: "GET_STATE" }
   | { type: "CHECK_HELPER" }
   | { type: "GET_AUDIO_PREFLIGHT" }
   | { type: "RUN_AUDIO_PROBE" }
-  | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number }
+  | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number; titleHint?: string }
   | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string }
   | { type: "STOP_RECORDING"; meetingId: string }
+  | { type: "ADD_BOOKMARK"; meetingId: string; note?: string }
+  | { type: "GET_WIDGET_STATE" }
+  | { type: "SAVE_WIDGET_POSITION"; position: { x: number; y: number } }
+  | { type: "OPEN_MEETING"; meetingId: string }
+  | { type: "OPEN_PAGE"; page: "onboarding" | "settings" | "install" | "microphone" | "shortcuts" }
   | { type: "RETRY_DRIVE_EXPORT"; meetingId: string }
   | { type: "SAVE_SETTINGS"; settings: NotetakerSettings }
   | { type: "RESUME_RECORDING"; meetingId: string }
@@ -27,6 +33,33 @@ export interface BackgroundState {
   recoverableMeeting: { meetingId: string; startedAt: string } | null;
   helperStatus: HelperConnectionStatus;
   helperInfo: HelperInfo | null;
+}
+
+/** Just enough of a meeting for the in-call widget; never the full transcript. */
+export interface WidgetMeeting {
+  id: string;
+  title: string;
+  startedAt: string;
+  status: MeetingRecord["status"];
+  errorMessage?: string;
+  bookmarks: Bookmark[];
+  transcript: Array<{ speaker: Speaker; text: string; isFinal: boolean; utteranceId?: number }>;
+}
+
+export interface WidgetState {
+  helperStatus: HelperConnectionStatus;
+  onboardingComplete: boolean;
+  consentAcknowledged: boolean;
+  widgetEnabled: boolean;
+  shortcuts: Shortcuts;
+  /** Title of the calendar event running right now, when a calendar is connected. */
+  callTitle: string | null;
+  /** Where the user last dropped the widget; the content script has no storage access of its own. */
+  position: { x: number; y: number } | null;
+  defaultMeetingMode: MeetingMode;
+  active: WidgetMeeting | null;
+  /** Most recent finished (or finishing) meeting, so the widget can show "notes ready". */
+  latest: Omit<WidgetMeeting, "bookmarks" | "transcript"> & { endedAt: string | null } | null;
 }
 
 export interface AudioPreflightResponse {
@@ -45,4 +78,5 @@ export type BackgroundToUiMessage =
   | { type: "RECORDING_ERROR"; meetingId: string | null; message: string }
   | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
   | { type: "DRIVE_EXPORT"; meetingId: string; status: DriveExportState["status"]; webViewLink?: string; message?: string }
-  | { type: "HELPER_STATUS"; status: HelperConnectionStatus };
+  | { type: "HELPER_STATUS"; status: HelperConnectionStatus }
+  | { type: "MEETING_STATE_CHANGED"; meetingId: string };

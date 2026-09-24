@@ -2,6 +2,7 @@ import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, updateMee
 import { escapeHtml } from "../lib/html";
 import { syncMeetingToWebapp } from "../lib/webappSync";
 import { speakerLabel } from "../types";
+import { describeBookmark, formatOffset, transcriptIndexForBookmark } from "../lib/bookmarks";
 import type { BackgroundToUiMessage } from "../lib/internalMessages";
 
 const app = document.getElementById("app")!;
@@ -45,6 +46,7 @@ function exportAsMarkdown(meeting: NonNullable<Awaited<ReturnType<typeof getMeet
       ? meeting.actionItems.map((item) => `- [${item.status === "done" ? "x" : " "}] ${item.text}${item.owner ? ` (${item.owner})` : ""}${item.dueAt ? ` — due ${item.dueAt.slice(0, 10)}` : ""}`)
       : ["_None_"]),
     "",
+    ...(meeting.bookmarks?.length ? ["## Flagged moments", ...meeting.bookmarks.map((bookmark) => `- ${describeBookmark(bookmark)}`), ""] : []),
     "## Transcript",
     ...meeting.transcript.map((segment) => `**${speakerLabel(segment.speaker)}:** ${segment.text}`),
   ];
@@ -64,6 +66,7 @@ function exportAsPlainText(meeting: NonNullable<Awaited<ReturnType<typeof getMee
       ? meeting.actionItems.map((item) => `${item.status === "done" ? "[done]" : "[open]"} ${item.text}${item.owner ? ` (${item.owner})` : ""}${item.dueAt ? ` — due ${item.dueAt.slice(0, 10)}` : ""}`)
       : ["None"]),
     "",
+    ...(meeting.bookmarks?.length ? ["FLAGGED MOMENTS", ...meeting.bookmarks.map(describeBookmark), ""] : []),
     "TRANSCRIPT",
     ...meeting.transcript.map((segment) => `${speakerLabel(segment.speaker)}: ${segment.text}`),
   ];
@@ -132,13 +135,27 @@ async function render(): Promise<void> {
       }
     </section>
 
+    ${
+      meeting.bookmarks?.length
+        ? `<section>
+      <h2>Flagged moments</h2>
+      <ul class="moments">${meeting.bookmarks
+        .map(
+          (bookmark) =>
+            `<li><button type="button" class="moment" data-line="${transcriptIndexForBookmark(meeting, bookmark)}" aria-label="Jump to ${formatOffset(bookmark.offsetMs)} in the transcript"><span class="moment-time">${formatOffset(bookmark.offsetMs)}</span><span>${bookmark.note ? escapeHtml(bookmark.note) : "Flagged moment"}</span></button></li>`,
+        )
+        .join("")}</ul>
+    </section>`
+        : ""
+    }
+
     <section>
       <h2>Transcript</h2>
       ${meeting.transcript.length > 0
         ? meeting.transcript
             .map(
-              (segment) =>
-                `<p class="transcript-line"><span class="speaker">${escapeHtml(speakerLabel(segment.speaker))}:</span>${escapeHtml(segment.text)}</p>`,
+              (segment, index) =>
+                `<p class="transcript-line" id="line-${index}" tabindex="-1"><span class="speaker">${escapeHtml(speakerLabel(segment.speaker))}:</span>${escapeHtml(segment.text)}</p>`,
             )
             .join("")
         : `<p class="text-secondary">No transcript available.</p>`}
@@ -151,6 +168,17 @@ async function render(): Promise<void> {
       <button class="danger" id="delete-meeting">Delete meeting</button>
     </div>
   `;
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".moment")) {
+    button.addEventListener("click", () => {
+      const line = document.getElementById(`line-${button.dataset.line}`);
+      if (!line) return;
+      line.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+      line.focus({ preventScroll: true });
+      line.classList.add("transcript-line-highlight");
+      window.setTimeout(() => line.classList.remove("transcript-line-highlight"), 2000);
+    });
+  }
 
   document.getElementById("export-markdown")?.addEventListener("click", () => {
     downloadText(meeting, exportAsMarkdown(meeting), "md", "text/markdown");

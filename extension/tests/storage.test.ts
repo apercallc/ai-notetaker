@@ -12,6 +12,10 @@ import {
   getWebappSyncOutbox,
   queueWebappSync,
   removeWebappSyncOutbox,
+  getRemindedCalls,
+  saveRemindedCalls,
+  getWidgetPosition,
+  saveWidgetPosition,
 } from "../src/lib/storage";
 import { DEFAULT_SETTINGS, type MeetingRecord } from "../src/types";
 
@@ -183,5 +187,32 @@ describe("meeting storage", () => {
     await Promise.all([queueWebappSync(meeting), queueWebappSync(second)]);
 
     expect((await getWebappSyncOutbox()).map((item) => item.id)).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("widget position and reminded calls", () => {
+  it("remembers where the widget was dropped, rounded to whole pixels", async () => {
+    expect(await getWidgetPosition()).toBeNull();
+    await saveWidgetPosition({ x: 120.6, y: 88.2 });
+    expect(await getWidgetPosition()).toEqual({ x: 121, y: 88 });
+  });
+
+  it("refuses positions a page-side sender should never be able to store", async () => {
+    await saveWidgetPosition({ x: 10, y: 10 });
+    for (const bad of [{ x: Number.NaN, y: 1 }, { x: 1e9, y: 1 }, { x: "1", y: 1 }, null] as unknown[]) {
+      await saveWidgetPosition(bad as { x: number; y: number });
+    }
+    expect(await getWidgetPosition()).toEqual({ x: 10, y: 10 });
+  });
+
+  it("ignores a stored value that is not a position", async () => {
+    chromeMock.storage.local._dump()["notetaker.widget.position"] = { x: "left", y: 5 };
+    expect(await getWidgetPosition()).toBeNull();
+  });
+
+  it("round-trips reminded calls and treats a missing record as empty", async () => {
+    expect(await getRemindedCalls()).toEqual({});
+    await saveRemindedCalls({ a: { url: "https://meet.google.com/abc-defg-hij", at: 1 } });
+    expect(await getRemindedCalls()).toEqual({ a: { url: "https://meet.google.com/abc-defg-hij", at: 1 } });
   });
 });

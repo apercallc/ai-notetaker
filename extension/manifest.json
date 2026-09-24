@@ -11,7 +11,7 @@
       "strict_min_version": "121.0"
     }
   },
-  "permissions": ["storage", "nativeMessaging", "alarms", "identity", "activeTab", "tabCapture", "offscreen"],
+  "permissions": ["storage", "nativeMessaging", "alarms", "identity", "activeTab", "tabCapture", "offscreen", "notifications"],
   "background": {
     "service_worker": "background.js",
     "scripts": ["background.js"],
@@ -23,6 +23,25 @@
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
+    }
+  },
+  "host_permissions": ["https://meet.google.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content/meetWidget.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "commands": {
+    "toggle-recording": {
+      "suggested_key": { "default": "Alt+Shift+R", "mac": "Alt+Shift+R" },
+      "description": "Start or stop taking notes on the current Google Meet call"
+    },
+    "add-bookmark": {
+      "suggested_key": { "default": "Alt+Shift+B", "mac": "Alt+Shift+B" },
+      "description": "Flag this moment in the current recording"
     }
   },
   "options_page": "settings/settings.html",

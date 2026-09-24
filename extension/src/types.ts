@@ -76,6 +76,10 @@ export interface NotetakerSettings {
   customSummaryInstructions: string;
   onboardingComplete: boolean;
   consentDisclosureAcknowledged: boolean;
+  /** Show the floating notes widget on Google Meet calls. */
+  showMeetWidget: boolean;
+  /** Notify shortly before a calendar event with a Google Meet link starts. */
+  calendarReminders: boolean;
   calendar: CalendarConnection | null;
   drive: DriveConnection | null;
 }
@@ -90,9 +94,19 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   customSummaryInstructions: "",
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
+  showMeetWidget: true,
+  calendarReminders: true,
   calendar: null,
   drive: null,
 };
+
+/** A flagged moment as sent to the helper at stop time so the summary can weigh it. */
+export interface FlaggedMomentWire {
+  offsetMs: number;
+  note: string;
+  /** How far through the call the flag sits (0-100), measured when the user stopped. */
+  positionPercent?: number;
+}
 
 export type Speaker = "you" | `them${"" | `-${number}`}`;
 
@@ -127,6 +141,15 @@ export interface ActionItem {
   completedAt?: string | null;
 }
 
+/** A moment the user flagged during a call, stored as an offset so it survives clock changes. */
+export interface Bookmark {
+  id: string;
+  /** Milliseconds since the meeting started. */
+  offsetMs: number;
+  note: string;
+  createdAt: string;
+}
+
 export interface MeetingRecord {
   id: string;
   title: string;
@@ -139,6 +162,7 @@ export interface MeetingRecord {
   status: "recording" | "processing" | "complete" | "error";
   errorMessage?: string;
   attendees?: string[];
+  bookmarks?: Bookmark[];
   driveExport?: DriveExportState;
 }
 
@@ -158,7 +182,7 @@ export type OutgoingMessage =
     }
   | { type: "start_recording"; meetingId: string; meetingMode: MeetingMode; captureSource?: CaptureSource }
   | { type: "audio_chunk"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string }
-  | { type: "stop_recording"; meetingId: string }
+  | { type: "stop_recording"; meetingId: string; flaggedMoments?: FlaggedMomentWire[] }
   | { type: "resume_recording"; meetingId: string }
   | { type: "discard_recording"; meetingId: string }
   | { type: "delete_meeting"; meetingId: string }
