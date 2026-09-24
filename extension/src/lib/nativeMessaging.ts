@@ -14,6 +14,8 @@ import {
   type IncomingMessage,
   type AudioProbeResult,
   type AudioStatus,
+  type BrowserAudioChannel,
+  type CaptureSource,
   type MeetingMode,
   type NotetakerSettings,
   type ProviderKind,
@@ -22,6 +24,8 @@ import {
 const HOST_NAME = "com.ainotetaker.helper";
 const TEST_PROVIDER_KEY_TIMEOUT_MS = 10_000;
 const AUDIO_DIAGNOSTICS_TIMEOUT_MS = 8_000;
+const MAX_BROWSER_AUDIO_CHUNK_BYTES = 64 * 1024;
+const BROWSER_AUDIO_SAMPLE_RATE_HZ = 48_000;
 const MIN_RECONNECT_BACKOFF_MS = 1_000;
 const MAX_RECONNECT_BACKOFF_MS = 30_000;
 const HELPER_RETRY_ALARM = "ai-notetaker-helper-retry";
@@ -234,8 +238,34 @@ export class NativeMessagingClient {
     });
   }
 
-  startRecording(meetingId: string, meetingMode: MeetingMode): void {
-    this.send({ type: "start_recording", meetingId, meetingMode });
+  startRecording(meetingId: string, meetingMode: MeetingMode, captureSource: CaptureSource = "desktop"): void {
+    this.send({
+      type: "start_recording",
+      meetingId,
+      meetingMode,
+      ...(captureSource === "meet" ? { captureSource } : {}),
+    });
+  }
+
+  sendAudioChunk(
+    meetingId: string,
+    channel: BrowserAudioChannel,
+    pcm16: Uint8Array,
+    sampleRateHz = BROWSER_AUDIO_SAMPLE_RATE_HZ,
+  ): void {
+    if (sampleRateHz !== BROWSER_AUDIO_SAMPLE_RATE_HZ) throw new Error("Meet capture must use 48 kHz audio");
+    if (pcm16.byteLength === 0 || pcm16.byteLength > MAX_BROWSER_AUDIO_CHUNK_BYTES || pcm16.byteLength % 2 !== 0) {
+      throw new Error("Meet audio chunks must be non-empty, even-length PCM16 data under 64 KiB");
+    }
+    let binary = "";
+    for (const byte of pcm16) binary += String.fromCharCode(byte);
+    this.send({
+      type: "audio_chunk",
+      meetingId,
+      channel,
+      sampleRateHz,
+      pcm16Base64: btoa(binary),
+    });
   }
 
   stopRecording(meetingId: string): void {

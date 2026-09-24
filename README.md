@@ -89,8 +89,9 @@ You need:
 - Chrome or another Chromium browser that supports the extension APIs.
 - A desktop OS with a supported virtual-audio setup: BlackHole on macOS,
   base VB-CABLE on Windows, or a PulseAudio/PipeWire null sink on Linux.
-- One transcription key and one summarization key. The default tier uses
-  Deepgram + Claude; the budget tier uses Groq + Gemini or DeepSeek.
+- Two provider keys: one transcription key and one summarization key. The
+  default tier uses Deepgram + Claude; the budget tier uses Groq + Gemini or
+  DeepSeek.
 - A meeting app that lets you choose its microphone and speaker separately.
 - Permission from the people you record, where required by local law.
 
@@ -152,7 +153,7 @@ through:
 
 1. Confirming the helper is installed and running.
 2. Selecting separate microphone and meeting-audio devices for your OS.
-3. Adding and testing provider keys.
+3. Adding and testing one transcription key plus one summarization key.
 4. Acknowledging the recording-consent disclosure.
 
 After the wizard, return to the popup, click **Check audio**, run the
@@ -160,10 +161,12 @@ two-second test, and wait for **Audio ready**.
 
 ### 4. Record a meeting
 
-1. In Zoom, Google Meet, Microsoft Teams, Slack Huddles, or another meeting
-   app, choose the AI Notetaker devices shown by the wizard.
+1. In Zoom, Microsoft Teams, or Slack Huddles, choose the AI Notetaker devices
+   shown by the wizard. In Google Meet, you can instead choose **Google Meet —
+   capture this tab** in the popup and keep Meet's normal devices.
 2. Open the extension popup and choose a meeting mode.
-3. Confirm the audio status is ready.
+3. Confirm the audio status is ready for helper mode; Meet browser mode only
+   needs the helper connection and browser capture permission.
 4. Click **Record**.
 5. Keep the helper running while you meet.
 6. Click **Stop recording** when the meeting ends.

@@ -118,6 +118,11 @@ pub trait AudioCapture: Send + Sync {
         .await?;
         tokio::time::sleep(Duration::from_secs(2)).await;
         self.stop_capture().await?;
+        // Some backends stop their reader thread asynchronously. Give the
+        // callback task a short drain window after stop_capture() so frames
+        // already produced by the backend—especially parec's final speaker
+        // buffer—are counted before we evaluate the probe.
+        tokio::time::sleep(Duration::from_millis(250)).await;
         let mut result = counts.lock().map(|value| value.clone()).unwrap_or_default();
         result.passed = result.mic_frames > 0 && result.speaker_frames > 0;
         result.message = if result.passed {

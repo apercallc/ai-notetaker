@@ -110,7 +110,7 @@ impl AudioCapture for LinuxAudioCapture {
             speaker,
             ready,
             guidance: if ready {
-                "Audio devices are ready. Choose AI Notetaker for your meeting app's microphone and speaker.".to_string()
+                "Audio devices are ready. In your meeting app, choose your physical/default microphone as Microphone and AI Notetaker as Speaker/Output. Keep your normal headphones or speakers as the system output.".to_string()
             } else if !driver_installed {
                 "AI Notetaker will create its PulseAudio/PipeWire devices when you check again. Make sure pactl and PulseAudio/PipeWire are available.".to_string()
             } else {

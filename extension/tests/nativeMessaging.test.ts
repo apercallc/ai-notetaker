@@ -58,6 +58,37 @@ describe("NativeMessagingClient", () => {
     expect(port.postMessage).toHaveBeenCalledWith({ type: "hello", pairingToken: null });
   });
 
+  it("starts Meet capture explicitly while preserving the desktop message shape", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.startRecording("meeting-1", "general", "meet");
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: "start_recording",
+      meetingId: "meeting-1",
+      meetingMode: "general",
+      captureSource: "meet",
+    });
+  });
+
+  it("sends bounded base64 PCM16 chunks on the selected channel", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.sendAudioChunk("meeting-1", "speaker", new Uint8Array([1, 2, 3, 4]), 48_000);
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: "audio_chunk",
+      meetingId: "meeting-1",
+      channel: "speaker",
+      sampleRateHz: 48_000,
+      pcm16Base64: "AQIDBA==",
+    });
+  });
+
   it("sends the previously stored pairing token on reconnect", async () => {
     await storage.savePairingToken("existing-token");
     const port = createFakePort();
@@ -91,12 +122,12 @@ describe("NativeMessagingClient", () => {
 
     const handler = vi.fn();
     client.on("helper_info", handler);
-    port._emitMessage({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 1, platform: "linux" });
+    port._emitMessage({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 2, platform: "linux" });
 
     expect(handler).toHaveBeenCalledWith({
       type: "helper_info",
       helperVersion: "0.1.0",
-      protocolVersion: 1,
+      protocolVersion: 2,
       platform: "linux",
     });
   });

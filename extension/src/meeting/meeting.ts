@@ -19,6 +19,18 @@ function showMeetingError(message: string): void {
   error.textContent = message;
 }
 
+function safeDriveLink(value: string | undefined): string {
+  if (!value) return "#";
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && (url.hostname === "docs.google.com" || url.hostname === "drive.google.com")
+      ? escapeHtml(url.toString())
+      : "#";
+  } catch {
+    return "#";
+  }
+}
+
 function exportAsMarkdown(meeting: NonNullable<Awaited<ReturnType<typeof getMeeting>>>): string {
   const lines = [
     `# ${meeting.title}`,
@@ -91,6 +103,13 @@ async function render(): Promise<void> {
   app.innerHTML = `
     <h1>${escapeHtml(meeting.title)}</h1>
     <p class="meeting-meta text-secondary">${new Date(meeting.startedAt).toLocaleString()}</p>
+    ${meeting.driveExport?.status === "exported"
+      ? `<p class="drive-export-status text-success" role="status">Saved to <a href="${safeDriveLink(meeting.driveExport.webViewLink)}" target="_blank" rel="noreferrer">Google Drive</a>.</p>`
+      : meeting.driveExport?.status === "pending"
+        ? `<p class="drive-export-status text-secondary" role="status">Saving notes to Google Drive…</p>`
+        : meeting.driveExport?.status === "error"
+          ? `<div class="drive-export-status text-warning" role="status"><p>Local meeting is safe, but Drive export failed: ${escapeHtml(meeting.driveExport.errorMessage ?? "unknown error")}.</p><button type="button" class="secondary" id="retry-drive-export">Retry Drive export</button></div>`
+          : ""}
 
     <section>
       <h2>Summary</h2>
@@ -140,6 +159,17 @@ async function render(): Promise<void> {
     downloadText(meeting, exportAsPlainText(meeting), "txt", "text/plain");
   });
   document.getElementById("print-meeting")?.addEventListener("click", () => window.print());
+  document.getElementById("retry-drive-export")?.addEventListener("click", async () => {
+    const button = document.getElementById("retry-drive-export") as HTMLButtonElement;
+    button.disabled = true;
+    try {
+      await chrome.runtime.sendMessage({ type: "RETRY_DRIVE_EXPORT", meetingId: id });
+      await render();
+    } catch {
+      showMeetingError("Drive export could not be retried. Your local meeting is still safe.");
+      button.disabled = false;
+    }
+  });
 
   document.getElementById("delete-meeting")?.addEventListener("click", async () => {
     if (!confirm("Delete this meeting? This can't be undone.")) return;
@@ -207,6 +237,9 @@ async function render(): Promise<void> {
       if (message.type === "SUMMARY_READY" && message.meetingId === id) {
         removeLiveListener?.();
         removeLiveListener = null;
+        void render().catch(renderFailure);
+      }
+      if (message.type === "DRIVE_EXPORT" && message.meetingId === id) {
         void render().catch(renderFailure);
       }
     }

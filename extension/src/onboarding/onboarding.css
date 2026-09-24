@@ -40,6 +40,97 @@ body {
   border-left: 3px solid var(--color-warning);
 }
 
+.provider-plan h2 {
+  font-size: 0.9375rem;
+  margin: 0 0 var(--space-1);
+}
+
+.provider-plan p {
+  margin: 0;
+}
+
+.provider-plan p + p {
+  margin-top: var(--space-2);
+}
+
+.tier-toggle {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.tier-toggle button {
+  flex: 1;
+}
+
+.tier-toggle button.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.audio-routing h2,
+.meeting-app-card h3,
+.meeting-app-directions h3 {
+  font-size: 0.9375rem;
+  margin: 0 0 var(--space-1);
+}
+
+.audio-route-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.audio-route-grid section {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
+
+.audio-route-grid h3 {
+  font-size: 0.875rem;
+  margin: 0 0 var(--space-1);
+}
+
+.audio-route-grid p,
+.meeting-app-directions p,
+.meeting-app-directions ol {
+  margin: 0;
+}
+
+.meeting-app-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  background: var(--color-bg-elevated);
+}
+
+.meeting-app-card select {
+  display: block;
+  width: 100%;
+  margin: var(--space-2) 0;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font: inherit;
+}
+
+.meeting-app-directions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.meeting-app-directions ol {
+  padding-left: 1.25rem;
+}
+
+.meeting-app-directions li + li {
+  margin-top: var(--space-1);
+}
+
 .device-guide {
   display: grid;
   gap: var(--space-2);
@@ -63,6 +154,10 @@ body {
   margin: 0;
 }
 
+.platform-card code {
+  font-size: 0.8125rem;
+}
+
 .setup-note {
   font-size: 0.8125rem;
 }
@@ -83,6 +178,12 @@ body {
 .audio-preflight p {
   margin: 0 0 var(--space-2);
   line-height: 1.45;
+}
+
+@media (max-width: 460px) {
+  .audio-route-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .audio-preflight-actions {

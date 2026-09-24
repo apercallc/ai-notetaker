@@ -11,7 +11,8 @@ import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, saveMeeti
 import { normalizeWebappUrl } from "./providerTest";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import { findCurrentEvent } from "./calendar";
-import type { AudioProbeResult, AudioStatus, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, TranscriptSegment } from "../types";
+import { exportMeetingToDrive } from "./drive";
+import type { AudioProbeResult, AudioStatus, BrowserAudioChannel, CaptureSource, HelperInfo, IncomingMessage, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, TranscriptSegment } from "../types";
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -21,7 +22,8 @@ export interface NativeClientLike {
   ): void;
   onStatusChange(handler: (status: HelperConnectionStatus) => void): void;
   pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions">): void;
-  startRecording(meetingId: string, meetingMode: MeetingMode): void;
+  startRecording(meetingId: string, meetingMode: MeetingMode, captureSource?: CaptureSource): void;
+  sendAudioChunk?: (meetingId: string, channel: BrowserAudioChannel, pcm16: Uint8Array, sampleRateHz?: number) => void;
   stopRecording(meetingId: string): void;
   resumeRecording(meetingId: string): void;
   discardRecording(meetingId: string): void;
@@ -108,7 +110,7 @@ export class BackgroundController {
     void flushWebappSyncOutbox(this.settings, this.fetchImpl);
   }
 
-  async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general"): Promise<string> {
+  async startRecording(meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general", captureSource: CaptureSource = "desktop"): Promise<string> {
     if (this.activeMeetingId) return this.activeMeetingId;
     // activeMeetingId is only assigned after an await (the calendar lookup),
     // so the guard above cannot catch a second START_RECORDING that arrives
@@ -117,7 +119,7 @@ export class BackgroundController {
     // with different meeting ids and capture the same call twice. Claim the
     // slot synchronously instead.
     if (this.startInFlight) return this.startInFlight;
-    const start = this.startRecordingUnguarded(meetingMode);
+    const start = this.startRecordingUnguarded(meetingMode, captureSource);
     this.startInFlight = start;
     try {
       return await start;
@@ -126,7 +128,7 @@ export class BackgroundController {
     }
   }
 
-  private async startRecordingUnguarded(meetingMode: MeetingMode): Promise<string> {
+  private async startRecordingUnguarded(meetingMode: MeetingMode, captureSource: CaptureSource): Promise<string> {
     if (this.helperStatus !== "connected" || !this.helperInfo) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -175,7 +177,8 @@ export class BackgroundController {
     await saveMeeting(meeting);
     this.activeMeetingId = meetingId;
     try {
-      this.client.startRecording(meetingId, meetingMode);
+      if (captureSource === "meet") this.client.startRecording(meetingId, meetingMode, captureSource);
+      else this.client.startRecording(meetingId, meetingMode);
     } catch {
       meeting.status = "error";
       meeting.errorMessage = "The desktop helper is not connected. Install and start it, then try again.";
@@ -184,6 +187,22 @@ export class BackgroundController {
       this.broadcast({ type: "RECORDING_ERROR", meetingId, message: meeting.errorMessage });
     }
     return meetingId;
+  }
+
+  async failRecording(meetingId: string, message: string): Promise<void> {
+    try {
+      this.client.stopRecording(meetingId);
+    } catch {
+      // The local error is still durable if the helper has already gone away.
+    }
+    await updateMeeting(meetingId, (current) => ({ ...current, status: "error", errorMessage: message }));
+    if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
+    this.broadcast({ type: "RECORDING_ERROR", meetingId, message });
+  }
+
+  sendMeetAudioChunk(meetingId: string, channel: BrowserAudioChannel, pcm16: Uint8Array, sampleRateHz = 48_000): void {
+    if (!this.client.sendAudioChunk) throw new Error("The desktop helper does not support browser capture yet. Update it and try again.");
+    this.client.sendAudioChunk(meetingId, channel, pcm16, sampleRateHz);
   }
 
   async stopRecording(meetingId: string): Promise<void> {
@@ -283,7 +302,7 @@ export class BackgroundController {
       protocolVersion: msg.protocolVersion,
       platform: msg.platform,
     };
-    this.helperStatus = msg.protocolVersion === 1 ? "connected" : "incompatible";
+    this.helperStatus = msg.protocolVersion === 2 ? "connected" : "incompatible";
     this.broadcast({ type: "HELPER_STATUS", status: this.helperStatus });
   }
 
@@ -354,6 +373,57 @@ export class BackgroundController {
       actionItems: msg.actionItems,
     });
     await this.syncToWebapp(meeting);
+    void this.exportToDrive(meeting);
+  }
+
+  private async exportToDrive(meeting: MeetingRecord): Promise<void> {
+    const connection = this.settings?.drive;
+    if (!connection) return;
+    await updateMeeting(meeting.id, (current) => ({
+      ...current,
+      driveExport: { status: "pending" },
+    }));
+    this.broadcast({ type: "DRIVE_EXPORT", meetingId: meeting.id, status: "pending" });
+    try {
+      const result = await exportMeetingToDrive(meeting, connection, this.fetchImpl);
+      await updateMeeting(meeting.id, (current) => ({
+        ...current,
+        driveExport: {
+          status: "exported",
+          fileId: result.fileId,
+          ...(result.webViewLink ? { webViewLink: result.webViewLink } : {}),
+          exportedAt: new Date().toISOString(),
+        },
+      }));
+      this.broadcast({
+        type: "DRIVE_EXPORT",
+        meetingId: meeting.id,
+        status: "exported",
+        ...(result.webViewLink ? { webViewLink: result.webViewLink } : {}),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Google Drive export failed";
+      await updateMeeting(meeting.id, (current) => ({
+        ...current,
+        driveExport: { status: "error", errorMessage: message },
+      }));
+      this.broadcast({ type: "DRIVE_EXPORT", meetingId: meeting.id, status: "error", message });
+    }
+  }
+
+  async retryDriveExport(meetingId: string): Promise<void> {
+    const meeting = await getMeeting(meetingId);
+    if (!meeting) return;
+    if (!this.settings?.drive) {
+      this.broadcast({
+        type: "DRIVE_EXPORT",
+        meetingId,
+        status: "error",
+        message: "Connect Google Drive in Settings before retrying the export.",
+      });
+      return;
+    }
+    await this.exportToDrive(meeting);
   }
 
   private async handleError(msg: Extract<IncomingMessage, { type: "error" }>): Promise<void> {

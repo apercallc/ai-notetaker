@@ -11,7 +11,7 @@
       "strict_min_version": "121.0"
     }
   },
-  "permissions": ["storage", "nativeMessaging", "alarms", "identity"],
+  "permissions": ["storage", "nativeMessaging", "alarms", "identity", "activeTab", "tabCapture", "offscreen"],
   "background": {
     "service_worker": "background.js",
     "scripts": ["background.js"],

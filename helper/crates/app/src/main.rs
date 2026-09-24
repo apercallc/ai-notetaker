@@ -11,7 +11,8 @@ mod tray;
 
 use notetaker_audio::{AudioCapture, AudioDiagnostics};
 use notetaker_core::native_messaging::{
-    ErrorCode, ExtensionToHelper, HelperToExtension, MeetingMode,
+    decode_browser_audio_chunk, BrowserAudioChannel, CaptureSource, ErrorCode, ExtensionToHelper,
+    HelperToExtension, MeetingMode,
 };
 use notetaker_core::pipeline::{Pipeline, RetryableChunk};
 use notetaker_core::providers::test_provider_key;
@@ -35,7 +36,8 @@ struct Settings {
 }
 
 struct ActiveRecording {
-    audio: Arc<dyn AudioCapture>,
+    audio: Option<Arc<dyn AudioCapture>>,
+    capture_source: CaptureSource,
 }
 
 struct AppState {
@@ -273,6 +275,7 @@ async fn handle_message(
         ExtensionToHelper::StartRecording {
             meeting_id,
             meeting_mode,
+            capture_source,
         } => {
             subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
             let settings_guard = state.settings.lock().await;
@@ -366,6 +369,18 @@ async fn handle_message(
                 .await
                 .insert(meeting_id, retry_task);
 
+            if capture_source == CaptureSource::Meet {
+                state.active.lock().await.insert(
+                    meeting_id,
+                    ActiveRecording {
+                        audio: None,
+                        capture_source,
+                    },
+                );
+                tray.set_recording(true);
+                return true;
+            }
+
             let audio = state.audio.clone();
             let state_for_audio = state.clone();
             let pipeline_for_audio = pipeline.clone();
@@ -393,11 +408,13 @@ async fn handle_message(
 
             match result {
                 Ok(()) => {
-                    state
-                        .active
-                        .lock()
-                        .await
-                        .insert(meeting_id, ActiveRecording { audio });
+                    state.active.lock().await.insert(
+                        meeting_id,
+                        ActiveRecording {
+                            audio: Some(audio),
+                            capture_source,
+                        },
+                    );
                 }
                 Err(e) => {
                     if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
@@ -416,9 +433,66 @@ async fn handle_message(
             true
         }
 
+        ExtensionToHelper::AudioChunk {
+            meeting_id,
+            channel,
+            sample_rate_hz,
+            pcm16_base64,
+        } => {
+            let is_external = state
+                .active
+                .lock()
+                .await
+                .get(&meeting_id)
+                .is_some_and(|active| active.capture_source == CaptureSource::Meet);
+            if !is_external {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: "browser audio arrived for a meeting that is not using Meet capture"
+                        .into(),
+                });
+                return true;
+            }
+            let pcm16 = match decode_browser_audio_chunk(&pcm16_base64, sample_rate_hz) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::DeviceNotFound,
+                        message,
+                    });
+                    return true;
+                }
+            };
+            let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() else {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: "Meet capture pipeline is no longer active".into(),
+                });
+                return true;
+            };
+            let provider_channel = match channel {
+                BrowserAudioChannel::Mic => notetaker_core::providers::AudioChannel::Mic,
+                BrowserAudioChannel::Speaker => notetaker_core::providers::AudioChannel::Speaker,
+            };
+            let messages = pipeline
+                .lock()
+                .await
+                .handle_audio_chunk(meeting_id, provider_channel, &pcm16, sample_rate_hz)
+                .await;
+            for message in messages {
+                send_meeting_message(&state, meeting_id, message).await;
+            }
+            true
+        }
+
         ExtensionToHelper::StopRecording { meeting_id } => {
             if let Some(active) = state.active.lock().await.remove(&meeting_id) {
-                let _ = active.audio.stop_capture().await;
+                if let Some(audio) = active.audio {
+                    let _ = audio.stop_capture().await;
+                }
             }
             if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
                 let messages = pipeline.lock().await.stop_recording(meeting_id).await;
@@ -504,7 +578,9 @@ async fn handle_message(
 
         ExtensionToHelper::DiscardRecording { meeting_id } => {
             if let Some(active) = state.active.lock().await.remove(&meeting_id) {
-                let _ = active.audio.stop_capture().await;
+                if let Some(audio) = active.audio {
+                    let _ = audio.stop_capture().await;
+                }
                 tray.set_recording(false);
             }
             if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
@@ -524,7 +600,9 @@ async fn handle_message(
 
         ExtensionToHelper::DeleteMeeting { meeting_id } => {
             if let Some(active) = state.active.lock().await.remove(&meeting_id) {
-                let _ = active.audio.stop_capture().await;
+                if let Some(audio) = active.audio {
+                    let _ = audio.stop_capture().await;
+                }
                 tray.set_recording(false);
             }
             if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {

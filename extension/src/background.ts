@@ -8,9 +8,19 @@
 import { BackgroundController } from "./lib/backgroundController";
 import { NativeMessagingClient } from "./lib/nativeMessaging";
 import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/internalMessages";
+import { MeetCaptureController, type MeetAudioChunk } from "./meet/meetCapture";
 
 const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
+const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => {
+  try {
+    controller.sendMeetAudioChunk(meetingId, channel, pcm16, 48_000);
+  } catch (error) {
+    console.warn("Meet audio chunk could not reach the helper", error);
+    void controller.failRecording(meetingId, "The desktop helper disconnected during Google Meet capture. The audio already received is safe; reconnect and start again.");
+    void meetCapture.stop(meetingId);
+  }
+});
 
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === "ai-notetaker-helper-retry") client.retryFromAlarm();
@@ -63,9 +73,40 @@ async function handleUiMessage(message: UiToBackgroundMessage): Promise<unknown>
     case "RUN_AUDIO_PROBE":
       return { result: await controller.runAudioProbe() };
     case "START_RECORDING":
-      return { meetingId: await controller.startRecording(message.meetingMode) };
+      {
+        const captureSource = message.captureSource ?? "desktop";
+        const meetingId = await controller.startRecording(message.meetingMode, captureSource);
+        if (!meetingId) return { meetingId: "" };
+        if (captureSource === "meet") {
+          if (typeof message.tabId !== "number") {
+            await controller.failRecording(meetingId, "Choose the active Google Meet tab before starting browser capture.");
+            return { meetingId: "" };
+          }
+          try {
+            await meetCapture.start(message.tabId, meetingId);
+          } catch (error) {
+            await controller.failRecording(meetingId, error instanceof Error ? error.message : "Google Meet capture could not start.");
+            return { meetingId: "" };
+          }
+        }
+        return { meetingId };
+      }
     case "STOP_RECORDING":
-      await controller.stopRecording(message.meetingId);
+      try {
+        if (meetCapture.isActive(message.meetingId)) await meetCapture.stop(message.meetingId);
+      } finally {
+        await controller.stopRecording(message.meetingId);
+      }
+      return {};
+    case "RETRY_DRIVE_EXPORT":
+      await controller.retryDriveExport(message.meetingId);
+      return {};
+    case "MEET_AUDIO_CHUNK":
+      try {
+        meetCapture.forwardChunk(message as MeetAudioChunk);
+      } catch (error) {
+        await controller.failRecording(message.meetingId, error instanceof Error ? error.message : "Meet audio capture failed.");
+      }
       return {};
     case "SAVE_SETTINGS":
       await controller.saveSettings(message.settings);

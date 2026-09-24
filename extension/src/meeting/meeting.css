@@ -16,6 +16,10 @@ h1 {
   margin-bottom: var(--space-4);
 }
 
+.drive-export-status {
+  margin: var(--space-2) 0 var(--space-4);
+}
+
 section {
   margin-bottom: var(--space-4);
 }

@@ -8,9 +8,10 @@ meeting data, operate a shared backend, or collect analytics.
 | Data | Location | Leaves the device when |
 | --- | --- | --- |
 | Provider API keys | Chrome extension `chrome.storage.local` | The selected provider receives its key with a direct provider request |
+| Google Drive OAuth tokens | Chrome extension `chrome.storage.local` | Google receives them during OAuth/API calls; the project never sees them |
 | Native Messaging pairing token | Chrome extension `chrome.storage.local` and the local helper's private data directory | Never leaves the device; it is used only across the local extension/helper channel |
 | Raw mic/speaker PCM | Helper app-data directory under `ai-notetaker` | Audio chunks are sent to the selected transcription provider during recording |
-| Transcript and summary | Helper/extension local storage, and optionally the user's own webapp/Postgres | The transcript is sent to the selected summarizer; finished notes leave the device only when optional webapp sync is enabled |
+| Transcript and summary | Helper/extension local storage, and optionally the user's own webapp/Postgres or Google Drive Doc | The transcript is sent to the selected summarizer; notes leave the device only when optional webapp sync or Drive export is enabled |
 | Retry queues | Helper app-data directory under `ai-notetaker` | Never sent; they reference local audio ranges |
 | Helper status/control | Native Messaging plus a local Unix socket/named pipe | Never to a project-operated server |
 

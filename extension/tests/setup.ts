@@ -53,6 +53,15 @@ export const chromeMock = {
     launchWebAuthFlow: vi.fn(),
     getRedirectURL: vi.fn(() => "https://fake-extension-id.chromiumapp.org/"),
   },
+  tabs: {
+    get: vi.fn(async () => ({ id: 1, url: "https://meet.google.com/test" })),
+  },
+  offscreen: {
+    Reason: { USER_MEDIA: "USER_MEDIA" },
+    hasDocument: vi.fn(async () => false),
+    createDocument: vi.fn(async () => undefined),
+    closeDocument: vi.fn(async () => undefined),
+  },
   reset() {
     storageLocal._reset();
     storageSync._reset();
@@ -62,6 +71,12 @@ export const chromeMock = {
     this.identity.launchWebAuthFlow.mockReset();
     this.identity.getRedirectURL.mockReset();
     this.identity.getRedirectURL.mockReturnValue("https://fake-extension-id.chromiumapp.org/");
+    this.tabs.get.mockReset();
+    this.tabs.get.mockResolvedValue({ id: 1, url: "https://meet.google.com/test" });
+    this.offscreen.hasDocument.mockReset();
+    this.offscreen.hasDocument.mockResolvedValue(false);
+    this.offscreen.createDocument.mockReset();
+    this.offscreen.closeDocument.mockReset();
   },
 };
 

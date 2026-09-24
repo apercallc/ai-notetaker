@@ -30,7 +30,7 @@ Have these ready:
   - Windows: base [VB-CABLE](https://vb-audio.com/Cable/), with its own
     licensing and attribution.
   - Linux: PulseAudio or PipeWire with the helper's null-sink integration.
-- A transcription provider key and a summarization provider key.
+- Two provider API keys: one transcription key and one summarization key.
 - A meeting app that lets you choose its microphone and speakers.
 - Consent from the people you record when local law requires it.
 
@@ -273,38 +273,83 @@ The extension is only a UI; it cannot capture audio on its own.
 
 ### Step 2: Set up audio
 
+Use this normal routing: in the meeting app, choose your **physical
+microphone** for Microphone/Input and the platform's **virtual meeting output**
+for Speaker/Output. Keep your normal headphones or speakers as the operating
+system's output so other apps continue to work normally. The helper captures
+the physical/default microphone and listens to the virtual output's monitor.
+
+Google Meet has a lower-setup browser option: in the extension popup choose
+**Google Meet — capture this tab**. The extension asks for microphone and tab
+audio permission, keeps the two channels separate, and continues routing the
+tab audio so you can use Meet normally. If permission is denied or you switch
+tabs, retry from the popup. Zoom, Microsoft Teams, and Slack Huddles use the
+desktop-helper routing below.
+
 Choose the devices in the meeting app, not only in the operating system:
 
 - **macOS:** In Audio MIDI Setup, create a Multi-Output Device containing
   BlackHole and your headphones or speakers. Choose the Multi-Output Device
-  as the meeting app's speaker and keep your normal physical microphone as
-  the meeting app's microphone; the helper captures both separately.
+  as the meeting app's Speaker and your physical microphone as Microphone.
+  Do not choose BlackHole alone or you will not hear the meeting.
 - **Windows:** Enable “Listen to this device” for CABLE Output and choose
   your normal headphones for playback. Choose CABLE Input as the meeting
-  app's speaker and keep your normal physical microphone as its microphone.
+  app's Speaker and your physical microphone as Microphone.
 - **Linux:** Choose the helper's “AI Notetaker” PulseAudio/PipeWire virtual
-  device as the meeting app's speaker and keep your normal physical
-  microphone as its microphone. Keep your normal speakers as the system
-  output so the loopback remains audible.
+  device as the meeting app's Speaker and your physical/default microphone as
+  Microphone. Keep your normal speakers or headphones as the system output.
+  Do not choose `notetaker_mic` as the meeting microphone; the helper reads
+  your normal default input directly.
+
+#### Slack huddles
+
+Open your profile picture → **Preferences** → **Audio & video**. Set
+**Microphone** to your physical microphone and **Speaker** to the virtual
+meeting output above. If Slack changes the device after you join a huddle,
+use the huddle's three-dots menu → **Select a speaker**. See Slack's
+[huddles preferences guide](https://slack.com/help/articles/1500002037922-Adjust-your-huddles-preferences).
+
+#### Microsoft Teams
+
+Open **Settings and more (…)** → **Settings** → **Devices**. Under **Audio
+settings**, set **Microphone** to your physical microphone and **Speaker** to
+the virtual meeting output above. During an active meeting, use **More (…)**
+→ **Settings** → **Device settings** if you need to change them. See
+Microsoft's [Teams device settings guide](https://support.microsoft.com/en-US/Teams/calls-devices/manage-your-call-settings-in-microsoft-teams).
 
 Click **Check devices**, then **Run 2-second test**. Continue only when the
 wizard reports that both the microphone and meeting audio are ready.
 
 ### Step 3: Add provider keys
 
-The default tier asks for:
+Enter **two API keys**, one for each job. They are entered in **Step 3 of the
+browser setup wizard**; after setup, edit the same keys under the extension's
+**Settings → AI provider** section. A single key is not enough because
+transcription and summarization are separate provider calls.
 
-- **Deepgram** for transcription.
-- **Claude** for summarization.
+The recommended default tier asks for:
+
+- **Key 1 — Deepgram:** transcription, including live transcript updates.
+- **Key 2 — Claude:** summarization and action items after you stop.
+
+AI Notetaker supports these provider roles:
+
+| Role | Supported providers | What it does |
+| --- | --- | --- |
+| Transcription | Deepgram or Groq | Turns microphone and meeting audio into text |
+| Summarization | Claude, Gemini, or DeepSeek | Turns the transcript into a summary and action items |
+
+The **Default** tier uses Deepgram + Claude. The **Budget** tier uses Groq +
+Gemini or DeepSeek; choose the summarizer in Settings. Budget transcription is
+batch-based, so live partial transcripts are less immediate.
 
 Enter each key, click **Test keys**, and continue only after both checks pass.
 Keys are stored in the browser's `chrome.storage.local`; they are not sent to
 the optional webapp.
 
-You can switch to the budget tier later in Settings:
-
-- Groq for transcription.
-- Gemini or DeepSeek for summarization.
+You can switch between the Default and Budget tiers later in **Settings → AI
+provider**. The settings page labels every field by role and marks that both
+roles need a key.
 
 ### Step 4: Acknowledge recording consent
 
@@ -314,12 +359,16 @@ consent obligations. Finish the wizard.
 ## Record your first meeting
 
 1. Open the meeting app.
-2. Set its microphone and speaker to the AI Notetaker devices from Step 2.
+2. For Zoom, Teams, or Slack Huddles, set its microphone and speaker to the AI
+   Notetaker devices from Step 2. For Google Meet, leave normal Meet devices
+   selected and choose **Google Meet — capture this tab** in the popup instead.
 3. Open the extension popup.
 4. Choose **General**, **Standup**, **Sales call**, **1:1**, **Interview**, or
    a custom meeting mode.
-5. Confirm the popup says **Audio ready**.
-6. Click **Record**.
+5. Confirm the popup says **Audio ready** for desktop-helper mode. Meet browser
+   mode does not require the virtual-output probe, but the helper still must
+   be connected because it owns local storage and the AI pipeline.
+6. Click **Record** and approve the browser capture prompts if shown.
 7. Keep the helper tray app running until you click **Stop recording**.
 
 While recording, the extension shows live transcript lines and a recording
@@ -332,6 +381,21 @@ meetings** to see:
 - the summary;
 - action items, including due dates and completion state; and
 - the full speaker-labeled transcript.
+
+## Optional: save notes to Google Drive
+
+Open Settings → **Google Drive notes**. Create your own Google Cloud OAuth
+client (Chrome extension), enable the Google Drive API, register the redirect
+URI shown by the extension, and connect it. The extension requests only
+`https://www.googleapis.com/auth/drive.file`; it does not use the Calendar
+token or send credentials through the helper or a project server.
+
+When a summary finishes, AI Notetaker creates or reuses `My Drive/ai-notetaker`
+and creates a Google Doc titled `<meeting name> — <YYYY-MM-DD>`. The document
+contains metadata, Summary, Key decisions, Action items, Discussion
+highlights, Open questions, and the speaker-labeled Transcript. Local storage
+is authoritative: a Drive outage shows **Retry Drive export** on the meeting
+page and cannot lose or invalidate the meeting.
 
 ## Use meetings and action items later
 

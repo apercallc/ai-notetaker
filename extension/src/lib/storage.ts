@@ -69,6 +69,7 @@ export async function getSettings(): Promise<NotetakerSettings> {
       typeof stored.customSummaryInstructions === "string"
         ? stored.customSummaryInstructions.slice(0, 4_000)
         : DEFAULT_SETTINGS.customSummaryInstructions,
+    drive: stored.drive && typeof stored.drive === "object" ? stored.drive : DEFAULT_SETTINGS.drive,
   };
 }
 

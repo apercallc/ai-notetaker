@@ -9,6 +9,8 @@ export type TranscriptionProvider = "deepgram" | "groq";
 export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
 export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
+export type CaptureSource = "desktop" | "meet";
+export type BrowserAudioChannel = "mic" | "speaker";
 export type ActionItemStatus = "open" | "done";
 
 export interface ProviderApiKeys {
@@ -22,6 +24,23 @@ export interface ProviderApiKeys {
 export interface WebappConfig {
   url: string;
   token: string;
+}
+
+/** A user-owned Google OAuth connection, stored only in chrome.storage.local. */
+export interface DriveConnection {
+  clientId: string;
+  clientSecret?: string;
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: number;
+}
+
+export interface DriveExportState {
+  status: "pending" | "exported" | "error";
+  fileId?: string;
+  webViewLink?: string;
+  exportedAt?: string;
+  errorMessage?: string;
 }
 
 export interface AudioStatus {
@@ -58,6 +77,7 @@ export interface NotetakerSettings {
   onboardingComplete: boolean;
   consentDisclosureAcknowledged: boolean;
   calendar: CalendarConnection | null;
+  drive: DriveConnection | null;
 }
 
 export const DEFAULT_SETTINGS: NotetakerSettings = {
@@ -71,6 +91,7 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
   calendar: null,
+  drive: null,
 };
 
 export type Speaker = "you" | `them${"" | `-${number}`}`;
@@ -118,6 +139,7 @@ export interface MeetingRecord {
   status: "recording" | "processing" | "complete" | "error";
   errorMessage?: string;
   attendees?: string[];
+  driveExport?: DriveExportState;
 }
 
 // ---- Native Messaging: extension -> helper ----
@@ -134,7 +156,8 @@ export type OutgoingMessage =
       customVocabulary: string[];
       customSummaryInstructions: string;
     }
-  | { type: "start_recording"; meetingId: string; meetingMode: MeetingMode }
+  | { type: "start_recording"; meetingId: string; meetingMode: MeetingMode; captureSource?: CaptureSource }
+  | { type: "audio_chunk"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string }
   | { type: "stop_recording"; meetingId: string }
   | { type: "resume_recording"; meetingId: string }
   | { type: "discard_recording"; meetingId: string }

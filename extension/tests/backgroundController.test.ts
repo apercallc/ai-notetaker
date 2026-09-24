@@ -6,6 +6,9 @@ import { DEFAULT_SETTINGS } from "../src/types";
 
 vi.mock("../src/lib/calendar", () => ({ findCurrentEvent: vi.fn() }));
 import { findCurrentEvent } from "../src/lib/calendar";
+import { exportMeetingToDrive } from "../src/lib/drive";
+
+vi.mock("../src/lib/drive", () => ({ exportMeetingToDrive: vi.fn() }));
 
 function createFakeClient(): NativeClientLike & {
   emit: (type: string, payload: Record<string, unknown>) => void;
@@ -15,7 +18,7 @@ function createFakeClient(): NativeClientLike & {
   return {
     connect: vi.fn(async () => {
       for (const handler of handlers.get("helper_info") ?? []) {
-        handler({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 1, platform: "linux" });
+        handler({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 2, platform: "linux" });
       }
     }),
     on: vi.fn((type: string, handler: (msg: unknown) => void) => {
@@ -340,6 +343,43 @@ describe("BackgroundController", () => {
         completedAt: null,
       }),
     ]);
+  });
+
+  it("keeps local completion successful when Drive export fails", async () => {
+    vi.mocked(exportMeetingToDrive).mockRejectedValue(new Error("Drive request failed: 503"));
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      drive: { clientId: "client", accessToken: "token", expiresAt: Date.now() + 60_000 },
+    });
+    const meetingId = await controller.startRecording();
+
+    client.emit("summary_ready", { meetingId, summary: "Saved locally", actionItems: [] });
+
+    await vi.waitFor(async () => {
+      expect((await getMeeting(meetingId))?.status).toBe("complete");
+      expect((await getMeeting(meetingId))?.driveExport).toEqual(expect.objectContaining({ status: "error" }));
+    });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "DRIVE_EXPORT", status: "error", meetingId }));
+  });
+
+  it("exports a completed meeting asynchronously when Drive is connected", async () => {
+    vi.mocked(exportMeetingToDrive).mockResolvedValue({ fileId: "doc-1", webViewLink: "https://docs.google.com/document/d/doc-1/edit" });
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const drive = { clientId: "client", accessToken: "token", expiresAt: Date.now() + 60_000 };
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, drive });
+    const meetingId = await controller.startRecording();
+    client.emit("summary_ready", { meetingId, summary: "Saved to Drive", actionItems: [] });
+
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.driveExport?.status).toBe("exported"));
+    expect(exportMeetingToDrive).toHaveBeenCalledWith(expect.objectContaining({ id: meetingId }), drive, expect.any(Function));
   });
 
   it("POSTs the finished meeting to the webapp when one is configured", async () => {

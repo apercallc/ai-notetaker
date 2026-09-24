@@ -5,15 +5,17 @@
  * UI pages never talk to the helper directly.
  */
 import type { HelperConnectionStatus } from "./nativeMessaging";
-import type { ActionItem, AudioProbeResult, AudioStatus, HelperInfo, MeetingMode, NotetakerSettings, ProviderKind, Speaker } from "../types";
+import type { ActionItem, AudioProbeResult, AudioStatus, BrowserAudioChannel, CaptureSource, DriveExportState, HelperInfo, MeetingMode, NotetakerSettings, ProviderKind, Speaker } from "../types";
 
 export type UiToBackgroundMessage =
   | { type: "GET_STATE" }
   | { type: "CHECK_HELPER" }
   | { type: "GET_AUDIO_PREFLIGHT" }
   | { type: "RUN_AUDIO_PROBE" }
-  | { type: "START_RECORDING"; meetingMode?: MeetingMode }
+  | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number }
+  | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string }
   | { type: "STOP_RECORDING"; meetingId: string }
+  | { type: "RETRY_DRIVE_EXPORT"; meetingId: string }
   | { type: "SAVE_SETTINGS"; settings: NotetakerSettings }
   | { type: "RESUME_RECORDING"; meetingId: string }
   | { type: "DISCARD_RECORDING"; meetingId: string }
@@ -42,4 +44,5 @@ export type BackgroundToUiMessage =
   | { type: "PROCESSING_WARNING"; meetingId: string; message: string }
   | { type: "RECORDING_ERROR"; meetingId: string | null; message: string }
   | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
+  | { type: "DRIVE_EXPORT"; meetingId: string; status: DriveExportState["status"]; webViewLink?: string; message?: string }
   | { type: "HELPER_STATUS"; status: HelperConnectionStatus };

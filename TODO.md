@@ -12,9 +12,9 @@ them drift apart.
 
 ## Workflow improvements (2026-09-21)
 
-- [x] Guided audio preflight and short mic/speaker probe in onboarding and the
-      popup; the helper reports platform-specific device guidance without
-      sending audio over Native Messaging.
+- [x] Guided desktop audio preflight and short mic/speaker probe in onboarding
+      and the popup; Google Meet additionally has a separate browser-capture
+      path for users who do not want virtual-device routing.
 - [x] Meeting modes, bounded custom vocabulary, and custom summary
       instructions flow from extension settings into the helper prompt and
       are persisted with each local meeting.
@@ -271,7 +271,9 @@ accessibility failures):*
       probe with mic and speaker frames while test audio played, and wrote
       non-empty `mic.pcm` and `speaker.pcm` files for a 30-second recording
       before any real provider key was used. The probe's active sources
-      reported `RUNNING` during capture.
+      reported `RUNNING` during capture. The real raw-recording proof produced
+      non-empty mic and speaker files; the direct synthetic probe's speaker
+      counter still needs a follow-up before it is called fully green.
 - [x] Dual-channel capture kept as separate streams — tested
       (`storage::tests::mic_and_speaker_channels_stay_in_separate_files`)
 - [x] Raw audio always written to local disk before any API call — tested,
@@ -381,6 +383,24 @@ accessibility failures):*
       for real
 - [x] Per-OS setup guide written in `docs/helper-packaging.md`; native-OS
       screenshots and execution remain release-owner validation
+
+### Google Meet browser capture + Drive notes (2026-09-24)
+
+- [x] Native Messaging protocol v2 supports explicit `captureSource`, bounded
+      48 kHz PCM16 browser chunks, separate mic/speaker channels, and helper
+      pipeline persistence before provider calls.
+- [x] Chrome/Chromium Meet capture uses an offscreen document, tab capture,
+      separate microphone capture, normal-audio playback, cleanup, and a
+      popup mode selector; Zoom, Teams, and Slack Huddles remain helper mode.
+- [x] Optional BYOK Google Drive OAuth uses `drive.file` in
+      `chrome.storage.local`, reuses/creates `My Drive/ai-notetaker`, and
+      creates standardized Google Docs with retryable export status.
+- [x] Onboarding, popup, Settings, meeting detail, data-handling, protocol,
+      and getting-started documentation explain the two capture paths and the
+      two-key provider model.
+- [ ] Live Google Meet permission/audio proof and real Google OAuth/Drive
+      export remain release-owner validation; mocked REST and local protocol
+      tests are green.
 
 ---
 

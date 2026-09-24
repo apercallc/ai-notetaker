@@ -4,19 +4,25 @@
 //! object preceded by a 4-byte little-endian message length, matching the
 //! protocol contract in `docs/native-messaging-protocol.md`.
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 use uuid::Uuid;
 
 /// Chrome will refuse to launch a native message exceeding 1 MiB when sent
 /// *to* the extension, and the host must refuse anything absurd coming in.
-/// Audio itself never flows over this channel (only transcript text and
-/// control messages), so this ceiling is generous headroom, not a tight fit.
+/// Meet browser PCM chunks flow over this channel, but each is capped well
+/// below 1 MiB; desktop audio still stays inside the helper's OS capture path.
 pub const MAX_MESSAGE_BYTES: u32 = 1024 * 1024;
+/// Browser chunks stay comfortably below Chrome's 1 MiB Native Messaging
+/// ceiling even after JSON and base64 overhead. A 64 KiB cap is also small
+/// enough that a malformed message cannot consume meaningful helper memory.
+pub const MAX_BROWSER_AUDIO_CHUNK_BYTES: usize = 64 * 1024;
+pub const BROWSER_AUDIO_SAMPLE_RATE_HZ: u32 = 48_000;
 /// Increment when the JSON wire contract changes incompatibly. The extension
 /// uses the helper's advertised value to show an upgrade path instead of
 /// failing later with an opaque recording error.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FramingError {
@@ -88,6 +94,17 @@ pub enum ExtensionToHelper {
         meeting_id: Uuid,
         #[serde(rename = "meetingMode", default)]
         meeting_mode: MeetingMode,
+        #[serde(rename = "captureSource", default)]
+        capture_source: CaptureSource,
+    },
+    AudioChunk {
+        #[serde(rename = "meetingId")]
+        meeting_id: Uuid,
+        channel: BrowserAudioChannel,
+        #[serde(rename = "sampleRateHz")]
+        sample_rate_hz: u32,
+        #[serde(rename = "pcm16Base64")]
+        pcm16_base64: String,
     },
     StopRecording {
         #[serde(rename = "meetingId")]
@@ -111,6 +128,44 @@ pub enum ExtensionToHelper {
     },
     AudioPreflight,
     AudioProbe,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureSource {
+    #[default]
+    Desktop,
+    Meet,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserAudioChannel {
+    Mic,
+    Speaker,
+}
+
+pub fn decode_browser_audio_chunk(encoded: &str, sample_rate_hz: u32) -> Result<Vec<u8>, String> {
+    if sample_rate_hz != BROWSER_AUDIO_SAMPLE_RATE_HZ {
+        return Err(format!(
+            "browser audio must use {BROWSER_AUDIO_SAMPLE_RATE_HZ} Hz"
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|_| "browser audio chunk is not valid base64".to_string())?;
+    if bytes.is_empty() {
+        return Err("browser audio chunk is empty".to_string());
+    }
+    if bytes.len() > MAX_BROWSER_AUDIO_CHUNK_BYTES {
+        return Err(format!(
+            "browser audio chunk exceeds {MAX_BROWSER_AUDIO_CHUNK_BYTES} bytes"
+        ));
+    }
+    if bytes.len() % 2 != 0 {
+        return Err("browser audio chunk must contain complete PCM16 samples".to_string());
+    }
+    Ok(bytes)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -415,5 +470,52 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(a.len(), 64); // 32 bytes -> 64 hex chars
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn start_recording_defaults_to_desktop_capture() {
+        let id = Uuid::new_v4();
+        let json = serde_json::json!({
+            "type": "start_recording",
+            "meetingId": id,
+            "meetingMode": "general"
+        });
+        let decoded: ExtensionToHelper = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            decoded,
+            ExtensionToHelper::StartRecording {
+                meeting_id: id,
+                meeting_mode: MeetingMode::General,
+                capture_source: CaptureSource::Desktop,
+            }
+        );
+    }
+
+    #[test]
+    fn browser_audio_chunk_round_trips_as_a_separate_channel() {
+        let id = Uuid::new_v4();
+        let message = ExtensionToHelper::AudioChunk {
+            meeting_id: id,
+            channel: BrowserAudioChannel::Speaker,
+            sample_rate_hz: 48_000,
+            pcm16_base64: "AQIDBA==".into(),
+        };
+        let decoded: ExtensionToHelper =
+            serde_json::from_value(serde_json::to_value(&message).unwrap()).unwrap();
+        assert_eq!(decoded, message);
+        assert_eq!(
+            decode_browser_audio_chunk("AQIDBA==", 48_000).unwrap(),
+            vec![1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn browser_audio_chunk_rejects_invalid_shape() {
+        assert!(decode_browser_audio_chunk("not-base64", 48_000).is_err());
+        assert!(decode_browser_audio_chunk("AQI=", 44_100).is_err());
+        let too_large =
+            base64::engine::general_purpose::STANDARD
+                .encode(vec![0_u8; MAX_BROWSER_AUDIO_CHUNK_BYTES + 1]);
+        assert!(decode_browser_audio_chunk(&too_large, 48_000).is_err());
     }
 }

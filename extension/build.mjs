@@ -11,6 +11,7 @@ const entryPoints = [
   "src/onboarding/onboarding.ts",
   "src/meeting/meeting.ts",
   "src/actions/actions.ts",
+  "src/meet/offscreen.ts",
 ];
 
 const buildOptions = {
@@ -32,6 +33,7 @@ async function copyStatic() {
     await cp(`src/${page}/${page}.html`, `dist/${page}/${page}.html`);
     await cp(`src/${page}/${page}.css`, `dist/${page}/${page}.css`);
   }
+  await cp("src/meet/offscreen.html", "dist/meet/offscreen.html");
   await cp("src/shared/theme.css", "dist/shared/theme.css");
 }
 

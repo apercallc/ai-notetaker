@@ -4,6 +4,7 @@ import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { escapeHtml } from "../lib/html";
 import { estimateMeetingCost } from "../lib/costEstimate";
 import { connectCalendar } from "../lib/calendar";
+import { connectGoogleDrive } from "../lib/drive";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
 
 const app = document.getElementById("app")!;
@@ -21,13 +22,14 @@ function render(): void {
     <fieldset>
       <legend>AI provider</legend>
       <p class="text-secondary field-hint">
-        AI Notetaker never bills you — you bring your own API key(s) and pay
-        the provider directly, at cost. See the cost table in the README for
-        current per-meeting estimates.
+        Every recording uses exactly two provider keys: one transcription key
+        and one summarization key. AI Notetaker never bills you — you bring
+        your own keys and pay the providers directly. See the cost table in
+        the README for current per-meeting estimates.
       </p>
       <div class="tier-toggle" role="group" aria-label="Provider tier">
-        <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}" aria-pressed="${!budget}">Default (best quality)</button>
-        <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}" aria-pressed="${budget}">Budget (lowest cost)</button>
+        <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}" aria-pressed="${!budget}">Default: Deepgram + Claude</button>
+        <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}" aria-pressed="${budget}">Budget: Groq + Gemini/DeepSeek</button>
       </div>
 
       <div class="cost-estimator">
@@ -92,6 +94,15 @@ function render(): void {
       </div>
     </fieldset>
 
+    <fieldset>
+      <legend>Google Drive notes (optional)</legend>
+      <p class="text-secondary field-hint">
+        After a summary is ready, create a Google Doc in <code>My Drive/ai-notetaker</code>.
+        Meetings are always kept locally first; Drive errors never delete or block them.
+      </p>
+      ${renderDriveFields()}
+    </fieldset>
+
     <div class="save-bar">
       <button type="button" class="primary" id="save-settings">Save settings</button>
       <span class="test-result text-secondary" id="save-status" role="status" aria-live="polite"></span>
@@ -121,22 +132,24 @@ function meetingModeOptions(selected: NotetakerSettings["defaultMeetingMode"]): 
 
 function renderDefaultTierFields(): string {
   return `
-    ${renderKeyField("deepgram", "Deepgram API key", "Transcription")}
-    ${renderKeyField("claude", "Claude API key", "Summarization")}
+    <p class="field-hint"><strong>Two keys required for this tier:</strong> one for each role below.</p>
+    ${renderKeyField("deepgram", "1. Deepgram API key", "Transcription — live transcript updates")}
+    ${renderKeyField("claude", "2. Claude API key", "Summarization — summary and action items after you stop")}
   `;
 }
 
 function renderBudgetTierFields(): string {
   return `
-    ${renderKeyField("groq", "Groq API key", "Transcription (batch — live partials will be choppier than the default tier)")}
+    <p class="field-hint"><strong>Two keys required for this tier:</strong> Groq for transcription, plus one summarization provider.</p>
+    ${renderKeyField("groq", "1. Groq API key", "Transcription — batch mode, so live partials are less immediate")}
     <div class="field">
-      <label for="budget-summarizer">Summarization provider</label>
+      <label for="budget-summarizer">2. Summarization provider</label>
       <select id="budget-summarizer">
         <option value="gemini" ${settings.summarizationProvider === "gemini" ? "selected" : ""}>Gemini Flash</option>
         <option value="deepseek" ${settings.summarizationProvider === "deepseek" ? "selected" : ""}>DeepSeek V4 Flash</option>
       </select>
     </div>
-    ${renderKeyField(settings.summarizationProvider === "deepseek" ? "deepseek" : "gemini", `${settings.summarizationProvider === "deepseek" ? "DeepSeek" : "Gemini"} API key`, "Summarization")}
+    ${renderKeyField(settings.summarizationProvider === "deepseek" ? "deepseek" : "gemini", `${settings.summarizationProvider === "deepseek" ? "DeepSeek" : "Gemini"} API key`, "Summarization — summary and action items after you stop")}
   `;
 }
 
@@ -200,6 +213,36 @@ function renderCalendarFields(): string {
       </div>
     `
     }
+  `;
+}
+
+function renderDriveFields(): string {
+  if (settings.drive) {
+    return `
+      <div class="field">
+        <p>Google Drive is connected. Notes will be created in <code>My Drive/ai-notetaker</code>.</p>
+        <button type="button" class="secondary" id="disconnect-drive">Disconnect Google Drive</button>
+      </div>
+    `;
+  }
+  return `
+    <p class="field-hint text-secondary">
+      Create your own OAuth client in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a>, enable the Google Drive API, and choose “Chrome extension”.
+      This extension requests only the <code>drive.file</code> permission for files it creates.
+    </p>
+    <div class="field">
+      <label for="drive-client-id">Google OAuth Client ID</label>
+      <input type="text" id="drive-client-id" autocomplete="off" />
+    </div>
+    <div class="field">
+      <label for="drive-client-secret">Client secret (if your OAuth client has one)</label>
+      <input type="password" id="drive-client-secret" autocomplete="off" />
+    </div>
+    <div class="field">
+      <p class="field-hint text-secondary">Redirect URI: <code>${escapeHtml(chrome.identity.getRedirectURL())}</code></p>
+      <button type="button" class="secondary" id="connect-drive">Connect Google Drive</button>
+      <p class="test-result" id="drive-test-result" role="status" aria-live="polite"></p>
+    </div>
   `;
 }
 
@@ -327,6 +370,36 @@ function wireEvents(): void {
   document.getElementById("disconnect-calendar")?.addEventListener("click", async () => {
     settings.calendar = null;
     pendingCalendarProvider = "none";
+    await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+    render();
+  });
+
+  document.getElementById("connect-drive")?.addEventListener("click", async () => {
+    const button = document.getElementById("connect-drive") as HTMLButtonElement;
+    const resultEl = document.getElementById("drive-test-result")!;
+    const clientId = (document.getElementById("drive-client-id") as HTMLInputElement)?.value.trim();
+    const clientSecret = (document.getElementById("drive-client-secret") as HTMLInputElement)?.value.trim();
+    if (!clientId) {
+      resultEl.textContent = "Enter a Google OAuth Client ID first.";
+      resultEl.className = "test-result invalid";
+      return;
+    }
+    button.disabled = true;
+    resultEl.textContent = "Opening Google sign-in…";
+    resultEl.className = "test-result text-secondary";
+    try {
+      settings.drive = await connectGoogleDrive(clientId, clientSecret || undefined);
+      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+      render();
+    } catch (error) {
+      resultEl.textContent = error instanceof Error ? error.message : "Could not connect Google Drive. Check the OAuth client and redirect URI.";
+      resultEl.className = "test-result invalid";
+      button.disabled = false;
+    }
+  });
+
+  document.getElementById("disconnect-drive")?.addEventListener("click", async () => {
+    settings.drive = null;
     await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
     render();
   });

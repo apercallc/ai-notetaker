@@ -1,6 +1,6 @@
 import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
-import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
+import { speakerLabel, type AudioProbeResult, type AudioStatus, type CaptureSource, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
 import { getInstallPageUrl } from "../lib/install";
 
@@ -44,7 +44,7 @@ async function renderOnboardingPrompt(): Promise<void> {
   app.innerHTML = `
     ${renderHeader(false)}
     <div class="empty-state">
-      <p>Let's get you set up — pick a virtual audio device, add your API key, and you're recording.</p>
+      <p>Let's get you set up — connect the helper, route meeting audio, then add one transcription key and one summarization key.</p>
       <button class="primary" id="start-onboarding">Start setup</button>
     </div>
   `;
@@ -218,13 +218,15 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]):
     if (checkButton) checkButton.textContent = status.ready ? "Refresh audio check" : "Check audio again";
     if (probeButton) probeButton.disabled = !status.ready;
     const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-    if (startButton) startButton.disabled = !status.ready || helperStatus !== "connected";
+    const captureSource = (document.getElementById("capture-source") as HTMLSelectElement | null)?.value;
+    if (startButton) startButton.disabled = helperStatus !== "connected" || (captureSource !== "meet" && !status.ready);
   } catch {
     statusEl.textContent = "Audio check failed. Confirm the desktop helper is running, then try again.";
     statusEl.className = "text-warning";
     if (probeButton) probeButton.disabled = true;
     const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-    if (startButton) startButton.disabled = true;
+    const captureSource = (document.getElementById("capture-source") as HTMLSelectElement | null)?.value;
+    if (startButton) startButton.disabled = helperStatus !== "connected" || captureSource !== "meet";
   }
 }
 
@@ -264,6 +266,13 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       <label class="meeting-mode-picker" for="meeting-mode">Meeting mode
         <select id="meeting-mode">${meetingModeOptions(settings.defaultMeetingMode)}</select>
       </label>
+      <label class="meeting-mode-picker" for="capture-source">Capture mode
+        <select id="capture-source">
+          <option value="desktop">Zoom, Teams, Slack Huddle — desktop helper</option>
+          <option value="meet">Google Meet — capture this tab</option>
+        </select>
+      </label>
+      <p class="field-hint text-secondary capture-mode-hint" id="capture-mode-hint">Use the desktop helper for Zoom, Microsoft Teams, and Slack Huddles. Google Meet can use browser capture in the active tab.</p>
       <div class="audio-check" aria-live="polite">
         <p id="audio-status" class="text-secondary">Checking audio devices…</p>
         <div class="audio-check-actions">
@@ -295,7 +304,10 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
     if (startButton) startButton.disabled = true;
     try {
       const meetingMode = (document.getElementById("meeting-mode") as HTMLSelectElement).value as MeetingMode;
-      await sendToBackground({ type: "START_RECORDING", meetingMode });
+      const captureSource = (document.getElementById("capture-source") as HTMLSelectElement).value as CaptureSource;
+      const tabs = captureSource === "meet" ? await chrome.tabs.query({ active: true, currentWindow: true }) : [];
+      const tabId = tabs[0]?.id;
+      await sendToBackground({ type: "START_RECORDING", meetingMode, captureSource, ...(typeof tabId === "number" ? { tabId } : {}) });
       await renderSafely();
     } catch (error) {
       renderFailure(error);
@@ -303,6 +315,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   });
   document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus(helperStatus));
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());
+  document.getElementById("capture-source")?.addEventListener("change", () => void renderAudioStatus(helperStatus));
   document.getElementById("open-action-inbox")?.addEventListener("click", () => {
     chrome.tabs.create({ url: chrome.runtime.getURL("actions/actions.html") });
   });

@@ -203,3 +203,8 @@ button.record-toggle {
   color: var(--color-text-secondary);
   padding: var(--space-4) var(--space-2);
 }
+
+.capture-mode-hint {
+  flex-basis: 100%;
+  margin: 0;
+}
