@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { validateManifest } from "./validate-release-manifest.mjs";
 import { renderReleasePackages } from "./render-release-packages.mjs";
+import { generateReleaseManifest } from "./generate-release-manifest.mjs";
 import os from "node:os";
 import path from "node:path";
 
@@ -50,4 +51,30 @@ test("published metadata renders pinned package-manager templates", () => {
   renderReleasePackages(published, output);
   assert.match(fs.readFileSync(path.join(output, "homebrew/Casks/ai-notetaker.rb"), "utf8"), /a{64}/);
   assert.match(fs.readFileSync(path.join(output, "winget/AI.Notetaker.yaml"), "utf8"), /windows\.exe/);
+});
+
+test("release metadata is generated from checksummed native assets", () => {
+  const assets = fs.mkdtempSync(path.join(os.tmpdir(), "ai-notetaker-release-assets-"));
+  fs.mkdirSync(path.join(assets, "helper-macos"), { recursive: true });
+  fs.mkdirSync(path.join(assets, "helper-windows"), { recursive: true });
+  fs.mkdirSync(path.join(assets, "helper-ubuntu"), { recursive: true });
+  fs.mkdirSync(path.join(assets, "extension"), { recursive: true });
+  fs.writeFileSync(path.join(assets, "helper-macos", "AI Notetaker.dmg"), "mac");
+  fs.writeFileSync(path.join(assets, "helper-windows", "AI Notetaker.exe"), "windows");
+  fs.writeFileSync(path.join(assets, "helper-ubuntu", "AI Notetaker.deb"), "linux");
+  fs.writeFileSync(path.join(assets, "extension", "ai-notetaker-extension-v0.1.0.zip"), "extension");
+
+  const generated = generateReleaseManifest(manifest, {
+    assetDirectory: assets,
+    repository: "apercallc/ai-notetaker",
+    tag: "v0.1.0",
+    chromeWebStoreUrl: "https://chromewebstore.google.com/detail/example",
+    signingConfirmed: true,
+  });
+
+  assert.equal(generated.status, "published");
+  assert.equal(generated.artifacts.length, 3);
+  assert.equal(generated.artifacts[0].signatureStatus, "checksummed");
+  assert.match(generated.extension.fallbackZipUrl, /ai-notetaker-extension-v0.1.0.zip/);
+  assert.match(generated.artifacts[0].url, /releases\/download\/v0\.1\.0/);
 });

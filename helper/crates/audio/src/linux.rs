@@ -7,22 +7,24 @@
 //!
 //! Module setup shells out to `pactl` (present on both PulseAudio and
 //! PipeWire-with-pulse-compat systems, which covers the large majority of
-//! desktop Linux). Capture itself uses `cpal`, same as the other
-//! platforms, reading from the null sink's monitor and from the real
-//! default input device.
+//! desktop Linux). The microphone still uses cpal's default input device,
+//! while the null-sink monitor is captured through `parec`: cpal's ALSA
+//! enumeration cannot reliably see PipeWire/PulseAudio sources.
 
-use crate::device_matching::{find_matching_device, LINUX_DEVICE_HINT};
 use crate::{AudioCapture, AudioDiagnostics, AudioError, CapturedFrame, DriverStatus};
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 const SINK_NAME: &str = "notetaker_sink";
+const SINK_MONITOR_NAME: &str = "notetaker_sink.monitor";
 const SINK_DESCRIPTION: &str = "AI Notetaker";
 const MIC_SOURCE_NAME: &str = "notetaker_mic";
+const PAREC_SAMPLE_RATE_HZ: u32 = 48_000;
 
 pub struct LinuxAudioCapture {
     running: Arc<AtomicBool>,
@@ -94,15 +96,12 @@ impl AudioCapture for LinuxAudioCapture {
         let microphone = host
             .default_input_device()
             .and_then(|device| device.name().ok());
-        let speaker = host.input_devices().ok().and_then(|mut devices| {
-            devices.find_map(|device| {
-                let name = device.name().ok()?;
-                name.to_lowercase()
-                    .contains(&format!("{SINK_NAME}.monitor"))
-                    .then_some(name)
-            })
-        });
-        let ready = driver_installed && microphone.is_some() && speaker.is_some();
+        let sources = run_pactl(&["list", "short", "sources"]).unwrap_or_default();
+        let speaker =
+            source_is_listed(&sources, SINK_MONITOR_NAME).then(|| SINK_MONITOR_NAME.to_string());
+        let mic_source_available = source_is_listed(&sources, MIC_SOURCE_NAME);
+        let ready =
+            driver_installed && microphone.is_some() && speaker.is_some() && mic_source_available;
         AudioDiagnostics {
             platform: "linux".to_string(),
             driver: SINK_DESCRIPTION.to_string(),
@@ -115,7 +114,7 @@ impl AudioCapture for LinuxAudioCapture {
             } else if !driver_installed {
                 "AI Notetaker will create its PulseAudio/PipeWire devices when you check again. Make sure pactl and PulseAudio/PipeWire are available.".to_string()
             } else {
-                "The virtual device exists, but the microphone or monitor is not available yet. Check the system audio service and try again.".to_string()
+                "The virtual device exists, but the microphone or PulseAudio/PipeWire sources are not available yet. Check the system audio service and try again.".to_string()
             },
         }
     }
@@ -129,64 +128,66 @@ impl AudioCapture for LinuxAudioCapture {
         on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
     ) -> Result<(), AudioError> {
         self.ensure_virtual_devices()?;
+        let sources = run_pactl(&["list", "short", "sources"])?;
+        if !source_is_listed(&sources, SINK_MONITOR_NAME) {
+            return Err(AudioError::DeviceNotFound(SINK_MONITOR_NAME.to_string()));
+        }
         self.running.store(true, Ordering::SeqCst);
 
         let (tx, rx) = std::sync::mpsc::channel::<CapturedFrame>();
         let running = self.running.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
-        // cpal::Stream is not Send, so the streams live entirely on this
-        // dedicated OS thread; only CapturedFrame values cross to the
-        // async side, via a plain mpsc channel.
+        // cpal::Stream is not Send, so the mic stream lives entirely on this
+        // dedicated OS thread. The parec child and its reader stay on the
+        // same thread too; only CapturedFrame values cross to the async side,
+        // via a plain mpsc channel.
         std::thread::spawn(move || {
             let host = cpal::default_host();
-            let device_names: Vec<String> = host
-                .input_devices()
-                .map(|it| it.filter_map(|d| d.name().ok()).collect())
-                .unwrap_or_default();
-
-            let speaker_device =
-                find_matching_device(&device_names, &format!("{SINK_NAME}.monitor"))
-                    .or_else(|| find_matching_device(&device_names, LINUX_DEVICE_HINT))
-                    .and_then(|name| {
-                        host.input_devices()
-                            .ok()?
-                            .find(|d| d.name().ok().as_deref() == Some(name))
-                    });
             let mic_device = host.default_input_device();
-
-            let Some(speaker_device) = speaker_device else {
-                let _ = ready_tx.send(Err(
-                    "the AI Notetaker meeting-audio device was not found".into()
-                ));
-                return;
-            };
             let Some(mic_device) = mic_device else {
                 let _ = ready_tx.send(Err("the system microphone was not found".into()));
                 return;
             };
-            let speaker_stream =
-                match build_input_stream(&speaker_device, AudioChannel::Speaker, tx.clone()) {
-                    Ok(stream) => stream,
-                    Err(error) => {
-                        let _ = ready_tx.send(Err(error.to_string()));
-                        return;
-                    }
-                };
-            let mic_stream = match build_input_stream(&mic_device, AudioChannel::Mic, tx.clone()) {
-                Ok(stream) => stream,
+
+            let mut parec = match spawn_parec() {
+                Ok(child) => child,
                 Err(error) => {
                     let _ = ready_tx.send(Err(error.to_string()));
                     return;
                 }
             };
+            let Some(parec_stdout) = parec.stdout.take() else {
+                let _ = parec.kill();
+                let _ = parec.wait();
+                let _ = ready_tx.send(Err("parec did not provide stdout".into()));
+                return;
+            };
+
+            let mic_stream = match build_input_stream(&mic_device, AudioChannel::Mic, tx.clone()) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    let _ = parec.kill();
+                    let _ = parec.wait();
+                    let _ = ready_tx.send(Err(error.to_string()));
+                    return;
+                }
+            };
+
+            let speaker_running = running.clone();
+            let speaker_thread = std::thread::spawn(move || {
+                read_parec_frames(parec_stdout, speaker_running, tx);
+            });
             let _ = ready_tx.send(Ok(()));
 
             while running.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            drop((speaker_stream, mic_stream));
-            // Streams drop here, stopping capture.
+            let _ = parec.kill();
+            let _ = parec.wait();
+            drop(mic_stream);
+            let _ = speaker_thread.join();
+            // The cpal stream and parec child both stop here.
         });
 
         match tokio::time::timeout(std::time::Duration::from_secs(3), ready_rx).await {
@@ -258,6 +259,53 @@ fn build_input_stream(
     Ok(stream)
 }
 
+fn spawn_parec() -> Result<Child, AudioError> {
+    spawn_parec_with_program("parec")
+}
+
+fn spawn_parec_with_program(program: &str) -> Result<Child, AudioError> {
+    Command::new(program)
+        .args([
+            "-d",
+            SINK_MONITOR_NAME,
+            "--raw",
+            "--format=s16le",
+            "--rate=48000",
+            "--channels=2",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AudioError::StreamError(format!("failed to spawn parec: {e}")))
+}
+
+fn read_parec_frames(
+    mut stdout: impl Read,
+    running: Arc<AtomicBool>,
+    tx: std::sync::mpsc::Sender<CapturedFrame>,
+) {
+    let mut buffer = [0_u8; 19_200]; // 100 ms of 48 kHz, 16-bit, stereo PCM.
+    loop {
+        match stdout.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(bytes_read) => {
+                let _ = tx.send(CapturedFrame {
+                    channel: AudioChannel::Speaker,
+                    pcm16: buffer[..bytes_read].to_vec(),
+                    sample_rate_hz: PAREC_SAMPLE_RATE_HZ,
+                });
+            }
+            Err(error) => {
+                if running.load(Ordering::SeqCst) {
+                    tracing::error!("parec audio read failed: {error}");
+                }
+                break;
+            }
+        }
+    }
+}
+
 fn run_pactl(args: &[&str]) -> Result<String, AudioError> {
     let output = Command::new("pactl")
         .args(args)
@@ -278,6 +326,14 @@ fn module_exists(name_fragment: &str) -> Result<bool, AudioError> {
     Ok(sinks.contains(name_fragment) || sources.contains(name_fragment))
 }
 
+fn source_is_listed(sources: &str, source_name: &str) -> bool {
+    sources.lines().any(|line| {
+        line.split_whitespace()
+            .nth(1)
+            .is_some_and(|name| name == source_name)
+    })
+}
+
 fn default_sink_name() -> Result<Option<String>, AudioError> {
     let info = run_pactl(&["info"]).unwrap_or_default();
     Ok(info
@@ -292,4 +348,55 @@ fn default_source_name() -> Result<Option<String>, AudioError> {
         .lines()
         .find_map(|l| l.strip_prefix("Default Source: "))
         .map(String::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn source_probe_matches_exact_pulse_source_names() {
+        let sources = "2 notetaker_sink.monitor module-null-sink.c s16le 2ch 48000Hz RUNNING\n3 notetaker_mic module-remap-source.c s16le 1ch 48000Hz IDLE\n";
+        assert!(source_is_listed(sources, SINK_MONITOR_NAME));
+        assert!(source_is_listed(sources, MIC_SOURCE_NAME));
+        assert!(!source_is_listed(sources, "notetaker_sink"));
+    }
+
+    #[test]
+    fn parec_spawn_uses_raw_dual_channel_contract() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let script = directory.path().join("fake-parec");
+        let args_file = directory.path().join("args");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '\\001\\002\\003\\004'\n",
+                args_file.display()
+            ),
+        )
+        .expect("fake parec script");
+        let mut permissions = fs::metadata(&script)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("script permissions");
+
+        let mut child = spawn_parec_with_program(script.to_str().expect("script path"))
+            .expect("fake parec should spawn");
+        let mut output = Vec::new();
+        child
+            .stdout
+            .take()
+            .expect("stdout")
+            .read_to_end(&mut output)
+            .expect("read fake parec output");
+        assert_eq!(child.wait().expect("fake parec exit").code(), Some(0));
+        assert_eq!(output, vec![1, 2, 3, 4]);
+        assert_eq!(
+            fs::read_to_string(args_file).expect("captured args"),
+            "-d\nnotetaker_sink.monitor\n--raw\n--format=s16le\n--rate=48000\n--channels=2\n"
+        );
+    }
 }

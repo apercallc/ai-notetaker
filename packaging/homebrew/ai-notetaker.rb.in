@@ -9,6 +9,10 @@ cask "ai-notetaker" do
 
   app "AI Notetaker.app"
 
+  # Development fallback only. A published Cask must be rendered from a
+  # signed release manifest; see docs/code-signing-policy.md.
+  no_quarantine
+
   postflight do
     system_command staged_path.join("AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh")
   end

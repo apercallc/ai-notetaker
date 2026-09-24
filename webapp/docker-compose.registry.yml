@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-notetaker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Docker Compose}
+      POSTGRES_DB: ${POSTGRES_DB:-ainotetaker}
+    volumes:
+      - ai-notetaker-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  webapp:
+    image: ${AI_NOTETAKER_WEBAPP_IMAGE:-ghcr.io/apercallc/ai-notetaker-webapp:latest}
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-notetaker}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Docker Compose}@db:5432/${POSTGRES_DB:-ainotetaker}
+      AUTH_TOKEN: ${AUTH_TOKEN:?Set AUTH_TOKEN before starting Docker Compose}
+    ports:
+      - "${AI_NOTETAKER_WEBAPP_BIND:-127.0.0.1}:${AI_NOTETAKER_WEBAPP_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ai-notetaker-postgres:

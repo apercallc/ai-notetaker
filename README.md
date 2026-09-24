@@ -21,19 +21,25 @@ The normal user flow is:
 4. Select the AI Notetaker audio devices in your meeting app.
 5. Check audio, click **Record**, and stop when the meeting ends.
 
-The full, copy-and-paste setup is in [`docs/getting-started.md`](docs/getting-started.md).
-It covers source builds, per-OS audio routing, provider keys, recording,
-troubleshooting, and the optional history webapp.
+The easiest install is the published native helper for your OS plus the
+Chrome Web Store extension. The full, copy-and-paste setup—including package
+manager install and upgrade commands—is in
+[`docs/getting-started.md`](docs/getting-started.md).
 
 The production distribution model is documented in the
 [distribution and installation architecture](docs/superpowers/specs/2026-09-21-distribution-and-installation-architecture.md): native helper
 installers/package-manager channels for capture, with Docker reserved for the
 optional self-hosted history webapp.
 
-> **Current project status:** the helper packages and installer registration
-> are implemented, but signed public installers and a live cross-OS meeting
-> validation pass are still release-owner work. If no release is published
-> yet, use the source-build path in the setup guide.
+> **Current project status:** the release workflow is configured to build and
+> publish release assets and the optional webapp image from a version tag, but
+> the repository currently has no public release. The first public signed
+> release, Chrome Web Store listing, and package-manager submissions still
+> require release-owner credentials and external review. Until those are
+> complete, the install page correctly directs users to the source-build or
+> development-extension path. See the [code-signing policy](docs/code-signing-policy.md)
+> and [unsigned-install guide](docs/unsigned-install.md) for the development
+> fallback and the separate signed-release requirements.
 
 ## What it feels like
 
@@ -93,17 +99,38 @@ in the wizard and the detailed [audio setup guide](docs/helper-packaging.md).
 
 ## Quick start
 
-### 1. Build or install the helper
+### 1. Install the helper
 
-If a release is available, install the helper for your OS and launch **AI
-Notetaker** once so its tray process is running.
+Use the package manager for your OS when a published release is available:
 
-For the current source-build path, follow [Build from source](docs/getting-started.md#build-from-source).
-The important detail is to install a packaged helper or register the Native
-Messaging manifest; running `cargo build` alone does not make Chrome find the
-helper.
+```sh
+# macOS
+brew install --cask ai-notetaker
 
-### 2. Build and load the extension
+# Windows PowerShell
+winget install AI.Notetaker
+# or: choco install ai-notetaker
+
+# Linux: download the .deb from the latest release, then run:
+sudo apt install ./AI-Notetaker_<version>_amd64.deb
+```
+
+Launch **AI Notetaker** once so its tray process is running. Package-managed
+installs update with `brew upgrade --cask ai-notetaker`, `winget upgrade
+AI.Notetaker`, or `choco upgrade ai-notetaker`.
+
+If no public release is available yet, follow the contributor-only
+[source-build path](docs/getting-started.md#build-from-source). Running
+`cargo build` alone does not make Chrome find the helper.
+
+### 2. Install the extension
+
+Install **AI Notetaker** from the Chrome Web Store when the listing is
+available. A released ZIP is the fallback for managed or development installs;
+Chrome does not allow a native desktop installer to silently install an
+extension.
+
+For the fallback ZIP or a source build:
 
 ```sh
 cd extension

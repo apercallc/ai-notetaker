@@ -43,7 +43,7 @@ maintainer = "AI Notetaker contributors"
 copyright = "2026 AI Notetaker contributors"
 section = "sound"
 priority = "optional"
-depends = "libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2"
+depends = "libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2, pulseaudio-utils"
 assets = [
   ["target/release/notetaker-helper", "usr/bin/notetaker-helper", "755"],
   ["target/release/notetaker-nm-host", "usr/bin/notetaker-nm-host", "755"],

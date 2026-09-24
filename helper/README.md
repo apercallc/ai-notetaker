@@ -11,6 +11,11 @@ Native Messaging host; use the packaged installer flow in
 [`../docs/helper-packaging.md`](../docs/helper-packaging.md) when you need a
 working extension-to-helper install.
 
+End users should install the published helper with Homebrew, WinGet,
+Chocolatey, or the Linux `.deb` instead of cloning this workspace. Those
+channels update the helper and its Native Messaging relay together; npm/npx is
+not a supported native-helper installer.
+
 ## Workspace layout
 
 ```
@@ -60,12 +65,14 @@ filesystem I/O via `tempfile`, no live credentials or hardware needed):
   logic for finding BlackHole/VB-CABLE/the Linux null-sink among enumerated
   device names.
 
-**Compiles cleanly (Linux target) but not runtime-verified** — no audio
-hardware, no display, no live meeting in this environment:
+**Linux runtime verified on a real PipeWire desktop** — the module uses
+`pactl` for virtual-source setup/probing, `parec` for the speaker monitor, and
+cpal's default input device for the microphone. A live Native Messaging audio
+probe and a short raw-audio recording have both been exercised.
 
-- `audio::linux::LinuxAudioCapture` — real `cpal` + `pactl` module setup
-  code; `pactl` calls will genuinely run if PulseAudio/PipeWire is present,
-  but nothing here exercised an actual meeting's audio.
+- `audio::linux::LinuxAudioCapture` — real `cpal` mic capture plus `pactl`
+  module setup/source probing and `parec` monitor capture; `parec` is
+  provided by the distro's `pulseaudio-utils` package.
 - `app` crate's IPC bridge (`ipc.rs`) and message dispatch (`main.rs`) —
   type-checks and unit-testable pieces are covered by `core`'s tests, but
   the two binaries talking to each other over a real socket, and to a real

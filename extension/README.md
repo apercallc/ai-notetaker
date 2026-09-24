@@ -13,6 +13,12 @@ For the user-facing install and recording flow, start with
 [`../docs/getting-started.md`](../docs/getting-started.md). This package guide
 is for building and loading the extension during development.
 
+Normal users should install the extension from the Chrome Web Store and pair
+it with the native helper installed through Homebrew, WinGet, Chocolatey, or a
+Linux package. The released ZIP and unpacked build below are fallbacks for
+managed/private installations; npm is a development dependency path, not a
+replacement for the native helper.
+
 ## Develop
 
 ```sh

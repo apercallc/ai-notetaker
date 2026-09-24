@@ -12,6 +12,35 @@ You deploy and own this instance yourself. Nothing here is run by the
 AI Notetaker project — your meeting notes never touch a server anyone else
 controls.
 
+## Deploy with the prebuilt container image
+
+Release tags publish the history webapp image to GitHub Container Registry:
+
+```bash
+mkdir -p ai-notetaker-webapp && cd ai-notetaker-webapp
+curl -fsSLo docker-compose.registry.yml https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/docker-compose.registry.yml
+curl -fsSLo .env.docker.example https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/.env.docker.example
+cp .env.docker.example .env
+docker compose -f docker-compose.registry.yml --env-file .env pull
+docker compose -f docker-compose.registry.yml --env-file .env up -d
+```
+
+Set `AI_NOTETAKER_WEBAPP_IMAGE` if you use a versioned tag or a Docker Hub
+mirror, for example
+`docker.io/your-namespace/ai-notetaker-webapp:0.1.0`. The image contains only
+the optional authenticated history webapp; it does not capture audio or run the
+desktop helper.
+
+To update a registry deployment without rebuilding locally:
+
+```bash
+docker compose -f docker-compose.registry.yml --env-file .env pull
+docker compose -f docker-compose.registry.yml --env-file .env up -d
+```
+
+The entrypoint applies pending Prisma migrations before the server starts.
+Back up the Postgres volume before upgrades.
+
 ## Deploy with Docker Compose
 
 Docker is an optional deployment path for this history webapp only. It does

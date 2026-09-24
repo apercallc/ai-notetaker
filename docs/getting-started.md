@@ -4,8 +4,8 @@ This is the complete first-use guide for AI Notetaker. You only need the
 optional webapp if you want meeting history on more than one device.
 
 For the release and installation model—including Homebrew Cask,
-WinGet/Chocolatey, OS prerequisite detection, and the Docker-only webapp
-option—see the [distribution and installation architecture](superpowers/specs/2026-09-21-distribution-and-installation-architecture.md).
+WinGet/Chocolatey, OS prerequisite detection, release updates, and the
+Docker-only webapp option—see the [distribution and installation architecture](superpowers/specs/2026-09-21-distribution-and-installation-architecture.md).
 
 ## What you are installing
 
@@ -34,15 +34,94 @@ Have these ready:
 - A meeting app that lets you choose its microphone and speakers.
 - Consent from the people you record when local law requires it.
 
-> Signed public installers are not published in this repository yet. If you
-> have a release installer, use it and skip to [Install the extension](#install-the-extension).
-> Otherwise use the source-build steps below.
-
 The intended production flow is the Chrome Web Store extension plus a native
 helper installer for the user's OS. Docker is supported for the optional
 history webapp, not for desktop audio capture.
 
+## Install without cloning the repository
+
+Open the [install page](https://apercallc.github.io/ai-notetaker/) first. It
+detects your OS and displays only the channels that exist in the current
+published release. A native helper is required; the extension cannot capture
+audio by itself.
+
+### macOS
+
+```sh
+brew install --cask ai-notetaker
+brew upgrade --cask ai-notetaker
+```
+
+Homebrew Cask installs the same signed DMG used by the release page and runs
+the Native Messaging registration hook. AI Notetaker links to the official
+BlackHole installer; it never bundles BlackHole.
+
+### Windows
+
+```powershell
+winget install AI.Notetaker
+winget upgrade AI.Notetaker
+
+# Chocolatey alternative
+choco install ai-notetaker
+choco upgrade ai-notetaker
+```
+
+The installer registers Chrome/Edge/Brave/Firefox Native Messaging. Base
+VB-CABLE, if required by the release, is launched visibly with VB-Audio
+attribution and may require administrator approval or a reboot.
+
+### Linux
+
+Download the `.deb` matching your architecture from the latest release, then:
+
+```sh
+sudo apt install ./AI-Notetaker_<version>_amd64.deb
+```
+
+Run `sudo apt install` again with the newer `.deb` to update. Use the AppImage
+only when a Debian package is not suitable; it needs an explicit stable-path
+Native Messaging registration and is not the recommended first install.
+
+### Extension
+
+Install the extension from the Chrome Web Store when the listing is published.
+Until then, use the release ZIP as a managed/development fallback and load it
+from `chrome://extensions` with Developer mode. A normal desktop installer
+cannot silently install a Chrome extension.
+
+### npm and npx: contributor/diagnostic tools only
+
+Do not use `npm install` or `npx` to install the desktop helper. Node packages
+cannot safely register Native Messaging, install OS audio prerequisites, or
+handle platform elevation. npm is used below for extension/webapp development;
+the supported end-user helper channels are native installers and package
+managers. A future `npx @ai-notetaker/cli doctor` may inspect an installation,
+but it will not replace the signed helper installer.
+
+### Updating
+
+Use the same channel used to install the helper. Do not mix a package-manager
+install with a direct-download updater:
+
+| Install method | Update command |
+| --- | --- |
+| Homebrew Cask | `brew upgrade --cask ai-notetaker` |
+| WinGet | `winget upgrade AI.Notetaker` |
+| Chocolatey | `choco upgrade ai-notetaker` |
+| Linux `.deb` | `sudo apt install ./AI-Notetaker_<new-version>_amd64.deb` |
+| Release DMG/MSI/NSIS | Download and run the newer installer |
+| Docker image | `docker compose -f webapp/docker-compose.registry.yml pull && docker compose -f webapp/docker-compose.registry.yml up -d` |
+
+The Tauri automatic updater remains disabled until the release owner supplies
+and protects the updater key and endpoint. Package-manager upgrades are the
+safe update path today.
+
 ## Build from source
+
+This section is for contributors, private managed deployments, and release
+owners. End users should use the package-manager path above whenever a release
+is published.
 
 ### 1. Get the repository
 
@@ -276,9 +355,22 @@ The webapp is self-hosted by you. It stores finished notes and action items;
 it does not call Deepgram, Claude, Groq, Gemini, or DeepSeek and never needs
 those keys.
 
-For a local/private Docker deployment instead, run the Compose flow in
-[`webapp/README.md`](../webapp/README.md#deploy-with-docker-compose), then
-paste `http://127.0.0.1:3000` and the same `AUTH_TOKEN` into the extension.
+For a local/private Docker deployment instead, download the two versioned
+configuration files without cloning the repository, then use the prebuilt
+registry image:
+
+```sh
+mkdir -p ai-notetaker-webapp && cd ai-notetaker-webapp
+curl -fsSLo docker-compose.registry.yml https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/docker-compose.registry.yml
+curl -fsSLo .env.docker.example https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/.env.docker.example
+cp .env.docker.example .env
+docker compose -f docker-compose.registry.yml --env-file .env pull
+docker compose -f docker-compose.registry.yml --env-file .env up -d
+```
+
+The image is for the history webapp only. It never captures audio or replaces
+the native helper. If the registry image is not published yet, use the local
+build Compose flow in [`webapp/README.md`](../webapp/README.md#deploy-with-docker-compose).
 
 ## Optional: connect your calendar
 

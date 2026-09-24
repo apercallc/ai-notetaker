@@ -67,6 +67,12 @@ only.
 - [x] Add Homebrew Cask plus WinGet/Chocolatey templates and release-build
       rendering around pinned native artifacts; publishing packages remains
       release-owner work. npm stays limited to source builds.
+- [x] Make package-manager installs and channel-specific upgrade commands the
+      primary user documentation; keep source builds in the contributor path
+      and document that npm/npx cannot replace the native helper installer.
+- [x] Release workflow now uploads versioned native artifacts, a generated
+      checksum manifest, and the optional webapp image to GitHub Releases and
+      GHCR. External Homebrew/WinGet/Chocolatey publication remains owner work.
 - [x] Add `webapp/Dockerfile` and Docker Compose for the optional webapp and
       Postgres, with persistent storage, migrations, health checks, and
       authenticated token setup.
@@ -255,9 +261,17 @@ accessibility failures):*
       payload is intentionally not committed and Windows execution/reboot
       behavior remains release-owner validation. See
       `packaging/windows/` and `helper/crates/audio/src/windows.rs`.
-- [x] Linux: PulseAudio/PipeWire null-sink integration — `cpal` + `pactl`,
-      compiles and unit-tests pass (not hardware-verified — no audio
-      device in this sandbox)
+- [x] Linux: PulseAudio/PipeWire null-sink integration — cpal keeps the
+      default microphone capture, while `parec -d notetaker_sink.monitor
+      --raw --format=s16le --rate=48000 --channels=2` captures the speaker
+      monitor and `pactl list short sources` probes the exact virtual source
+      names. The fake-`parec` contract test, full Rust tests, release build,
+      and live PipeWire run are green. The live run completed the Native
+      Messaging relay handshake, reported `ready: true`, passed the audio
+      probe with mic and speaker frames while test audio played, and wrote
+      non-empty `mic.pcm` and `speaker.pcm` files for a 30-second recording
+      before any real provider key was used. The probe's active sources
+      reported `RUNNING` during capture.
 - [x] Dual-channel capture kept as separate streams — tested
       (`storage::tests::mic_and_speaker_channels_stay_in_separate_files`)
 - [x] Raw audio always written to local disk before any API call — tested,

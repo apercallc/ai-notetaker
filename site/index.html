@@ -45,23 +45,25 @@
     <section class="card" aria-labelledby="extension">
       <h2 id="extension">2. Install the Chrome extension</h2>
       <p class="muted">The extension is installed separately because Chrome does not allow a normal desktop installer to silently install browser extensions.</p>
-      <p><a href="https://github.com/apercallc/ai-notetaker/releases/latest">Open the extension release fallback</a> <span class="muted">(the Chrome Web Store link will appear when the listing is published)</span></p>
+      <p id="extension-links">Checking the current release…</p>
     </section>
 
     <section class="card" aria-labelledby="docker">
       <h2 id="docker">Optional: self-host history with Docker</h2>
       <p>Use Docker Compose for the authenticated webapp and Postgres. It never receives your provider keys and cannot replace the desktop helper.</p>
-      <code>cp webapp/.env.docker.example webapp/.env
-docker compose -f webapp/docker-compose.yml --env-file webapp/.env up -d --build</code>
-      <p><a href="https://github.com/apercallc/ai-notetaker/blob/main/webapp/README.md#deploy-with-docker-compose">Read the Docker deployment guide</a></p>
+      <div id="docker-install">Checking the current release…</div>
+      <p><a href="https://github.com/apercallc/ai-notetaker/blob/main/webapp/README.md#deploy-with-the-prebuilt-container-image">Read the Docker deployment guide</a></p>
     </section>
 
     <p class="muted warning">Audio drivers are OS-level components. macOS users install BlackHole from Existential Audio; Windows uses base VB-CABLE; Linux uses the helper's PulseAudio/PipeWire modules. The helper will confirm when audio is actually ready.</p>
   </main>
   <script>
     const releases = 'https://github.com/apercallc/ai-notetaker/releases/latest';
+    const manifestUrl = 'https://github.com/apercallc/ai-notetaker/releases/latest/download/manifest.json';
     const platform = document.querySelector('#platform');
     const instructions = document.querySelector('#instructions');
+    const extensionLinks = document.querySelector('#extension-links');
+    const dockerInstall = document.querySelector('#docker-install');
     const detected = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
     const hinted = new URLSearchParams(location.search).get('platform');
     platform.value = ['macos', 'windows', 'linux', 'unknown'].includes(hinted) ? hinted : detected.includes('mac') ? 'macos' : detected.includes('win') ? 'windows' : detected.includes('linux') ? 'linux' : 'unknown';
@@ -71,12 +73,46 @@ docker compose -f webapp/docker-compose.yml --env-file webapp/.env up -d --build
       linux: ['Linux', 'Install the signed Debian package; use AppImage when your distribution does not use apt.', 'sudo apt install ./AI-Notetaker.deb', 'The helper creates its PulseAudio/PipeWire null sink when pactl is available.'],
       unknown: ['your OS', 'Use the latest release page and choose the native artifact for your system.', '', 'The supported desktop targets are macOS, Windows, and Linux.']
     };
+    let releaseManifest = null;
     function render() {
       const [name, description, command, driver] = content[platform.value];
-      instructions.innerHTML = `<article class="platform selected"><h3>${name}</h3><p>${description}</p>${command ? `<code>${command}</code>` : ''}<p class="muted">${driver}</p><a href="${releases}">View release artifacts</a></article>`;
+      const published = releaseManifest?.status === 'published';
+      const installCommand = published ? command : '';
+      const releaseMessage = published
+        ? `<a href="${releases}">View release artifacts</a>`
+        : '<p class="warning">No public signed release is available yet. The commands below become active after the release owner publishes the native artifacts and extension listing.</p>';
+      instructions.innerHTML = `<article class="platform selected"><h3>${name}</h3><p>${description}</p>${installCommand ? `<code>${installCommand}</code>` : ''}<p class="muted">${driver}</p>${releaseMessage}</article>`;
     }
     platform.addEventListener('change', render);
     render();
+
+    fetch(`${manifestUrl}?t=${Date.now()}`, { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((manifest) => {
+        releaseManifest = manifest;
+        if (manifest?.status === 'published' && manifest.extension?.chromeWebStoreUrl) {
+          extensionLinks.innerHTML = `<a href="${manifest.extension.chromeWebStoreUrl}">Install from the Chrome Web Store</a>`;
+        } else if (manifest?.extension?.fallbackZipUrl) {
+          extensionLinks.innerHTML = `<a href="${manifest.extension.fallbackZipUrl}">Download the extension fallback ZIP</a> <span class="muted">(load it from chrome://extensions with Developer mode)</span>`;
+        } else {
+          extensionLinks.textContent = 'The extension listing and release fallback will appear here when published.';
+        }
+        if (manifest?.version) {
+          dockerInstall.innerHTML = `<code>mkdir ai-notetaker-webapp &amp;&amp; cd ai-notetaker-webapp
+curl -fsSLo docker-compose.registry.yml https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/docker-compose.registry.yml
+curl -fsSLo .env.docker.example https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/.env.docker.example
+cp .env.docker.example .env
+docker compose -f docker-compose.registry.yml --env-file .env pull
+docker compose -f docker-compose.registry.yml --env-file .env up -d</code><p>Release tags publish <code>ghcr.io/apercallc/ai-notetaker-webapp:${manifest.version}</code> and <code>:latest</code>. Set <code>AI_NOTETAKER_WEBAPP_IMAGE</code> for a Docker Hub mirror.</p>`;
+        } else {
+          dockerInstall.innerHTML = '<p class="warning">The prebuilt webapp image will appear after the first release. Until then, use the local Compose build in the repository.</p>';
+        }
+        render();
+      })
+      .catch(() => {
+        extensionLinks.textContent = 'Release metadata is temporarily unavailable; use the repository release page.';
+        dockerInstall.textContent = 'Release metadata is temporarily unavailable; use the local Compose build from the repository.';
+      });
   </script>
 </body>
 </html>
