@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 notetaker-core = { path = "../core" }
-cpal = "0.15"
+cpal = "0.18"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
