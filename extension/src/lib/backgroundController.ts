@@ -19,6 +19,7 @@ import { exportMeetingToDrive } from "./drive";
 import { browserMeetChunkStats, clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
 import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedGoogleCalendarEvent, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
+import { reportManagedError } from "./errorReport";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment } from "../types";
 
 export interface NativeClientLike {
@@ -350,6 +351,14 @@ export class BackgroundController {
    * no recording behind it.
    */
   async abortStart(meetingId: string, message: string): Promise<void> {
+    // A Meet start that reached meeting creation but never captured audio.
+    // Worth reporting in hosted mode: repeated failures here are the top of
+    // the "extension did nothing when I clicked start" funnel.
+    reportManagedError(
+      this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null,
+      new Error(message),
+      { surface: "meet_capture", meetingId, key: `meet-start-abort:${message}` },
+    );
     try {
       if (this.helperStatus === "connected") this.client.discardRecording(meetingId);
     } catch {
@@ -405,6 +414,11 @@ export class BackgroundController {
       // Keep the durable meeting record visible, but make the uncertain
       // finalization explicit instead of leaving the popup in a fake live
       // recording state or surfacing an unhandled promise rejection.
+      reportManagedError(
+        this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null,
+        new Error("stop command could not reach the desktop helper"),
+        { surface: "background", meetingId, key: `stop-unreachable:${meetingId}` },
+      );
       await updateMeeting(meetingId, (current) => ({
         ...current,
         status: "error",
@@ -507,6 +521,14 @@ export class BackgroundController {
       await this.clearCompletedMeetChunks(meetingId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Meet processing failed";
+      // Hosted-mode critical failure: the user's recording produced no notes.
+      // Report for diagnosis (no-op in local BYOK mode), then persist the
+      // recoverable state exactly as before.
+      reportManagedError(
+        this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null,
+        error,
+        { surface: meeting.processingMode?.kind === "managed" ? "managed_job" : "meet_capture", meetingId },
+      );
       await updateMeeting(meetingId, (current) => ({
         ...current,
         status: "error",

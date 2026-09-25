@@ -169,6 +169,18 @@ reintroducing its old assumptions.
 
 ## Quality, error handling, and open-source operations (2026-09-21)
 
+- [x] Sentry error handling (2026-09-25): webapp server (`instrumentation-server.ts`
+      + `lib/observability.ts` capture on API 500s, Stripe webhook, managed job
+      runs), client (`instrumentation-client.ts` + error boundaries, CSP
+      connect-src extended only when a DSN is configured), and the managed
+      worker script — all strictly DSN-gated so self-hosted builds have zero
+      telemetry. Extension Hosted-AI mode reports bounded, deduplicated error
+      records to a new authenticated, rate-limited
+      `/api/v1/client-errors` endpoint; local BYOK never reports. Releases tag
+      from `RAILWAY_GIT_COMMIT_SHA`. The helper intentionally stays
+      local-logs-only (privacy boundary, documented in `docs/data-handling.md`).
+      Live Sentry DSN configuration on the managed deployment remains
+      release-owner work.
 - [x] Add reproducible coverage commands and CI artifacts for every surface;
       the current deterministic gates report 96.20% extension lines and
       93.63% webapp lines, with 152 Rust tests, 382 extension tests, and 151

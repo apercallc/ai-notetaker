@@ -16,6 +16,7 @@ the user's selected hosted workspace for processing and billing.
 | Transcript and summary | Helper/extension local storage, optionally the user's own webapp/Postgres, managed workspace, or Google Drive Doc | Notes leave the device only through the selected local provider, managed workspace, optional webapp sync, or Drive export |
 | Retry queues | Meet: extension IndexedDB until processing succeeds; desktop calls: helper app-data directory | Never sent; they reference local audio ranges or resumable upload state |
 | Helper status/control | Native Messaging plus a local Unix socket/named pipe | Never to a project-operated server |
+| Error reports | Managed webapp server and worker: Sentry, only when the operator sets `SENTRY_DSN`; extension: a bounded error record (message, surface, optional stack/meeting id) posted to the hosted service's authenticated `/api/v1/client-errors` endpoint, only while signed in to Hosted AI | Local BYOK mode never sends error reports anywhere |
 
 For Google Meet, local BYOK provider requests go directly from the extension
 after the audio is in IndexedDB; desktop-call local BYOK requests go from the

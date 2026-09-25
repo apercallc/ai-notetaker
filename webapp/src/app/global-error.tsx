@@ -4,6 +4,8 @@
 // <html>/<body>) when the layout itself throws, so it doesn't inherit
 // layout.tsx's globals.css import — without this it would render in
 // unstyled default browser chrome at the worst possible moment.
+import * as Sentry from "@sentry/nextjs";
+import { useEffect } from "react";
 import "./globals.css";
 
 export default function GlobalError({
@@ -13,6 +15,15 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      try {
+        Sentry.captureException(error, { tags: { boundary: "global-error" } });
+      } catch {
+        // reporting must never worsen the error state
+      }
+    }
+  }, [error]);
   return (
     <html lang="en">
       <body>

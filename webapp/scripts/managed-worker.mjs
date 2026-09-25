@@ -4,6 +4,43 @@ const DEFAULT_POLL_MS = 5_000;
 const DEFAULT_ERROR_BACKOFF_MS = 10_000;
 const MAX_BACKOFF_MS = 60_000;
 
+// Sentry (DSN-gated): the worker is the process that turns uploaded audio
+// into notes, so its crashes and provider failures are the highest-signal
+// errors the service can capture. No DSN → no init, no outbound call.
+let sentry = null;
+if (process.env.SENTRY_DSN?.trim()) {
+  try {
+    const Sentry = await import("@sentry/nextjs");
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN.trim(),
+      environment: process.env.SENTRY_ENVIRONMENT?.trim() || "managed-worker",
+      ...(process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ? { release: process.env.RAILWAY_GIT_COMMIT_SHA.trim() } : {}),
+    });
+    sentry = Sentry;
+  } catch {
+    // The worker must keep running even if error reporting cannot load.
+  }
+}
+
+function reportWorkerError(error, context = {}) {
+  if (!sentry) return;
+  try {
+    sentry.captureException(error, { extra: context });
+  } catch {
+    // never on the failure path
+  }
+}
+
+export async function reportAndFlush(error, context = {}) {
+  reportWorkerError(error, context);
+  if (!sentry) return;
+  try {
+    await sentry.flush(2_000);
+  } catch {
+    // best effort
+  }
+}
+
 export class ManagedWorkerRequestError extends Error {
   constructor(message, status) {
     super(message);
@@ -84,6 +121,7 @@ export async function runManagedWorker({ config = workerConfig(), fetchImpl = fe
       } catch (error) {
         if (error instanceof ManagedWorkerRequestError && error.status === 401) throw error;
         log.error?.("managed worker poll failed; retrying", error instanceof Error ? error.message : String(error));
+        reportWorkerError(error, { phase: "poll" });
         delay = nextErrorDelay(delay, config.errorBackoffMs);
       }
       if (!stopping) await sleep(delay);
@@ -99,6 +137,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     await runManagedWorker();
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
+    await reportAndFlush(error, { phase: "fatal" });
     process.exitCode = 1;
   }
 }

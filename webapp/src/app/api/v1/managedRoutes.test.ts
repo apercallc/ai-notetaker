@@ -16,6 +16,8 @@ import { POST as portal } from "./billing/portal/route";
 import { POST as billingWebhook } from "./billing/webhook/route";
 import { GET as currentGoogleCalendar } from "./google/calendar/current/route";
 import { POST as exportGoogleDrive } from "./google/drive/export/route";
+import { POST as reportClientError } from "./client-errors/route";
+import { clientErrorLimiter } from "@/lib/clientErrors";
 import { prisma } from "@/lib/db";
 import { MAX_CHUNK_BYTES } from "@/lib/managedJobs";
 import { hashPassword } from "@/lib/passwords";
@@ -450,6 +452,42 @@ describe("managed upload routes", () => {
       body: payload,
     }));
     expect(invalid.status).toBe(400);
+  });
+
+  it("accepts a bounded extension error report and rejects unauthenticated or malformed ones", async () => {
+    clientErrorLimiter.clear();
+    const sessionId = await createPrincipal(USER_ID, "error-reporter@example.com", WORKSPACE_ID);
+    const good = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ message: "meet upload failed mid-chunk", surface: "managed_upload", meetingId: "meet-1", extensionVersion: "0.1.0" }),
+    }));
+    expect(good.status).toBe(200);
+    await expect(good.json()).resolves.toEqual(expect.objectContaining({ received: true }));
+
+    const badSurface = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ message: "boom", surface: "made-up-surface" }),
+    }));
+    expect(badSurface.status).toBe(400);
+
+    const unauthenticated = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "boom", surface: "popup" }),
+    }));
+    expect(unauthenticated.status).toBe(401);
+
+    clientErrorLimiter.clear();
+    for (let i = 0; i < 20; i += 1) clientErrorLimiter.hit(USER_ID);
+    const flooded = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ message: "loop", surface: "background" }),
+    }));
+    expect(flooded.status).toBe(429);
+    expect(flooded.headers.get("retry-after")).toBeTruthy();
   });
 });
 
