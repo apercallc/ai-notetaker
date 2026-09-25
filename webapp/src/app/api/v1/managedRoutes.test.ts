@@ -14,6 +14,8 @@ import { POST as pollNextJob } from "./jobs/next/route";
 import { POST as checkout } from "./billing/checkout/route";
 import { POST as portal } from "./billing/portal/route";
 import { POST as billingWebhook } from "./billing/webhook/route";
+import { GET as currentGoogleCalendar } from "./google/calendar/current/route";
+import { POST as exportGoogleDrive } from "./google/drive/export/route";
 import { prisma } from "@/lib/db";
 import { MAX_CHUNK_BYTES } from "@/lib/managedJobs";
 import { hashPassword } from "@/lib/passwords";
@@ -27,6 +29,9 @@ const originalStorageDir = process.env.OBJECT_STORAGE_DIR;
 const originalWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const originalHostedProPrice = process.env.STRIPE_PRICE_HOSTED_PRO;
 const originalManagedHosting = process.env.MANAGED_HOSTING;
+const originalGoogleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+const originalGoogleClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+const originalGoogleEncryptionKey = process.env.GOOGLE_OAUTH_ENCRYPTION_KEY;
 
 function auth(sessionId: string): HeadersInit {
   return { authorization: `Bearer ${sessionId}`, "content-type": "application/json" };
@@ -50,6 +55,9 @@ beforeEach(async () => {
   storageDir = await mkdtemp(path.join(os.tmpdir(), "ai-notetaker-managed-route-"));
   process.env.OBJECT_STORAGE_DIR = storageDir;
   process.env.MANAGED_WORKER_TOKEN = "route-worker-token";
+  delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+  delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  delete process.env.GOOGLE_OAUTH_ENCRYPTION_KEY;
   await prisma.workspace.createMany({
     data: [
       { id: WORKSPACE_ID, name: "Route test workspace" },
@@ -71,6 +79,12 @@ afterEach(async () => {
   else process.env.STRIPE_PRICE_HOSTED_PRO = originalHostedProPrice;
   if (originalManagedHosting === undefined) delete process.env.MANAGED_HOSTING;
   else process.env.MANAGED_HOSTING = originalManagedHosting;
+  if (originalGoogleClientId === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+  else process.env.GOOGLE_OAUTH_CLIENT_ID = originalGoogleClientId;
+  if (originalGoogleClientSecret === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  else process.env.GOOGLE_OAUTH_CLIENT_SECRET = originalGoogleClientSecret;
+  if (originalGoogleEncryptionKey === undefined) delete process.env.GOOGLE_OAUTH_ENCRYPTION_KEY;
+  else process.env.GOOGLE_OAUTH_ENCRYPTION_KEY = originalGoogleEncryptionKey;
 });
 
 describe("managed upload routes", () => {
@@ -131,6 +145,21 @@ describe("managed upload routes", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("x-request-id")).toBe("managed-auth-test");
     expect(await response.json()).toEqual({ error: "managed session required", requestId: "managed-auth-test" });
+  });
+
+  it("returns a safe 503 when Google integration configuration is absent", async () => {
+    const sessionId = await createPrincipal(USER_ID, "google-route@example.com", WORKSPACE_ID);
+    const calendar = await currentGoogleCalendar(new Request("http://localhost/api/v1/google/calendar/current", { headers: auth(sessionId) }));
+    expect(calendar.status).toBe(503);
+    expect(await calendar.json()).toMatchObject({ error: "Google integration is not configured. Ask an administrator to configure it." });
+
+    const drive = await exportGoogleDrive(new Request("http://localhost/api/v1/google/drive/export", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ meetingId: randomUUID() }),
+    }));
+    expect(drive.status).toBe(503);
+    expect(await drive.json()).toMatchObject({ error: "Google integration is not configured. Ask an administrator to configure it." });
   });
 
   it("protects the worker poll and returns an empty 204 when the queue is idle", async () => {

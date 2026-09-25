@@ -93,6 +93,25 @@ model User {
   sessions    Session[]
   apiTokens   ApiToken[]
   authTokens  AuthToken[]
+  googleOAuthConnection GoogleOAuthConnection?
+}
+
+// Project-owned Google OAuth is person-scoped, not workspace-scoped. Tokens
+// are AES-256-GCM ciphertexts; plaintext credentials never enter Prisma.
+model GoogleOAuthConnection {
+  id                     String   @id @default(uuid())
+  userId                 String   @unique
+  accountEmail           String?
+  accessTokenCiphertext  String   @db.Text
+  refreshTokenCiphertext String   @db.Text
+  expiresAt              DateTime
+  scopes                 String   @db.Text
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }
 
 model Workspace {

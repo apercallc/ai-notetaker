@@ -119,11 +119,12 @@ decided yet.
       Today onboarding treats both modes as equals and Hosted needs a
       user-entered service URL. Requires the trial/quota policy from the design
       spec (section 6) to be affordable first.
-- [ ] (b) Create a project-owned Google OAuth client for Calendar and Drive
-      through `chrome.identity`, replacing the current requirement that every
-      user create their own Google Cloud OAuth client. Needs Google consent
-      screen verification for the sensitive scopes; keep the user-owned client
-      path as an advanced option.
+- [x] Implement a project-owned **server** Google OAuth client for Calendar and
+      Drive: per-user encrypted-at-rest connections, CSRF state + PKCE callback,
+      authenticated extension endpoints, and account connect/disconnect controls.
+      Google consent-screen verification plus a live credential/configuration
+      test remain release-owner work; legacy extension BYOK setup remains a
+      separate compatibility path until it is explicitly removed.
 - [ ] (c) Move `nativeMessaging`, `identity`, `alarms`, and the five AI provider
       host permissions (Deepgram, Anthropic, Groq, Gemini, DeepSeek) to
       optional permissions requested when the feature is first used, so the

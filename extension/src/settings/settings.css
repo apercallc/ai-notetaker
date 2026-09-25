@@ -92,6 +92,35 @@ kbd {
   text-align: center;
 }
 
+.account-form {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 28rem;
+}
+
+.account-form .field {
+  margin-bottom: var(--space-2);
+}
+
+.connection-card {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg-elevated);
+}
+
+.connection-card p:first-child {
+  margin-top: 0;
+}
+
+.connection-card p:last-of-type {
+  margin-bottom: var(--space-3);
+}
+
+.muted-card {
+  background: transparent;
+}
+
 .account-actions {
   display: flex;
   flex-wrap: wrap;

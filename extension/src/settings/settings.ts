@@ -3,11 +3,9 @@ import { testWebappHealth } from "../lib/providerTest";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { escapeHtml } from "../lib/html";
 import { estimateMeetingCost } from "../lib/costEstimate";
-import { connectCalendar } from "../lib/calendar";
-import { connectGoogleDrive } from "../lib/drive";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
-import { loginManaged, managedBillingUrl, managedSignupUrl } from "../lib/managedClient";
+import { loginManaged, MANAGED_SERVICE_ORIGIN, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl } from "../lib/managedClient";
 import {
   MODE_LABEL_HOSTED,
   MODE_LABEL_OWN_KEYS,
@@ -30,41 +28,25 @@ let managedSetupVisible = isHostedActive(settings);
  * into the new markup. Passwords are deliberately not kept.
  */
 interface Drafts {
-  managedUrl: string;
   managedEmail: string;
   webappUrl: string;
   webappToken: string;
-  calendarClientId: string;
-  calendarClientSecret: string;
-  driveClientId: string;
-  driveClientSecret: string;
   meetingMinutes: string;
 }
 let drafts: Drafts = emptyDrafts();
 
 function emptyDrafts(): Drafts {
   return {
-    managedUrl: "",
     managedEmail: "",
     webappUrl: "",
     webappToken: "",
-    calendarClientId: "",
-    calendarClientSecret: "",
-    driveClientId: "",
-    driveClientSecret: "",
     meetingMinutes: "45",
   };
 }
 
 // Disclosure state survives re-renders so toggling a provider never collapses what the user was editing.
 let integrationsOpen = false;
-let calendarAdvancedOpen = false;
-let driveAdvancedOpen = false;
 let signedOutNotice = "";
-
-// Only held while the user is filling in a new connection — cleared once
-// `settings.calendar` is set (or the user picks "None").
-let pendingCalendarProvider: "none" | "google" | "outlook" = "none";
 
 function isBudgetTier(s: NotetakerSettings): boolean {
   return s.transcriptionProvider === "groq";
@@ -85,14 +67,9 @@ function inputValue(id: string): string | undefined {
 function captureDrafts(): void {
   const pick = (id: string, current: string): string => inputValue(id) ?? current;
   drafts = {
-    managedUrl: pick("managed-url", drafts.managedUrl),
     managedEmail: pick("managed-email", drafts.managedEmail),
     webappUrl: pick("webapp-url", drafts.webappUrl),
     webappToken: pick("webapp-token", drafts.webappToken),
-    calendarClientId: pick("calendar-client-id", drafts.calendarClientId),
-    calendarClientSecret: pick("calendar-client-secret", drafts.calendarClientSecret),
-    driveClientId: pick("drive-client-id", drafts.driveClientId),
-    driveClientSecret: pick("drive-client-secret", drafts.driveClientSecret),
     meetingMinutes: pick("meeting-minutes", drafts.meetingMinutes),
   };
 }
@@ -185,26 +162,17 @@ function render(options: RenderOptions = {}): void {
     </fieldset>
 
     <details class="integrations" id="integrations" ${integrationsOpen ? "open" : ""}>
-      <summary>Integrations (optional)</summary>
-      <p class="text-secondary field-hint">Calendar, Google Drive${managedSetupVisible ? "" : " and your own history webapp"}. Meetings are always saved on this device first, so none of these are required.</p>
-
-      <section class="integration" aria-labelledby="calendar-heading">
-        <h2 id="calendar-heading">Calendar</h2>
-        <p class="text-secondary field-hint">
-          Fill in a meeting's title and attendees from your calendar when you start recording.
-          Uses your own Google or Microsoft app, so nothing here goes through a project-run server.
-        </p>
-        ${renderCalendarFields()}
-      </section>
+      <summary>Connections &amp; history (optional)</summary>
+      <p class="text-secondary field-hint">Use the hosted account or connect your own history webapp. Meetings are always saved on this device first.</p>
 
       ${managedSetupVisible ? "" : `
       <section class="integration" aria-labelledby="webapp-heading">
-        <h2 id="webapp-heading">Self-hosted history webapp</h2>
+        <h2 id="webapp-heading">Your self-hosted history</h2>
         <p class="text-secondary field-hint">
-          Deploy your own instance for cross-device history. Enter both the URL and the access token.
+          Optional cross-device history that you deploy and control. Enter its URL and access token together.
         </p>
         <div class="field">
-          <label for="webapp-url">Webapp URL</label>
+          <label for="webapp-url">Web app URL</label>
           <input type="url" id="webapp-url" placeholder="https://your-app.up.railway.app" value="${escapeHtml(drafts.webappUrl)}" aria-describedby="webapp-url-error" />
           <p class="test-result invalid" id="webapp-url-error" role="alert"></p>
         </div>
@@ -219,14 +187,7 @@ function render(options: RenderOptions = {}): void {
         </div>
       </section>`}
 
-      <section class="integration" aria-labelledby="drive-heading">
-        <h2 id="drive-heading">Google Drive notes</h2>
-        <p class="text-secondary field-hint">
-          After a summary is ready, create a Google Doc in <code>My Drive/ai-notetaker</code>.
-          Drive errors never delete or block your local meeting.
-        </p>
-        ${renderDriveFields()}
-      </section>
+      ${renderGoogleServices()}
     </details>
 
     <div class="save-bar">
@@ -293,22 +254,24 @@ function renderHostedSection(): string {
       </div>
       <div class="account-actions">
         ${billingLink ? `<a class="button-link" href="${escapeHtml(billingLink)}" target="_blank" rel="noreferrer">Manage billing</a>` : ""}
-        <button type="button" class="secondary" id="managed-sign-out">Sign out of Hosted</button>
+        <a class="button-link" href="${escapeHtml(managedIntegrationsUrl(service.baseUrl))}" target="_blank" rel="noreferrer">Google connections</a>
+        <button type="button" class="secondary" id="managed-sign-out">Sign out</button>
       </div>
       <p class="test-result" id="managed-sign-in-result" role="status" aria-live="polite"></p>
     `;
   }
   return `
     <p class="text-secondary field-hint">
-      Paid. We transcribe and summarize for you, so you do not need provider keys. Sign in to your hosted workspace to turn it on.
+      Paid. We transcribe and summarize for you, so you do not need provider keys. Your account, billing, Calendar, and Drive connections live at <strong>ai-notetaker.apercallc.com</strong>.
       ${signedOutNotice ? `<br /><strong>${escapeHtml(signedOutNotice)}</strong>` : "Until then, your own API keys are used."}
     </p>
-    <div class="field"><label for="managed-url">Hosted service URL</label><input type="url" id="managed-url" placeholder="https://notes.example.com" value="${escapeHtml(drafts.managedUrl)}" /></div>
-    <div class="field"><label for="managed-email">Account email</label><input type="email" id="managed-email" autocomplete="username" value="${escapeHtml(drafts.managedEmail)}" /></div>
-    <div class="field"><label for="managed-password">Account password</label><input type="password" id="managed-password" autocomplete="current-password" /></div>
+    <div class="account-form">
+      <div class="field"><label for="managed-email">Account email</label><input type="email" id="managed-email" autocomplete="username" value="${escapeHtml(drafts.managedEmail)}" /></div>
+      <div class="field"><label for="managed-password">Account password</label><input type="password" id="managed-password" autocomplete="current-password" /></div>
+    </div>
     <div class="account-actions">
-      <button type="button" class="primary" id="managed-sign-in">Sign in</button>
-      <button type="button" class="secondary" id="managed-signup" disabled>Create an account</button>
+      <button type="button" class="primary" id="managed-sign-in">Sign in to Hosted</button>
+      <button type="button" class="secondary" id="managed-signup">Create an account</button>
     </div>
     <p class="test-result" id="managed-sign-in-result" role="status" aria-live="polite"></p>
   `;
@@ -347,115 +310,38 @@ function renderBudgetTierFields(): string {
   `;
 }
 
-function advancedDetails(id: string, open: boolean, body: string): string {
-  return `<details class="advanced" id="${id}" ${open ? "open" : ""}><summary>Advanced: your OAuth client</summary>${body}</details>`;
-}
-
-function renderCalendarFields(): string {
-  if (settings.calendar) {
-    const label = settings.calendar.provider === "google" ? "Google Calendar" : "Outlook Calendar";
-    return `
-      <div class="field">
-        <p>Connected to ${label}.</p>
-        <button type="button" class="secondary" id="disconnect-calendar">Disconnect</button>
-      </div>
-      ${
-        settings.calendar.provider === "google"
-          ? `<div class="field checkbox-field">
-        <label for="calendar-reminders">
-          <input type="checkbox" id="calendar-reminders" ${settings.calendarReminders ? "checked" : ""} />
-          Remind me when a call with a Google Meet link is about to start
-        </label>
-        <p class="field-hint text-secondary">A desktop notification around the start of the call. Choose Open call, then start notes from the Notetaker pill. Uses your calendar connection only; nothing leaves this device.</p>
-      </div>`
-          : ""
-      }
-    `;
-  }
-
-  const provider = pendingCalendarProvider;
-  return `
-    <div class="field">
-      <label for="calendar-provider">Calendar</label>
-      <select id="calendar-provider">
-        <option value="none" ${provider === "none" ? "selected" : ""}>None</option>
-        <option value="google" ${provider === "google" ? "selected" : ""}>Google Calendar</option>
-        <option value="outlook" ${provider === "outlook" ? "selected" : ""}>Outlook Calendar</option>
-      </select>
-    </div>
-    ${
-      provider === "none"
-        ? ""
-        : `
-      ${advancedDetails(
-        "calendar-advanced",
-        calendarAdvancedOpen,
-        `
-        <p class="field-hint text-secondary">
-          Create the app once in
-          ${
-            provider === "google"
-              ? `<a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a> (enable the Calendar API, create an OAuth client, choose "Chrome extension" as the application type)`
-              : `<a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noreferrer">Azure Portal → App registrations</a> (add the Calendars.Read Microsoft Graph permission)`
-          }.
-        </p>
-        <div class="field">
-          <label for="calendar-client-id">Client ID</label>
-          <input type="text" id="calendar-client-id" autocomplete="off" value="${escapeHtml(drafts.calendarClientId)}" />
-        </div>
-        ${
-          provider === "google"
-            ? `<div class="field">
-          <label for="calendar-client-secret">Client secret</label>
-          <input type="password" id="calendar-client-secret" autocomplete="off" value="${escapeHtml(drafts.calendarClientSecret)}" />
-        </div>`
-            : ""
-        }
-        <p class="field-hint text-secondary">Redirect URI to register: <code>${escapeHtml(chrome.identity.getRedirectURL())}</code></p>
-      `,
-      )}
-      <div class="field">
-        <button type="button" class="secondary" id="connect-calendar">Connect</button>
-        <p class="test-result" id="calendar-test-result" role="status" aria-live="polite"></p>
-      </div>
-    `
+function renderGoogleServices(): string {
+  const baseUrl = managedSetupVisible
+    ? settings.managedService?.baseUrl ?? MANAGED_SERVICE_ORIGIN
+    : settings.webapp?.url;
+  const accountLink = baseUrl ? (() => {
+    try {
+      return managedIntegrationsUrl(baseUrl);
+    } catch {
+      return "";
     }
-  `;
-}
+  })() : "";
+  const legacyConnection = settings.calendar || settings.drive;
 
-function renderDriveFields(): string {
-  if (settings.drive) {
-    return `
-      <div class="field">
-        <p>Google Drive is connected. Notes will be created in <code>My Drive/ai-notetaker</code>.</p>
-        <button type="button" class="secondary" id="disconnect-drive">Disconnect Google Drive</button>
-      </div>
-    `;
-  }
   return `
-    ${advancedDetails(
-      "drive-advanced",
-      driveAdvancedOpen,
-      `
-      <p class="field-hint text-secondary">
-        Create your own OAuth client in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console → Credentials</a>, enable the Google Drive API, and choose “Chrome extension”.
-        This extension requests only the <code>drive.file</code> permission for files it creates.
+    <section class="integration" aria-labelledby="google-services-heading">
+      <h2 id="google-services-heading">Google Calendar &amp; Drive</h2>
+      <p class="text-secondary field-hint">
+        Connect once in your account. The service keeps its Google OAuth credentials and your authorization server-side;
+        this extension never asks for a client ID or client secret.
       </p>
-      <div class="field">
-        <label for="drive-client-id">Google OAuth Client ID</label>
-        <input type="text" id="drive-client-id" autocomplete="off" value="${escapeHtml(drafts.driveClientId)}" />
-      </div>
-      <div class="field">
-        <label for="drive-client-secret">Client secret (if your OAuth client has one)</label>
-        <input type="password" id="drive-client-secret" autocomplete="off" value="${escapeHtml(drafts.driveClientSecret)}" />
-      </div>
-      <p class="field-hint text-secondary">Redirect URI: <code>${escapeHtml(chrome.identity.getRedirectURL())}</code></p>
-    `,
-    )}
-    <div class="field">
-      <button type="button" class="secondary" id="connect-drive">Connect Google Drive</button>
-      <p class="test-result" id="drive-test-result" role="status" aria-live="polite"></p>
-    </div>
+      ${accountLink
+        ? `<div class="connection-card">
+            <p><strong>Connect calendar and Drive from your account.</strong></p>
+            <p class="text-secondary field-hint">Calendar can name your meeting from the current event. Drive creates a copy of completed notes. You choose both permissions in one Google sign-in.</p>
+            <a class="button-link" href="${escapeHtml(accountLink)}" target="_blank" rel="noreferrer">Manage Google connections</a>
+          </div>`
+        : `<div class="connection-card muted-card">
+            <p><strong>Connect a history web app first.</strong></p>
+            <p class="text-secondary field-hint">Hosted users sign in above. With your own API keys, connect your self-hosted history webapp to manage Google Calendar and Drive there.</p>
+          </div>`}
+      ${legacyConnection ? `<p class="field-hint text-secondary">A previous device-only Google connection remains available for existing notes. Reconnect it in your account to move future access to the server.</p>` : ""}
+    </section>
   `;
 }
 
@@ -505,13 +391,9 @@ function wireEvents(): void {
   minutesInput?.addEventListener("input", updateCostEstimate);
   if (minutesInput) updateCostEstimate();
 
-  for (const [id, setter] of [
-    ["integrations", (open: boolean) => (integrationsOpen = open)],
-    ["calendar-advanced", (open: boolean) => (calendarAdvancedOpen = open)],
-    ["drive-advanced", (open: boolean) => (driveAdvancedOpen = open)],
-  ] as const) {
-    document.getElementById(id)?.addEventListener("toggle", (event) => setter((event.currentTarget as HTMLDetailsElement).open));
-  }
+  document.getElementById("integrations")?.addEventListener("toggle", (event) => {
+    integrationsOpen = (event.currentTarget as HTMLDetailsElement).open;
+  });
 
   document.getElementById("mode-local")?.addEventListener("click", () => {
     readFormIntoSettings();
@@ -528,9 +410,7 @@ function wireEvents(): void {
   document.getElementById("managed-sign-out")?.addEventListener("click", async () => {
     const resultEl = document.getElementById("managed-sign-in-result");
     readFormIntoSettings();
-    const previousUrl = settings.managedService?.baseUrl ?? "";
     settings = signOutOfHosted(settings);
-    drafts.managedUrl = previousUrl;
     signedOutNotice = "Signed out. Your own API keys are used until you sign in again.";
     try {
       await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
@@ -538,19 +418,18 @@ function wireEvents(): void {
       setResult(resultEl, "Signed out here, but the change could not be saved. Press Save settings to finish.", "invalid");
       return;
     }
-    render({ focus: "managed-url" });
+    render({ focus: "managed-email" });
   });
   document.getElementById("managed-sign-in")?.addEventListener("click", async () => {
     const resultEl = document.getElementById("managed-sign-in-result");
     const button = document.getElementById("managed-sign-in") as HTMLButtonElement;
     readFormIntoSettings();
-    const baseUrl = drafts.managedUrl.trim();
     const email = drafts.managedEmail.trim();
     const password = inputValue("managed-password") ?? "";
     button.disabled = true;
     setResult(resultEl, "Signing in…", "pending");
     try {
-      const result = await loginManaged(baseUrl, email, password);
+      const result = await loginManaged(MANAGED_SERVICE_ORIGIN, email, password);
       settings.managedService = result.config;
       settings = applyModeChoice(settings, true);
       managedSetupVisible = true;
@@ -562,25 +441,8 @@ function wireEvents(): void {
       button.disabled = false;
     }
   });
-  const managedUrlInput = document.getElementById("managed-url") as HTMLInputElement | null;
-  const managedSignupButton = document.getElementById("managed-signup") as HTMLButtonElement | null;
-  const updateManagedSignupState = (): void => {
-    if (!managedSignupButton) return;
-    try {
-      managedSignupUrl(managedUrlInput?.value.trim() ?? "");
-      managedSignupButton.disabled = false;
-    } catch {
-      managedSignupButton.disabled = true;
-    }
-  };
-  managedUrlInput?.addEventListener("input", updateManagedSignupState);
-  updateManagedSignupState();
-  managedSignupButton?.addEventListener("click", () => {
-    try {
-      void chrome.tabs.create({ url: managedSignupUrl(managedUrlInput?.value.trim() ?? "") });
-    } catch (error) {
-      setResult(document.getElementById("managed-sign-in-result"), error instanceof Error ? error.message : "Enter a valid service URL first.", "invalid");
-    }
+  document.getElementById("managed-signup")?.addEventListener("click", () => {
+    void chrome.tabs.create({ url: managedSignupUrl(MANAGED_SERVICE_ORIGIN) });
   });
 
   void readShortcuts().then((shortcuts) => {
@@ -632,84 +494,6 @@ function wireEvents(): void {
       }
     });
   }
-
-  document.getElementById("calendar-provider")?.addEventListener("change", () => {
-    readFormIntoSettings();
-    pendingCalendarProvider = inputValue("calendar-provider") as typeof pendingCalendarProvider;
-    render({ focus: "calendar-provider" });
-  });
-
-  document.getElementById("connect-calendar")?.addEventListener("click", async () => {
-    const connectButton = document.getElementById("connect-calendar") as HTMLButtonElement;
-    const resultEl = document.getElementById("calendar-test-result");
-    captureDrafts();
-    const clientId = drafts.calendarClientId.trim();
-    const clientSecret = drafts.calendarClientSecret.trim();
-    if (!clientId || pendingCalendarProvider === "none") {
-      const advanced = document.getElementById("calendar-advanced") as HTMLDetailsElement | null;
-      if (advanced) advanced.open = true;
-      calendarAdvancedOpen = true;
-      setResult(resultEl, "Enter your OAuth Client ID under Advanced first.", "invalid");
-      document.getElementById("calendar-client-id")?.focus();
-      return;
-    }
-    connectButton.disabled = true;
-    setResult(resultEl, "Opening the sign-in window…", "pending");
-    try {
-      const provider = pendingCalendarProvider as "google" | "outlook";
-      settings.calendar = await connectCalendar(provider, clientId, clientSecret || undefined);
-      drafts.calendarClientId = "";
-      drafts.calendarClientSecret = "";
-      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
-      render({ focus: "disconnect-calendar" });
-    } catch {
-      setResult(resultEl, "Could not connect. Check your Client ID/secret and redirect URI, then try again.", "invalid");
-      connectButton.disabled = false;
-    }
-  });
-
-  document.getElementById("disconnect-calendar")?.addEventListener("click", async () => {
-    readFormIntoSettings();
-    settings.calendar = null;
-    pendingCalendarProvider = "none";
-    await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
-    render({ focus: "calendar-provider" });
-  });
-
-  document.getElementById("connect-drive")?.addEventListener("click", async () => {
-    const button = document.getElementById("connect-drive") as HTMLButtonElement;
-    const resultEl = document.getElementById("drive-test-result");
-    captureDrafts();
-    const clientId = drafts.driveClientId.trim();
-    const clientSecret = drafts.driveClientSecret.trim();
-    if (!clientId) {
-      const advanced = document.getElementById("drive-advanced") as HTMLDetailsElement | null;
-      if (advanced) advanced.open = true;
-      driveAdvancedOpen = true;
-      setResult(resultEl, "Enter your Google OAuth Client ID under Advanced first.", "invalid");
-      document.getElementById("drive-client-id")?.focus();
-      return;
-    }
-    button.disabled = true;
-    setResult(resultEl, "Opening Google sign-in…", "pending");
-    try {
-      settings.drive = await connectGoogleDrive(clientId, clientSecret || undefined);
-      drafts.driveClientId = "";
-      drafts.driveClientSecret = "";
-      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
-      render({ focus: "disconnect-drive" });
-    } catch (error) {
-      setResult(resultEl, error instanceof Error ? error.message : "Could not connect Google Drive. Check the OAuth client and redirect URI.", "invalid");
-      button.disabled = false;
-    }
-  });
-
-  document.getElementById("disconnect-drive")?.addEventListener("click", async () => {
-    readFormIntoSettings();
-    settings.drive = null;
-    await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
-    render({ focus: "connect-drive" });
-  });
 
   for (const id of ["webapp-url", "webapp-token"]) {
     document.getElementById(id)?.addEventListener("input", () => showWebappErrors());
@@ -777,11 +561,9 @@ async function init(): Promise<void> {
   // mutates `settings` as the user types, so it must work on its own copy.
   settings = structuredClone(await getSettings());
   managedSetupVisible = isHostedActive(settings);
-  pendingCalendarProvider = settings.calendar?.provider ?? "none";
   drafts = emptyDrafts();
   drafts.webappUrl = settings.webapp?.url ?? "";
   drafts.webappToken = settings.webapp?.token ?? "";
-  drafts.managedUrl = settings.managedService?.baseUrl ?? "";
   render();
 }
 

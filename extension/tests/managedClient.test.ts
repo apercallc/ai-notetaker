@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getManagedEntitlements, loginManaged, managedBillingUrl, managedSignupUrl, registerManagedMeeting, uploadManagedMeeting } from "../src/lib/managedClient";
+import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedGoogleCalendarEvent, loginManaged, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl, registerManagedMeeting, uploadManagedMeeting } from "../src/lib/managedClient";
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -11,8 +11,9 @@ describe("managedClient", () => {
     expect(() => managedSignupUrl("http://notes.example.com")).toThrow("HTTPS");
   });
 
-  it("builds billing links only for valid hosted service URLs", () => {
+  it("builds billing and account-integration links only for valid hosted service URLs", () => {
     expect(managedBillingUrl("https://notes.example.com/workspace/")).toBe("https://notes.example.com/workspace/billing");
+    expect(managedIntegrationsUrl("https://notes.example.com/workspace/")).toBe("https://notes.example.com/workspace/account#google-services");
     expect(() => managedBillingUrl("javascript:alert(1)")).toThrow("HTTPS");
   });
 
@@ -45,6 +46,21 @@ describe("managedClient", () => {
       canProcess: true,
       inPaymentGrace: false,
     });
+  });
+
+  it("keeps Google event and Drive export calls inside the authenticated hosted service", async () => {
+    const config = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" };
+    const calendarFetch = vi.fn().mockResolvedValue(response({ event: {
+      title: "Weekly sync", attendees: ["Ava"], startsAt: "2026-09-25T15:00:00.000Z", endsAt: "2026-09-25T15:30:00.000Z",
+    } }));
+    await expect(getManagedGoogleCalendarEvent(config, calendarFetch)).resolves.toEqual({
+      title: "Weekly sync", attendees: ["Ava"], startsAt: "2026-09-25T15:00:00.000Z", endsAt: "2026-09-25T15:30:00.000Z",
+    });
+    expect(calendarFetch).toHaveBeenCalledWith("https://notes.example.com/api/v1/google/calendar/current", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer session" }) }));
+
+    const driveFetch = vi.fn().mockResolvedValue(response({ fileId: "doc-1", webViewLink: "https://docs.google.com/document/d/doc-1/edit" }, 201));
+    await expect(exportManagedMeetingToGoogleDrive(config, "meeting-1", driveFetch)).resolves.toEqual({ fileId: "doc-1", webViewLink: "https://docs.google.com/document/d/doc-1/edit" });
+    expect(driveFetch).toHaveBeenCalledWith("https://notes.example.com/api/v1/google/drive/export", expect.objectContaining({ method: "POST", body: JSON.stringify({ meetingId: "meeting-1" }) }));
   });
 
   it("retries transient hosted failures but does not retry authentication failures", async () => {

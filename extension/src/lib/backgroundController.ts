@@ -18,7 +18,7 @@ import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
 import { browserMeetChunkStats, clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
-import { getManagedEntitlements, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
+import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedGoogleCalendarEvent, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment } from "../types";
 
 export interface NativeClientLike {
@@ -263,9 +263,13 @@ export class BackgroundController {
     const meetingId = generateMeetingId();
     let title = titleHint?.trim().slice(0, 200) || `Meeting on ${new Date().toLocaleString()}`;
     let attendees: string[] | undefined;
-    if (this.settings?.calendar) {
+    const managedGoogle = this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null;
+    const localCalendar = this.settings?.calendar;
+    if (managedGoogle || localCalendar) {
       try {
-        const event = await findCurrentEvent(this.settings.calendar);
+        const event = managedGoogle
+          ? await getManagedGoogleCalendarEvent(managedGoogle, this.fetchImpl)
+          : await findCurrentEvent(localCalendar!);
         if (event) {
           if (event.title) title = event.title;
           if (event.attendees.length > 0) attendees = event.attendees;
@@ -606,12 +610,15 @@ export class BackgroundController {
    * background, after which open widgets are told to look again.
    */
   private currentCallTitle(settings: NotetakerSettings): string | null {
-    const calendar = settings.calendar;
-    if (!calendar) return null;
+    const managedGoogle = settings.processingMode.kind === "managed" ? settings.managedService : null;
+    const localCalendar = settings.calendar;
+    if (!managedGoogle && !localCalendar) return null;
     const stale = !this.currentEventCache || Date.now() - this.currentEventCache.at > 60_000;
     if (stale && !this.currentEventRefresh) {
       this.currentEventRefresh = (async () => {
-        const event = await findCurrentEvent(calendar).catch(() => null);
+        const event = managedGoogle
+          ? await getManagedGoogleCalendarEvent(managedGoogle, this.fetchImpl).catch(() => null)
+          : await findCurrentEvent(localCalendar!).catch(() => null);
         const title = event?.title?.trim() || null;
         const changed = this.currentEventCache?.title !== title;
         this.currentEventCache = { at: Date.now(), title };
@@ -822,15 +829,18 @@ export class BackgroundController {
   }
 
   private async exportToDrive(meeting: MeetingRecord): Promise<void> {
+    const managedGoogle = this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null;
     const connection = this.settings?.drive;
-    if (!connection) return;
+    if (!managedGoogle && !connection) return;
     await updateMeeting(meeting.id, (current) => ({
       ...current,
       driveExport: { status: "pending" },
     }));
     this.broadcast({ type: "DRIVE_EXPORT", meetingId: meeting.id, status: "pending" });
     try {
-      const result = await exportMeetingToDrive(meeting, connection, this.fetchImpl);
+      const result = managedGoogle
+        ? await exportManagedMeetingToGoogleDrive(managedGoogle, meeting.id, this.fetchImpl)
+        : await exportMeetingToDrive(meeting, connection!, this.fetchImpl);
       await updateMeeting(meeting.id, (current) => ({
         ...current,
         driveExport: {
@@ -859,12 +869,13 @@ export class BackgroundController {
   async retryDriveExport(meetingId: string): Promise<void> {
     const meeting = await getMeeting(meetingId);
     if (!meeting) return;
-    if (!this.settings?.drive) {
+    const managedGoogle = this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null;
+    if (!managedGoogle && !this.settings?.drive) {
       this.broadcast({
         type: "DRIVE_EXPORT",
         meetingId,
         status: "error",
-        message: "Connect Google Drive in Settings before retrying the export.",
+        message: "Connect Google Drive in your account before retrying the export.",
       });
       return;
     }

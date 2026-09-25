@@ -13,6 +13,7 @@ import { createApiToken, revokeApiToken, revokeAllApiTokens } from "@/lib/apiTok
 import { deleteObject } from "@/lib/objectStorage";
 import { deleteUserSessions, revokeUserSession, setSessionActiveWorkspace } from "@/lib/sessions";
 import { getUserRole, removeWorkspaceMember } from "@/lib/workspaces";
+import { disconnectGoogle } from "@/lib/googleIntegration";
 
 /**
  * Expected failures are returned as values, never thrown: Next replaces a
@@ -119,6 +120,14 @@ export async function switchWorkspaceAction(formData: FormData): Promise<void> {
     await setSessionActiveWorkspace(session.sessionId, workspaceId);
   }
   redirect("/meetings");
+}
+
+// ---------------------------------------------------------- Google OAuth
+
+export async function disconnectGoogleAction(): Promise<void> {
+  const session = await requireSession({ allowPasswordChange: true });
+  await disconnectGoogle(session.userId);
+  revalidatePath("/account");
 }
 
 // ------------------------------------------------------------ danger zone

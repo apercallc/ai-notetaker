@@ -78,23 +78,25 @@ describe("settings page: modes", () => {
     await vi.waitFor(() => expect(document.getElementById("managed-sign-in")).not.toBeNull());
     expect(savedSettings()?.managedService).toBeNull();
     expect(savedSettings()?.processingMode).toEqual({ kind: "local_byok" });
-    expect($<HTMLInputElement>("managed-url").value).toBe("https://notes.example.com");
+    expect($<HTMLInputElement>("managed-email").value).toBe("");
     expect($("mode-managed").getAttribute("aria-pressed")).toBe("true");
   });
 });
 
 describe("settings page: structure", () => {
-  it("shows Mode, Notes preferences and Shortcuts by default, with everything optional behind one disclosure", async () => {
+  it("keeps all optional connections collapsed and removes browser OAuth-client setup", async () => {
     await openSettings(DEFAULT_SETTINGS);
     const legends = [...document.querySelectorAll("legend")].map((legend) => legend.textContent);
     expect(legends).toEqual(["How meetings are processed", "Notes preferences", "Shortcuts and Meet widget"]);
 
     const integrations = $<HTMLDetailsElement>("integrations");
     expect(integrations.open).toBe(false);
-    expect(integrations.querySelector("summary")?.textContent).toBe("Integrations (optional)");
-    for (const id of ["calendar-provider", "webapp-url", "drive-advanced"]) expect(integrations.querySelector(`#${id}`)).not.toBeNull();
-    // OAuth client fields live in "Advanced" inside the integration.
-    expect($("drive-advanced").querySelector("#drive-client-id")).not.toBeNull();
+    expect(integrations.querySelector("summary")?.textContent).toBe("Connections & history (optional)");
+    expect(integrations.querySelector("#webapp-url")).not.toBeNull();
+    expect(integrations.querySelector("#google-services-heading")?.textContent).toBe("Google Calendar & Drive");
+    expect(document.getElementById("calendar-client-id")).toBeNull();
+    expect(document.getElementById("drive-client-id")).toBeNull();
+    expect(document.querySelector("input[id*='client'], input[id*='secret']")).toBeNull();
   });
 });
 

@@ -5,6 +5,7 @@ import {
   changePasswordAction,
   createApiTokenAction,
   deleteWorkspaceAction,
+  disconnectGoogleAction,
   leaveWorkspaceAction,
   revokeApiTokenAction,
   revokeSessionAction,
@@ -147,6 +148,31 @@ export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+export function GoogleConnectionPanel({
+  configured,
+  connected,
+  accountEmail,
+}: {
+  configured: boolean;
+  connected: boolean;
+  accountEmail: string | null;
+}) {
+  if (!configured) {
+    return <p role="status" className="muted-copy">Google Calendar and Drive are not configured on this deployment.</p>;
+  }
+  if (!connected) {
+    return <p><a href="/api/google/oauth/connect" className="button button-primary">Connect Google</a></p>;
+  }
+  return (
+    <div>
+      <p role="status" className="muted-copy">Connected{accountEmail ? ` as ${accountEmail}` : ""}. Calendar lookup and Drive exports are available to your signed-in extension.</p>
+      <form action={disconnectGoogleAction}>
+        <button type="submit" className="button button-secondary">Disconnect Google</button>
+      </form>
     </div>
   );
 }

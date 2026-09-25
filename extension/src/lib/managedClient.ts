@@ -17,6 +17,26 @@ export interface ManagedUploadResult {
   meetingId: string;
 }
 
+/**
+ * The project-operated Hosted service is deliberately fixed. A person using
+ * the extension should never need to discover, type, or trust an API origin.
+ * Self-hosted history remains a separate explicit configuration in Settings.
+ */
+export const MANAGED_SERVICE_ORIGIN = "https://ai-notetaker.apercallc.com";
+
+export interface ManagedCalendarEvent {
+  title: string;
+  attendees: string[];
+  startsAt: string;
+  endsAt: string;
+  meetUrl?: string;
+}
+
+export interface ManagedDriveExportResult {
+  fileId: string;
+  webViewLink?: string;
+}
+
 const REQUEST_TIMEOUT_MS = 15_000;
 const REQUEST_MAX_ATTEMPTS = 3;
 const REQUEST_RETRY_BASE_MS = 250;
@@ -65,6 +85,11 @@ export function managedSignupUrl(baseUrl: string): string {
  * too, so UI rendering must not interpolate a raw service URL into href. */
 export function managedBillingUrl(baseUrl: string): string {
   return `${serviceUrl(baseUrl)}/billing`;
+}
+
+/** The browser account page owns server-side Google OAuth connections. */
+export function managedIntegrationsUrl(baseUrl: string): string {
+  return `${serviceUrl(baseUrl)}/account#google-services`;
 }
 
 /**
@@ -165,6 +190,40 @@ export async function getManagedEntitlements(
     canProcess: body.canProcess === true,
     inPaymentGrace: body.inPaymentGrace === true,
   };
+}
+
+/** Calendar metadata is resolved by the service; Google tokens never reach Chrome. */
+export async function getManagedGoogleCalendarEvent(
+  config: ManagedServiceConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManagedCalendarEvent | null> {
+  const body = await requestJson(config, "/api/v1/google/calendar/current", { method: "GET" }, fetchImpl);
+  const event = body.event;
+  if (!event || typeof event !== "object") return null;
+  const value = event as Record<string, unknown>;
+  if (typeof value.title !== "string" || typeof value.startsAt !== "string" || typeof value.endsAt !== "string") return null;
+  return {
+    title: value.title,
+    attendees: Array.isArray(value.attendees) ? value.attendees.filter((item): item is string => typeof item === "string").slice(0, 200) : [],
+    startsAt: value.startsAt,
+    endsAt: value.endsAt,
+    ...(typeof value.meetUrl === "string" ? { meetUrl: value.meetUrl } : {}),
+  };
+}
+
+/** Export is server-owned, so the Drive refresh token stays encrypted at rest. */
+export async function exportManagedMeetingToGoogleDrive(
+  config: ManagedServiceConfig,
+  meetingId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManagedDriveExportResult> {
+  const body = await requestJson(config, "/api/v1/google/drive/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ meetingId }),
+  }, fetchImpl);
+  if (typeof body.fileId !== "string" || !body.fileId) throw new Error("Managed service returned no Google Drive file id");
+  return { fileId: body.fileId, ...(typeof body.webViewLink === "string" ? { webViewLink: body.webViewLink } : {}) };
 }
 
 /**

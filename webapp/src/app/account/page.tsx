@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db";
 import { describeUserAgent, listUserSessions } from "@/lib/sessions";
 import { listApiTokens } from "@/lib/apiTokens";
 import { listUserWorkspaces } from "@/lib/workspaces";
-import { ApiTokenPanel, ChangePasswordForm, DeleteWorkspaceForm, LeaveWorkspaceForm, SessionList, WorkspaceSwitcher } from "./AccountForms";
+import { ApiTokenPanel, ChangePasswordForm, DeleteWorkspaceForm, GoogleConnectionPanel, LeaveWorkspaceForm, SessionList, WorkspaceSwitcher } from "./AccountForms";
+import { googleConnectionStatus } from "@/lib/googleIntegration";
 import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
 
 export const metadata = { referrer: "no-referrer", robots: { index: false, follow: false } };
@@ -22,10 +23,10 @@ function formatDateTime(value: Date | null): string {
 export default async function AccountPage({
   searchParams,
 }: {
-  searchParams: Promise<{ required?: string }>;
+  searchParams: Promise<{ required?: string; google?: string; googleError?: string }>;
 }) {
   const session = await requireSession({ allowPasswordChange: true });
-  const [workspaces, sessions, tokens, workspace] = await Promise.all([
+  const [workspaces, sessions, tokens, workspace, google] = await Promise.all([
     listUserWorkspaces(session.userId),
     listUserSessions(session.userId),
     listApiTokens(session.userId),
@@ -33,8 +34,9 @@ export default async function AccountPage({
       where: { id: session.workspaceId },
       select: { name: true, retentionDays: true },
     }),
+    googleConnectionStatus(session.userId),
   ]);
-  const { required } = await searchParams;
+  const { required, google: googleNotice, googleError } = await searchParams;
 
   return (
     <div className="container">
@@ -86,6 +88,12 @@ export default async function AccountPage({
           expiresAt: formatDate(token.expiresAt),
         }))}
       />
+
+      <h2 id="google-services" className="section-title">Google Calendar &amp; Drive</h2>
+      <p className="muted-copy">Connect one Google account to label recordings from your current calendar event and export completed notes to a private Drive document. Google access is stored encrypted and can be removed here.</p>
+      {googleNotice === "connected" && <p role="status" className="empty-state">Google account connected.</p>}
+      {googleError && <p role="alert" className="error-text">{googleError}</p>}
+      <GoogleConnectionPanel {...google} />
 
       <h2 className="section-title">Export</h2>
       <p className="muted-copy">Download every meeting in {workspace.name} — summary, transcript, and action items — as one JSON file.</p>
