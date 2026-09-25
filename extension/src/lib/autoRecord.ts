@@ -84,4 +84,4 @@ export function clearAutoRecordAttempt(tabId: number, nextUrl?: string): void {
 
 /** The disclosure text users can paste into Meet chat (meetDisclosureNotice setting). */
 export const MEET_DISCLOSURE_TEXT =
-  "Heads up: I'm using AI Notetaker to transcribe and summarize this call. The recording stays on my device unless I choose to share the notes.";
+  "Heads up: I'm using AI Notetaker to transcribe and summarize this call. Please let me know if you have any concerns.";
