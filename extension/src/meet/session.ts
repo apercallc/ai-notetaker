@@ -82,7 +82,8 @@ export async function startMeetRecording(
     // invocation. Remember the start so the toolbar click that opens the
     // popup completes it — one click total instead of click-then-click.
     if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
-    if (!options.silent) controller.reportStartFailure(description);
+    if (options.silent && description === CAPTURE_PERMISSION_HINT) controller.reportCaptureInvocationRequired(tabId);
+    else if (!options.silent) controller.reportStartFailure(description);
     return "";
   }
   const meetingId = await controller.startRecording(options.meetingMode, "meet", titleHint);
@@ -94,8 +95,10 @@ export async function startMeetRecording(
     if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
     if (options.silent) {
       // Auto-attempt: tear down quietly; the saved intent makes the user's
-      // next toolbar click the one-click start.
-      await controller.abortStart(meetingId, description).catch(() => undefined);
+      // next toolbar click the one-click start. Tell only this Meet tab what
+      // Chrome requires; this expected first-use gate is not a recording error.
+      if (description === CAPTURE_PERMISSION_HINT) controller.reportCaptureInvocationRequired(tabId);
+      await controller.abortStart(meetingId, description, { silent: true }).catch(() => undefined);
     } else {
       await controller.abortStart(meetingId, description);
     }

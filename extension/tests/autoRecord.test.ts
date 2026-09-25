@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAutoRecordAttempt, maybeAutoStartMeetRecording, resetAutoRecordTrackingForTests } from "../src/lib/autoRecord";
+import { clearAutoRecordAttempt, maybeAutoStartMeetRecording, MEET_AUTO_RECORD_GUIDANCE, resetAutoRecordTrackingForTests } from "../src/lib/autoRecord";
 import { DEFAULT_SETTINGS } from "../src/types";
 
 const CALL_URL = "https://meet.google.com/abc-defg-hij";
@@ -20,6 +20,11 @@ beforeEach(() => {
 });
 
 describe("maybeAutoStartMeetRecording", () => {
+  it("explains that one toolbar click completes Chrome's first-use gate", () => {
+    expect(MEET_AUTO_RECORD_GUIDANCE).toContain("click the Notetaker toolbar icon once");
+    expect(MEET_AUTO_RECORD_GUIDANCE).toContain("no extra Start notes step");
+  });
+
   it("defaults auto-record on while keeping disclosure and share off and opening notes on", () => {
     expect(DEFAULT_SETTINGS.autoRecordOnMeetJoin).toBe(true);
     expect(DEFAULT_SETTINGS.meetDisclosureNotice).toBe(false);

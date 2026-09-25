@@ -10,6 +10,8 @@ export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
 export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
 export type ErrorRecoveryCategory = "retry" | "check_provider_key" | "check_audio" | "check_billing" | "install_helper" | "update_helper" | "sign_in";
+export type LiveTranscriptStatus = "connecting" | "available" | "unavailable" | "not_supported";
+
 
 /** Maps stable helper error codes to safe actions without exposing provider internals. */
 export function errorRecoveryCategory(code: string): ErrorRecoveryCategory {
@@ -250,6 +252,7 @@ export interface MeetingRecord {
   actionItems: ActionItem[];
   mode?: MeetingMode;
   status: "recording" | "processing" | "complete" | "error";
+  liveTranscriptStatus?: LiveTranscriptStatus;
   errorMessage?: string;
   attendees?: string[];
   bookmarks?: Bookmark[];

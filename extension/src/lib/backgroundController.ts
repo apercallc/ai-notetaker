@@ -20,7 +20,7 @@ import { browserMeetChunkStats, clearBrowserMeetChunks, appendBrowserMeetChunk, 
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
 import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedGoogleCalendarEvent, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { reportManagedError } from "./errorReport";
-import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment } from "../types";
+import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment, type LiveTranscriptStatus } from "../types";
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -343,6 +343,11 @@ export class BackgroundController {
    */
   reportStartFailure(message: string): void {
     this.broadcast({ type: "RECORDING_ERROR", meetingId: null, message, phase: "start" });
+  }
+
+  /** Expected first-use Chrome gate: show a brief, non-error instruction only on this Meet tab. */
+  reportCaptureInvocationRequired(tabId: number): void {
+    this.broadcast({ type: "CAPTURE_INVOCATION_REQUIRED", tabId });
   }
 
   /**
@@ -709,6 +714,8 @@ export class BackgroundController {
             title: activeRecord.title,
             startedAt: activeRecord.startedAt,
             status: activeRecord.status,
+            ...(activeRecord.captureSource ? { captureSource: activeRecord.captureSource } : {}),
+            ...(activeRecord.liveTranscriptStatus ? { liveTranscriptStatus: activeRecord.liveTranscriptStatus } : {}),
             ...(activeRecord.errorMessage ? { errorMessage: activeRecord.errorMessage } : {}),
             bookmarks: activeRecord.bookmarks ?? [],
             transcript: activeRecord.transcript.slice(-40).map(({ speaker, text, isFinal, utteranceId }) => ({
@@ -787,6 +794,53 @@ export class BackgroundController {
     );
     if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
+  }
+
+  async updateMeetLiveTranscriptStatus(meetingId: string, status: LiveTranscriptStatus): Promise<void> {
+    if (this.activeMeetingId !== meetingId) return;
+    const meeting = await updateMeeting(meetingId, (current) =>
+      current.status === "recording" ? { ...current, liveTranscriptStatus: status } : current,
+    );
+    if (!meeting || meeting.status !== "recording") return;
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
+  }
+
+  async addMeetLiveTranscript(update: {
+    meetingId: string;
+    channel: BrowserAudioChannel;
+    speaker: import("../types").Speaker;
+    text: string;
+    isFinal: boolean;
+    utteranceId: number;
+    offsetMs: number;
+  }): Promise<void> {
+    if (this.activeMeetingId !== update.meetingId || !update.text.trim()) return;
+    const meeting = await updateMeeting(update.meetingId, (current) => {
+      if (current.status !== "recording") return current;
+      const existingIndex = current.transcript.findIndex(
+        (segment) => segment.speaker === update.speaker && segment.utteranceId === update.utteranceId && !segment.isFinal,
+      );
+      const segment: TranscriptSegment = {
+        speaker: update.speaker,
+        text: update.text,
+        isFinal: update.isFinal,
+        utteranceId: update.utteranceId,
+        timestamp: new Date().toISOString(),
+        offsetMs: update.offsetMs,
+      };
+      if (existingIndex >= 0) current.transcript[existingIndex] = segment;
+      else current.transcript.push(segment);
+      return current;
+    });
+    if (!meeting || meeting.status !== "recording") return;
+    this.broadcast({
+      type: "TRANSCRIPT_UPDATE",
+      meetingId: update.meetingId,
+      speaker: update.speaker,
+      text: update.text,
+      isFinal: update.isFinal,
+      utteranceId: update.utteranceId,
+    });
   }
 
   private async handleTranscriptPartial(

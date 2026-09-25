@@ -1110,4 +1110,30 @@ describe("BackgroundController: in-call widget support", () => {
     expect((await controller.getWidgetState()).callTitle).toBe("Weekly sync");
     expect(findCurrentEvent).toHaveBeenCalledTimes(1);
   });
+
+  it("persists live transcript updates and exposes live status to the widget", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg" } });
+    const meetingId = await controller.startRecording("general", "meet");
+
+    await controller.updateMeetLiveTranscriptStatus(meetingId, "available");
+    await controller.addMeetLiveTranscript({
+      meetingId,
+      channel: "mic",
+      speaker: "you",
+      text: "Planning the launch",
+      isFinal: false,
+      utteranceId: 1,
+      offsetMs: 2400,
+    });
+
+    expect(await getMeeting(meetingId)).toMatchObject({
+      liveTranscriptStatus: "available",
+      transcript: [expect.objectContaining({ speaker: "you", text: "Planning the launch", isFinal: false, utteranceId: 1, offsetMs: 2400 })],
+    });
+    expect((await controller.getWidgetState()).active).toMatchObject({ liveTranscriptStatus: "available" });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "TRANSCRIPT_UPDATE", meetingId, text: "Planning the launch", isFinal: false, utteranceId: 1 }));
+  });
 });

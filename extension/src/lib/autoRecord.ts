@@ -1,5 +1,9 @@
 import { isMeetUrl, meetingCodeFromPath } from "../meet/meetContext";
 
+/** Honest first-use copy: Chrome's invocation gate is a single click, not a second Start action. */
+export const MEET_AUTO_RECORD_GUIDANCE =
+  "Auto-record starts when you join. If Chrome blocks the first start, click the Notetaker toolbar icon once in that Meet tab; recording starts from that click, with no extra Start notes step.";
+
 /**
  * Auto-record on joining a Google Meet call (opt-in setting).
  *

@@ -16,13 +16,15 @@ export async function broadcastToMeetTabs(message: BackgroundToUiMessage): Promi
     return;
   }
   await Promise.all(
-    tabs.map(async (tab) => {
-      if (typeof tab.id !== "number") return;
-      try {
-        await chrome.tabs.sendMessage(tab.id, message);
-      } catch {
-        // No widget in this tab (still loading, or a non-call Meet page).
-      }
-    }),
+    tabs
+      .filter((tab) => message.type !== "CAPTURE_INVOCATION_REQUIRED" || tab.id === message.tabId)
+      .map(async (tab) => {
+        if (typeof tab.id !== "number") return;
+        try {
+          await chrome.tabs.sendMessage(tab.id, message);
+        } catch {
+          // No widget in this tab (still loading, or a non-call Meet page).
+        }
+      }),
   );
 }

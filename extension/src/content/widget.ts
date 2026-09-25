@@ -3,7 +3,7 @@ import { MEET_DISCLOSURE_TEXT } from "../lib/autoRecord";
 import { escapeHtml } from "../lib/html";
 import type { BackgroundToUiMessage, UiToBackgroundMessage, WidgetMeeting, WidgetState } from "../lib/internalMessages";
 import { createStopConfirm, STOP_CONFIRM_LABEL, STOP_LABEL, type StopConfirmOptions } from "../lib/stopConfirm";
-import { MIC_PERMISSION_HINT } from "../meet/hints";
+import { CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "../meet/hints";
 import { speakerLabel, type MeetingMode, type Speaker } from "../types";
 import { canStart, deriveView, formatElapsed, type WidgetUi, type WidgetView } from "./widgetModel";
 import { ICONS, errorMessage, readyKey, renderPanel, renderPill, type TemplateContext } from "./widgetTemplates";
@@ -145,6 +145,11 @@ export class MeetWidget {
       case "HELPER_STATUS":
         void this.refresh();
         return;
+      case "CAPTURE_INVOCATION_REQUIRED":
+        this.ui = { ...this.ui, starting: false, error: CAPTURE_PERMISSION_HINT };
+        this.expanded = true;
+        this.render();
+        return;
       case "PROCESSING_WARNING":
         this.ui = { ...this.ui, warning: message.message };
         this.showToast("A transcription chunk will be retried automatically.");
@@ -278,7 +283,18 @@ export class MeetWidget {
       const previousScroll = transcript.scrollTop;
       transcript.replaceChildren();
       if (active.transcript.length === 0) {
-        transcript.insertAdjacentHTML("beforeend", `<p class="empty">Listening… the transcript appears here within a few seconds.</p>`);
+        const empty = this.root.ownerDocument.createElement("p");
+        empty.className = "empty";
+        empty.textContent = active.liveTranscriptStatus === "connecting"
+          ? "Connecting to live transcript…"
+          : active.liveTranscriptStatus === "available"
+            ? "Listening for live transcript…"
+            : active.liveTranscriptStatus === "unavailable"
+              ? "Live transcript unavailable. Your full transcript will be ready after you stop recording."
+              : active.liveTranscriptStatus === "not_supported"
+                ? "Live transcript needs a Deepgram key in local mode; Hosted AI and other providers prepare it after you stop."
+                : "Your transcript will appear here after you stop recording.";
+        transcript.append(empty);
       }
       for (const segment of active.transcript) this.upsertTranscriptLine(segment.speaker, segment.text, segment.isFinal, segment.utteranceId, true);
       transcript.scrollTop = initial || this.pinnedToBottom ? transcript.scrollHeight : previousScroll;

@@ -6,6 +6,7 @@ import { detectInstallPlatform, getInstallPageUrl, type InstallPlatform } from "
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
 import { loginManaged, managedSignupUrl } from "../lib/managedClient";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
+import { MEET_AUTO_RECORD_GUIDANCE } from "../lib/autoRecord";
 import { microphoneAlreadyAllowed, requestMicrophone, type MicOutcome } from "../meet/micPermission";
 
 /**
@@ -324,12 +325,18 @@ function renderSetupStep(): string {
 
 function renderDoneStep(): string {
   const keys = toggleShortcut ? shortcutKeys(toggleShortcut).map((key) => `<kbd>${escapeHtml(key)}</kbd>`).join("") : "";
-  const startLine = keys
-    ? `In a call, press ${keys} or click the toolbar icon to start notes.`
-    : "In a call, click the Notetaker toolbar icon to start notes.";
+  const startLine = settings.autoRecordOnMeetJoin
+    ? MEET_AUTO_RECORD_GUIDANCE
+    : keys
+      ? `In a call, press ${keys} or click the toolbar icon to start notes.`
+      : "In a call, click the Notetaker toolbar icon to start notes.";
+  const transcriptLine = settings.processingMode.kind === "local_byok" && settings.transcriptionProvider === "deepgram"
+    ? "With your Deepgram key, the transcript appears live when the connection is available; otherwise it is ready after you stop."
+    : "Your full transcript is ready after you stop recording.";
   return `
     <h1 tabindex="-1" data-view-heading>You're all set</h1>
     <p>${startLine}</p>
+    <p class="text-secondary">${transcriptLine}</p>
     <p class="text-secondary">Tip: pin Notetaker from Chrome's puzzle-piece menu so the icon is always one click away. Your notes are written when you stop, and Chrome shows a notification when they are ready.</p>
     ${desktop ? `<p class="text-secondary">For Zoom, Teams, or Slack, click the toolbar icon during your call and choose Start notes.</p>` : ""}
     <p><button type="button" class="primary" id="open-meet">Open Google Meet</button></p>

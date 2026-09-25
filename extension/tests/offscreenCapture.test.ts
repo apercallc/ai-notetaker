@@ -121,8 +121,11 @@ describe("offscreen capture", () => {
     workletNodes[0]?.port.onmessage?.({ data: samples.buffer });
     workletNodes[1]?.port.onmessage?.({ data: { type: "unrelated" } });
 
-    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledTimes(1);
-    const message = chromeMock.runtime.sendMessage.mock.calls[0]?.[0] as { type: string; meetingId: string; channel: string; sampleRateHz: number; pcm16Base64: string };
+    const chunks = chromeMock.runtime.sendMessage.mock.calls
+      .map(([message]) => message as { type?: string; meetingId?: string; channel?: string; sampleRateHz?: number; pcm16Base64?: string })
+      .filter((message) => message.type === "MEET_AUDIO_CHUNK");
+    expect(chunks).toHaveLength(1);
+    const message = chunks[0] as { type: string; meetingId: string; channel: string; sampleRateHz: number; pcm16Base64: string };
     expect(message).toMatchObject({ type: "MEET_AUDIO_CHUNK", meetingId: "m1", channel: "speaker", sampleRateHz: 48_000 });
     // 0.5 s of mono PCM16: under the service worker's 64 KiB limit even before base64.
     expect(atob(message.pcm16Base64).length).toBe(48_000);
@@ -136,7 +139,9 @@ describe("offscreen capture", () => {
 
     expect(await send(listener, { type: "MEET_CAPTURE_STOP", meetingId: "m1" })).toEqual({ ok: true });
 
-    const chunks = chromeMock.runtime.sendMessage.mock.calls.map(([message]) => message as { channel: string; pcm16Base64: string });
+    const chunks = chromeMock.runtime.sendMessage.mock.calls
+      .map(([message]) => message as { type?: string; channel?: string; pcm16Base64?: string })
+      .filter((message) => message.type === "MEET_AUDIO_CHUNK") as Array<{ type?: string; channel: string; pcm16Base64: string }>;
     expect(chunks.map((chunk) => chunk.channel).sort()).toEqual(["mic", "speaker"]);
     expect(atob(chunks[0]!.pcm16Base64).length).toBe(4); // two samples
     workletNodes.forEach((node) => expect(node.disconnect).toHaveBeenCalled());

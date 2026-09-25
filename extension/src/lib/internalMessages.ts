@@ -6,7 +6,7 @@
  */
 import type { HelperConnectionStatus } from "./nativeMessaging";
 import type { Shortcuts } from "./shortcuts";
-import type { ActionItem, AudioProbeResult, AudioStatus, Bookmark, BrowserAudioChannel, CaptureSource, DriveExportState, ErrorRecoveryCategory, HelperInfo, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, Speaker } from "../types";
+import type { ActionItem, AudioProbeResult, AudioStatus, Bookmark, BrowserAudioChannel, CaptureSource, DriveExportState, ErrorRecoveryCategory, HelperInfo, LiveTranscriptStatus, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, Speaker } from "../types";
 
 export type UiToBackgroundMessage =
   | { type: "GET_STATE" }
@@ -16,6 +16,8 @@ export type UiToBackgroundMessage =
   | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number; titleHint?: string }
   | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string; tabId?: number }
   | { type: "MEET_CAPTURE_ERROR"; meetingId: string; message: string }
+  | { type: "MEET_LIVE_TRANSCRIPT_STATUS"; meetingId: string; status: LiveTranscriptStatus }
+  | { type: "MEET_LIVE_TRANSCRIPT_UPDATE"; meetingId: string; channel: BrowserAudioChannel; speaker: Speaker; text: string; isFinal: boolean; utteranceId: number; offsetMs: number }
   | { type: "STOP_RECORDING"; meetingId: string }
   | { type: "ADD_BOOKMARK"; meetingId: string; note?: string }
   | { type: "GET_WIDGET_STATE" }
@@ -43,6 +45,8 @@ export interface WidgetMeeting {
   title: string;
   startedAt: string;
   status: MeetingRecord["status"];
+  captureSource?: CaptureSource;
+  liveTranscriptStatus?: LiveTranscriptStatus;
   errorMessage?: string;
   bookmarks: Bookmark[];
   transcript: Array<{ speaker: Speaker; text: string; isFinal: boolean; utteranceId?: number }>;
@@ -86,4 +90,6 @@ export type BackgroundToUiMessage =
   | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
   | { type: "DRIVE_EXPORT"; meetingId: string; status: DriveExportState["status"]; webViewLink?: string; message?: string }
   | { type: "HELPER_STATUS"; status: HelperConnectionStatus }
-  | { type: "MEETING_STATE_CHANGED"; meetingId: string };
+  | { type: "MEETING_STATE_CHANGED"; meetingId: string }
+  /** Chrome requires one toolbar/shortcut invocation before tab audio capture. */
+  | { type: "CAPTURE_INVOCATION_REQUIRED"; tabId: number };

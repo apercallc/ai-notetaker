@@ -127,8 +127,8 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
             </div>`
                 : ""
             }
-            ${
-              ctx.state?.helperStatus === "connected"
+              ${
+              ctx.state?.helperStatus === "connected" || ctx.state?.active?.captureSource === "meet" || ctx.state?.active?.captureSource === "meet_tab"
                 ? `<div class="transcript-wrap">
               <div class="transcript" id="transcript" role="log" aria-live="off" aria-label="Live transcript" tabindex="0"></div>
               <button type="button" class="jump" id="jump" hidden>Jump to latest</button>
@@ -149,11 +149,11 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
 
 function renderError(ctx: TemplateContext): string {
   const message = errorMessage(ctx);
-  // A failed start can be retried here; a meeting that failed after the call can only be inspected.
-  const retryable = ctx.ui.error !== null;
+  const needsCaptureInvocation = message === CAPTURE_PERMISSION_HINT;
+  const retryable = ctx.ui.error !== null && !needsCaptureInvocation;
   const needsMic = message === MIC_PERMISSION_HINT;
   const shortcutHint =
-    message === CAPTURE_PERMISSION_HINT && ctx.state?.shortcuts.toggle ? ` Or press ${keysHtml(ctx.state.shortcuts.toggle)} on this tab.` : "";
+    needsCaptureInvocation && ctx.state?.shortcuts.toggle ? ` Or press ${keysHtml(ctx.state.shortcuts.toggle)} on this tab.` : "";
   const recoveryHint =
     ctx.ui.errorRecovery === "check_provider_key"
       ? "Check the selected provider key in Settings."
@@ -168,12 +168,12 @@ function renderError(ctx: TemplateContext): string {
             : "";
   return `
           <div class="stack">
-            <div><h2>Couldn't take notes</h2></div>
-            <p class="note error">${escapeHtml(message)}${shortcutHint}${recoveryHint ? ` ${escapeHtml(recoveryHint)}` : ""}</p>
+            <div><h2>${needsCaptureInvocation ? "One Chrome step" : "Couldn't take notes"}</h2></div>
+            <p class="note ${needsCaptureInvocation ? "warning" : "error"}">${escapeHtml(message)}${shortcutHint}${recoveryHint ? ` ${escapeHtml(recoveryHint)}` : ""}</p>
             <div class="row">
               ${needsMic ? `<button type="button" class="btn primary" id="allow-mic">Allow microphone</button>` : ""}
-              ${retryable ? `<button type="button" class="btn ${needsMic ? "secondary" : "primary"}" id="retry">Try again</button>` : `<button type="button" class="btn primary" id="open-notes">Open details</button>`}
-              <button type="button" class="btn secondary" id="dismiss">Dismiss</button>
+              ${retryable ? `<button type="button" class="btn ${needsMic ? "secondary" : "primary"}" id="retry">Try again</button>` : needsCaptureInvocation ? "" : `<button type="button" class="btn primary" id="open-notes">Open details</button>`}
+              <button type="button" class="btn secondary" id="dismiss">${needsCaptureInvocation ? "Got it" : "Dismiss"}</button>
             </div>
           </div>`;
 }

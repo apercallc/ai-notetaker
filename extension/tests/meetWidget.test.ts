@@ -227,7 +227,7 @@ describe("MeetWidget: starting a recording", () => {
     expect($(".toast")?.textContent).toBe("Recording started. Let everyone know.");
   });
 
-  it("tells the user how to give Chrome the one click it needs, and offers the shortcut when one is set", async () => {
+  it("gives a one-step Chrome instruction without offering a retry that cannot work", async () => {
     harness = await createHarness();
     const { $, click, respond, widget } = harness;
     respond("START_RECORDING", () => {
@@ -239,11 +239,11 @@ describe("MeetWidget: starting a recording", () => {
     await click("#start");
 
     expect($(".nt")?.dataset.view).toBe("error");
-    expect($(".note.error")?.textContent).toContain("Click the Notetaker icon in the Chrome toolbar");
-    expect(Array.from($(".note.error")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["Alt", "Shift", "R"]);
-    respond("START_RECORDING", () => ({ meetingId: "" }));
-    await click("#retry");
-    expect(harness.sent.filter((message) => message.type === "START_RECORDING")).toHaveLength(2);
+    expect($("h2")?.textContent).toBe("One Chrome step");
+    expect($(".note.warning")?.textContent).toContain("Click it once; recording will start automatically.");
+    expect(Array.from($(".note.warning")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["Alt", "Shift", "R"]);
+    expect($("#retry")).toBeNull();
+    expect($("#dismiss")?.textContent).toBe("Got it");
   });
 
   it("does not promise a shortcut Chrome never assigned", async () => {
@@ -256,8 +256,8 @@ describe("MeetWidget: starting a recording", () => {
     await click("#toggle");
     await click("#start");
 
-    expect($(".note.error kbd")).toBeNull();
-    expect($(".note.error")?.textContent).not.toMatch(/Or press/);
+    expect($(".note.warning kbd")).toBeNull();
+    expect($(".note.warning")?.textContent).not.toMatch(/Or press/);
   });
 
   it("shows macOS-style bindings as individual keycaps", async () => {
@@ -357,6 +357,14 @@ describe("MeetWidget: recording", () => {
     expect($("#elapsed")?.textContent).toBe("02:00");
     expect($("#pill-bookmark")?.getAttribute("aria-label")).toBe("Flag this moment");
     expect($("#pill-stop")?.getAttribute("aria-label")).toBe("Stop notes");
+  });
+
+  it("shows the live transcript connection state without promising unavailable captions", async () => {
+    harness = await recording({ liveTranscriptStatus: "connecting" });
+    expect(harness.$("#transcript .empty")?.textContent).toBe("Connecting to live transcript…");
+    harness.setState(baseState({ active: activeMeeting({ liveTranscriptStatus: "unavailable" }) }));
+    await harness.widget.refresh();
+    expect(harness.$("#transcript .empty")?.textContent).toBe("Live transcript unavailable. Your full transcript will be ready after you stop recording.");
   });
 
   it("renders the live transcript from state and upserts provisional lines in place", async () => {

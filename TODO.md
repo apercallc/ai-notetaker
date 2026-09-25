@@ -104,6 +104,17 @@ Implementation plan:
 - [x] Bind durable managed Meet and desktop-helper retries to their original
       account/workspace identity; switching hosted workspaces fails closed
       instead of moving an old recording into the new tenant.
+- [x] Add optional live transcript for extension-owned Meet recordings using
+      the user's local Deepgram key: mic and speaker remain separate, and each
+      audio chunk is persisted locally before it is sent over the streaming
+      connection. Transcript updates are stored locally; provider failure does
+      not stop capture.
+- [x] Explain the one-click Chrome capture gate accurately in onboarding and
+      the in-call widget; if Chrome blocks auto-start, one toolbar click hands
+      the pending recording directly to capture without a second Start action.
+- [ ] Enable live transcription for Hosted AI only after adding server-owned
+      real-time usage reservation/metering and a verified short-lived Deepgram
+      token flow; other providers continue to create transcripts after stop.
 - [ ] Complete real Chrome/Meet, provider, deployment, storage, and billing
       acceptance evidence before advertising hosted mode.
 
@@ -881,6 +892,11 @@ open-notes is on:
       gate on a first join saves the intent so the first toolbar click starts
       recording on that single click. URL-based join detection only, one
       attempt per call, re-armed when a tab joins a different call.
+- [x] Chrome's first-use `activeTab` gate now shows a brief, non-error
+      "One Chrome step" message in the in-call widget. It tells the user that
+      the toolbar click/assigned shortcut starts the pending recording; the
+      widget no longer offers a futile retry. Chrome still requires this
+      invocation and it cannot be bypassed by an extension.
 - [x] One-tap attendee disclosure notice (`meetDisclosureNotice`, off): while
       recording, the widget shows a Copy button with a short chat-ready
       notice. The user pastes and sends it themselves — Meet's DOM is never
