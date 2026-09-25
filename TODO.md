@@ -856,6 +856,34 @@ them without changing `CLAUDE.md` and the design spec first.
   Edge Add-ons listings.
 - Cellular/PSTN call interception and DRM/protected audio: not promised.
 
+## Pre-production audit (2026-09-25) — deferred items
+
+Fixed in this pass (see commits ca6aea1 helper, 1e9a3fa extension, 9abc589
+webapp): pairing hardening + tray re-pair flow, IPC subscriber-leak pruning,
+StopRecording/stop-pipeline non-blocking, retry-worker cap + backoff,
+cross-tenant upsertMeeting TOCTOU, checkout double-billing mutex, cookie
+Secure flag, managed Meet upload streaming (~700MB → bounded), recording_stopped
+listener, Meet capture state persistence + tab-close finalization, Gemini
+query-param key leak, recover even-byte clamp, empty-summary retry.
+
+Consciously deferred (why):
+
+- [ ] Extension `listMeetings` search loads full meeting records (summaries
+      included) to match a query, while popup/history only needs the list
+      view. Fixing this means splitting transcripts/summaries into separate
+      storage keys or adding a lightweight index — a storage schema
+      migration with a data-move path, too risky to land pre-launch.
+      Revisit with the planned history indexing work.
+- [ ] Webapp Dockerfile keeps `prisma` CLI in production dependencies:
+      `scripts/docker-entrypoint.mjs` runs `npx prisma migrate deploy` at
+      container start, so the CLI must ship. Revisit only if entrypoint
+      switches to a build-time migration step or a standalone engine.
+- [ ] Helper `stop_capture_only` (pipeline.rs) drops mic/speaker streaming
+      sessions without `close()` — audit lead from the delegation sweep,
+      not re-verified against the current code after the pipeline rework;
+      sessions drop when the process exits, but an explicit close would
+      flush provider buffers cleanly. Verify on the next pipeline pass.
+
 ---
 
 ## How to use this file
