@@ -1,17 +1,17 @@
 import Link from "next/link";
 
 /**
- * Without this, a stale link (or navigating right after deleting a
- * meeting) drops the user onto Next's default unstyled "This page could
- * not be found" screen — no dark mode, no app chrome, no way back except
- * the browser's back button. Jarring on a tool whose whole job is being a
- * trustworthy archive (design review finding, see TODO.md).
+ * The root-level fallback for URLs that match no route. It used to assume
+ * every 404 was a deleted meeting; with Team, Plans & usage and Account
+ * routes the app is no longer meetings-only, so the copy stays neutral
+ * while still pointing at the page the user almost certainly wanted.
  */
 export default function NotFound() {
   return (
     <div className="container">
       <div className="empty-state">
-        <p>This meeting doesn&apos;t exist — it may have been deleted.</p>
+        <h1>Page not found</h1>
+        <p className="muted-copy">This page doesn&apos;t exist — it may have moved, or a meeting it pointed to was deleted.</p>
         <Link href="/meetings" className="back-link">
           ← Back to your meetings
         </Link>

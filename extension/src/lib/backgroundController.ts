@@ -12,11 +12,12 @@ import { getWidgetPosition } from "./storage";
 import type { HelperConnectionStatus } from "./nativeMessaging";
 import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, listMeetings, saveMeeting, saveSettings, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
+import { testProviderKeyDirect } from "./testProviderKey";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
-import { clearBrowserMeetChunks, listBrowserMeetChunks, appendBrowserMeetChunk } from "../meet/browserStorage";
-import { processBrowserMeetRecording, type BrowserMeetChunk } from "../meet/browserProcessing";
+import { clearBrowserMeetChunks, listBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
+import { processBrowserMeetRecording } from "../meet/browserProcessing";
 import { getManagedEntitlements, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment } from "../types";
 
@@ -104,8 +105,7 @@ export class BackgroundController {
     const active = latest.find((meeting) => meeting.status === "recording" && meeting.captureSource === "meet");
     if (active) {
       this.activeMeetingId = active.id;
-      const chunks = await listBrowserMeetChunks(active.id).catch(() => [] as BrowserMeetChunk[]);
-      this.meetChunkSequence.set(active.id, chunks.reduce((max, chunk) => Math.max(max, chunk.sequence + 1), 0));
+      this.meetChunkSequence.set(active.id, (await lastBrowserMeetSequence(active.id)) + 1);
     }
     this.pushCurrentSettings();
     void flushWebappSyncOutbox(this.settings, this.fetchImpl);
@@ -210,6 +210,7 @@ export class BackgroundController {
       this.broadcast({
         type: "RECORDING_ERROR",
         meetingId: null,
+        phase: "start",
         message:
           this.helperStatus === "incompatible"
             ? "The desktop helper needs an update before it can record. Open the install page to update it."
@@ -221,6 +222,7 @@ export class BackgroundController {
       this.broadcast({
         type: "RECORDING_ERROR",
         meetingId: null,
+        phase: "start",
         message: "Acknowledge the recording consent notice in setup before recording.",
       });
       return "";
@@ -231,7 +233,8 @@ export class BackgroundController {
         this.broadcast({
           type: "RECORDING_ERROR",
           meetingId: null,
-          message: "Hosted AI is not connected. Sign in again or choose free local BYOK before recording.",
+          phase: "start",
+          message: "Hosted AI is not connected. Sign in again or switch to your own API keys in Settings before recording.",
           recovery: "sign_in",
         });
         return "";
@@ -242,14 +245,15 @@ export class BackgroundController {
           const message = entitlements.remaining <= 0
             ? "Hosted AI's meeting allowance is used up for this billing period. Open Hosted AI billing in Settings to choose a plan or resolve payment."
             : "Hosted AI is not active for this workspace. Open Hosted AI billing in Settings to choose a plan or resolve payment.";
-          this.broadcast({ type: "RECORDING_ERROR", meetingId: null, message, recovery: "check_billing" });
+          this.broadcast({ type: "RECORDING_ERROR", meetingId: null, phase: "start", message, recovery: "check_billing" });
           return "";
         }
       } catch {
         this.broadcast({
           type: "RECORDING_ERROR",
           meetingId: null,
-          message: "Hosted AI availability could not be checked. Sign in again or choose free local BYOK before recording.",
+          phase: "start",
+          message: "Hosted AI availability could not be checked. Sign in again or switch to your own API keys in Settings before recording.",
           recovery: "sign_in",
         });
         return "";
@@ -290,23 +294,17 @@ export class BackgroundController {
       this.meetChunkSequence.set(meetingId, 0);
     }
     this.activeMeetingId = meetingId;
-    try {
-      if (captureSource === "meet" && (this.helperStatus !== "connected" || !this.helperInfo)) {
-        // Browser Meet capture is intentionally extension-owned. The helper is
-        // still used when present for live transcription and durable processing,
-        // but it is not a prerequisite for a Meet recording.
-      } else if (captureSource === "desktop" && this.settings.processingMode.kind === "local_byok") {
-        this.client.startRecording(meetingId, meetingMode, "desktop", this.settings.processingMode, title);
-      } else {
+    if (captureSource !== "meet") {
+      try {
         this.client.startRecording(meetingId, meetingMode, captureSource, this.settings.processingMode, title);
+      } catch {
+        meeting.status = "error";
+        meeting.errorMessage = "The desktop helper is not connected. Install and start it, then try again.";
+        await saveMeeting(meeting);
+        this.activeMeetingId = null;
+        this.broadcast({ type: "RECORDING_ERROR", meetingId, message: meeting.errorMessage, phase: "start" });
+        return meetingId;
       }
-    } catch {
-      meeting.status = "error";
-      meeting.errorMessage = "The desktop helper is not connected. Install and start it, then try again.";
-      await saveMeeting(meeting);
-      this.activeMeetingId = null;
-      this.broadcast({ type: "RECORDING_ERROR", meetingId, message: meeting.errorMessage });
-      return meetingId;
     }
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
     return meetingId;
@@ -333,7 +331,34 @@ export class BackgroundController {
     this.broadcast({ type: "RECORDING_ERROR", meetingId, message });
   }
 
-  sendMeetAudioChunk(meetingId: string, channel: BrowserAudioChannel, pcm16: Uint8Array, sampleRateHz = 48_000): void {
+  /**
+   * Tells whoever asked for a recording that it never began. Nothing was
+   * created, so there is no meeting to fail and no reason for a toolbar badge.
+   */
+  reportStartFailure(message: string): void {
+    this.broadcast({ type: "RECORDING_ERROR", meetingId: null, message, phase: "start" });
+  }
+
+  /**
+   * A start that got as far as creating the meeting but not as far as capturing
+   * audio: forget the meeting entirely rather than leave a "Failed" entry with
+   * no recording behind it.
+   */
+  async abortStart(meetingId: string, message: string): Promise<void> {
+    try {
+      if (this.helperStatus === "connected") this.client.discardRecording(meetingId);
+    } catch {
+      // The helper is optional for Meet; local cleanup below is what matters.
+    }
+    await clearBrowserMeetChunks(meetingId).catch(() => undefined);
+    this.meetChunkSequence.delete(meetingId);
+    await deleteLocalMeeting(meetingId);
+    if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
+    this.reportStartFailure(message);
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
+  }
+
+  sendMeetAudioChunk(meetingId: string, channel: BrowserAudioChannel, pcm16: Uint8Array, sampleRateHz = 48_000): Promise<void> {
     if (sampleRateHz !== 48_000 || pcm16.byteLength === 0 || pcm16.byteLength > 64 * 1024 || pcm16.byteLength % 2 !== 0) {
       throw new Error("Meet audio chunks must be non-empty, even-length PCM16 data under 64 KiB at 48 kHz");
     }
@@ -344,20 +369,25 @@ export class BackgroundController {
       .catch(() => undefined)
       .then(() => appendBrowserMeetChunk(meetingId, channel, sequence, pcm16));
     this.meetChunkWrites.set(meetingId, current);
-    void current.finally(() => {
+    const cleanup = () => {
       if (this.meetChunkWrites.get(meetingId) === current) this.meetChunkWrites.delete(meetingId);
-    });
-    if (this.helperStatus === "connected" && this.client.sendAudioChunk) this.client.sendAudioChunk(meetingId, channel, pcm16, sampleRateHz);
+    };
+    void current.then(cleanup, cleanup);
+    return current;
   }
 
   async stopRecording(meetingId: string): Promise<void> {
     const meeting = await getMeeting(meetingId);
     if (meeting) {
       meeting.status = "processing";
+      meeting.endedAt ??= new Date().toISOString();
       await saveMeeting(meeting);
     }
     if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
-    if (meeting?.captureSource === "meet" && (this.helperStatus !== "connected" || !this.helperInfo)) {
+    if (meeting?.captureSource === "meet") {
+      // Writing the notes can take a minute; let every open view move on from
+      // "recording" now instead of when the summary lands.
+      this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
       await this.finishBrowserMeetRecording(meetingId, meeting);
       return;
     }
@@ -400,9 +430,9 @@ export class BackgroundController {
     const pending = this.meetChunkWrites.get(meetingId);
     if (pending) await pending.catch(() => undefined);
     try {
-      const chunks = await listBrowserMeetChunks(meetingId);
       if (!this.settings) throw new Error("Meet settings are not loaded");
       if (this.settings.processingMode.kind === "managed") {
+        const chunks = await listBrowserMeetChunks(meetingId);
         const managed = this.settings.managedService;
         if (!managed) throw new Error("Hosted AI is not connected. Sign in again before processing this Meet recording.");
         if (!managedMeetingMatchesService(meeting, managed)) {
@@ -429,7 +459,7 @@ export class BackgroundController {
               status: "complete",
               summary: job.summary ?? "",
               actionItems: job.actionItems ?? [],
-              endedAt: new Date().toISOString(),
+              endedAt: current.endedAt ?? new Date().toISOString(),
               managedProcessing: { uploadId: upload.uploadId, jobId: upload.jobId, status: "complete" },
             }));
             if (completed) {
@@ -444,14 +474,15 @@ export class BackgroundController {
         }
         throw new Error("Hosted processing did not finish within 3 minutes; the saved audio can be retried from the meeting details.");
       }
-      const result = await processBrowserMeetRecording(this.settings, meeting.mode ?? "general", chunks, this.fetchImpl);
+      const result = await processBrowserMeetRecording(this.settings, meeting.mode ?? "general", streamBrowserMeetChunks(meetingId), this.fetchImpl, { startedAt: meeting.startedAt });
       const completed = await updateMeeting(meetingId, (current) => ({
         ...current,
         status: "complete",
         transcript: result.transcript,
         summary: result.summary,
         actionItems: result.actionItems,
-        endedAt: new Date().toISOString(),
+        ...(result.title && /^Meeting on /.test(current.title) ? { title: result.title } : {}),
+        endedAt: current.endedAt ?? new Date().toISOString(),
       }));
       if (completed) {
         this.broadcast({ type: "SUMMARY_READY", meetingId, summary: result.summary, actionItems: result.actionItems });
@@ -524,8 +555,13 @@ export class BackgroundController {
     }
   }
 
-  testProviderKey(provider: ProviderKind, key: string): Promise<{ valid: boolean; message: string }> {
-    return this.client.testProviderKey(provider, key);
+  /**
+   * Meet keys are used by this extension, so they are checked with a direct
+   * provider call. Only keys destined for the desktop helper are checked by it.
+   */
+  testProviderKey(provider: ProviderKind, key: string, options: { desktop?: boolean } = {}): Promise<{ valid: boolean; message: string }> {
+    if (options.desktop) return this.client.testProviderKey(provider, key);
+    return testProviderKeyDirect(provider, key, this.fetchImpl);
   }
 
   getAudioPreflight(): Promise<AudioStatus> {
@@ -574,6 +610,7 @@ export class BackgroundController {
     const latestRecord = activeRecord ? null : ((await listMeetings(1))[0] ?? null);
     return {
       helperStatus: this.helperStatus,
+      processingKind: settings.processingMode.kind,
       onboardingComplete: settings.onboardingComplete,
       consentAcknowledged: settings.consentDisclosureAcknowledged,
       widgetEnabled: settings.showMeetWidget !== false,

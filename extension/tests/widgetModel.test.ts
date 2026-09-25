@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { WidgetState } from "../src/lib/internalMessages";
-import { DONE_CARD_WINDOW_MS, canStart, deriveView, formatElapsed, helperNotice, type WidgetUi } from "../src/content/widgetModel";
+import { DONE_CARD_WINDOW_MS, canStart, deriveView, formatElapsed, type WidgetUi } from "../src/content/widgetModel";
 
 const NOW = Date.parse("2026-09-24T12:00:00.000Z");
 const ui = (overrides: Partial<WidgetUi> = {}): WidgetUi => ({ starting: false, error: null, dismissedMeetingId: null, contextLost: false, ...overrides });
 const state = (overrides: Partial<WidgetState> = {}): WidgetState => ({
   helperStatus: "connected",
+  processingKind: "local_byok",
   onboardingComplete: true,
   consentAcknowledged: true,
   widgetEnabled: true,
@@ -69,13 +70,6 @@ describe("widget helpers", () => {
     expect(canStart(state())).toBe(true);
     expect(canStart(state({ helperStatus: "helper_not_found" }))).toBe(true);
     expect(canStart(null)).toBe(false);
-  });
-
-  it("does not surface desktop-helper status for a completed Meet setup", () => {
-    expect(helperNotice(state())).toBeNull();
-    expect(helperNotice(state({ helperStatus: "connecting", onboardingComplete: false, consentAcknowledged: false }))).toMatch(/connecting/i);
-    expect(helperNotice(state({ helperStatus: "incompatible", onboardingComplete: false, consentAcknowledged: false }))).toMatch(/update/i);
-    expect(helperNotice(state({ helperStatus: "helper_not_found", onboardingComplete: false, consentAcknowledged: false }))).toMatch(/isn't running/i);
   });
 
   it("formats elapsed time", () => {

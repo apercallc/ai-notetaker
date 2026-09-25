@@ -6,8 +6,11 @@ description: Coordinate a versioned release of AI Notetaker across the desktop h
 # Notetaker Release
 
 The helper and extension talk to each other over Native Messaging with a
-version-checked handshake (see the architecture spec at
-`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`, §3.2).
+version-checked handshake (see `docs/native-messaging-protocol.md` and the
+target design at
+`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`).
+Google Meet recording does not use the helper, but desktop-call recording does,
+so the pair must still ship in lockstep.
 Shipping one without the other — or shipping them at different versions —
 breaks that handshake for anyone who updates one half and not the other.
 This skill keeps them moving together.

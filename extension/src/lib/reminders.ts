@@ -4,6 +4,15 @@ import type { RemindedCall } from "./storage";
 import type { NotetakerSettings } from "../types";
 
 export const REMINDER_ALARM = "ai-notetaker-meet-reminder";
+/**
+ * How often the calendar is checked. The reminder window (see calendar.ts:
+ * REMINDER_LEAD_MS before start to REMINDER_GRACE_MS after) is wider than this,
+ * so a call is never missed, and a check costs a network request plus a
+ * service-worker wake-up, so once every few minutes is the right trade.
+ */
+export const REMINDER_POLL_MINUTES = 5;
+/** Label of the notification's action button. */
+export const REMINDER_BUTTON_OPEN = "Open call";
 const REMINDED_RETENTION_MS = 24 * 60 * 60_000;
 
 export interface ReminderDeps {
@@ -25,7 +34,7 @@ export function reminderId(event: CalendarEvent): string {
 export function reminderCopy(event: CalendarEvent): { title: string; message: string } {
   return {
     title: `${event.title || "Your call"} is starting`,
-    message: "Click to open the call, then click the Notetaker icon once and press Start.",
+    message: "Open the call, then press Start on the Notetaker pill to take notes.",
   };
 }
 

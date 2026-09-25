@@ -206,6 +206,8 @@ export interface TranscriptSegment {
   isFinal: boolean;
   /** Absent on segments recorded before this field existed. */
   utteranceId?: number;
+  /** Milliseconds since the call started, when available from browser capture. */
+  offsetMs?: number;
 }
 
 export interface ActionItem {

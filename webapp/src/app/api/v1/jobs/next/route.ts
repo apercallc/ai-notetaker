@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
 import { ManagedWorkerError, nextManagedJob, runManagedJob } from "@/lib/managedWorker";
 import { managedHostingEnabled } from "@/lib/managedAuth";
+import { isValidWorkerToken } from "@/lib/secureCompare";
 
 /**
  * Worker-polling endpoint for deployments without an external queue product.
@@ -11,8 +12,7 @@ import { managedHostingEnabled } from "@/lib/managedAuth";
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
   if (!managedHostingEnabled()) return NextResponse.json({ error: "managed hosting is disabled", requestId }, { status: 404, headers: { "x-request-id": requestId } });
-  const workerToken = process.env.MANAGED_WORKER_TOKEN;
-  if (!workerToken || request.headers.get("x-worker-token") !== workerToken) {
+  if (!isValidWorkerToken(request.headers.get("x-worker-token"))) {
     return NextResponse.json({ error: "worker authentication required", requestId }, { status: 401, headers: { "x-request-id": requestId } });
   }
 

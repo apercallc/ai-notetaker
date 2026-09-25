@@ -1,32 +1,92 @@
 import Link from "next/link";
-import { listActionItems, MAX_ACTION_ITEMS_PER_PAGE } from "@/lib/meetings";
+import { listActionItems } from "@/lib/meetings";
 import { requireSession } from "@/lib/currentUser";
-import { updateActionItemAction } from "@/app/meetings/[id]/actions";
-import { ActionDoneCheckbox } from "@/components/ActionDoneCheckbox";
+import { ActionItemRow } from "@/components/ActionItemRow";
 
 type ActionStatus = "open" | "done";
 
-function formatDate(iso: Date): string {
-  return iso.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+/**
+ * The "mine" filter matches action items recorded by this user that are
+ * unassigned or whose owner text plausibly names them: the speaker label
+ * ("You"), a bare "me", or any part of their email address ("dana@x.co",
+ * "dana.smith", "dana", "smith"). Managed processing copies the owner
+ * straight from diarization labels, so this is deliberately fuzzy.
+ */
+function ownerNamesFromEmail(email: string): string[] {
+  const names = new Set(["you", "me", email.toLowerCase()]);
+  const local = email.split("@")[0]?.toLowerCase() ?? "";
+  if (local) {
+    names.add(local);
+    for (const part of local.split(/[._-]+/).filter(Boolean)) names.add(part);
+  }
+  return [...names];
 }
 
-function dateInputValue(date: Date | null): string {
-  return date ? date.toISOString().slice(0, 10) : "";
+interface Filters {
+  status?: ActionStatus;
+  mine?: boolean;
+  overdue?: boolean;
+  cursor?: string;
+}
+
+function parseFilters(raw: { status?: string; mine?: string; overdue?: string; cursor?: string }): Filters {
+  const status: ActionStatus | undefined = raw.status === "open" || raw.status === "done" ? raw.status : undefined;
+  return {
+    status,
+    mine: raw.mine === "1",
+    overdue: raw.overdue === "1",
+    cursor: raw.cursor || undefined,
+  };
+}
+
+/**
+ * Builds a filter link that flips one control while keeping the rest. A
+ * control that is already active drops out of its own toggle link so it
+ * can be clicked again to turn itself off.
+ */
+function filterHref(current: Filters, change: Partial<Filters>): string {
+  const merged: Filters = {
+    status: "status" in change ? change.status : current.status,
+    mine: "mine" in change ? change.mine : current.mine,
+    overdue: "overdue" in change ? change.overdue : current.overdue,
+  };
+  const params = new URLSearchParams();
+  if (merged.status) params.set("status", merged.status);
+  if (merged.mine) params.set("mine", "1");
+  if (merged.overdue) params.set("overdue", "1");
+  const query = params.toString();
+  return query ? `/actions?${query}` : "/actions";
+}
+
+export async function generateMetadata({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  const { status } = await searchParams;
+  return { title: status === "open" ? "Open action items" : status === "done" ? "Completed action items" : "Action items" };
 }
 
 export default async function ActionItemsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; error?: string }>;
+  searchParams: Promise<{ status?: string; mine?: string; overdue?: string; cursor?: string }>;
 }) {
-  const { workspaceId } = await requireSession();
-  const { status: rawStatus, error } = await searchParams;
-  const status: ActionStatus | undefined = rawStatus === "open" || rawStatus === "done" ? rawStatus : undefined;
-  const items = await listActionItems(workspaceId, status);
+  const session = await requireSession();
+  const filters = parseFilters(await searchParams);
+  const page = await listActionItems(session.workspaceId, {
+    status: filters.status,
+    overdue: filters.overdue,
+    mine: filters.mine ? { userId: session.userId, names: ownerNamesFromEmail(session.email) } : undefined,
+    cursor: filters.cursor,
+  });
 
-  function filterHref(nextStatus?: ActionStatus): string {
-    return nextStatus ? `/actions?status=${nextStatus}` : "/actions";
-  }
+  const nextHref = page.nextCursor
+    ? (() => {
+        const params = new URLSearchParams();
+        if (filters.status) params.set("status", filters.status);
+        if (filters.mine) params.set("mine", "1");
+        if (filters.overdue) params.set("overdue", "1");
+        params.set("cursor", page.nextCursor);
+        return `/actions?${params.toString()}`;
+      })()
+    : null;
 
   return (
     <div className="container">
@@ -35,62 +95,51 @@ export default async function ActionItemsPage({
           <Link href="/meetings" className="back-link">← Meetings</Link>
           <h1>Action items</h1>
         </div>
-        <span className="total-count">{items.length} shown</span>
+        <span className="total-count">{page.items.length} of {page.total} shown</span>
       </div>
 
-      {items.length === MAX_ACTION_ITEMS_PER_PAGE && (
-        // Otherwise "500 shown" silently reads as "500 exist" — the reader
-        // has no way to tell the list was truncated.
-        <p className="muted-copy">
-          Showing the first {MAX_ACTION_ITEMS_PER_PAGE}. Filter by status, or open a meeting to see the rest.
-        </p>
-      )}
-
       <nav className="filter-links" aria-label="Action item filters">
-        <Link href={filterHref()} aria-current={!status ? "page" : undefined}>All</Link>
-        <Link href={filterHref("open")} aria-current={status === "open" ? "page" : undefined}>Open</Link>
-        <Link href={filterHref("done")} aria-current={status === "done" ? "page" : undefined}>Done</Link>
+        <Link href={filterHref(filters, { status: undefined })} aria-current={!filters.status ? "page" : undefined}>All</Link>
+        <Link href={filterHref(filters, { status: "open" })} aria-current={filters.status === "open" ? "page" : undefined}>Open</Link>
+        <Link href={filterHref(filters, { status: "done" })} aria-current={filters.status === "done" ? "page" : undefined}>Done</Link>
+        <Link href={filterHref(filters, { overdue: !filters.overdue })} aria-current={filters.overdue ? "page" : undefined}>Overdue</Link>
+        <Link href={filterHref(filters, { mine: !filters.mine })} aria-current={filters.mine ? "page" : undefined}>Mine</Link>
       </nav>
 
-      {error && (
-        <p className="error-text" role="alert">
-          {error === "missing-action" ? "That action item no longer exists." : "We could not save that action item. Check the date and try again."}
-        </p>
-      )}
-
-      {items.length === 0 ? (
+      {page.items.length === 0 ? (
         <p className="empty-state">
-          {status === "done" ? "No completed action items yet." : status === "open" ? "You are all caught up." : "Action items from your meetings will appear here."}
+          {filters.overdue
+            ? "Nothing is overdue. Nice."
+            : filters.status === "done"
+              ? "No completed action items yet."
+              : filters.mine
+                ? "No action items assigned to you."
+                : filters.status === "open"
+                  ? "You are all caught up."
+                  : "Action items from your meetings will appear here."}
         </p>
       ) : (
         <ul className="action-inbox" aria-label="Action items">
-          {items.map((item) => (
-            <li key={item.id} className={`action-inbox-row ${item.status === "done" ? "is-done" : ""}`}>
-              <form action={updateActionItemAction} className="action-inbox-form">
-                <input type="hidden" name="id" value={item.id} />
-                <input type="hidden" name="meetingId" value={item.meeting.id} />
-                <ActionDoneCheckbox
-                  name="done"
-                  label={`Mark "${item.text}" ${item.status === "done" ? "open" : "done"}`}
-                  defaultChecked={item.status === "done"}
-                />
-                <div className="action-content">
-                  <div className="action-title">{item.text}</div>
-                  <div className="action-context">
-                    <Link href={`/meetings/${item.meeting.id}`}>{item.meeting.title}</Link>
-                    {item.owner ? <span> · {item.owner}</span> : null}
-                    <span> · {formatDate(item.meeting.startedAt)}</span>
-                  </div>
-                </div>
-                <label className="action-due-label">
-                  <span>Due</span>
-                  <input type="date" name="dueAt" defaultValue={dateInputValue(item.dueAt)} aria-label={`Due date for ${item.text}`} />
-                </label>
-                <button type="submit" className="button button-secondary action-save">Save</button>
-              </form>
-            </li>
+          {page.items.map((item) => (
+            <ActionItemRow
+              key={item.id}
+              id={item.id}
+              meetingId={item.meetingId}
+              surface="actions"
+              text={item.text}
+              owner={item.owner}
+              initialDone={item.status === "done"}
+              initialDueAt={item.dueAt?.toISOString() ?? null}
+              meeting={{ id: item.meeting.id, title: item.meeting.title, startedAt: item.meeting.startedAt.toISOString() }}
+            />
           ))}
         </ul>
+      )}
+
+      {nextHref && (
+        <nav className="pagination" aria-label="Pagination">
+          <Link href={nextHref}>Next page →</Link>
+        </nav>
       )}
     </div>
   );

@@ -11,55 +11,64 @@ const helperState = {
   consentAcknowledged: false,
 };
 
+async function loadWizard(url: string, beforeLoad?: () => Promise<void> | void): Promise<void> {
+  vi.resetModules();
+  document.body.innerHTML = '<main id="app"></main>';
+  window.history.replaceState({}, "", url);
+  chromeMock.reset();
+  chromeMock.runtime.sendMessage.mockResolvedValue(helperState);
+  chromeMock.runtime.onMessage.addListener.mockReset();
+  await beforeLoad?.();
+  await import("../src/onboarding/onboarding");
+}
+
 describe("onboarding entry point", () => {
   beforeEach(() => {
-    document.body.innerHTML = '<main id="app"></main>';
-    window.history.replaceState({}, "", "/onboarding/onboarding.html?mode=desktop");
-    chromeMock.reset();
-    chromeMock.runtime.sendMessage.mockResolvedValue(helperState);
-    chromeMock.runtime.onMessage.addListener.mockReset();
+    vi.restoreAllMocks();
   });
 
-  it("keeps a stale desktop onboarding URL on Meet-first setup", async () => {
-    await import("../src/onboarding/onboarding");
+  it("keeps a stale desktop onboarding URL on the Meet-first single setup screen", async () => {
+    await loadWizard("/onboarding/onboarding.html?mode=desktop");
 
     await vi.waitFor(() => {
-      expect(document.querySelector("#meeting-app")).not.toBeNull();
+      expect(document.querySelector("#onboarding-form")).not.toBeNull();
     });
 
-    expect(document.querySelector<HTMLSelectElement>("#meeting-app")?.value).toBe("google-meet");
+    // Meet path: one setup screen, no helper installer, no meeting-app detour.
     expect(document.querySelector("#download-helper")).toBeNull();
-    expect(document.querySelector("h1")?.textContent).toContain("Choose where");
-    expect(document.body.textContent).toContain("Google Meet uses the browser path");
+    expect(document.querySelector("#meeting-app")).toBeNull();
+    expect(document.querySelector("#use-desktop")).not.toBeNull();
+    expect(document.querySelector("#onboarding-mode-local")).not.toBeNull();
+    expect(document.querySelector("#allow-microphone")).not.toBeNull();
+    expect(document.querySelector("#consent-ack")).not.toBeNull();
+    expect(document.querySelector("h1")?.textContent).toContain("Set up Notetaker");
   });
 
   it("rejects a copied desktop URL without an explicit session intent", async () => {
-    vi.resetModules();
-    document.body.innerHTML = '<main id="app"></main>';
-    window.history.replaceState({}, "", "/onboarding/onboarding.html?mode=desktop&source=desktop");
-    chromeMock.reset();
-    chromeMock.runtime.sendMessage.mockResolvedValue(helperState);
+    await loadWizard("/onboarding/onboarding.html?mode=desktop&source=desktop");
 
-    await import("../src/onboarding/onboarding");
-
-    await vi.waitFor(() => expect(document.querySelector("#meeting-app")).not.toBeNull());
-    expect(document.querySelector<HTMLSelectElement>("#meeting-app")?.value).toBe("google-meet");
+    await vi.waitFor(() => expect(document.querySelector("#onboarding-form")).not.toBeNull());
     expect(document.querySelector("#download-helper")).toBeNull();
+    expect(document.querySelector("#use-desktop")).not.toBeNull();
   });
 
   it("honors the short-lived intent created by explicit desktop setup", async () => {
-    vi.resetModules();
-    document.body.innerHTML = '<main id="app"></main>';
-    window.history.replaceState({}, "", "/onboarding/onboarding.html?mode=desktop&source=desktop");
-    chromeMock.reset();
-    chromeMock.runtime.sendMessage.mockResolvedValue(helperState);
-    await new Promise<void>((resolve) => chromeMock.storage.session.set({ "notetaker.desktopOnboardingIntentAt": Date.now() }, resolve));
+    await loadWizard("/onboarding/onboarding.html?mode=desktop&source=desktop", () => {
+      return new Promise<void>((resolve) => chromeMock.storage.session.set({ "notetaker.desktopOnboardingIntentAt": Date.now() }, resolve));
+    });
 
-    await import("../src/onboarding/onboarding");
-
-    await vi.waitFor(() => expect(document.querySelector("#meeting-app")).not.toBeNull());
-    expect(document.querySelector<HTMLSelectElement>("#meeting-app")?.value).toBe("other");
-    expect(document.querySelector("#download-helper")).not.toBeNull();
+    await vi.waitFor(() => expect(document.querySelector("#download-helper")).not.toBeNull());
+    // Desktop detour starts at the helper step and hides the Meet mic section.
+    expect(document.querySelector("h1")?.textContent).toContain("desktop calls");
+    expect(document.querySelector("#allow-microphone")).toBeNull();
+    expect(document.querySelector("#use-meet")).not.toBeNull();
     expect(chromeMock.storage.session._dump()).toEqual({});
+  });
+
+  it("lets the mic section be skipped only on the desktop detour", async () => {
+    await loadWizard("/onboarding/onboarding.html");
+
+    await vi.waitFor(() => expect(document.querySelector("#onboarding-form")).not.toBeNull());
+    expect(document.querySelector<HTMLButtonElement>("#use-desktop")?.textContent).toContain("Zoom, Teams, or Slack");
   });
 });

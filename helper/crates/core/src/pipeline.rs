@@ -157,7 +157,7 @@ impl Pipeline {
         if let Err(e) = self.store.append_audio(meeting_id, channel_file, pcm16) {
             return vec![HelperToExtension::Error {
                 meeting_id: Some(meeting_id),
-                code: ErrorCode::DeviceNotFound,
+                code: e.error_code(),
                 message: format!("failed to persist audio to disk: {e}"),
             }];
         }
@@ -461,7 +461,7 @@ impl Pipeline {
             Err(error) => {
                 return vec![HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("failed to persist transcription retry: {error}"),
                 }]
             }
@@ -493,7 +493,7 @@ impl Pipeline {
                         let _ = self.retry_queue.record_failure(retry_job_id, Utc::now());
                         messages.push(HelperToExtension::Error {
                             meeting_id: Some(meeting_id),
-                            code: ErrorCode::DeviceNotFound,
+                            code: ErrorCode::StorageError,
                             message: format!(
                                 "transcript could not be persisted; queued for retry: {error}"
                             ),
@@ -634,7 +634,7 @@ impl Pipeline {
             Err(error) => {
                 return vec![HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("could not reload transcript for summary: {error}"),
                 }]
             }
@@ -648,7 +648,7 @@ impl Pipeline {
                 if let Err(error) = self.store.write_summary(meeting_id, &summary) {
                     return vec![HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not persist summary: {error}"
                         ),
@@ -657,7 +657,7 @@ impl Pipeline {
                 if let Err(error) = self.store.mark_processed(meeting_id) {
                     return vec![HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not finalize meeting: {error}"
                         ),
@@ -739,7 +739,7 @@ impl Pipeline {
                         let _ = self.retry_queue.record_failure(job_id, now);
                         messages.push(HelperToExtension::Error {
                             meeting_id: Some(job.meeting_id),
-                            code: ErrorCode::DeviceNotFound,
+                            code: ErrorCode::StorageError,
                             message: format!("retry could not read saved audio: {error}"),
                         });
                         continue;
@@ -786,7 +786,7 @@ impl Pipeline {
                                 matches!(self.retry_queue.record_failure(job_id, now), Ok(Some(_)));
                             messages.push(HelperToExtension::Error {
                                 meeting_id: Some(job.meeting_id),
-                                code: ErrorCode::DeviceNotFound,
+                                code: ErrorCode::StorageError,
                                 message: format!(
                                     "transcript could not be persisted; queued for retry: {error}"
                                 ),
@@ -845,7 +845,7 @@ impl Pipeline {
             Err(error) => {
                 return Some(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("could not reload transcript after retry: {error}"),
                 });
             }
@@ -859,7 +859,7 @@ impl Pipeline {
                 if let Err(error) = self.store.write_summary(meeting_id, &summary) {
                     return Some(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not persist summary: {error}"
                         ),
@@ -868,7 +868,7 @@ impl Pipeline {
                 if let Err(error) = self.store.mark_processed(meeting_id) {
                     return Some(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not finalize meeting: {error}"
                         ),
@@ -900,6 +900,14 @@ impl Pipeline {
 pub enum PipelineError {
     #[error("storage error: {0}")]
     Storage(#[from] crate::storage::StorageError),
+}
+
+impl PipelineError {
+    pub fn error_code(&self) -> ErrorCode {
+        match self {
+            PipelineError::Storage(error) => error.error_code(),
+        }
+    }
 }
 
 #[cfg(test)]

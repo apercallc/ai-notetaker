@@ -62,11 +62,14 @@ function storageRemove(keys: string | string[]): Promise<void> {
 
 export async function getSettings(): Promise<NotetakerSettings> {
   const stored = await storageGet<NotetakerSettings>(KEYS.settings);
-  if (!stored) return DEFAULT_SETTINGS;
+  // Callers mutate the settings they get back (onboarding edits it in place),
+  // so never hand out DEFAULT_SETTINGS itself or any array/object inside it.
+  const defaults = structuredClone(DEFAULT_SETTINGS);
+  if (!stored) return defaults;
   return {
-    ...DEFAULT_SETTINGS,
+    ...defaults,
     ...stored,
-    apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...(stored.apiKeys ?? {}) },
+    apiKeys: { ...defaults.apiKeys, ...(stored.apiKeys ?? {}) },
     processingMode:
       stored.processingMode?.kind === "managed" &&
       stored.managedService &&
@@ -90,18 +93,18 @@ export async function getSettings(): Promise<NotetakerSettings> {
             workspaceId: typeof stored.managedService.workspaceId === "string" ? stored.managedService.workspaceId : "",
             plan: typeof stored.managedService.plan === "string" ? stored.managedService.plan : "free",
           }
-        : DEFAULT_SETTINGS.managedService,
-    defaultMeetingMode: stored.defaultMeetingMode ?? DEFAULT_SETTINGS.defaultMeetingMode,
+        : defaults.managedService,
+    defaultMeetingMode: stored.defaultMeetingMode ?? defaults.defaultMeetingMode,
     customVocabulary: Array.isArray(stored.customVocabulary)
       ? stored.customVocabulary.filter((term): term is string => typeof term === "string").slice(0, 100)
-      : DEFAULT_SETTINGS.customVocabulary,
+      : defaults.customVocabulary,
     customSummaryInstructions:
       typeof stored.customSummaryInstructions === "string"
         ? stored.customSummaryInstructions.slice(0, 4_000)
-        : DEFAULT_SETTINGS.customSummaryInstructions,
-    showMeetWidget: typeof stored.showMeetWidget === "boolean" ? stored.showMeetWidget : DEFAULT_SETTINGS.showMeetWidget,
-    calendarReminders: typeof stored.calendarReminders === "boolean" ? stored.calendarReminders : DEFAULT_SETTINGS.calendarReminders,
-    drive: stored.drive && typeof stored.drive === "object" ? stored.drive : DEFAULT_SETTINGS.drive,
+        : defaults.customSummaryInstructions,
+    showMeetWidget: typeof stored.showMeetWidget === "boolean" ? stored.showMeetWidget : defaults.showMeetWidget,
+    calendarReminders: typeof stored.calendarReminders === "boolean" ? stored.calendarReminders : defaults.calendarReminders,
+    drive: stored.drive && typeof stored.drive === "object" ? stored.drive : defaults.drive,
   };
 }
 

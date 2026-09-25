@@ -1,6 +1,8 @@
 "use client";
 
 import { speakerLabel, type MeetingDetailResponse } from "@/lib/types";
+import { actionItemLine } from "@/lib/actionItems";
+import { modeLabel } from "@/lib/meetingText";
 
 function safeFilename(title: string, extension: string): string {
   const normalized = title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "meeting";
@@ -13,14 +15,14 @@ function markdownFor(meeting: MeetingDetailResponse): string {
     "",
     `Started: ${meeting.startedAt}`,
     `Ended: ${meeting.endedAt}`,
-    `Mode: ${meeting.mode.replaceAll("_", " ")}`,
+    ...(modeLabel(meeting.mode) ? [`Mode: ${modeLabel(meeting.mode)}`] : []),
     "",
     "## Summary",
     meeting.summary || "_No summary available._",
     "",
     "## Action Items",
     ...(meeting.actionItems.length
-      ? meeting.actionItems.map((item) => `- [${item.status === "done" ? "x" : " "}] ${item.text}${item.owner ? ` (${item.owner})` : ""}${item.dueAt ? ` — due ${item.dueAt.slice(0, 10)}` : ""}`)
+      ? meeting.actionItems.map(actionItemLine)
       : ["_None_"]),
     "",
     "## Transcript",
@@ -33,7 +35,7 @@ function plainTextFor(meeting: MeetingDetailResponse): string {
     meeting.title,
     `Started: ${meeting.startedAt}`,
     `Ended: ${meeting.endedAt}`,
-    `Mode: ${meeting.mode.replaceAll("_", " ")}`,
+    ...(modeLabel(meeting.mode) ? [`Mode: ${modeLabel(meeting.mode)}`] : []),
     "",
     "SUMMARY",
     meeting.summary || "No summary available.",
@@ -73,10 +75,10 @@ export function ExportButtons({ meeting }: { meeting: MeetingDetailResponse }) {
         Print / Save PDF
       </button>
       {meeting.recordingAvailable && meeting.recordingChannels.includes("mic") && (
-        <a className="button button-secondary" href={`/meetings/${encodeURIComponent(meeting.id)}/recording?channel=mic`}>Download mic WAV</a>
+        <a className="button button-secondary" href={`/meetings/${encodeURIComponent(meeting.id)}/recording?channel=mic&download=1`}>Download mic WAV</a>
       )}
       {meeting.recordingAvailable && meeting.recordingChannels.includes("speaker") && (
-        <a className="button button-secondary" href={`/meetings/${encodeURIComponent(meeting.id)}/recording?channel=speaker`}>Download speaker WAV</a>
+        <a className="button button-secondary" href={`/meetings/${encodeURIComponent(meeting.id)}/recording?channel=speaker&download=1`}>Download speaker WAV</a>
       )}
     </div>
   );

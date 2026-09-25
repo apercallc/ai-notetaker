@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT, describeCaptureFailure, handleMeetCommand, startMeetRecording, stopMeetRecording } from "../src/meet/session";
+import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT, describeCaptureFailure, finishMeetCaptureForTab, handleMeetCommand, startMeetRecording, stopMeetRecording } from "../src/meet/session";
 import type { BackgroundController } from "../src/lib/backgroundController";
 import type { MeetCaptureController } from "../src/meet/meetCapture";
 import { chromeMock } from "./setup";
@@ -8,14 +8,18 @@ function fakes(active: { id: string } | null = null) {
   const controller = {
     startRecording: vi.fn(async () => "m1"),
     failRecording: vi.fn(async () => undefined),
-    stopRecording: vi.fn(async () => undefined),
+    stopRecording: vi.fn(async (_id: string): Promise<void> => undefined),
     addBookmark: vi.fn(async () => true),
+    reportStartFailure: vi.fn(),
+    abortStart: vi.fn(async () => undefined),
     getState: vi.fn(() => ({ activeMeeting: active })),
   };
   const capture = {
     start: vi.fn(async () => undefined),
     stop: vi.fn(async () => undefined),
     isActive: vi.fn(() => true),
+    preflight: vi.fn(async () => undefined),
+    stopForTab: vi.fn(async () => [] as string[]),
   };
   return { controller, capture, asTypes: () => [controller as unknown as BackgroundController, capture as unknown as MeetCaptureController] as const };
 }
@@ -80,22 +84,36 @@ describe("startMeetRecording", () => {
     expect(capture.start).not.toHaveBeenCalled();
   });
 
-  it("fails the meeting when there is no tab to capture", async () => {
+  it("reports the failure without creating a meeting when there is no tab to capture", async () => {
     const { controller, capture, asTypes } = fakes();
     const [c, k] = asTypes();
 
     expect(await startMeetRecording(c, k, { tabId: undefined })).toBe("");
-    expect(controller.failRecording).toHaveBeenCalledWith("m1", expect.stringMatching(/active Google Meet tab/));
+    expect(controller.reportStartFailure).toHaveBeenCalledWith("Open the Google Meet call in this tab first, then start notes.");
+    expect(controller.startRecording).not.toHaveBeenCalled();
+    expect(controller.failRecording).not.toHaveBeenCalled();
     expect(capture.start).not.toHaveBeenCalled();
   });
 
-  it("fails the meeting with the shortcut hint when Chrome refuses capture", async () => {
+  it("reports a preflight refusal before any meeting record exists", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.preflight.mockRejectedValue(new Error("Extension has not been invoked for the current page"));
+    const [c, k] = asTypes();
+
+    expect(await startMeetRecording(c, k, { tabId: 9 })).toBe("");
+    expect(controller.reportStartFailure).toHaveBeenCalledWith(CAPTURE_PERMISSION_HINT);
+    expect(controller.startRecording).not.toHaveBeenCalled();
+    expect(controller.abortStart).not.toHaveBeenCalled();
+  });
+
+  it("aborts a start whose capture fails after the meeting was created, leaving no failed meeting", async () => {
     const { controller, capture, asTypes } = fakes();
     capture.start.mockRejectedValue(new Error("Extension has not been invoked for the current page"));
     const [c, k] = asTypes();
 
     expect(await startMeetRecording(c, k, { tabId: 9 })).toBe("");
-    expect(controller.failRecording).toHaveBeenCalledWith("m1", CAPTURE_PERMISSION_HINT);
+    expect(controller.abortStart).toHaveBeenCalledWith("m1", CAPTURE_PERMISSION_HINT);
+    expect(controller.failRecording).not.toHaveBeenCalled();
   });
 });
 
@@ -117,6 +135,44 @@ describe("stopMeetRecording", () => {
     await stopMeetRecording(c, k, "m1");
     expect(capture.stop).not.toHaveBeenCalled();
     expect(controller.stopRecording).toHaveBeenCalledWith("m1");
+  });
+});
+
+describe("finishMeetCaptureForTab", () => {
+  it("finalizes the meetings a closed tab was recording, instead of failing them", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.stopForTab.mockResolvedValue(["m1", "m2"]);
+    const [c, k] = asTypes();
+
+    await finishMeetCaptureForTab(c, k, 9);
+
+    expect(capture.stopForTab).toHaveBeenCalledWith(9, undefined);
+    expect(controller.stopRecording).toHaveBeenCalledWith("m1");
+    expect(controller.stopRecording).toHaveBeenCalledWith("m2");
+    expect(controller.failRecording).not.toHaveBeenCalled();
+  });
+
+  it("passes the next URL along so a same-call navigation can be ignored", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.stopForTab.mockResolvedValue([]);
+    const [c, k] = asTypes();
+
+    await finishMeetCaptureForTab(c, k, 9, "https://meet.google.com/abc-defg-hij?cls=10");
+
+    expect(capture.stopForTab).toHaveBeenCalledWith(9, "https://meet.google.com/abc-defg-hij?cls=10");
+    expect(controller.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("keeps finalizing the other meetings when one teardown fails", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.stopForTab.mockResolvedValue(["m1", "m2"]);
+    controller.stopRecording.mockImplementation(async (id: string) => {
+      if (id === "m1") throw new Error("gone");
+    });
+    const [c, k] = asTypes();
+
+    await expect(finishMeetCaptureForTab(c, k, 9)).resolves.toBeUndefined();
+    expect(controller.stopRecording).toHaveBeenCalledWith("m2");
   });
 });
 

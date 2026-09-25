@@ -11,7 +11,7 @@
       "strict_min_version": "121.0"
     }
   },
-  "permissions": ["storage", "nativeMessaging", "alarms", "identity", "activeTab", "tabCapture", "offscreen", "notifications"],
+  "permissions": ["storage", "nativeMessaging", "alarms", "identity", "activeTab", "tabCapture", "offscreen", "notifications", "unlimitedStorage"],
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js",

@@ -36,7 +36,7 @@ describe("manifest.json cross-browser fields", () => {
 
   it("asks only for the permissions the features need", () => {
     expect([...manifest.permissions].sort()).toEqual(
-      ["activeTab", "alarms", "identity", "nativeMessaging", "notifications", "offscreen", "storage", "tabCapture"].sort(),
+      ["activeTab", "alarms", "identity", "nativeMessaging", "notifications", "offscreen", "storage", "tabCapture", "unlimitedStorage"].sort(),
     );
     expect(manifest.host_permissions).toContain("https://meet.google.com/*");
   });

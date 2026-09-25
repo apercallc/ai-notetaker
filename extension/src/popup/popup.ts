@@ -1,6 +1,7 @@
 import { getMeeting, getSettings, listMeetings } from "../lib/storage";
+import { createStopConfirm, STOP_CONFIRM_LABEL, STOP_LABEL } from "../lib/stopConfirm";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
-import { speakerLabel, type AudioProbeResult, type AudioStatus, type CaptureSource, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
+import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
 import { getExtensionOnboardingUrl } from "../lib/install";
 import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
@@ -8,6 +9,11 @@ import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
 let historyQuery = "";
+/** Set when the person says they are recording a desktop call (Zoom, Teams, Slack) rather than Google Meet. */
+let desktopChosen = false;
+/** Why the last start did not begin; shown in place, since the popup has no other channel for it. */
+let startError = "";
+const MEET_HOME = "https://meet.google.com/";
 
 function onboardingUrl(): string {
   return getExtensionOnboardingUrl(chrome.runtime.getURL(""));
@@ -36,9 +42,9 @@ async function sendToBackground<T>(message: unknown): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
 }
 
-function formatRelativeDate(iso: string): string {
+function formatMeetingTime(iso: string): string {
   const date = new Date(iso);
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 // A precise gear glyph at small sizes, unlike a raw emoji (which renders
@@ -63,10 +69,9 @@ async function renderOnboardingPrompt(): Promise<void> {
   app.innerHTML = `
     ${renderHeader(false)}
     <div class="empty-state">
-      <h2>Record calls without a bot</h2>
-      <p>Start with Google Meet browser capture, or choose a desktop call during setup. Choose free local BYOK or Hosted AI after you pick where you will record.</p>
-      <button class="primary" id="start-onboarding">Start with Google Meet</button>
-      <p class="field-hint text-secondary">You can switch to Zoom, Teams, Slack, or another desktop call in the next step.</p>
+      <h2>Take notes on your calls, no bot</h2>
+      <p>Setup takes about a minute: add your AI keys (or sign in to Hosted AI), allow the microphone, and you're ready for your next Google Meet.</p>
+      <button class="primary" id="start-onboarding">Set up Notetaker</button>
     </div>
   `;
   document.getElementById("start-onboarding")?.addEventListener("click", () => {
@@ -78,7 +83,7 @@ async function renderRecoverableBanner(recoverableMeeting: NonNullable<Backgroun
   const container = document.createElement("div");
   container.className = "banner recoverable";
   container.innerHTML = `
-    <p><strong>Unfinished recording found.</strong> It looks like the helper was interrupted while recording a meeting started ${formatRelativeDate(recoverableMeeting.startedAt)}.</p>
+    <p><strong>Unfinished recording found.</strong> A recording started ${escapeHtml(formatMeetingTime(recoverableMeeting.startedAt))} was interrupted. Resume it, or discard it.</p>
     <div class="banner-actions">
       <button class="primary" id="resume-recording">Resume</button>
       <button class="secondary" id="discard-recording">Discard</button>
@@ -126,47 +131,65 @@ function appendTranscriptLine(
   container.scrollTop = container.scrollHeight;
 }
 
-async function renderActiveRecording(meetingId: string): Promise<void> {
+async function renderActiveRecording(meetingId: string, helperStatus: BackgroundState["helperStatus"]): Promise<void> {
   const meeting = await getMeeting(meetingId);
+  // Live captions come from the desktop helper; a browser-only recording is
+  // written up when it stops.
+  const liveCaptions = helperStatus === "connected";
   app.innerHTML = `
     ${renderHeader(true)}
     <div class="record-controls">
       <span class="recording-indicator">Recording</span>
-      <button class="danger record-toggle" id="stop-recording">Stop</button>
+      <button class="danger record-toggle" id="stop-recording">${STOP_LABEL}</button>
     </div>
-    <p id="recording-status" class="text-secondary" role="status" aria-live="polite"></p>
-    <div class="transcript-view" id="transcript-view" role="log" aria-label="Live transcript"></div>
+    <p id="recording-status" class="text-secondary" role="status" aria-live="polite">${liveCaptions ? "" : "Your notes are written when you stop. Live captions need the desktop helper."}</p>
+    ${liveCaptions ? `<div class="transcript-view" id="transcript-view" role="log" aria-label="Live transcript"></div>` : ""}
   `;
-  const transcriptView = document.getElementById("transcript-view")!;
-  for (const segment of meeting?.transcript ?? []) {
-    appendTranscriptLine(transcriptView, segment.speaker, segment.text, segment.isFinal, segment.utteranceId);
-  }
-  document.getElementById("stop-recording")?.addEventListener("click", async () => {
-    try {
-      await sendToBackground({ type: "STOP_RECORDING", meetingId });
-      await render();
-    } catch (error) {
-      renderFailure(error);
+  const transcriptView = document.getElementById("transcript-view");
+  if (transcriptView) {
+    for (const segment of meeting?.transcript ?? []) {
+      appendTranscriptLine(transcriptView, segment.speaker, segment.text, segment.isFinal, segment.utteranceId);
     }
+  }
+  const stopButton = document.getElementById("stop-recording") as HTMLButtonElement;
+  const stopConfirm = createStopConfirm({
+    arm: () => {
+      stopButton.classList.add("armed");
+      stopButton.setAttribute("aria-label", "Confirm: stop notes");
+      stopButton.textContent = STOP_CONFIRM_LABEL;
+    },
+    disarm: () => {
+      stopButton.classList.remove("armed");
+      stopButton.removeAttribute("aria-label");
+      stopButton.textContent = STOP_LABEL;
+    },
+    confirm: async () => {
+      stopButton.disabled = true;
+      try {
+        await sendToBackground({ type: "STOP_RECORDING", meetingId });
+        await render();
+      } catch (error) {
+        renderFailure(error);
+      }
+    },
   });
+  stopButton.addEventListener("click", stopConfirm.press);
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
   function liveListener(message: BackgroundToUiMessage): void {
-    if (message.type === "TRANSCRIPT_UPDATE" && message.meetingId === meetingId) {
+    if (message.type === "TRANSCRIPT_UPDATE" && message.meetingId === meetingId && transcriptView) {
       appendTranscriptLine(transcriptView, message.speaker, message.text, message.isFinal, message.utteranceId);
     }
-    if (message.type === "SUMMARY_READY" && message.meetingId === meetingId) {
-      clearLiveListener();
-      void renderSafely();
-    }
-    // A failed recording used to leave this exact view showing a "live"
-    // transcript that had actually stopped updating, with no visible sign
-    // anything went wrong — the toolbar badge (see background.ts) covers
-    // the case where the popup is closed when this happens; re-rendering
-    // out of the dead "recording" view covers the case where it's open.
-    if (message.type === "RECORDING_ERROR" && message.meetingId === meetingId) {
-      clearLiveListener();
-      void renderSafely();
+    // Notes finished, or the recording failed or was stopped elsewhere (the
+    // in-call pill, the shortcut): leave this view instead of showing a
+    // recording that is over. A failure while the popup is closed is covered
+    // by the toolbar badge (see background.ts).
+    if (
+      (message.type === "SUMMARY_READY" && message.meetingId === meetingId) ||
+      (message.type === "RECORDING_ERROR" && message.meetingId === meetingId) ||
+      message.type === "MEETING_STATE_CHANGED"
+    ) {
+      void refreshIfNoLongerRecording(meetingId);
     }
     if (message.type === "PROCESSING_WARNING" && message.meetingId === meetingId) {
       const status = document.getElementById("recording-status");
@@ -175,6 +198,17 @@ async function renderActiveRecording(meetingId: string): Promise<void> {
   }
   chrome.runtime.onMessage.addListener(liveListener);
   removeLiveListener = () => chrome.runtime.onMessage.removeListener(liveListener);
+}
+
+async function refreshIfNoLongerRecording(meetingId: string): Promise<void> {
+  try {
+    const state = await sendToBackground<BackgroundState>({ type: "GET_STATE" });
+    if (state.activeMeeting?.id === meetingId) return;
+    clearLiveListener();
+    await renderSafely();
+  } catch {
+    // The next render will pick the state up.
+  }
 }
 
 function renderHistoryItem(meeting: MeetingRecord): string {
@@ -187,7 +221,7 @@ function renderHistoryItem(meeting: MeetingRecord): string {
   return `
     <button class="history-item" data-meeting-id="${escapeHtml(meeting.id)}">
       <span class="meeting-title">${escapeHtml(meeting.title)}</span>
-      <span class="meeting-meta text-secondary">${formatRelativeDate(meeting.startedAt)}${statusLabel}</span>
+      <span class="meeting-meta text-secondary">${formatMeetingTime(meeting.startedAt)}${statusLabel}</span>
     </button>
   `;
 }
@@ -204,26 +238,25 @@ function meetingModeOptions(selected: MeetingMode): string {
   return options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
 }
 
-async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"], knownOnMeet?: boolean): Promise<void> {
+/** Desktop calls only: the helper's view of the microphone and meeting audio. */
+async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]): Promise<void> {
   const statusEl = document.getElementById("audio-status");
   const checkButton = document.getElementById("check-audio") as HTMLButtonElement | null;
   const probeButton = document.getElementById("test-audio") as HTMLButtonElement | null;
+  const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
   if (!statusEl) return;
-  statusEl.textContent = "Checking audio devices…";
-  statusEl.className = "text-secondary";
-  const captureSource = (document.getElementById("capture-source") as HTMLSelectElement | null)?.value;
-  if (captureSource === "meet") {
-    const onMeet = knownOnMeet ?? await activeTabIsMeet();
-    statusEl.textContent = onMeet
-      ? "Google Meet browser capture is ready. Chrome will ask for microphone and tab-audio permission when you start."
-      : "Open a Google Meet call in this tab to start browser capture. Desktop-call capture is optional below.";
-    statusEl.className = onMeet ? "text-success" : "text-secondary";
+  if (helperStatus !== "connected") {
+    statusEl.textContent = helperStatus === "incompatible"
+      ? "The desktop helper needs an update. Open desktop setup to install the current version."
+      : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
+    statusEl.className = "text-warning";
     if (checkButton) checkButton.disabled = true;
     if (probeButton) probeButton.disabled = true;
-    const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-    if (startButton) startButton.disabled = !onMeet;
+    if (startButton) startButton.disabled = true;
     return;
   }
+  statusEl.textContent = "Checking audio devices…";
+  statusEl.className = "text-secondary";
   if (checkButton) checkButton.disabled = false;
   try {
     const response = await sendToBackground<{ status: AudioStatus }>({ type: "GET_AUDIO_PREFLIGHT" });
@@ -239,14 +272,12 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"], 
     statusEl.className = status.ready ? "text-success" : "text-warning";
     if (checkButton) checkButton.textContent = status.ready ? "Refresh audio check" : "Check audio again";
     if (probeButton) probeButton.disabled = !status.ready;
-    const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-    if (startButton) startButton.disabled = (captureSource !== "meet" && helperStatus !== "connected") || (captureSource !== "meet" && !status.ready);
+    if (startButton) startButton.disabled = !status.ready;
   } catch {
     statusEl.textContent = "Audio check failed. Confirm the desktop helper is running, then try again.";
     statusEl.className = "text-warning";
     if (probeButton) probeButton.disabled = true;
-    const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
-    if (startButton) startButton.disabled = captureSource !== "meet" && helperStatus !== "connected";
+    if (startButton) startButton.disabled = false;
   }
 }
 
@@ -268,44 +299,60 @@ async function runAudioProbe(): Promise<void> {
   }
 }
 
-async function activeTabIsMeet(): Promise<boolean> {
+async function activeMeetTab(): Promise<chrome.tabs.Tab | undefined> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return isMeetUrl(tab?.url);
+    return isMeetUrl(tab?.url) ? tab : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
+function modeChip(settings: Awaited<ReturnType<typeof getSettings>>): string {
+  const label = settings.processingMode.kind === "managed" ? "Hosted AI" : "Your own API keys";
+  return `<p class="mode-chip" id="mode-chip"><span class="sr-only">Notes are written with: </span>${label}</p>`;
+}
+
+/** The popup's idle view knows where the person is: on a Meet call, it is one button. */
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
   const meetings = await listMeetings(historyQuery ? undefined : 5, historyQuery || undefined);
-  const onMeet = await activeTabIsMeet();
-  app.innerHTML = `
-    ${renderHeader(true)}
-    <div class="record-controls">
-      <button class="primary record-toggle" id="start-recording" disabled>Record</button>
-      <label class="meeting-mode-picker" for="meeting-mode">Meeting mode
+  const meetTab = await activeMeetTab();
+  const onMeet = meetTab !== undefined;
+  const desktop = !onMeet && (desktopChosen || helperStatus === "connected");
+  const helperReady = helperStatus === "connected";
+  const controls = onMeet || desktop
+    ? `
+      <button class="primary record-toggle" id="start-recording"${desktop ? " disabled" : ""}>Start notes</button>
+      ${modeChip(settings)}
+      <label class="meeting-mode-picker" for="meeting-mode">Notes style
         <select id="meeting-mode">${meetingModeOptions(settings.defaultMeetingMode)}</select>
       </label>
-      <label class="meeting-mode-picker" for="capture-source">Capture mode
-        <select id="capture-source">
-          <option value="meet" selected>Google Meet — capture this tab</option>
-          <option value="desktop">Zoom, Teams, Slack Huddle — desktop helper</option>
-        </select>
-      </label>
-      <p class="field-hint text-secondary capture-mode-hint" id="capture-mode-hint">Use the desktop helper for Zoom, Microsoft Teams, and Slack Huddles. Google Meet can use browser capture in the active tab.</p>
-      <div class="audio-check" id="desktop-helper-actions" hidden>
-        <p class="field-hint text-secondary">Desktop-call capture needs the native helper. Google Meet does not.</p>
-        <button type="button" class="secondary" id="open-helper-setup">Set up desktop capture</button>
-      </div>
-      <div class="audio-check" aria-live="polite">
+      <p id="start-error" class="start-error" role="alert"${startError ? "" : " hidden"}>${escapeHtml(startError)}</p>
+      ${
+        desktop
+          ? `<div class="audio-check" aria-live="polite">
         <p id="audio-status" class="text-secondary">Checking audio devices…</p>
         <div class="audio-check-actions">
           <button type="button" class="secondary" id="check-audio">Check audio</button>
           <button type="button" class="secondary" id="test-audio" disabled>Run 2-second test</button>
         </div>
       </div>
-    </div>
+      <div class="audio-check" id="desktop-helper-actions">
+        <p class="field-hint text-secondary">${helperReady ? "Recording a desktop call (Zoom, Teams, Slack)." : "Desktop calls need the native helper. Google Meet does not."}</p>
+        ${helperReady ? "" : `<button type="button" class="secondary" id="open-helper-setup">Set up desktop capture</button>`}
+        <button type="button" class="text-link" id="use-meet">Recording Google Meet instead?</button>
+      </div>`
+          : ""
+      }`
+    : `
+      <button class="primary record-toggle" id="open-meet">Open Google Meet</button>
+      ${modeChip(settings)}
+      <p id="start-error" class="start-error" role="alert"${startError ? "" : " hidden"}>${escapeHtml(startError)}</p>
+      <p class="field-hint text-secondary">Join a call, then click this icon on the Meet tab to start notes.</p>
+      <button type="button" class="text-link" id="use-desktop">Recording Zoom or Teams instead?</button>`;
+  app.innerHTML = `
+    ${renderHeader(true)}
+    <div class="record-controls">${controls}</div>
     <div class="history-section">
       <div class="history-heading">
         <h2 tabindex="-1" data-view-heading>${historyQuery ? "Search results" : "Recent meetings"}</h2>
@@ -320,24 +367,41 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       ${
         meetings.length > 0
           ? meetings.map(renderHistoryItem).join("")
-          : `<p class="empty-state">${historyQuery ? `No meetings match “${escapeHtml(historyQuery)}”.` : "No meetings yet — hit Record during your next call."}</p>`
+          : `<p class="empty-state">${historyQuery ? `No meetings match “${escapeHtml(historyQuery)}”.` : "No meetings yet. Your notes will show up here."}</p>`
       }
     </div>
   `;
+
+  // A start that never began is reported by the background as a broadcast, and
+  // only this idle view can show it.
+  function idleListener(message: BackgroundToUiMessage): void {
+    if (message.type !== "RECORDING_ERROR" || (message.meetingId !== null && message.phase !== "start")) return;
+    startError = message.message;
+    const el = document.getElementById("start-error");
+    if (el) {
+      el.textContent = startError;
+      el.hidden = false;
+    }
+    const button = document.getElementById("start-recording") as HTMLButtonElement | null;
+    if (button && onMeet) button.disabled = false;
+  }
+  chrome.runtime.onMessage.addListener(idleListener);
+  removeLiveListener = () => chrome.runtime.onMessage.removeListener(idleListener);
+
   document.getElementById("start-recording")?.addEventListener("click", async () => {
     const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
     if (startButton) startButton.disabled = true;
+    startError = "";
+    const errorEl = document.getElementById("start-error");
+    if (errorEl) errorEl.hidden = true;
     try {
       const meetingMode = (document.getElementById("meeting-mode") as HTMLSelectElement).value as MeetingMode;
-      const captureSource = (document.getElementById("capture-source") as HTMLSelectElement).value as CaptureSource;
-      const tabs = captureSource === "meet" ? await chrome.tabs.query({ active: true, currentWindow: true }) : [];
-      const tabId = tabs[0]?.id;
-      const titleHint = captureSource === "meet" ? meetTitleForTab(tabs[0]) : undefined;
+      const titleHint = meetTitleForTab(meetTab);
       await sendToBackground({
         type: "START_RECORDING",
         meetingMode,
-        captureSource,
-        ...(typeof tabId === "number" ? { tabId } : {}),
+        captureSource: onMeet ? "meet" : "desktop",
+        ...(onMeet && typeof meetTab?.id === "number" ? { tabId: meetTab.id } : {}),
         ...(titleHint ? { titleHint } : {}),
       });
       await renderSafely();
@@ -345,14 +409,22 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       renderFailure(error);
     }
   });
+  document.getElementById("open-meet")?.addEventListener("click", () => {
+    chrome.tabs.create({ url: MEET_HOME });
+    window.close();
+  });
+  document.getElementById("use-desktop")?.addEventListener("click", () => {
+    desktopChosen = true;
+    startError = "";
+    void renderSafely();
+  });
+  document.getElementById("use-meet")?.addEventListener("click", () => {
+    desktopChosen = false;
+    startError = "";
+    void renderSafely();
+  });
   document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus(helperStatus));
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());
-  document.getElementById("capture-source")?.addEventListener("change", () => {
-    const captureSource = (document.getElementById("capture-source") as HTMLSelectElement).value;
-    const helperActions = document.getElementById("desktop-helper-actions");
-    if (helperActions) helperActions.hidden = captureSource !== "desktop";
-    void renderAudioStatus(helperStatus, onMeet);
-  });
   document.getElementById("open-helper-setup")?.addEventListener("click", async () => {
     // This is an explicit desktop choice. Keep the ordinary popup entry point
     // Meet-first, but preserve the user's deliberate request for helper setup.
@@ -378,7 +450,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(id)}`) });
     });
   }
-  void renderAudioStatus(helperStatus, onMeet);
+  if (desktop) void renderAudioStatus(helperStatus);
 }
 
 async function render(): Promise<void> {
@@ -392,7 +464,7 @@ async function render(): Promise<void> {
   const state = await sendToBackground<BackgroundState>({ type: "GET_STATE" });
 
   if (state.activeMeeting) {
-    await renderActiveRecording(state.activeMeeting.id);
+    await renderActiveRecording(state.activeMeeting.id, state.helperStatus);
   } else {
     await renderIdleState(state.helperStatus, settings);
   }

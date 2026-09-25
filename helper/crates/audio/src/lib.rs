@@ -5,7 +5,13 @@
 //! never build our own, and mic + speaker are always captured as two
 //! separate streams, never merged.
 
+mod convert;
 pub mod device_matching;
+pub mod health;
+mod input;
+pub mod readiness;
+mod session;
+mod timeline;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -19,6 +25,11 @@ use notetaker_core::providers::AudioChannel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::broadcast;
+
+#[allow(unused_imports)]
+pub(crate) use convert::interleaved_f32_to_mono_pcm16;
+pub use health::{CaptureHealthEvent, CaptureHealthKind, HealthHub};
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -28,6 +39,10 @@ pub enum AudioError {
     StreamError(String),
     #[error("platform-specific driver setup failed: {0}")]
     DriverSetup(String),
+    /// An OS permission (microphone, screen recording) is missing and capture
+    /// cannot start until the user grants it.
+    #[error("permission required: {0}")]
+    PermissionRequired(String),
 }
 
 /// One frame of captured audio from a single channel (mic or speaker),
@@ -55,6 +70,20 @@ pub enum DriverStatus {
     },
 }
 
+/// State of one OS privacy permission, as far as a read-only preflight can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PermissionState {
+    /// The platform has no such permission (or it cannot be queried).
+    #[default]
+    NotApplicable,
+    Granted,
+    /// The user has not been asked yet; the prompt appears on `start_capture`.
+    NotDetermined,
+    Denied,
+    /// Blocked by policy (MDM/parental controls); the user cannot grant it.
+    Restricted,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioDiagnostics {
     pub platform: String,
@@ -67,6 +96,37 @@ pub struct AudioDiagnostics {
     pub native_loopback: bool,
     pub virtual_device_fallback: bool,
     pub permission_required: bool,
+    /// Microphone permission (macOS TCC); `NotApplicable` elsewhere.
+    pub microphone_permission: PermissionState,
+    /// Screen Recording permission needed for ScreenCaptureKit system audio
+    /// (macOS); `NotApplicable` elsewhere.
+    pub screen_permission: PermissionState,
+}
+
+/// Optional device selection for `start_capture_with_options`. `None` means
+/// "pick automatically" (system default microphone; the monitor of the output
+/// the meeting app uses, else the default output).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaptureOptions {
+    /// Microphone id as returned by `AudioCapture::list_devices`.
+    pub mic_device: Option<String>,
+    /// Speaker/loopback id as returned by `AudioCapture::list_devices`.
+    pub speaker_device: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDeviceInfo {
+    /// Stable-enough identifier to pass back in [`CaptureOptions`].
+    pub id: String,
+    /// Human-readable name for a picker.
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AudioDeviceList {
+    pub microphones: Vec<AudioDeviceInfo>,
+    pub speakers: Vec<AudioDeviceInfo>,
 }
 
 /// Applies the cross-platform readiness contract used by every backend.
@@ -110,10 +170,43 @@ pub trait AudioCapture: Send + Sync {
     /// useful before a meeting and must not call a provider or create a note.
     fn diagnostics(&self) -> AudioDiagnostics;
 
-    /// Gives a platform backend a chance to create its existing virtual
-    /// devices. It must not download or invent a custom audio driver.
+    /// Read-only readiness check, safe to call from passive preflight: it must
+    /// not launch installers, create audio modules, or trigger OS permission
+    /// prompts. Anything that mutates the system lives in [`Self::setup`] and
+    /// `start_capture`.
     fn prepare(&self) -> Result<(), AudioError> {
         Ok(())
+    }
+
+    /// Explicit, user-initiated setup: launches the fallback driver installer
+    /// or creates the fallback virtual devices where the platform needs it.
+    /// `start_capture` performs the same setup itself when required. It must not
+    /// download or invent a custom audio driver.
+    fn setup(&self) -> Result<(), AudioError> {
+        Ok(())
+    }
+
+    /// Subscribes to capture-health events (source ended, device changed,
+    /// stream error, restart results). Backends that do not report health
+    /// return a receiver that never yields.
+    fn subscribe_health(&self) -> broadcast::Receiver<CaptureHealthEvent> {
+        HealthHub::new().subscribe()
+    }
+
+    /// Lists selectable microphones and loopback/speaker sources for pickers.
+    fn list_devices(&self) -> AudioDeviceList {
+        AudioDeviceList::default()
+    }
+
+    /// Like [`Self::start_capture`] but with optional explicit device ids.
+    /// Backends that support device selection override this; the default
+    /// ignores the options.
+    async fn start_capture_with_options(
+        &self,
+        _options: CaptureOptions,
+        on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
+    ) -> Result<(), AudioError> {
+        self.start_capture(on_frame).await
     }
 
     /// Begins capturing both channels. Frames are delivered to `on_frame`
@@ -125,6 +218,9 @@ pub trait AudioCapture: Send + Sync {
         on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
     ) -> Result<(), AudioError>;
 
+    /// Stops capturing and does not return until the capture threads have
+    /// exited and all captured frames were handed to the callback, so an
+    /// immediate `start_capture` can never overlap the old capture.
     async fn stop_capture(&self) -> Result<(), AudioError>;
 
     /// Exercises both capture callbacks for a short bounded interval. The
@@ -158,34 +254,6 @@ pub trait AudioCapture: Send + Sync {
         };
         Ok(result)
     }
-}
-
-/// Converts the native Windows loopback format (interleaved IEEE-754 f32)
-/// into the mono little-endian PCM16 frames consumed by the core pipeline.
-/// Keeping this conversion platform-neutral makes it testable on the host
-/// build even though the WASAPI reader itself is Windows-only.
-#[allow(dead_code)]
-pub(crate) fn interleaved_f32_to_mono_pcm16(data: &[u8], channels: usize) -> Vec<u8> {
-    if channels == 0 {
-        return Vec::new();
-    }
-
-    let bytes_per_frame = channels.saturating_mul(std::mem::size_of::<f32>());
-    if bytes_per_frame == 0 {
-        return Vec::new();
-    }
-
-    let frame_count = data.len() / bytes_per_frame;
-    let mut pcm16 = Vec::with_capacity(frame_count * std::mem::size_of::<i16>());
-    for frame in data[..frame_count * bytes_per_frame].chunks_exact(bytes_per_frame) {
-        let mut sum = 0.0_f32;
-        for sample in frame.as_chunks::<4>().0 {
-            sum += f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]);
-        }
-        let mono = (sum / channels as f32).clamp(-1.0, 1.0);
-        pcm16.extend_from_slice(&((mono * i16::MAX as f32).round() as i16).to_le_bytes());
-    }
-    pcm16
 }
 
 #[cfg(test)]

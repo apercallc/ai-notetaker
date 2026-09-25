@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { requestIdFrom } from "@/lib/apiErrors";
 import { applyStripeEvent, verifyStripeSignature } from "@/lib/billing";
@@ -12,6 +13,12 @@ export async function POST(request: Request) {
   }
   try {
     await applyStripeEvent(JSON.parse(payload));
+    // Plan/usage changed: make the billing page show it on the next request.
+    try {
+      revalidatePath("/billing");
+    } catch {
+      // Not running inside a Next.js request context (e.g. unit tests); the page is dynamic anyway.
+    }
     return NextResponse.json({ received: true }, { headers: { "x-request-id": requestId } });
   } catch (error) {
     console.error("Stripe webhook processing failed", {

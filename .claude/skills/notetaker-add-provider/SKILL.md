@@ -5,12 +5,15 @@ description: Scaffold a new BYOK (bring-your-own-key) transcription or summariza
 
 # Notetaker: Add AI Provider
 
-AI Notetaker's whole value proposition is BYOK: no subscription, users pay
-providers directly (see the architecture spec,
-`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`, §3.3).
-A new provider integration is only safe to ship if it fits the same shape
-as the existing ones — otherwise the pipeline's resilience guarantees (see
-below) quietly stop applying to it.
+AI Notetaker has two execution modes (see the target design,
+`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`): a
+free local mode where users bring their own API keys ("Use my own API keys" in
+the UI, BYOK internally) and pay providers directly, and a hosted paid mode
+where the project's service owns the provider credentials. This skill covers
+adding a provider for the local mode, and notes what changes if it must also be
+offered in hosted mode. A new provider integration is only safe to ship if it
+fits the same shape as the existing ones, otherwise the pipeline's resilience
+guarantees (see below) quietly stop applying to it.
 
 ## Before writing code
 
@@ -22,25 +25,29 @@ plug into different points in the pipeline.
 
 1. **Implement against the existing provider interface**, not a bespoke
    one-off client. The helper (Rust/Tauri) defines a shared trait/interface
-   for each provider category — find it before writing new code, and match
-   it. If no such interface exists yet because this is the first provider
+   for each provider category for desktop calls, and the extension has a
+   matching browser-side client for the Google Meet path, which the extension
+   owns. Find both before writing new code, and match them. If no such interface exists yet because this is the first provider
    beyond the two defaults, that's a sign to extract one now rather than
    let a second implementation ossify a copy-pasted shape.
 2. **Preserve the raw-audio-first resilience guarantee.** Per the
-   architecture's non-negotiable constraints, raw audio is always saved to
-   local disk before any provider call is attempted. A new provider must
-   fail into the same retry-queue path as the existing ones — never a
-   silent swallow of the audio if the API call errors.
+   non-negotiable constraints in the root `CLAUDE.md`, raw audio is always
+   saved locally (helper disk, or extension IndexedDB for Meet) before any
+   provider call is attempted. A new provider must fail into the same retry
+   path as the existing ones, never a silent swallow of the audio if the API
+   call errors.
 3. **Handle streaming vs. batch honestly.** Deepgram's live-streaming
    endpoint is the default specifically because batch/chunked transcription
    has boundary artifacts (words split across chunk edges) and higher
    latency. If the new provider is batch-only (like Groq's Whisper), say so
    explicitly in its config/UI label — don't present it as equivalent to a
    true streaming provider.
-4. **API keys stay in `chrome.storage.local`.** Never introduce a path
-   where a new provider's key could end up in `chrome.storage.sync` or any
-   server the project operates — that would violate the no-backend,
-   no-data-liability design (§1, §5 of the spec).
+4. **API keys stay in `chrome.storage.local`.** Local-mode keys must never end
+   up in `chrome.storage.sync`, the webapp, or any server the project
+   operates. If the provider is also offered in hosted mode, its credential is
+   a server-side secret used by the hosted provider gateway (with the timeout,
+   retry, and quota-reservation policy the existing adapters use) and must
+   never reach the extension or the helper.
 5. **Document the real cost.** Look up current pricing and compute the
    same $/45-minute-meeting estimate used for the existing providers (see
    the cost table in `README.md` and the spec's §3.3). Add this provider to

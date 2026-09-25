@@ -38,9 +38,14 @@ chrome.runtime.onMessage.addListener((message: BackgroundToUiMessage) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") void widget?.refresh();
+  if (document.visibilityState === "visible") void widget?.resume();
 });
 
 ensureWidget();
 window.addEventListener("popstate", ensureWidget);
-window.setInterval(ensureWidget, ROUTE_POLL_MS);
+// Meet navigates without reloading (pushState), which fires no popstate. The
+// Navigation API reports those changes from the browser side, so the content
+// script's isolated world sees them too; browsers without it keep the slow poll.
+const navigation = (window as unknown as { navigation?: EventTarget }).navigation;
+if (navigation) navigation.addEventListener("currententrychange", ensureWidget);
+else window.setInterval(ensureWidget, ROUTE_POLL_MS);

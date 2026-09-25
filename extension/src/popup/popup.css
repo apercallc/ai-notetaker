@@ -50,8 +50,7 @@ header.app-header button.icon-button:hover {
   flex: 1;
 }
 
-.banner.recoverable,
-.banner.missing-helper {
+.banner.recoverable {
   border: 1px solid var(--color-warning);
 }
 
@@ -101,11 +100,41 @@ header.app-header button.icon-button:hover {
 }
 
 button.record-toggle {
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
-  font-size: 0.8125rem;
+  width: 100%;
+  min-height: 44px;
+  font-size: 0.9375rem;
   font-weight: 600;
+}
+
+button.record-toggle.armed {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.mode-chip {
+  margin: 0;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.start-error {
+  width: 100%;
+  margin: 0;
+  padding: var(--space-2);
+  border-left: 3px solid var(--color-danger);
+  border-radius: var(--radius);
+  background: var(--color-bg-elevated);
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.start-error:not([hidden])::before {
+  content: "Could not start: ";
+  font-weight: 600;
+  color: var(--color-danger);
 }
 
 .transcript-view {

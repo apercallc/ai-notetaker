@@ -14,7 +14,7 @@ use crate::{
     CapturedFrame, DriverStatus,
 };
 use async_trait::async_trait;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, HostTrait};
 use notetaker_core::providers::AudioChannel;
 use screencapturekit::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,12 +28,16 @@ const SCREEN_CAPTURE_CHANNELS: usize = 2;
 
 pub struct MacosAudioCapture {
     running: Arc<AtomicBool>,
+    session: Arc<crate::session::CaptureSession>,
+    health: crate::HealthHub,
 }
 
 impl MacosAudioCapture {
     pub fn new() -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
+            session: Arc::new(crate::session::CaptureSession::new()),
+            health: crate::HealthHub::new(),
         }
     }
 
@@ -47,7 +51,8 @@ impl MacosAudioCapture {
     }
 
     fn native_system_audio_available(&self) -> bool {
-        probe_screencapturekit().is_ok()
+        // Unlike SCShareableContent::get, this never prompts during preflight.
+        unsafe { CGPreflightScreenCaptureAccess() }
     }
 }
 
@@ -59,6 +64,9 @@ impl Default for MacosAudioCapture {
 
 #[async_trait]
 impl AudioCapture for MacosAudioCapture {
+    fn subscribe_health(&self) -> tokio::sync::broadcast::Receiver<crate::CaptureHealthEvent> {
+        self.health.subscribe()
+    }
     fn prepare(&self) -> Result<(), AudioError> {
         // ScreenCaptureKit and an already-installed BlackHole require no
         // mutation here. The fallback installer remains an explicit user
@@ -90,7 +98,7 @@ impl AudioCapture for MacosAudioCapture {
         let microphone = cpal::default_host()
             .default_input_device()
             .and_then(|device| device.name().ok());
-        let permission_required = microphone.is_none();
+        let permission_required = microphone.is_none() || (!native_loopback && !fallback_available);
         let driver_installed = speaker.is_some();
         let ready = capture_ready(
             driver_installed,
@@ -126,6 +134,12 @@ impl AudioCapture for MacosAudioCapture {
             native_loopback,
             virtual_device_fallback: !native_loopback && fallback_available,
             permission_required,
+            microphone_permission: crate::PermissionState::NotApplicable,
+            screen_permission: if native_loopback {
+                crate::PermissionState::Granted
+            } else {
+                crate::PermissionState::NotDetermined
+            },
         }
     }
 
@@ -133,7 +147,9 @@ impl AudioCapture for MacosAudioCapture {
         &self,
         on_frame: Box<dyn Fn(CapturedFrame) + Send + Sync>,
     ) -> Result<(), AudioError> {
-        let native_loopback = self.native_system_audio_available();
+        self.stop_capture().await?;
+        let native_loopback =
+            self.native_system_audio_available() || unsafe { CGRequestScreenCaptureAccess() };
         let fallback_device_name = if native_loopback {
             None
         } else {
@@ -146,16 +162,22 @@ impl AudioCapture for MacosAudioCapture {
 
         let (tx, rx) = std::sync::mpsc::channel::<CapturedFrame>();
         let running = self.running.clone();
+        let health = self.health.clone();
         let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
 
-        std::thread::spawn(move || {
+        let worker = std::thread::spawn(move || {
             let host = cpal::default_host();
             let mic_device = host.default_input_device();
             let Some(mic_device) = mic_device else {
                 let _ = ready_tx.send(Err("the system microphone was not found".into()));
                 return;
             };
-            let mic_stream = match build_input_stream(&mic_device, AudioChannel::Mic, tx.clone()) {
+            let mic_stream = match build_input_stream(
+                &mic_device,
+                AudioChannel::Mic,
+                tx.clone(),
+                health.clone(),
+            ) {
                 Ok(stream) => stream,
                 Err(error) => {
                     let _ = ready_tx.send(Err(error.to_string()));
@@ -166,6 +188,11 @@ impl AudioCapture for MacosAudioCapture {
             if native_loopback {
                 if let Err(error) = run_screencapturekit_capture(running.clone(), tx, ready_tx) {
                     tracing::error!(%error, "macOS ScreenCaptureKit capture stopped");
+                    health.emit(
+                        AudioChannel::Speaker,
+                        crate::CaptureHealthKind::SourceEnded,
+                        error,
+                    );
                 }
             } else {
                 let Some(speaker_device) = fallback_device_name.as_ref().and_then(|name| {
@@ -177,7 +204,7 @@ impl AudioCapture for MacosAudioCapture {
                     return;
                 };
                 let speaker_stream =
-                    match build_input_stream(&speaker_device, AudioChannel::Speaker, tx) {
+                    match build_input_stream(&speaker_device, AudioChannel::Speaker, tx, health) {
                         Ok(stream) => stream,
                         Err(error) => {
                             let _ = ready_tx.send(Err(error.to_string()));
@@ -192,6 +219,8 @@ impl AudioCapture for MacosAudioCapture {
             }
             drop(mic_stream);
         });
+        let delivery = crate::session::spawn_frame_delivery(rx, on_frame);
+        self.session.attach(vec![worker, delivery]);
 
         match tokio::time::timeout(Duration::from_secs(3), ready_rx).await {
             Ok(Ok(Ok(()))) => {}
@@ -211,17 +240,12 @@ impl AudioCapture for MacosAudioCapture {
             }
         }
 
-        tokio::spawn(async move {
-            while let Ok(frame) = rx.recv() {
-                on_frame(frame);
-            }
-        });
-
         Ok(())
     }
 
     async fn stop_capture(&self) -> Result<(), AudioError> {
         self.running.store(false, Ordering::SeqCst);
+        self.session.stop().await;
         Ok(())
     }
 }
@@ -248,10 +272,10 @@ fn create_screencapturekit_stream() -> Result<SCStream, String> {
     SCStream::new(&filter, &configuration).map_err(|error| error.to_string())
 }
 
-fn probe_screencapturekit() -> Result<(), String> {
-    std::thread::spawn(|| create_screencapturekit_stream().map(|_| ()))
-        .join()
-        .map_err(|_| "ScreenCaptureKit capability probe thread panicked".to_string())?
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
 }
 
 fn run_screencapturekit_capture(
@@ -392,31 +416,12 @@ fn build_input_stream(
     device: &cpal::Device,
     channel: AudioChannel,
     tx: std::sync::mpsc::Sender<CapturedFrame>,
+    health: crate::HealthHub,
 ) -> Result<cpal::Stream, AudioError> {
-    let config = device
-        .default_input_config()
-        .map_err(|e| AudioError::StreamError(e.to_string()))?;
-    let sample_rate_hz = config.sample_rate().0;
-    let stream = device
-        .build_input_stream(
-            &config.into(),
-            move |data: &[f32], _| {
-                let pcm16: Vec<u8> = data
-                    .iter()
-                    .flat_map(|s| ((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes())
-                    .collect();
-                let _ = tx.send(CapturedFrame {
-                    channel,
-                    pcm16,
-                    sample_rate_hz,
-                });
-            },
-            move |err| tracing::error!("audio stream error: {err}"),
-            None,
-        )
-        .map_err(|e| AudioError::StreamError(e.to_string()))?;
-    stream
-        .play()
-        .map_err(|e| AudioError::StreamError(e.to_string()))?;
-    Ok(stream)
+    crate::input::build_input_stream(
+        device,
+        channel,
+        tx,
+        Arc::new(move |error| health.emit(channel, crate::CaptureHealthKind::StreamError, error)),
+    )
 }

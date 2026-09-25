@@ -15,7 +15,7 @@ import { getUserRole } from "@/lib/workspaces";
 // getSessionUser.
 const cookieStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
 const originalManagedHosting = process.env.MANAGED_HOSTING;
-vi.mock("next/headers", () => ({ cookies: vi.fn(async () => cookieStore) }));
+vi.mock("next/headers", () => ({ cookies: vi.fn(async () => cookieStore), headers: vi.fn(async () => new Headers({ host: "localhost:3000" })) }));
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
@@ -32,6 +32,9 @@ function formData(fields: Record<string, string>): FormData {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  delete process.env.MANAGED_HOSTING;
+  await prisma.loginThrottle.deleteMany();
   await prisma.session.deleteMany();
   await prisma.workspaceMembership.deleteMany();
   await prisma.user.deleteMany();
@@ -96,8 +99,11 @@ describe("bootstrap", () => {
 describe("managed signup", () => {
   it("creates a separate tenant owner when managed hosting is enabled", async () => {
     process.env.MANAGED_HOSTING = "true";
+    for (const name of ["S3_BUCKET", "MANAGED_WORKER_TOKEN", "MANAGED_DEEPGRAM_API_KEY", "MANAGED_ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_HOSTED_PRO", "STRIPE_PRICE_HOSTED_TEAM"]) vi.stubEnv(name, "test-only");
+    vi.stubEnv("APP_URL", "http://localhost:3000");
+    vi.stubEnv("ALLOW_UNVERIFIED_SIGNUP", "true");
     await expect(
-      signup(formData({ workspaceName: "Acme Notes", email: "acme@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
+      signup(formData({ workspaceName: "Acme Notes", email: "acme@example.com", password: "correct horse battery", confirmPassword: "correct horse battery", acceptTerms: "on" })),
     ).rejects.toThrow("REDIRECT:/meetings");
 
     const user = await prisma.user.findUniqueOrThrow({ where: { email: "acme@example.com" } });
@@ -110,7 +116,7 @@ describe("managed signup", () => {
     delete process.env.MANAGED_HOSTING;
     await expect(
       signup(formData({ workspaceName: "Should not exist", email: "blocked@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" })),
-    ).rejects.toThrow("REDIRECT:/login?error=signup-disabled");
+    ).rejects.toThrow("REDIRECT:/login?tab=signup&error=signup-disabled");
     expect(await prisma.user.findUnique({ where: { email: "blocked@example.com" } })).toBeNull();
   });
 });
@@ -118,14 +124,15 @@ describe("managed signup", () => {
 describe("login", () => {
   async function seedUser(email: string, password: string) {
     const passwordHash = await hashPassword(password);
-    return prisma.user.create({ data: { email, passwordHash } });
+    const workspace = await prisma.workspace.findFirstOrThrow({ where: { isDefault: true } });
+    return prisma.user.create({ data: { email, passwordHash, emailVerifiedAt: new Date(), memberships: { create: { workspaceId: workspace.id, role: "owner" } } } });
   }
 
   it("rejects a wrong password", async () => {
     await seedUser("person@example.com", "the real password");
     await expect(
       login(formData({ email: "person@example.com", password: "wrong password", next: "/meetings" })),
-    ).rejects.toThrow(/REDIRECT:\/login\?error=1/);
+    ).rejects.toThrow(/REDIRECT:\/login\?error=invalid/);
   });
 
   it("accepts a correct password and sets a session cookie that resolves to that user", async () => {

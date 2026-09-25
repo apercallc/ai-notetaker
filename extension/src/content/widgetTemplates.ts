@@ -3,7 +3,8 @@ import type { WidgetState } from "../lib/internalMessages";
 import { shortcutKeys } from "../lib/shortcuts";
 import { CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "../meet/hints";
 import type { MeetingMode } from "../types";
-import { canStart, formatElapsed, helperNotice, type WidgetUi, type WidgetView } from "./widgetModel";
+import { STOP_LABEL } from "../lib/stopConfirm";
+import { canStart, formatElapsed, type WidgetUi, type WidgetView } from "./widgetModel";
 
 /** Everything the templates read. They are pure: same context, same markup. */
 export interface TemplateContext {
@@ -50,7 +51,7 @@ const PILL_LABELS: Partial<Record<WidgetView, string>> = {
 
 /** Everything the idle panel shows that can change under it, so it re-renders only when one does. */
 export function readyKey(state: WidgetState | null): string {
-  return JSON.stringify([state?.callTitle, state?.shortcuts, helperNotice(state), canStart(state), state?.onboardingComplete, state?.consentAcknowledged]);
+  return JSON.stringify([state?.callTitle, state?.shortcuts, canStart(state), state?.onboardingComplete, state?.consentAcknowledged]);
 }
 
 export function renderPill(view: WidgetView, ctx: TemplateContext): string {
@@ -67,12 +68,12 @@ export function renderPill(view: WidgetView, ctx: TemplateContext): string {
           <span>${escapeHtml(label)}</span>
           ${recording ? `<span class="elapsed" id="elapsed" role="timer">${elapsed}</span>` : ""}
         </button>
-        ${quickStart ? `<button type="button" class="pill-start" id="pill-start" title="${hint("Start taking notes", state?.shortcuts.toggle)}">Start</button>` : ""}
+        ${quickStart ? `<button type="button" class="pill-start" id="pill-start" title="${hint("Start notes", state?.shortcuts.toggle)}">Start notes</button>` : ""}
         ${
           recording
             ? `<button type="button" class="icon-btn" id="pill-bookmark" aria-label="Flag this moment" title="${hint("Flag this moment", state?.shortcuts.bookmark)}">${ICONS.bookmark}</button>
                <span class="divider" aria-hidden="true"></span>
-               <button type="button" class="icon-btn stop" id="pill-stop" aria-label="Stop recording and write notes" title="${hint("Stop and write notes", state?.shortcuts.toggle)}">${ICONS.stop}</button>`
+               <button type="button" class="icon-btn stop" id="pill-stop" aria-label="${STOP_LABEL}" title="${hint(STOP_LABEL, state?.shortcuts.toggle)}">${ICONS.stop}</button>`
             : ""
         }
         <button type="button" class="icon-btn chevron" id="chevron" aria-label="${ctx.expanded ? "Collapse notes panel" : "Expand notes panel"}" tabindex="-1">${ICONS.chevron}</button>
@@ -90,13 +91,13 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
     case "setup":
       return `
           <div class="stack">
-            <div><h2>Set up Google Meet notes</h2><p class="sub">Choose local BYOK or Hosted AI and add the recording notice. Meet capture runs in Chrome; desktop calls can use the native helper later.</p></div>
+            <div><h2>Finish setup to take notes</h2><p class="sub">Choose how notes are written (your own API keys or Hosted AI), allow the microphone, and you're ready. It takes about a minute.</p></div>
             <button type="button" class="btn primary block" id="open-setup">Open setup</button>
           </div>`;
     case "starting":
       return `
           <div class="stack">
-            <div><h2>Connecting to the call audio…</h2><p class="sub">Audio is saved on this device and sent to your own transcription provider with your key.</p></div>
+            <div><h2>Connecting to the call audio…</h2><p class="sub">${startingCopy(ctx.state)}</p></div>
           </div>`;
     case "processing":
       return `
@@ -118,16 +119,20 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
     case "recording":
       return `
           <div class="stack">
-            <div class="transcript-wrap">
+            ${
+              ctx.state?.helperStatus === "connected"
+                ? `<div class="transcript-wrap">
               <div class="transcript" id="transcript" role="log" aria-live="off" aria-label="Live transcript" tabindex="0"></div>
               <button type="button" class="jump" id="jump" hidden>Jump to latest</button>
-            </div>
+            </div>`
+                : `<p class="sub" id="written-on-stop">Recording. Your notes are written when you stop. Live captions need the desktop helper.</p>`
+            }
             <form class="row" id="moment-form" autocomplete="off">
               <input type="text" id="moment-note" maxlength="280" placeholder="Add a note to this moment" aria-label="Note for this moment (optional)" />
               <button type="submit" class="btn secondary" id="moment-submit">Flag</button>
             </form>
             <div id="moments-wrap" hidden><p class="section-label">Flagged moments</p><ul class="moments" id="moments"></ul></div>
-            <button type="button" class="btn danger block" id="stop">Stop &amp; write notes</button>
+            <button type="button" class="btn danger block" id="stop">${STOP_LABEL}</button>
           </div>`;
     default:
       return renderReady(ctx);
@@ -165,31 +170,33 @@ function renderError(ctx: TemplateContext): string {
           </div>`;
 }
 
+function startingCopy(state: WidgetState | null): string {
+  return state?.processingKind === "managed"
+    ? "Audio is saved on this device first. When you stop, it is uploaded to Hosted AI to write your notes."
+    : "Audio is saved on this device first. When you stop, it is sent to your transcription and summary providers, using your own API keys, to write your notes.";
+}
+
 function renderReady(ctx: TemplateContext): string {
   const { state } = ctx;
-  const notice = helperNotice(state);
   const mode = ctx.selectedMode ?? state?.defaultMeetingMode ?? "general";
   const intro = state?.callTitle
     ? `Notes for <strong>${escapeHtml(state.callTitle)}</strong> appear right after the call.`
     : "Notes, decisions, and action items appear right after the call.";
-  const shortcutLine = state?.shortcuts.toggle
-    ? `<p class="sub">Start or stop with ${keysHtml(state.shortcuts.toggle)}</p>`
-    : `<p class="sub">No keyboard shortcut is set. <button type="button" class="link" id="set-shortcut">Set one</button></p>`;
+  // Chrome only lets an extension capture a tab after the person has invoked it
+  // there (toolbar icon or shortcut), so that is the first thing to say, not a
+  // button that would fail on its first press.
+  const startHint = state?.shortcuts.toggle
+    ? `Press ${keysHtml(state.shortcuts.toggle)} or click the toolbar icon to start notes.`
+    : `Click the Notetaker toolbar icon to start notes. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
   return `
       <div class="stack">
         <div><h2>Ready when you are</h2><p class="sub">${intro}</p></div>
-        ${
-          notice
-            ? `<p class="note warn" role="status" id="helper-note">${escapeHtml(notice)}</p>
-               <div class="row"><button type="button" class="btn primary" id="helper-setup">Open recording setup</button><button type="button" class="btn secondary" id="helper-check">Check again</button></div>`
-            : ""
-        }
+        <p class="note" id="start-hint">${startHint}</p>
         <div class="field">
           <label for="mode">Notes style</label>
           <select id="mode">${MODES.map(([value, label]) => `<option value="${value}"${value === mode ? " selected" : ""}>${label}</option>`).join("")}</select>
         </div>
         <p class="consent"><strong>Nobody else is notified.</strong> Tell everyone you're recording; some places require everyone's consent.</p>
-        <button type="button" class="btn ${notice ? "secondary" : "primary"} block" id="start"${canStart(state) ? "" : ` disabled aria-describedby="helper-note"`}>Start taking notes</button>
-        ${shortcutLine}
+        <button type="button" class="btn secondary block" id="start"${canStart(state) ? "" : " disabled"}>Start notes</button>
       </div>`;
 }

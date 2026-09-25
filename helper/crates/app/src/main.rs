@@ -6,7 +6,14 @@
 //! `ipc.rs`); those shims are what Chrome actually spawns per
 //! `docs/native-messaging-protocol.md`.
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod ipc;
+mod ipc_endpoint;
+mod logging;
+mod notify;
+mod paths;
+mod single_instance;
 mod tray;
 
 use async_trait::async_trait;
@@ -224,12 +231,6 @@ impl RetryWorker {
     fn abort(self) {
         self._task.abort();
     }
-}
-
-fn data_dir() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("ai-notetaker")
 }
 
 async fn managed_service_from_state(state: &AppState) -> Result<ManagedServiceConfig, String> {
@@ -769,20 +770,40 @@ fn secure_data_dir(root: &std::path::Path) -> std::io::Result<()> {
 }
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .init();
+    let root = paths::data_dir().expect("per-user data directory is required");
+    secure_data_dir(&root).expect("could not secure app data directory");
+    logging::init(&root);
+    let _instance = match single_instance::acquire(&root) {
+        Ok(single_instance::Acquired::Yes(lock)) => lock,
+        Ok(single_instance::Acquired::AlreadyRunning) => {
+            notify::Notifier::default().notify_deduped(
+                "already-running",
+                "AI Notetaker",
+                "The helper is already running.",
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(%error, "could not acquire helper lock");
+            return;
+        }
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
             ))?;
 
-            let root = data_dir();
+            let root = root.clone();
+            use tauri_plugin_autostart::ManagerExt;
+            let autostart_marker = root.join("autostart-configured");
+            if !autostart_marker.exists() && app.autolaunch().enable().is_ok() {
+                std::fs::write(&autostart_marker, b"configured")?;
+            }
             secure_data_dir(&root).map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
             let store = Arc::new(
                 MeetingStore::new(&root)
@@ -802,11 +823,17 @@ fn main() {
                 managed_tasks: Mutex::new(HashMap::new()),
                 subscribers: Mutex::new(HashMap::new()),
             });
-            let tray = tray::initialize(app.handle(), root.clone())?;
+            let tray = tray::initialize(app.handle(), root.clone());
+            if let Ok(interrupted) = state
+                .store
+                .find_interrupted_meetings_excluding(&HashSet::new())
+            {
+                tray.set_attention(!interrupted.is_empty());
+            }
             let ipc_state = state.clone();
             let ipc_tray = tray.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(error) = ipc::run_ipc_server(move |msg, out_tx| {
+                if let Err(error) = ipc::run_ipc_server(&root, move |msg, out_tx| {
                     let state = ipc_state.clone();
                     let tray = ipc_tray.clone();
                     async move { handle_message(state, tray, msg, out_tx).await }
@@ -817,7 +844,7 @@ fn main() {
                 }
             });
 
-            tracing::info!("notetaker-helper starting, data dir: {}", root.display());
+            tracing::info!("notetaker-helper starting");
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -1083,39 +1110,34 @@ async fn handle_message(
             let audio = state.audio.clone();
             let state_for_audio = state.clone();
             let audio_processing_for_audio = audio_processing.clone();
+            let audio_errors = out_tx.clone();
             let result = audio
                 .start_capture(Box::new(move |frame| {
-                    let state = state_for_audio.clone();
-                    let audio_processing = audio_processing_for_audio.clone();
-                    tokio::spawn(async move {
-                        let existing_len = match persist_audio_frame(
-                            &state.store,
-                            meeting_id,
-                            frame.channel,
-                            &frame.pcm16,
-                            frame.sample_rate_hz,
-                        ) {
-                            Ok(existing_len) => existing_len,
-                            Err(message) => {
-                                send_meeting_message(
-                                    &state,
-                                    meeting_id,
-                                    HelperToExtension::Error {
-                                        meeting_id: Some(meeting_id),
-                                        code: ErrorCode::DeviceNotFound,
-                                        message,
-                                    },
-                                )
-                                .await;
-                                return;
-                            }
-                        };
-                        let _ = audio_processing.enqueue(PersistedAudioChunk {
-                            channel: frame.channel,
-                            pcm16: frame.pcm16,
-                            sample_rate_hz: frame.sample_rate_hz,
-                            existing_len,
-                        });
+                    // Backends deliver frames on one dispatcher thread. Persist
+                    // synchronously there so stop joins every write, and queue
+                    // provider work only after the durable append completes.
+                    let existing_len = match persist_audio_frame(
+                        &state_for_audio.store,
+                        meeting_id,
+                        frame.channel,
+                        &frame.pcm16,
+                        frame.sample_rate_hz,
+                    ) {
+                        Ok(existing_len) => existing_len,
+                        Err(message) => {
+                            let _ = audio_errors.send(HelperToExtension::Error {
+                                meeting_id: Some(meeting_id),
+                                code: ErrorCode::StorageError,
+                                message,
+                            });
+                            return;
+                        }
+                    };
+                    let _ = audio_processing_for_audio.enqueue(PersistedAudioChunk {
+                        channel: frame.channel,
+                        pcm16: frame.pcm16,
+                        sample_rate_hz: frame.sample_rate_hz,
+                        existing_len,
                     });
                 }))
                 .await;
@@ -1225,6 +1247,14 @@ async fn handle_message(
             flagged_moments,
         } => {
             let active_recording = state.active.lock().await.remove(&meeting_id);
+            if active_recording.is_none() && !state.pipelines.lock().await.contains_key(&meeting_id)
+            {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id), code: ErrorCode::StorageError,
+                    message: "This recording is not active. Recover it from the interrupted recordings list.".into(),
+                });
+                return true;
+            }
             if let Some(active) = &active_recording {
                 if let Some(audio) = &active.audio {
                     let _ = audio.stop_capture().await;
@@ -1346,6 +1376,39 @@ async fn handle_message(
         // was already captured before the interruption, then transcribe the
         // durable raw-audio tail before summarizing it.
         ExtensionToHelper::ResumeRecording { meeting_id } => {
+            if let Ok(meta) = state.store.load_meta(meeting_id) {
+                if meta.managed_pending {
+                    subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
+                    match managed_service_from_state(&state).await {
+                        Ok(service) if managed_identity_matches(&meta, &service) => {
+                            match state.store.mark_stopped(meeting_id, chrono::Utc::now()) {
+                                Ok(()) => {
+                                    let _ = out_tx
+                                        .send(HelperToExtension::RecordingStopped { meeting_id });
+                                    start_managed_worker(
+                                        state.clone(),
+                                        service,
+                                        meeting_id,
+                                        meta.managed_job_id,
+                                    )
+                                    .await;
+                                }
+                                Err(error) => {
+                                    let _ = out_tx.send(HelperToExtension::Error {
+                                        meeting_id: Some(meeting_id),
+                                        code: ErrorCode::StorageError,
+                                        message: error.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                        _ => {
+                            let _ = out_tx.send(HelperToExtension::Error { meeting_id: Some(meeting_id), code: ErrorCode::ProviderAuthFailed, message: "Sign in to the hosted workspace that owns this recording to recover it.".into() });
+                        }
+                    }
+                    return true;
+                }
+            }
             let Some(settings) = state.settings.lock().await.clone() else {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),

@@ -6,23 +6,23 @@ review remain release-owner actions.
 
 ## Short description
 
-Local-first AI meeting notes with live transcripts and action items, powered by
-your own desktop helper and provider keys.
+Botless AI meeting notes for Google Meet: transcript, summary, and action
+items, free with your own API keys.
 
 ## Full description
 
 AI Notetaker records separate microphone and meeting-audio channels without a
-meeting bot. Google Meet uses Chrome tab capture; Zoom, Teams, Slack, and
-other desktop calls can use the native helper. The free local BYOK mode keeps
-audio and meeting history on your machine and uses keys you provide. An
-optional Hosted AI mode lets users sign in to a managed service that performs
-provider calls, usage metering, and paid-plan billing without exposing
-provider keys to the extension.
+meeting bot. Google Meet uses Chrome tab capture and needs nothing besides the
+extension; Zoom, Teams, Slack, and other desktop calls additionally use the
+optional native helper. **Use my own API keys (free)** keeps audio and meeting
+history on your machine and uses keys you provide. **Hosted (paid)** lets you
+sign in to the hosted service, which performs provider calls, usage metering,
+and billing without exposing provider keys to the extension.
 
 The extension owns Google Meet capture and communicates with the desktop
-helper through Chrome Native Messaging for desktop-call capture. The optional
-self-hosted history webapp remains available; Hosted AI is a separate managed
-deployment path and is not required for local BYOK recording.
+helper through Chrome Native Messaging only for desktop-call capture. The
+optional self-hosted history webapp remains available; the hosted service is a
+separate deployment path and is not required for recording with your own keys.
 
 Use the extension only after obtaining the consent required in your location
 and by your meeting participants.
@@ -32,6 +32,10 @@ and by your meeting participants.
 | Permission | Why it is requested |
 | --- | --- |
 | `storage` | Store provider keys, helper pairing state, settings, and local meeting records in `chrome.storage.local`. |
+| `unlimitedStorage` | Keep recoverable meeting audio in local IndexedDB and retain notes without the ordinary extension storage quota interrupting long meetings. |
+| `activeTab` | Capture the Meet tab only after the user invokes the extension on that tab. |
+| `notifications` | Show meeting reminders and notify the user when notes are ready. |
+| `identity` | Run user-initiated OAuth for optional Calendar and Drive connections. |
 | `nativeMessaging` | Send desktop-call recording controls and receive transcripts from the user-installed desktop helper. |
 | `alarms` | Schedule bounded background retry/sync work when the MV3 service worker is inactive. |
 | `tabCapture`, `offscreen` | Capture the active Google Meet tab in an offscreen document without a bot joining the call. |

@@ -6,9 +6,10 @@ description: Add a BYOK transcription or summarization provider while preserving
 # Add an AI provider
 
 First classify the provider as transcription or summarization. Implement the
-existing helper trait, preserve raw-audio-before-network ordering and the
+existing helper trait and extension Meet provider interface, preserve raw-audio-before-network ordering and the
 retry path, and test success/auth/rate-limit/unreachable responses with
-mocked HTTP. Keep keys in `chrome.storage.local` and route settings-page
-validation through the helper. Label batch providers honestly, add the
+mocked HTTP. Keep local BYOK keys in `chrome.storage.local`; validate Meet
+providers in the extension without requiring the helper. Managed provider
+credentials stay server-side behind the managed gateway. Label batch providers honestly, add the
 provider to the settings list and protocol, and document verified current
 pricing rather than guessing.

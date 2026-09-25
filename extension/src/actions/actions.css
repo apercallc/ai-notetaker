@@ -85,3 +85,31 @@ body {
   text-align: center;
   color: var(--color-text-secondary);
 }
+
+.action-error {
+  text-align: left;
+  padding: 0;
+  margin: 0 0 var(--space-3);
+}
+
+.action-filters a[aria-current="page"] {
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--color-text);
+}
+
+.action-row.overdue {
+  border-left: 3px solid var(--color-danger);
+}
+
+.due-badge {
+  font-weight: 600;
+}
+
+.due-badge.overdue {
+  color: var(--color-danger);
+}
+
+.due-badge.today {
+  color: var(--color-warning);
+}

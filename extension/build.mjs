@@ -12,6 +12,7 @@ const entryPoints = [
   "src/meeting/meeting.ts",
   "src/actions/actions.ts",
   "src/meet/offscreen.ts",
+  "src/meet/captureWorklet.ts",
   "src/meet/microphone.ts",
   "src/content/meetWidget.ts",
 ];

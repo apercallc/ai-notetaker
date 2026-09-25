@@ -21,10 +21,10 @@ export function managedCorsHeaders(origin: string | null, requestOrigin: string)
     "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, X-Chunk-Sha256, X-Audio-Channel, X-Workspace-Id, X-Request-Id",
     "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Max-Age": "600",
+    Vary: "Origin",
   };
   if (origin && isManagedCorsOrigin(origin, requestOrigin)) {
     headers["Access-Control-Allow-Origin"] = origin;
-    headers.Vary = "Origin";
   }
   return headers;
 }

@@ -9,6 +9,7 @@ const NOW = Date.parse("2026-09-24T12:00:00.000Z");
 function baseState(overrides: Partial<WidgetState> = {}): WidgetState {
   return {
     helperStatus: "connected",
+    processingKind: "local_byok",
     onboardingComplete: true,
     consentAcknowledged: true,
     widgetEnabled: true,
@@ -262,13 +263,13 @@ describe("MeetWidget: starting a recording", () => {
     harness = await createHarness(baseState({ shortcuts: { toggle: "⌥⇧R", bookmark: "⌥⇧B" } }));
     await harness.click("#toggle");
     expect(Array.from(harness.$(".panel .keys")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["⌥", "⇧", "R"]);
-    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start taking notes (⌥⇧R)");
+    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start notes (⌥⇧R)");
   });
 
   it("offers to set a shortcut when none is assigned", async () => {
     harness = await createHarness(baseState({ shortcuts: { toggle: "", bookmark: "" } }));
     await harness.click("#toggle");
-    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start taking notes");
+    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start notes");
     await harness.click("#set-shortcut");
     expect(harness.sent).toContainEqual({ type: "OPEN_PAGE", page: "shortcuts" });
   });
@@ -354,7 +355,7 @@ describe("MeetWidget: recording", () => {
     expect($(".pill-main")?.textContent).toContain("Recording");
     expect($("#elapsed")?.textContent).toBe("02:00");
     expect($("#pill-bookmark")?.getAttribute("aria-label")).toBe("Flag this moment");
-    expect($("#pill-stop")?.getAttribute("aria-label")).toMatch(/Stop recording/);
+    expect($("#pill-stop")?.getAttribute("aria-label")).toBe("Stop notes");
   });
 
   it("renders the live transcript from state and upserts provisional lines in place", async () => {
@@ -464,7 +465,7 @@ describe("MeetWidget: recording", () => {
 
     await harness.click("#pill-stop");
     expect(harness.sent.some((message) => message.type === "STOP_RECORDING")).toBe(false);
-    expect(harness.$("#pill-stop")?.textContent).toBe("Stop?");
+    expect(harness.$("#pill-stop")?.textContent).toBe("Stop notes?");
     await harness.click("#pill-stop");
 
     expect(harness.sent).toContainEqual({ type: "STOP_RECORDING", meetingId: "m1" });
@@ -659,9 +660,12 @@ describe("MeetWidget: edge cases and resilience", () => {
     expect(harness.$("#helper-note")).toBeNull();
   });
 
-  it("stops from the panel button too", async () => {
+  it("stops from the panel button too, after the same two-press confirm", async () => {
     harness = await createHarness(baseState({ active: activeMeeting() }));
     await harness.click("#toggle");
+    await harness.click("#stop");
+    expect(harness.sent.some((message) => message.type === "STOP_RECORDING")).toBe(false);
+    expect(harness.$("#stop")?.textContent).toBe("Stop notes?");
     await harness.click("#stop");
     expect(harness.sent).toContainEqual({ type: "STOP_RECORDING", meetingId: "m1" });
   });
@@ -672,6 +676,7 @@ describe("MeetWidget: edge cases and resilience", () => {
       throw new Error("port closed");
     });
     await harness.click("#toggle");
+    await harness.click("#stop");
     await harness.click("#stop");
     expect(harness.$(".nt")?.dataset.view).toBe("recording");
   });
@@ -804,7 +809,7 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     harness = await createHarness();
     harness.respond("START_RECORDING", () => ({ meetingId: "" }));
 
-    expect(harness.$("#pill-start")?.textContent).toBe("Start");
+    expect(harness.$("#pill-start")?.textContent).toBe("Start notes");
     await harness.click("#pill-start");
     expect(harness.sent).toContainEqual(expect.objectContaining({ type: "START_RECORDING", captureSource: "meet" }));
   });
@@ -833,7 +838,7 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     harness.$<HTMLButtonElement>("#start")!.click();
     await harness.flush();
 
-    expect(harness.$(".panel")?.textContent).toMatch(/sent to your own transcription provider/);
+    expect(harness.$(".panel")?.textContent).toMatch(/sent to your transcription and summary providers, using your own API keys/);
     release?.();
     await harness.flush();
   });

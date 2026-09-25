@@ -7,6 +7,9 @@
  */
 import { BackgroundController } from "./lib/backgroundController";
 import { getExtensionOnboardingUrl } from "./lib/install";
+import { handleInstalled } from "./lib/installHandler";
+import { notifyNotesReady, openNotesReady } from "./lib/notesReady";
+import { setBadge, type BadgeState } from "./lib/recordingBadge";
 import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/internalMessages";
 import { NativeMessagingClient } from "./lib/nativeMessaging";
 import { openReminderCall, runMeetReminders, syncReminderAlarm } from "./lib/reminderAlarm";
@@ -14,7 +17,7 @@ import { REMINDER_ALARM } from "./lib/reminders";
 import { classifySender, isMessageAllowed, resolveStartRequest, type SenderKind } from "./lib/senderPolicy";
 import { saveWidgetPosition } from "./lib/storage";
 import { MeetCaptureController, type MeetAudioChunk } from "./meet/meetCapture";
-import { handleMeetCommand, startMeetRecording, stopMeetRecording } from "./meet/session";
+import { finishMeetCaptureForTab, handleMeetCommand, startMeetRecording, stopMeetRecording } from "./meet/session";
 import { broadcastToMeetTabs } from "./meet/tabBroadcast";
 
 // API keys and calendar tokens live in chrome.storage.local. Keep it out of
@@ -31,32 +34,19 @@ void restrictStorageToTrustedContexts();
 
 const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
-const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => {
-  try {
-    controller.sendMeetAudioChunk(meetingId, channel, pcm16, 48_000);
-  } catch (error) {
-    console.warn("Meet audio chunk could not reach the helper", error);
-    void controller.failRecording(meetingId, "The desktop helper disconnected during Google Meet capture. The audio already received is safe; reconnect and start again.");
-    void meetCapture.stop(meetingId);
-  }
-});
+const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => controller.sendMeetAudioChunk(meetingId, channel, pcm16, 48_000));
 
-async function stopMeetCaptureForTab(tabId: number, reason: string): Promise<void> {
-  const meetingIds = await meetCapture.stopForTab(tabId);
-  await Promise.all(meetingIds.map((meetingId) => controller.failRecording(meetingId, reason)));
-}
-
-// A captured tab can disappear without the popup or content script getting a
-// final event. Stop the offscreen graph first, then persist a retryable error
-// through the helper-backed controller so already-received audio remains safe.
+// A captured tab that closes, or leaves its call, is the end of the call and
+// not a failure: the audio is already on disk, so finish the meeting the way
+// Stop does and write the notes. Same-call URL changes (query, hash) are ignored.
 chrome.tabs.onRemoved?.addListener((tabId) => {
-  void stopMeetCaptureForTab(tabId, "The Google Meet tab was closed. Audio already received is safe; start a new recording when you rejoin.").catch((error) => {
+  void finishMeetCaptureForTab(controller, meetCapture, tabId).catch((error) => {
     console.warn("Meet capture cleanup after tab removal failed", error);
   });
 });
 chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
   if (typeof changeInfo.url !== "string") return;
-  void stopMeetCaptureForTab(tabId, "The Google Meet tab navigated. Audio already received is safe; start a new recording on the active call.").catch((error) => {
+  void finishMeetCaptureForTab(controller, meetCapture, tabId, changeInfo.url).catch((error) => {
     console.warn("Meet capture cleanup after tab navigation failed", error);
   });
 });
@@ -66,26 +56,14 @@ chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === REMINDER_ALARM) void readyPromise.then(() => runMeetReminders(() => controller.getState().activeMeeting !== null));
 });
 
-chrome.notifications?.onClicked.addListener((notificationId) => void openReminderCall(notificationId));
+async function openNotification(notificationId: string): Promise<void> {
+  if (!(await openNotesReady(notificationId))) await openReminderCall(notificationId);
+}
+chrome.notifications?.onClicked.addListener((notificationId) => void openNotification(notificationId));
+chrome.notifications?.onButtonClicked?.addListener((notificationId) => void openNotification(notificationId));
 
-// Do not force a tab open on installation. Chrome already exposes the action
-// popup as the product entry point; opening the wizard here made every new
-// install land on the helper-download screen before the user could see the
-// Meet and local/managed choices. The popup can still open onboarding from
-// its explicit setup action, and the Meet widget can link to it when needed.
-// On extension updates, replace any already-open wizard with the canonical
-// Meet-first URL. Reloading an older helper-first tab is not enough because
-// Chrome preserves its old `mode=desktop` query string across the reload.
-// This is deliberately update-only; the explicit desktop action still opens
-// a desktop-mode wizard after the update.
 chrome.runtime.onInstalled?.addListener((details) => {
-  if (details.reason !== "update") return;
-  const onboardingUrl = chrome.runtime.getURL("onboarding/onboarding.html");
-  const meetFirstUrl = getExtensionOnboardingUrl(chrome.runtime.getURL(""), "meet");
-  void chrome.tabs
-    .query({ url: `${onboardingUrl}*` })
-    .then((tabs) => Promise.all(tabs.flatMap((tab) => (typeof tab.id === "number" ? [chrome.tabs.update(tab.id, { url: meetFirstUrl })] : []))))
-    .catch((error) => console.warn("Could not migrate an older onboarding tab after update", error));
+  void handleInstalled(details).catch((error) => console.warn("Install handling failed", error));
 });
 
 chrome.commands?.onCommand.addListener((command, tab) => {
@@ -100,20 +78,35 @@ function broadcastToUi(message: BackgroundToUiMessage): void {
   chrome.runtime.sendMessage(message).catch(() => {});
   void broadcastToMeetTabs(message);
 
-  // A recording failure is exactly the moment the user is *not* looking at
-  // the popup (they're in the call it just failed to capture) — without a
-  // toolbar badge, the only trace was a passive label buried in history,
-  // discoverable only if they happened to reopen the popup and scroll down
-  // (design review finding, see TODO.md). The badge is cleared the next
-  // time the popup actually opens (see GET_STATE below).
-  if (message.type === "RECORDING_ERROR") {
-    void chrome.action.setBadgeBackgroundColor({ color: "#c62828" }); // matches --color-danger-solid
-    void chrome.action.setBadgeText({ text: "!" });
+  updateBadge(message);
+  if (message.type === "SUMMARY_READY") void notifyNotesReady(message.meetingId).catch(() => {});
+}
+
+// "REC" while a recording is live. A failure that happens while the person is
+// looking at something else (mid-call, or while notes were being written) is
+// the moment a passive label in the history is not enough, so it gets a "!"
+// that stays until the popup is opened. A start that fails is reported in
+// place, to whoever pressed start, and never badges.
+let badge: BadgeState = "";
+function showBadge(next: BadgeState): void {
+  badge = next;
+  setBadge(next);
+}
+function updateBadge(message: BackgroundToUiMessage): void {
+  if (message.type === "RECORDING_ERROR" && message.phase !== "start") {
+    showBadge("!");
+    return;
   }
+  const recording = controller.getState().activeMeeting !== null;
+  if (recording) showBadge("REC");
+  else if (badge === "REC") showBadge("");
 }
 
 const readyPromise = controller.init();
 void readyPromise.then(syncReminderAlarm);
+void readyPromise.then(() => {
+  if (controller.getState().activeMeeting) showBadge("REC");
+});
 
 chrome.runtime.onMessage.addListener((message: UiToBackgroundMessage, sender, sendResponse) => {
   // Extension pages and the offscreen capture page share this channel with the
@@ -132,7 +125,7 @@ chrome.runtime.onMessage.addListener((message: UiToBackgroundMessage, sender, se
   return true; // keep the message channel open for the async response
 });
 
-async function openExtensionPage(page: Extract<UiToBackgroundMessage, { type: "OPEN_PAGE" }>["page"]): Promise<void> {
+async function openExtensionPage(page: Extract<UiToBackgroundMessage, { type: "OPEN_PAGE" }>["page"], fromTabId?: number): Promise<void> {
   if (page === "settings") {
     await chrome.runtime.openOptionsPage();
     return;
@@ -142,7 +135,9 @@ async function openExtensionPage(page: Extract<UiToBackgroundMessage, { type: "O
     // path explicit so Chrome cannot restore an old desktop selection and
     // send the user to the helper installer.
     onboarding: getExtensionOnboardingUrl(chrome.runtime.getURL("")),
-    microphone: chrome.runtime.getURL("meet/microphone.html"),
+    // Opened from the call: remember which tab to hand focus back to once the
+    // microphone is allowed.
+    microphone: chrome.runtime.getURL(`meet/microphone.html${typeof fromTabId === "number" ? `?returnTo=${fromTabId}` : ""}`),
     shortcuts: "chrome://extensions/shortcuts",
   };
   await chrome.tabs.create({ url: urls[page] });
@@ -152,7 +147,8 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
   await readyPromise;
   switch (message.type) {
     case "GET_STATE":
-      void chrome.action.setBadgeText({ text: "" });
+      // Opening the popup acknowledges a failure badge; a live recording keeps its own.
+      showBadge(controller.getState().activeMeeting ? "REC" : "");
       return controller.getState();
     case "CHECK_HELPER":
       return controller.checkHelper();
@@ -187,7 +183,7 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await saveWidgetPosition(message.position);
       return {};
     case "OPEN_PAGE":
-      await openExtensionPage(message.page);
+      await openExtensionPage(message.page, sender.tab?.id);
       return {};
     case "OPEN_MEETING":
       await chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(message.meetingId)}`) });
@@ -200,10 +196,12 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       return {};
     case "MEET_AUDIO_CHUNK":
       try {
-        if (!meetCapture.isActive(message.meetingId) && controller.getState().activeMeeting?.id === message.meetingId) meetCapture.recover(message.meetingId);
-        meetCapture.forwardChunk(message as MeetAudioChunk);
+        if (!meetCapture.isActive(message.meetingId) && controller.getState().activeMeeting?.id === message.meetingId) meetCapture.recover(message.meetingId, message.tabId);
+        await meetCapture.forwardChunk(message as MeetAudioChunk);
       } catch (error) {
         await controller.failRecording(message.meetingId, error instanceof Error ? error.message : "Meet audio capture failed.");
+        void meetCapture.stop(message.meetingId).catch(() => {});
+        return { error: "Call audio could not be saved. Start notes again." };
       }
       return {};
     case "MEET_CAPTURE_ERROR":
@@ -224,6 +222,6 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await controller.deleteMeeting(message.meetingId);
       return {};
     case "TEST_PROVIDER_KEY":
-      return controller.testProviderKey(message.provider, message.key);
+      return controller.testProviderKey(message.provider, message.key, { desktop: message.desktop === true });
   }
 }

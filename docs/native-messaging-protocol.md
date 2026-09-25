@@ -234,6 +234,19 @@ into either field.
 - `provider_rate_limited` — retry is already queued; informational only
 - `provider_unreachable` — network failure; retry is already queued
 - `device_not_found` — the virtual audio device isn't selected/available
+- `mic_permission_denied` — the OS refused microphone access to the helper
+- `screen_permission_denied` — the OS refused screen/system-audio capture
+  access to the helper
+- `disk_full` — not enough free disk to start, or the disk filled mid-call;
+  the helper stops the recording, keeps what was written, and sends this once
+- `storage_error` — any other local read/write failure (unreadable recording,
+  metadata write failure)
+- `capture_lost` — the recording the message refers to is not active any more
+  (interrupted, already stopped, or never started)
+- `protocol_mismatch` — the helper could not parse a message or does not know
+  its `type`; the connection stays open
+- `helper_not_running` — sent by the Native Messaging relay itself (not the
+  helper) when it could not reach or auto-start the helper within ~5 seconds
 - `helper_not_paired` — a non-empty browser token is invalid. The extension
   clears its local token and retries; a missing token is treated as a fresh
   profile and receives a new token after Native Messaging origin validation.

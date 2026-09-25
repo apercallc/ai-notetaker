@@ -34,6 +34,19 @@ interprocess = { version = "2", features = ["tokio"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
+# Decodes the embedded tray-state PNGs into RGBA for tauri::image::Image.
+png = "0.17"
+
+# Free-disk queries (statvfs / GetDiskFreeSpaceExW) for the start-of-recording
+# check and the disk-full auto-stop. Both crates are already in Cargo.lock via
+# tauri/interprocess; they are named here only so this crate can call them.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+# Needed to hand interprocess an SDDL string for the named-pipe DACL.
+widestring = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -3,48 +3,170 @@
 //! The helper has no main window. Tauri owns the process main thread, while
 //! this module keeps the menu small and platform-native: status first, recent
 //! notes next, an explicit opt-in launch-at-login action, and quit last.
+//!
+//! The icon is the recording consent cue: a red dot while capturing, a
+//! neutral ring when idle, and an amber attention icon while recordings from
+//! an interrupted session wait to be finished or discarded. macOS uses
+//! template images for the non-recording states so they match the menu bar;
+//! the recording dot deliberately stays a colored — not template — image so
+//! it remains red everywhere.
+//!
+//! The tray is also optional. On a desktop where tray creation fails (no
+//! system tray, a locked-down session), the helper keeps running headless
+//! rather than abandoning capture: `initialize` never fails, it logs and
+//! returns a controller whose updates simply have nowhere to go.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Runtime};
 
 const TRAY_ID: &str = "ai-notetaker-tray";
 
+// The tray states are pre-rendered by scripts/generate-tray-icons.py and
+// embedded here at compile time, so a broken icon can never take the tray
+// down at runtime and the binary has one less thing to locate on disk.
+#[cfg(target_os = "macos")]
+const IDLE_ICON: &[u8] = include_bytes!("../icons/tray/tray-idle-template.png");
+#[cfg(target_os = "macos")]
+const ATTENTION_ICON: &[u8] = include_bytes!("../icons/tray/tray-attention-template.png");
+#[cfg(not(target_os = "macos"))]
+const IDLE_ICON: &[u8] = include_bytes!("../icons/tray/tray-idle.png");
+#[cfg(not(target_os = "macos"))]
+const ATTENTION_ICON: &[u8] = include_bytes!("../icons/tray/tray-attention.png");
+const RECORDING_ICON: &[u8] = include_bytes!("../icons/tray/tray-recording.png");
+
+/// The tray states, in display priority order: an active recording always
+/// wins over a pending recovery notice.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TrayState {
+    Idle,
+    Recording,
+    Attention,
+}
+
+struct TrayIcons {
+    idle: Image<'static>,
+    attention: Image<'static>,
+    recording: Image<'static>,
+}
+
+/// Decodes an embedded PNG into the RGBA `tauri::image::Image` the tray
+/// needs. Raw RGBA is used (rather than the window-icon pipeline) because the
+/// tray API takes pixel data, and decoding here keeps the icon assets from
+/// being tied to whatever icon format the bundler picked for the app icon.
+fn decode_icon(bytes: &'static [u8]) -> Result<Image<'static>, Box<dyn std::error::Error>> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder.read_info()?;
+    let mut rgba = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut rgba)?;
+    Ok(Image::new_owned(rgba, info.width, info.height))
+}
+
 pub struct TrayController<R: Runtime = tauri::Wry> {
-    status: MenuItem<R>,
-    tray: TrayIcon<R>,
+    /// `None` on a headless system: updates are accepted and dropped.
+    status: Option<MenuItem<R>>,
+    tray: Option<TrayIcon<R>>,
+    icons: Option<TrayIcons>,
+    recording: AtomicBool,
+    attention: AtomicBool,
 }
 
 impl<R: Runtime> TrayController<R> {
+    fn headless() -> Self {
+        Self {
+            status: None,
+            tray: None,
+            icons: None,
+            recording: AtomicBool::new(false),
+            attention: AtomicBool::new(false),
+        }
+    }
+
     pub fn set_recording(&self, recording: bool) {
-        let label = if recording {
-            "Status: Recording"
-        } else {
-            "Status: Idle"
+        self.recording.store(recording, Ordering::Release);
+        self.refresh();
+    }
+
+    /// Marks whether recordings from an interrupted session are waiting for
+    /// the user to finish or discard them.
+    pub fn set_attention(&self, attention: bool) {
+        self.attention.store(attention, Ordering::Release);
+        self.refresh();
+    }
+
+    fn refresh(&self) {
+        let state = match (
+            self.recording.load(Ordering::Acquire),
+            self.attention.load(Ordering::Acquire),
+        ) {
+            (true, _) => TrayState::Recording,
+            (false, true) => TrayState::Attention,
+            (false, false) => TrayState::Idle,
         };
-        let tooltip = if recording {
-            "AI Notetaker — Recording"
-        } else {
-            "AI Notetaker — Idle"
+        if let Some(status) = &self.status {
+            let _ = status.set_text(match state {
+                TrayState::Idle => "Status: Idle",
+                TrayState::Recording => "Status: Recording",
+                TrayState::Attention => "Status: Recovered Recording",
+            });
+        }
+        let Some(tray) = &self.tray else {
+            return;
         };
-        let _ = self.status.set_text(label);
-        let _ = self.tray.set_tooltip(Some(tooltip));
+        let _ = tray.set_tooltip(Some(match state {
+            TrayState::Idle => "AI Notetaker — Idle",
+            TrayState::Recording => "AI Notetaker — Recording",
+            TrayState::Attention => "AI Notetaker — Recovered a recording",
+        }));
+        let Some(icons) = &self.icons else {
+            return;
+        };
+        let (icon, is_template) = match state {
+            TrayState::Idle => (&icons.idle, cfg!(target_os = "macos")),
+            // The red dot is the consent cue; tinting it to match the menu
+            // bar would erase exactly the distinction it exists to make.
+            TrayState::Recording => (&icons.recording, false),
+            TrayState::Attention => (&icons.attention, cfg!(target_os = "macos")),
+        };
+        let _ = tray.set_icon_as_template(is_template);
+        let _ = tray.set_icon(Some(icon.clone()));
     }
 }
 
-pub fn initialize<R: Runtime>(
+/// Builds the tray, or logs and returns a headless controller. Startup must
+/// never abort because the desktop has no tray.
+pub fn initialize<R: Runtime>(app: &AppHandle<R>, data_dir: PathBuf) -> Arc<TrayController<R>> {
+    match try_initialize(app, data_dir) {
+        Ok(controller) => controller,
+        Err(error) => {
+            tracing::warn!("running without a tray: {error}");
+            Arc::new(TrayController::headless())
+        }
+    }
+}
+
+fn try_initialize<R: Runtime>(
     app: &AppHandle<R>,
     data_dir: PathBuf,
 ) -> Result<Arc<TrayController<R>>, Box<dyn std::error::Error>> {
+    let icons = TrayIcons {
+        idle: decode_icon(IDLE_ICON)?,
+        attention: decode_icon(ATTENTION_ICON)?,
+        recording: decode_icon(RECORDING_ICON)?,
+    };
+
     let status = MenuItem::with_id(app, "status", "Status: Idle", false, None::<&str>)?;
     let open_latest =
         MenuItem::with_id(app, "open-latest", "Open Latest Note", true, None::<&str>)?;
     let open_folder =
         MenuItem::with_id(app, "open-folder", "Open Notes Folder", true, None::<&str>)?;
+    let open_logs = MenuItem::with_id(app, "open-logs", "Open Logs", true, None::<&str>)?;
     let launch_at_login = MenuItem::with_id(
         app,
         "launch-at-login",
@@ -64,30 +186,30 @@ pub fn initialize<R: Runtime>(
     let quit = MenuItem::with_id(app, "quit", "Quit AI Notetaker", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[&status, &open_latest, &open_folder, &launch_at_login, &quit],
+        &[
+            &status,
+            &open_latest,
+            &open_folder,
+            &open_logs,
+            &launch_at_login,
+            &quit,
+        ],
     )?;
 
+    let logs_dir = crate::logging::log_dir(&data_dir);
     let tray = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip("AI Notetaker — Idle")
-        .icon(
-            app.default_window_icon()
-                .cloned()
-                .ok_or("default tray icon is missing")?,
-        )
-        // Marks the icon as a macOS template image so the system can render
-        // it monochrome/inverted to match the surrounding menu bar and the
-        // icon-selected state, instead of showing the full-color dock icon
-        // verbatim (a no-op on Windows/Linux). Reusing the dock icon asset
-        // is still a placeholder — see TODO.md for real tray-specific art —
-        // but this keeps whatever asset lands there native-looking on macOS
-        // without a second code change later.
-        .icon_as_template(true)
+        .icon(icons.idle.clone())
+        .icon_as_template(cfg!(target_os = "macos"))
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "open-latest" => open_latest_note(&data_dir),
             "open-folder" => {
                 let _ = open_with_default_app(&data_dir.join("meetings"));
+            }
+            "open-logs" => {
+                let _ = open_with_default_app(&logs_dir);
             }
             "launch-at-login" => toggle_autostart(app, &launch_at_login),
             "quit" => app.exit(0),
@@ -95,7 +217,13 @@ pub fn initialize<R: Runtime>(
         })
         .build(app)?;
 
-    Ok(Arc::new(TrayController { status, tray }))
+    Ok(Arc::new(TrayController {
+        status: Some(status),
+        tray: Some(tray),
+        icons: Some(icons),
+        recording: AtomicBool::new(false),
+        attention: AtomicBool::new(false),
+    }))
 }
 
 fn toggle_autostart<R: Runtime>(app: &AppHandle<R>, item: &MenuItem<R>) {

@@ -9,6 +9,9 @@ import {
   getUpload,
   MANAGED_UPLOAD_TTL_MS,
   ManagedValidationError,
+  chunksToReadableStream,
+  openManagedRecording,
+  readChunksSequentially,
 } from "./managedJobs";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
 import { chunkObjectKey, getObject, putObject } from "./objectStorage";
@@ -210,5 +213,78 @@ describe("managed usage reservations", () => {
         where: { workspaceId_idempotencyKey: { workspaceId: WORKSPACE_ID, idempotencyKey: "retry-job" } },
       }),
     ).resolves.toMatchObject({ units: 1, releasedAt: null });
+  });
+});
+
+describe("streaming recording reads", () => {
+  async function createStreamedRecording(workspaceId: string): Promise<string> {
+    const meetingId = await createMeeting(workspaceId);
+    const uploadId = randomUUID();
+    const keys = [0, 1].map((index) => `uploads/${workspaceId}/${uploadId}/${index}-stream.chunk`);
+    await putObject(keys[0], new Uint8Array([1, 2, 3, 4]));
+    await putObject(keys[1], new Uint8Array([5, 6]));
+    await prisma.managedUpload.create({
+      data: {
+        id: uploadId,
+        workspaceId,
+        meetingId,
+        idempotencyKey: `stream-${meetingId}`,
+        totalChunks: 3,
+        totalBytes: 8,
+        status: "complete",
+        expiresAt: new Date("2026-12-31T00:00:00.000Z"),
+        completedAt: new Date(),
+        chunks: {
+          create: [
+            { chunkIndex: 0, channel: "mic", byteLength: 4, checksum: "stream-0", objectKey: keys[0] },
+            { chunkIndex: 1, channel: "mic", byteLength: 2, checksum: "stream-1", objectKey: keys[1] },
+            { chunkIndex: 2, channel: "speaker", byteLength: 2, checksum: "stream-2", objectKey: `${uploadId}-speaker` },
+          ],
+        },
+      },
+    });
+    return meetingId;
+  }
+
+  it("yields stored objects one at a time, in order", async () => {
+    const keys = ["stream-a", "stream-b"];
+    await putObject("stream-a", new Uint8Array([10, 11]));
+    await putObject("stream-b", new Uint8Array([12]));
+    const parts: Uint8Array[] = [];
+    for await (const part of readChunksSequentially(keys)) parts.push(part);
+    expect(parts.map((part) => Array.from(part))).toEqual([[10, 11], [12]]);
+  });
+
+  it("streams a recording chunk by chunk without loading it into memory", async () => {
+    const meetingId = await createStreamedRecording(WORKSPACE_ID);
+    const recording = await openManagedRecording(WORKSPACE_ID, meetingId, "mic");
+    expect(recording).toMatchObject({ title: "Managed test meeting", totalBytes: 6 });
+
+    const parts: Uint8Array[] = [];
+    for await (const part of recording!.chunks) parts.push(part);
+    const bytes = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    expect(Array.from(bytes)).toEqual([1, 2, 3, 4, 5, 6]);
+
+    // Another workspace can never open this recording.
+    await expect(openManagedRecording(OTHER_WORKSPACE_ID, meetingId, "mic")).resolves.toBeNull();
+    // No completed upload for the meeting at all.
+    await expect(openManagedRecording(WORKSPACE_ID, randomUUID(), "mic")).resolves.toBeNull();
+  });
+
+  it("wraps the chunks as a ReadableStream response body and supports cancellation", async () => {
+    const meetingId = await createStreamedRecording(WORKSPACE_ID);
+    const response = new Response((await openManagedRecording(WORKSPACE_ID, meetingId, "mic"))!.stream());
+    expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([1, 2, 3, 4, 5, 6]);
+
+    const stream = chunksToReadableStream(readChunksSequentially(["stream-a", "stream-b"]));
+    const reader = stream.getReader();
+    expect(Array.from((await reader.read()).value!)).toEqual([10, 11]);
+    await reader.cancel();
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
   });
 });

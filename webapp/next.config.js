@@ -1,20 +1,43 @@
 /** @type {import('next').NextConfig} */
+
+// CORS for the managed API lives in exactly one place: src/proxy.ts (via
+// src/lib/cors.ts). Do not add Access-Control-* headers here, or the two
+// blocks drift and disagree about allowed origins and headers.
+
+const isProduction = process.env.NODE_ENV === "production";
+
+// Next.js emits inline bootstrap scripts and styles, so 'unsafe-inline' is
+// required without a per-request nonce; everything else is locked to this
+// origin. React's dev overlay needs eval outside production only. Stripe
+// hosts appear in form-action because a billing form POSTs here and is then
+// redirected to Stripe Checkout / the billing portal.
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "media-src 'self' blob:",
+  `connect-src 'self'${isProduction ? "" : " ws: wss:"}`,
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self' https://checkout.stripe.com https://billing.stripe.com",
+  "frame-ancestors 'none'",
+].join("; ");
+
+const securityHeaders = [
+  { key: "Content-Security-Policy", value: contentSecurityPolicy },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+];
+
 const nextConfig = {
   reactStrictMode: true,
   async headers() {
-    const configuredOrigin = process.env.MANAGED_EXTENSION_ORIGIN;
-    const extensionOrigin = configuredOrigin && /^(?:chrome|moz)-extension:\/\/[^/?#]+\/?$/.test(configuredOrigin)
-      ? configuredOrigin.replace(/\/$/, "")
-      : "chrome-extension://jidooookkdbbbhkkdmcajnnnhhphodok";
-    return [{
-      source: "/api/v1/:path*",
-      headers: [
-        { key: "Access-Control-Allow-Origin", value: extensionOrigin },
-        { key: "Access-Control-Allow-Headers", value: "Authorization, Content-Type, Idempotency-Key, X-Chunk-Sha256, X-Audio-Channel, X-Request-Id, Stripe-Signature" },
-        { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, OPTIONS" },
-        { key: "Access-Control-Max-Age", value: "600" },
-      ],
-    }];
+    return [{ source: "/:path*", headers: securityHeaders }];
   },
 };
 

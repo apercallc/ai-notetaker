@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { DUMMY_PASSWORD_HASH, verifyPassword } from "@/lib/passwords";
-import { createSession } from "@/lib/sessions";
+import { authenticateCredentials } from "@/lib/accounts";
+import { createApiToken } from "@/lib/apiTokens";
+import { contextFromRequest } from "@/lib/requestContext";
 import { getUserDefaultWorkspaceId, getUserRole } from "@/lib/workspaces";
 import { ManagedValidationError, readManagedJson } from "@/lib/managedJobs";
 import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
 import { getEntitlements } from "@/lib/usageLedger";
-import { clearLoginFailures, isLoginThrottled, recordLoginFailure } from "@/lib/loginThrottle";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 
 export async function POST(request: Request) {
@@ -20,26 +19,22 @@ export async function POST(request: Request) {
     const password = typeof value.password === "string" ? value.password : "";
     if (!email || email.length > 320 || !password) throw new ManagedValidationError("email and password are required");
 
-    if (await isLoginThrottled(email)) {
+    const context = contextFromRequest(request);
+    const result = await authenticateCredentials({ email, password, ip: context.ip });
+    if (!result.ok) {
       return NextResponse.json({ error: "invalid credentials" }, { status: 401, headers: { "x-request-id": requestId } });
     }
-
-    const user = await prisma.user.findUnique({ where: { email } });
-    const valid = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
-    if (!user || !valid) {
-      await recordLoginFailure(email);
-      return NextResponse.json({ error: "invalid credentials" }, { status: 401, headers: { "x-request-id": requestId } });
-    }
+    const user = result.user;
+    if (user.mustChangePassword) return NextResponse.json({ error: "Change your temporary password in the web app before connecting the extension." }, { status: 403 });
 
     const workspaceId = await getUserDefaultWorkspaceId(user.id);
     if (!workspaceId) return NextResponse.json({ error: "account has no workspace" }, { status: 403, headers: { "x-request-id": requestId } });
     const role = await getUserRole(user.id, workspaceId);
     if (!role) return NextResponse.json({ error: "account has no workspace membership" }, { status: 403, headers: { "x-request-id": requestId } });
-    await clearLoginFailures(email);
-    const session = await createSession(user.id);
+    const session = await createApiToken(user.id, { userAgent: context.userAgent, label: "Extension sign-in" });
     const entitlements = await getEntitlements(workspaceId);
     return NextResponse.json(
-      { accessToken: session.id, expiresAt: session.expiresAt, accountId: user.id, workspaceId, plan: entitlements.plan, role },
+      { accessToken: session.token, expiresAt: session.expiresAt, accountId: user.id, workspaceId, plan: entitlements.plan, role },
       { headers: { "x-request-id": requestId } },
     );
   } catch (error) {

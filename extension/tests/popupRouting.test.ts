@@ -17,43 +17,65 @@ const state = {
   helperInfo: null,
 };
 
+async function loadPopup(activeTab: { id: number; url: string } | undefined): Promise<void> {
+  vi.resetModules();
+  document.body.innerHTML = '<main id="app"></main>';
+  chromeMock.reset();
+  chromeMock.tabs.query.mockResolvedValue(activeTab ? [activeTab] : []);
+  chromeMock.runtime.sendMessage.mockImplementation(async (message: { type?: string }) => {
+    if (message.type === "GET_STATE") return state;
+    return {};
+  });
+  await new Promise<void>((resolve) => chromeMock.storage.local.set({ [SETTINGS_KEY]: completedSettings }, resolve));
+  await import("../src/popup/popup");
+}
+
 describe("popup capture routing", () => {
-  beforeEach(async () => {
-    vi.resetModules();
-    document.body.innerHTML = '<main id="app"></main>';
-    chromeMock.reset();
-    chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "chrome://newtab" }]);
-    chromeMock.runtime.sendMessage.mockImplementation(async (message: { type?: string }) => {
-      if (message.type === "GET_STATE") return state;
-      return {};
-    });
-    await new Promise<void>((resolve) => chromeMock.storage.local.set({ [SETTINGS_KEY]: completedSettings }, resolve));
+  beforeEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("keeps a non-Meet popup on browser capture without showing helper setup", async () => {
-    await import("../src/popup/popup");
+  it("detects the active tab: a non-Meet tab shows the way to Meet, not a dead Start", async () => {
+    await loadPopup({ id: 1, url: "chrome://newtab" });
 
     await vi.waitFor(() => {
-      expect(document.querySelector("#capture-source")).not.toBeNull();
+      expect(document.querySelector("#open-meet")).not.toBeNull();
     });
 
-    expect((document.querySelector("#capture-source") as HTMLSelectElement).value).toBe("meet");
-    expect((document.querySelector("#desktop-helper-actions") as HTMLDivElement).hidden).toBe(true);
-    expect((document.querySelector("#start-recording") as HTMLButtonElement).disabled).toBe(true);
+    expect(document.querySelector("#start-recording")).toBeNull();
+    expect(document.querySelector("#desktop-helper-actions")).toBeNull();
+    expect(document.querySelector("#use-desktop")?.textContent).toContain("Zoom or Teams");
     expect(document.body.textContent).not.toContain("Install desktop helper");
+    expect(document.querySelector("#mode-chip")?.textContent).toContain("Your own API keys");
   });
 
-  it("reveals explicit desktop setup only after selecting desktop capture", async () => {
-    await import("../src/popup/popup");
-    await vi.waitFor(() => expect(document.querySelector("#capture-source")).not.toBeNull());
-
-    const captureSource = document.querySelector("#capture-source") as HTMLSelectElement;
-    captureSource.value = "desktop";
-    captureSource.dispatchEvent(new Event("change", { bubbles: true }));
+  it("offers one Start button on a Meet tab and starts browser capture with the tab id", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" });
 
     await vi.waitFor(() => {
-      expect((document.querySelector("#desktop-helper-actions") as HTMLDivElement).hidden).toBe(false);
+      expect(document.querySelector("#start-recording")).not.toBeNull();
     });
+
+    const start = document.querySelector("#start-recording") as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    expect(start.textContent).toContain("Start notes");
+    expect(document.querySelector("#open-meet")).toBeNull();
+
+    start.click();
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "START_RECORDING" })));
+    const sent = chromeMock.runtime.sendMessage.mock.calls.map((call) => call[0]).find((m: { type?: string }) => m.type === "START_RECORDING");
+    expect(sent).toEqual(expect.objectContaining({ captureSource: "meet", tabId: 7 }));
+  });
+
+  it("reveals desktop setup only after the user says they are recording a desktop app", async () => {
+    await loadPopup({ id: 1, url: "chrome://newtab" });
+    await vi.waitFor(() => expect(document.querySelector("#use-desktop")).not.toBeNull());
+
+    (document.querySelector("#use-desktop") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector("#desktop-helper-actions")).not.toBeNull());
+
+    // Without a connected helper the desktop start stays off.
+    expect((document.querySelector("#start-recording") as HTMLButtonElement).disabled).toBe(true);
     expect(document.querySelector("#open-helper-setup")?.textContent).toContain("Set up desktop capture");
 
     (document.querySelector("#open-helper-setup") as HTMLButtonElement).click();

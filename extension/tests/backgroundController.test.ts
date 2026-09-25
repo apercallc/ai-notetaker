@@ -68,6 +68,36 @@ beforeEach(async () => {
 });
 
 describe("BackgroundController", () => {
+  it("processes Meet locally with a connected helper, preserving call times and model notes", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    const chunks = (async function* () { yield { channel: "mic" as const, sequence: 0, bytes: new Uint8Array([1, 2]) }; })();
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockReturnValue(chunks);
+    const process = vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockResolvedValue({ transcript: [{ speaker: "you", text: "Hello", isFinal: true, timestamp: "2026-09-24T15:00:00Z", offsetMs: 123 }], summary: "Notes", title: "Planning", actionItems: [] });
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
+    const id = await controller.startRecording("general", "meet");
+    const original = await getMeeting(id);
+    await controller.stopRecording(id);
+    expect(client.startRecording).not.toHaveBeenCalled();
+    expect(client.stopRecording).not.toHaveBeenCalled();
+    expect(process).toHaveBeenCalledWith(expect.any(Object), "general", chunks, expect.any(Function), { startedAt: original?.startedAt });
+    expect(await getMeeting(id)).toMatchObject({ status: "complete", title: "Planning", summary: "Notes", transcript: [expect.objectContaining({ offsetMs: 123 })], endedAt: expect.any(String) });
+  });
+
+  it("acknowledges a Meet chunk only after its durable write finishes", async () => {
+    let finish!: () => void;
+    vi.spyOn(browserStorage, "appendBrowserMeetChunk").mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    let acknowledged = false;
+    const write = controller.sendMeetAudioChunk("durable", "mic", new Uint8Array([1, 2])).then(() => { acknowledged = true; });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(acknowledged).toBe(false);
+    finish();
+    await write;
+    expect(acknowledged).toBe(true);
+  });
   it("connects and pushes current settings on init", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
@@ -381,6 +411,7 @@ describe("BackgroundController", () => {
     expect(broadcast).toHaveBeenCalledWith({
       type: "RECORDING_ERROR",
       meetingId: null,
+      phase: "start",
       message: "Acknowledge the recording consent notice in setup before recording.",
     });
   });
@@ -832,6 +863,7 @@ describe("BackgroundController", () => {
     expect(broadcast).toHaveBeenCalledWith({
       type: "RECORDING_ERROR",
       meetingId: null,
+      phase: "start",
       message: "The desktop helper is not connected. Install and start it, then check again.",
     });
   });
@@ -865,14 +897,27 @@ describe("BackgroundController", () => {
     );
   });
 
-  it("delegates testProviderKey to the native messaging client rather than calling a provider directly", async () => {
+  it("routes desktop key checks through the native messaging client", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
 
-    const result = await controller.testProviderKey("deepgram", "some-key");
+    const result = await controller.testProviderKey("deepgram", "some-key", { desktop: true });
 
     expect(client.testProviderKey).toHaveBeenCalledWith("deepgram", "some-key");
     expect(result).toEqual({ valid: true, message: "ok" });
+  });
+
+  it("checks Meet-path keys directly from the extension, without the helper", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    const fetchImpl = vi.fn(async () => new Response("{\"access_token\":\"t\"}", { status: 200 }));
+    controller.setFetchImpl(fetchImpl as unknown as typeof fetch);
+
+    const result = await controller.testProviderKey("deepgram", "some-key");
+
+    expect(client.testProviderKey).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("api.deepgram.com"), expect.anything());
+    expect(result.valid).toBe(true);
   });
 });
 

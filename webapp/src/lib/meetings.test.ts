@@ -106,7 +106,7 @@ describe("upsertMeeting", () => {
       WORKSPACE_ID,
     );
 
-    const openItems = await listActionItems(WORKSPACE_ID, "open");
+    const { items: openItems } = await listActionItems(WORKSPACE_ID, { status: "open" });
     expect(openItems).toHaveLength(1);
     expect(openItems[0]?.id).toBe("action-1");
     expect(openItems[0]?.meeting.title).toBe("Weekly sync");
@@ -119,8 +119,8 @@ describe("upsertMeeting", () => {
     expect(detail?.mode).toBe("sales");
     expect(detail?.actionItems[0]).toMatchObject({ status: "done", dueAt: null });
     expect(detail?.actionItems[0].completedAt).toEqual(expect.any(String));
-    expect(await listActionItems(WORKSPACE_ID, "open")).toHaveLength(0);
-    expect(await listActionItems(WORKSPACE_ID, "done")).toHaveLength(1);
+    expect((await listActionItems(WORKSPACE_ID, { status: "open" })).items).toHaveLength(0);
+    expect((await listActionItems(WORKSPACE_ID, { status: "done" })).items).toHaveLength(1);
   });
 
   it("defaults the title when none is provided", async () => {
@@ -353,7 +353,7 @@ describe("workspace isolation", () => {
 
   it("listActionItems only returns action items from meetings in the given workspace", async () => {
     await upsertMeeting(sampleMeeting(), WORKSPACE_ID);
-    expect(await listActionItems(OTHER_WORKSPACE_ID)).toHaveLength(0);
+    expect((await listActionItems(OTHER_WORKSPACE_ID)).items).toHaveLength(0);
   });
 
   it("updateActionItem does not update an action item in a different workspace", async () => {

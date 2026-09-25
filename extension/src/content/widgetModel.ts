@@ -49,23 +49,6 @@ export function canStart(state: WidgetState | null): boolean {
   return !!state?.onboardingComplete && !!state?.consentAcknowledged;
 }
 
-export function helperNotice(state: WidgetState | null): string | null {
-  // Meet capture persists its own mic/speaker chunks in the extension and can
-  // process them with BYOK or Hosted AI. The helper is only required for
-  // desktop-call capture, which is not initiated from this Meet widget.
-  if (state?.onboardingComplete && state.consentAcknowledged) return null;
-  switch (state?.helperStatus) {
-    case "connected":
-      return null;
-    case "connecting":
-      return "Connecting to the desktop helper…";
-    case "incompatible":
-      return "The desktop helper needs an update before it can record.";
-    default:
-      return "The desktop helper isn't running. Start it, or set it up, to take notes.";
-  }
-}
-
 export function formatElapsed(startedAt: string, now: number): string {
   const started = Date.parse(startedAt);
   const totalSeconds = Number.isFinite(started) ? Math.max(0, Math.floor((now - started) / 1000)) : 0;

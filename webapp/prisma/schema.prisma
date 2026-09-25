@@ -36,6 +36,7 @@ model Meeting {
   shareTokens MeetingShareToken[]
 
   @@index([userId, startedAt])
+  @@index([workspaceId, startedAt])
 }
 
 model TranscriptSegment {
@@ -78,9 +79,20 @@ model User {
   email        String   @unique
   passwordHash String
   createdAt    DateTime @default(now())
+  // Null until the mailbox is proven (verification link, password reset,
+  // invite acceptance) or vouched for by an operator/owner who provisioned it.
+  emailVerifiedAt DateTime?
+  // Set when an owner issues a temporary password; cleared by the next
+  // successful password change.
+  mustChangePassword Boolean @default(false)
+  // Recorded at self-service signup: explicit ToS / recording-consent tick.
+  termsAcceptedAt DateTime?
+  termsVersion    String?
 
   memberships WorkspaceMembership[]
   sessions    Session[]
+  apiTokens   ApiToken[]
+  authTokens  AuthToken[]
 }
 
 model Workspace {
@@ -115,6 +127,7 @@ model WorkspaceMembership {
 
   @@unique([userId, workspaceId])
   @@index([workspaceId])
+  @@index([userId, createdAt])
 }
 
 model Session {
@@ -122,6 +135,12 @@ model Session {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+  userAgent String?
+  ip        String?
+  // Workspace chosen with the workspace switcher; validated against
+  // membership on every request, so a stale value can never grant access.
+  activeWorkspaceId String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -253,4 +272,50 @@ model LoginThrottle {
   updatedAt      DateTime @updatedAt
 
   @@index([firstFailureAt])
+}
+
+// Bearer credential for the browser extension / managed clients. Only the
+// SHA-256 of the secret is stored, so a database leak does not yield usable
+// tokens. Expiry is sliding (renewed while in use) and every token is
+// individually revocable from /account.
+model ApiToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  scope      String    @default("managed")
+  label      String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Single-use, expiring, hashed tokens emailed (or handed to an owner) for
+// email verification, password reset and workspace invitations. `email` is
+// the normalized target address; `workspaceId` is intentionally not a
+// relation so this table stays independent of the tenant models.
+model AuthToken {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique
+  purpose     String
+  userId      String?
+  email       String
+  workspaceId String?
+  role        String?
+  invitedById String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@index([workspaceId, purpose])
+  @@index([expiresAt])
 }

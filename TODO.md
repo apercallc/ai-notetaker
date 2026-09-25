@@ -8,7 +8,9 @@ the 2026-09-21 architecture is historical.
 
 Check items off as they land. If a decision here turns out wrong once
 you're building, update the spec doc first, then this file — don't let
-them drift apart.
+them drift apart. Scope is governed by the root `CLAUDE.md`: anything it lists
+as out of scope (mobile capture, cellular/PSTN, DRM audio, non-Chrome browser
+ports) lives under "Ideas" at the bottom, not in the roadmap.
 
 ## Approved product migration (2026-09-24)
 
@@ -76,8 +78,9 @@ Implementation plan:
       or open desktop-helper setup until the user explicitly selects desktop
       capture.
 - [x] Make extension updates migrate already-open onboarding tabs from the
-      helper-first legacy bundle to the canonical Meet-first URL; fresh
-      installs still never auto-open setup.
+      helper-first legacy bundle to the canonical Meet-first URL. (Superseded
+      for fresh installs: the new flow auto-opens one-screen onboarding on
+      install; see `docs/getting-started.md`.)
 - [x] Link Hosted AI onboarding and Settings directly to the hosted
       login/signup page after validating the configured HTTPS service URL; local
       BYOK remains account-free.
@@ -103,6 +106,42 @@ Implementation plan:
       instead of moving an old recording into the new tenant.
 - [ ] Complete real Chrome/Meet, provider, deployment, storage, and billing
       acceptance evidence before advertising hosted mode.
+
+## Pre-launch decisions (product audit, 2026-09-24)
+
+Open product and release decisions found by the documentation and product
+coherence audit. Each needs an owner decision before public launch; none is
+decided yet.
+
+- [ ] (a) Make **Hosted** the primary onboarding call to action, with a
+      baked-in service URL (no URL to type) and a free trial, and move the
+      bring-your-own-keys path under a secondary **Use my own keys** option.
+      Today onboarding treats both modes as equals and Hosted needs a
+      user-entered service URL. Requires the trial/quota policy from the design
+      spec (section 6) to be affordable first.
+- [ ] (b) Create a project-owned Google OAuth client for Calendar and Drive
+      through `chrome.identity`, replacing the current requirement that every
+      user create their own Google Cloud OAuth client. Needs Google consent
+      screen verification for the sensitive scopes; keep the user-owned client
+      path as an advanced option.
+- [ ] (c) Move `nativeMessaging`, `identity`, `alarms`, and the five AI provider
+      host permissions (Deepgram, Anthropic, Groq, Gemini, DeepSeek) to
+      optional permissions requested when the feature is first used, so the
+      install prompt for a Meet-only user is minimal.
+- [ ] (d) Replace the committed development extension ID in the Native
+      Messaging `allowed_origins` with the real Chrome Web Store extension ID
+      once the listing exists, and verify the committed manifest `key`
+      derives the published ID (or add both origins deliberately).
+- [ ] (e) Generate and protect the Tauri updater signing key and set the
+      updater endpoint so the automatic updater can be enabled (see also the
+      Sub-project 2 updater item).
+- [ ] (f) Capture real store screenshots on each OS (macOS, Windows, Linux) for
+      the Chrome Web Store listing, the install page, and the README; current
+      screenshots are rendered extension UI only.
+- [ ] (g) Decide the helper's launch-at-login default (currently off) and have
+      the installer or first launch register the Native Messaging manifests
+      automatically, including the macOS DMG post-copy step that today is
+      manual.
 
 The legacy checklist below records work already landed against the original
 local/BYOK architecture and remains as regression coverage while the
@@ -283,12 +322,13 @@ note are the honest remaining gap, not an oversight.
 `notetaker-design-reviewer` passes on the extension and webapp UI, run
 after implementation rather than skipped.**
 
-*Guardrails finding — fixed:* the extension's "test API key" feature called
-Deepgram/Groq/Claude/Gemini/DeepSeek directly (`extension/src/lib/providerTest.ts`),
-bypassing the helper. Fixed by adding a `test_provider_key`/
-`provider_key_test_result` pair to the Native Messaging protocol — key
-validation now round-trips through the helper like everything else. Re-verified:
-zero references to any provider API domain remain anywhere in `extension/src/`.
+*Guardrails finding — fixed (historical; superseded):* under the 2026-09-21
+"pipeline lives in the helper" rule, the extension's "test API key" feature was
+moved to a `test_provider_key`/`provider_key_test_result` round-trip through the
+helper, and `extension/src/` had no provider API domains. The 2026-09-24
+design supersedes that rule for Google Meet: the extension owns Meet capture and
+its BYOK provider calls, so browser-side provider clients are now correct. The
+guardrails reviewer no longer enforces the old rule.
 
 *Design findings — fixed (high severity: a correctness bug and two AA
 accessibility failures):*
@@ -583,7 +623,7 @@ Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
 - [x] Linux: package for common formats — Tauri `.deb` + AppImage targets and
       cargo-deb metadata are configured; `.rpm` remains out of this slice.
 - [x] Auto-launch-on-login option — tray menu action is opt-in and defaults
-      to off.
+      to off (default under review, see Pre-launch decisions).
 - [x] Uninstall path documented per OS, including removing the virtual audio
       device cleanly — see `docs/helper-packaging.md`; native-OS execution
       remains release-owner validation.
@@ -608,8 +648,9 @@ Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
       items; the webapp searches titles, summaries, and transcript text.
 - [x] Calendar integration — extension-only (metadata enrichment, not AI
       pipeline work). BYOK OAuth per user via chrome.identity.launchWebAuthFlow
-      + PKCE, not a project-owned OAuth client (avoids Google's consent-
-      screen verification requirement entirely). Best-effort: any failure
+      + PKCE, with a user-supplied OAuth client today (avoids Google's consent-
+      screen verification requirement; a project-owned client is under
+      consideration, see Pre-launch decisions). Best-effort: any failure
       falls back to today's default title with no attendees, never blocks
       a recording. See
       `docs/superpowers/specs/2026-09-22-calendar-integration-design.md`.
@@ -635,33 +676,16 @@ Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
 
 ---
 
-## Sub-project 4: Mobile capture
-
-Scope per the research findings in the architecture spec, §9 — cellular
-call recording is out (blocked by OS/store policy on both platforms). Real
-scope:
-
-- [ ] Android app using `AudioPlaybackCapture`/`MediaProjection` to capture
-      Zoom/Meet/Teams mobile app audio (genuinely feasible)
-- [ ] iOS app using a manual ReplayKit "record, then join your meeting"
-      flow (functional but not passive/background — set expectations in
-      the UI accordingly)
-- [ ] Decide sync path: does mobile write to the same local-first model, or
-      does it require the self-hosted webapp to bridge devices? (Local
-      storage on a phone doesn't have a "same machine" helper to talk to —
-      needs its own design pass before building)
-- [ ] Consent-law disclosure surfaced on mobile too
-
----
-
-## Sub-project 5: Polish / extras
+## Sub-project 5: Polish / extras (numbering kept; sub-project 4, mobile capture, is now under Ideas)
 
 - [x] Custom vocabulary support (bounded terms persisted in settings and sent
       to the helper prompt)
 - [x] Richer summarization templates (meeting modes plus bounded custom
       instructions for sales calls, standups, 1:1s, interviews, and custom
       templates)
-- [x] Cross-browser ports — Edge/Brave: helper now registers its Native
+- [x] Cross-browser ports (experimental only; non-Chrome browser ports are out
+      of scope for now per `CLAUDE.md`, so Edge/Brave/Firefox are unsupported
+      and Firefox is a temporary-add-on experiment) — Edge/Brave: helper now registers its Native
       Messaging host in both browsers' OS-specific locations (the actual
       gap; the extension code needed no changes). Firefox: real port —
       `browser_specific_settings.gecko.id`, `background.scripts`
@@ -698,8 +722,9 @@ scope:
 - [x] `SECURITY.md` with a responsible-disclosure process and explicit
       privacy boundaries
 - [x] Repository review confirms no telemetry/analytics calls to a
-      project-operated server; provider and optional user-owned webapp calls
-      remain the only outbound application paths
+      project-operated server. In local mode the provider calls and the optional
+      user-owned webapp remain the only outbound application paths; the managed
+      service is an explicit opt-in (Hosted sign-in) and not telemetry.
 - [x] `docs/data-handling.md` documents storage locations, outbound paths,
       and deletion behavior
 
@@ -709,8 +734,7 @@ scope:
       surface — now explicitly names one-party vs. two-party consent and
       states it is general information, not legal advice
       (`extension/src/onboarding/onboarding.ts`). Not a substitute for an
-      actual attorney review; mobile has no disclosure yet since sub-project
-      4 (mobile capture) hasn't started.
+      actual attorney review.
 - [x] License compliance check on bundled/wrapped drivers and AI provider
       SDKs — see `docs/third-party-licenses.md` (checked 2026-09-23): no
       vendor AI SDK is used anywhere (Deepgram/Claude/Groq/Gemini/DeepSeek
@@ -813,6 +837,27 @@ scope:
 
 ---
 
+## Ideas (out of scope for now)
+
+These are not on the roadmap. `CLAUDE.md` lists mobile capture, cellular/PSTN
+interception, DRM/protected audio, and non-Chrome browser ports as out of
+scope. They are kept here only so the thinking is not lost; do not schedule
+them without changing `CLAUDE.md` and the design spec first.
+
+- Mobile capture. Cellular call recording is blocked by OS and store policy on
+  both platforms, so any future scope would be limited to:
+  - an Android app using `AudioPlaybackCapture`/`MediaProjection` to capture
+    Zoom/Meet/Teams mobile app audio;
+  - an iOS app using a manual ReplayKit "record, then join your meeting" flow
+    (not passive or background);
+  - a sync design (mobile has no same-machine helper, so it would need its own
+    design pass), and consent-law disclosure surfaced on mobile.
+- Supported Firefox, Edge, or Brave builds, including Mozilla AMO signing and
+  Edge Add-ons listings.
+- Cellular/PSTN call interception and DRM/protected audio: not promised.
+
+---
+
 ## How to use this file
 
 - Pick items top-down within sub-project 1 before touching later
@@ -821,4 +866,6 @@ scope:
 - When a section's items are all checked, do a design + guardrails review
   pass before calling that sub-project done, not just at the very end.
 - If scope changes (a gap turns out bigger or smaller than expected),
-  update the architecture spec first, then reflect the change here.
+  update the current design spec
+  (`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`)
+  first, then reflect the change here.

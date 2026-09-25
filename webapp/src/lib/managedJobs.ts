@@ -282,3 +282,64 @@ export async function readManagedRecording(
   }
   return { title: upload.meeting.title, bytes };
 }
+
+/**
+ * Yields the given stored objects one at a time, in order. At most one chunk
+ * (MAX_CHUNK_BYTES) is held in memory, so a recording of up to
+ * MAX_UPLOAD_BYTES can be forwarded to a provider or a browser without
+ * materializing it.
+ */
+export async function* readChunksSequentially(objectKeys: Iterable<string>): AsyncGenerator<Uint8Array, void, undefined> {
+  for (const key of objectKeys) {
+    yield await getObject(key);
+  }
+}
+
+/** Wraps an async chunk iterator as a web ReadableStream (pull-based, so it honours back-pressure). */
+export function chunksToReadableStream(chunks: AsyncIterator<Uint8Array>): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await chunks.next();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+    async cancel() {
+      await chunks.return?.();
+    },
+  });
+}
+
+export interface ManagedRecordingStream {
+  title: string;
+  /** Total PCM bytes across the channel's chunks, known before any object is read. */
+  totalBytes: number;
+  /** Sequential async iterator over the channel's chunks in order. */
+  chunks: AsyncGenerator<Uint8Array, void, undefined>;
+  /** The same chunks as a ReadableStream, ready to pass to `new Response(stream)`. */
+  stream(): ReadableStream<Uint8Array>;
+}
+
+/**
+ * Streaming counterpart of readManagedRecording for the recording download
+ * route: write a WAV header from `totalBytes`, then stream `chunks`. Scoped to
+ * the caller's workspace exactly like readManagedRecording.
+ */
+export async function openManagedRecording(
+  workspaceId: string,
+  meetingId: string,
+  channel: ManagedRecordingChannel,
+): Promise<ManagedRecordingStream | null> {
+  const upload = await prisma.managedUpload.findFirst({
+    where: { workspaceId, meetingId, status: "complete" },
+    orderBy: { createdAt: "desc" },
+    include: { meeting: { select: { title: true } }, chunks: { where: { channel }, orderBy: { chunkIndex: "asc" } } },
+  });
+  if (!upload || upload.chunks.length === 0) return null;
+  const chunks = readChunksSequentially(upload.chunks.map((chunk) => chunk.objectKey));
+  return {
+    title: upload.meeting.title,
+    totalBytes: upload.chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
+    chunks,
+    stream: () => chunksToReadableStream(chunks),
+  };
+}

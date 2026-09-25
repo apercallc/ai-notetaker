@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { findMeetEventsStartingSoon, resetCalendarCaches, REMINDER_GRACE_MS, REMINDER_LEAD_MS, type CalendarConnection } from "../src/lib/calendar";
-import { checkMeetReminders, reminderCopy, reminderId, type ReminderDeps } from "../src/lib/reminders";
+import { checkMeetReminders, reminderCopy, reminderId, REMINDER_POLL_MINUTES, type ReminderDeps } from "../src/lib/reminders";
 import type { RemindedCall } from "../src/lib/storage";
 
 const NOW = new Date("2026-09-24T15:00:00.000Z");
@@ -115,7 +115,7 @@ describe("checkMeetReminders", () => {
     expect(await checkMeetReminders(base)).toBe(1);
     expect(notify).toHaveBeenCalledWith(expect.stringMatching(/^meet-reminder:abc-defg-hij:/), {
       title: "Weekly sync is starting",
-      message: expect.stringContaining("click the Notetaker icon once"),
+      message: expect.stringContaining("Notetaker pill"),
     });
     expect(Object.values(store)[0]?.url).toBe("https://meet.google.com/abc-defg-hij");
 
@@ -165,9 +165,17 @@ describe("reminder copy and ids", () => {
     expect(reminderId({ ...event, startsAt: at(86_400_000) })).not.toBe(reminderId(event));
   });
 
-  it("falls back to a generic title and tells the truth about the one-click step", () => {
+  it("falls back to a generic title and no longer describes a click-icon-then-Start sequence", () => {
     const copy = reminderCopy({ title: "", attendees: [], startsAt: at(0), endsAt: at(1_000) });
     expect(copy.title).toBe("Your call is starting");
-    expect(copy.message).toMatch(/Notetaker icon once/);
+    expect(copy.message).toMatch(/Notetaker pill/);
+    expect(copy.message).not.toMatch(/icon|click/i);
+  });
+});
+
+describe("poll interval", () => {
+  it("polls every five minutes, and that still cannot skip a call because the reminder window is wider", () => {
+    expect(REMINDER_POLL_MINUTES).toBe(5);
+    expect(REMINDER_LEAD_MS + REMINDER_GRACE_MS).toBeGreaterThan(REMINDER_POLL_MINUTES * 60_000);
   });
 });

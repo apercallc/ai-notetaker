@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedBearer } from "./lib/auth";
+import { isLegacyIngestAvailable } from "./lib/deploymentConfig";
+import { isValidWorkerToken } from "./lib/secureCompare";
 import { isManagedCorsOrigin, managedCorsHeaders } from "./lib/cors";
 import { requestIdFrom } from "./lib/requestId";
 import { getSessionUser } from "./lib/sessions";
@@ -29,6 +31,8 @@ import { getSessionUser } from "./lib/sessions";
  *   can't be validated without state, and this project already has a
  *   database.
  */
+const WORKER_RUN_PATH = /^\/api\/v1\/jobs\/[^/]+\/run$/;
+
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
   const requestId = requestIdFrom(request);
@@ -51,7 +55,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       // session exists. The route itself performs password verification and
       // creates the opaque session used by every other managed endpoint.
       if (pathname === "/api/v1/auth/login") return NextResponse.next();
-      if (((pathname.startsWith("/api/v1/jobs/") && pathname.endsWith("/run")) || pathname === "/api/v1/jobs/next") && process.env.MANAGED_WORKER_TOKEN && request.headers.get("x-worker-token") === process.env.MANAGED_WORKER_TOKEN) {
+      if ((WORKER_RUN_PATH.test(pathname) || pathname === "/api/v1/jobs/next") && isValidWorkerToken(request.headers.get("x-worker-token"))) {
         return NextResponse.next();
       }
       if (pathname === "/api/v1/billing/webhook" && request.headers.has("stripe-signature")) {
@@ -64,6 +68,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ error: "managed session required", requestId }, { status: 401, headers: { ...corsHeaders, "x-request-id": requestId } });
       }
       return NextResponse.next();
+    }
+    // The legacy AUTH_TOKEN ingestion API does not exist on managed hosting
+    // unless explicitly re-enabled; answer before any credential check so it
+    // does not even confirm the route.
+    if ((pathname === "/api/meetings" || pathname.startsWith("/api/meetings/")) && !isLegacyIngestAvailable()) {
+      return NextResponse.json({ error: "not found", requestId }, { status: 404, headers: { "x-request-id": requestId } });
     }
     const authorized = isAuthorizedBearer(request.headers.get("authorization"));
     if (!authorized) {

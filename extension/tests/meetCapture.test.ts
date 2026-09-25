@@ -5,6 +5,7 @@ import { MIC_PERMISSION_HINT } from "../src/meet/hints";
 
 beforeEach(() => {
   chromeMock.reset();
+  chromeMock.runtime.sendMessage.mockResolvedValue({ ok: true });
   Object.assign(chromeMock, {
     tabs: { get: vi.fn(async () => ({ id: 7, url: "https://meet.google.com/abc-defg-hij" })) },
     offscreen: {
@@ -29,6 +30,21 @@ function grantStreamId(id: string | undefined, lastError?: string): void {
 }
 
 describe("Google Meet capture orchestration", () => {
+  it("does not report a recording when the offscreen page never acknowledges start", async () => {
+    grantStreamId("stream-abc");
+    chromeMock.runtime.sendMessage.mockResolvedValue(undefined);
+    const controller = new MeetCaptureController();
+    await expect(controller.start(7, "missing-page")).rejects.toThrow("could not start");
+    expect(controller.isActive("missing-page")).toBe(false);
+    expect(chromeMock.offscreen.closeDocument).toHaveBeenCalled();
+  });
+
+  it("finishes capture when navigation leaves Meet even with the same call path", async () => {
+    grantStreamId("stream-abc");
+    const controller = new MeetCaptureController();
+    await controller.start(7, "m1");
+    await expect(controller.stopForTab(7, "https://example.com/abc-defg-hij")).resolves.toEqual(["m1"]);
+  });
   it("converts float audio to signed little-endian PCM16", () => {
     expect(Array.from(float32ToPcm16(new Float32Array([-1, 0, 1])))).toEqual([0, 128, 0, 0, 255, 127]);
   });

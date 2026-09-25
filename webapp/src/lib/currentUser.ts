@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSessionUser } from "./sessions";
-import { getUserDefaultWorkspaceId, getUserRole } from "./workspaces";
+import { getSessionContext } from "./sessions";
+import { resolveActiveWorkspace } from "./workspaces";
 
 /**
  * Server-only helper every browser page/action calls to resolve the
@@ -19,17 +19,32 @@ import { getUserDefaultWorkspaceId, getUserRole } from "./workspaces";
  * lib/meetings.ts's LOCAL_USER_ID), so pulling next/headers into it broke
  * the production build.
  */
-export async function requireSession(): Promise<{ userId: string; workspaceId: string; role: "owner" | "member" }> {
+export interface RequireSessionOptions {
+  /** Only /account sets this, so a forced password change can happen at all. */
+  allowPasswordChange?: boolean;
+}
+
+export async function requireSession(
+  options: RequireSessionOptions = {},
+): Promise<{ userId: string; workspaceId: string; role: "owner" | "member"; email: string; sessionId: string }> {
   const store = await cookies();
-  const sessionId = store.get("session")?.value;
-  const user = await getSessionUser(sessionId);
-  if (!user) redirect("/login");
+  const context = await getSessionContext(store.get("session")?.value);
+  if (!context) redirect("/login");
 
-  const workspaceId = await getUserDefaultWorkspaceId(user.id);
-  if (!workspaceId) redirect("/login");
+  // An owner-issued temporary password must be replaced before anything else
+  // in the app is reachable.
+  if (context.user.mustChangePassword && !options.allowPasswordChange) redirect("/account?required=1");
 
-  const role = await getUserRole(user.id, workspaceId);
-  if (!role) redirect("/login");
+  // Workspace switcher: honour the session's chosen workspace only while the
+  // user is still a member; otherwise the deterministic default.
+  const active = await resolveActiveWorkspace(context.user.id, context.activeWorkspaceId);
+  if (!active) redirect("/login");
 
-  return { userId: user.id, workspaceId, role };
+  return {
+    userId: context.user.id,
+    workspaceId: active.workspaceId,
+    role: active.role,
+    email: context.user.email,
+    sessionId: context.sessionId,
+  };
 }

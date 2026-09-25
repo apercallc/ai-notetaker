@@ -37,7 +37,7 @@ function authForWorkspace(sessionId: string, workspaceId: string): HeadersInit {
 }
 
 async function createPrincipal(userId: string, email: string, workspaceId: string, role = "owner"): Promise<string> {
-  await prisma.user.create({ data: { id: userId, email, passwordHash: "test-hash" } });
+  await prisma.user.create({ data: { id: userId, email, passwordHash: "test-hash", emailVerifiedAt: new Date() } });
   await prisma.workspaceMembership.create({ data: { userId, workspaceId, role } });
   const session = await prisma.session.create({
     data: { userId, expiresAt: new Date(Date.now() + 60 * 60 * 1_000) },
@@ -86,7 +86,7 @@ describe("managed upload routes", () => {
 
   it("logs a managed client in before any session exists", async () => {
     const password = "correct horse battery staple";
-    await prisma.user.create({ data: { id: USER_ID, email: "login-route@example.com", passwordHash: await hashPassword(password) } });
+    await prisma.user.create({ data: { id: USER_ID, email: "login-route@example.com", passwordHash: await hashPassword(password), emailVerifiedAt: new Date() } });
     await prisma.workspaceMembership.create({ data: { userId: USER_ID, workspaceId: WORKSPACE_ID, role: "owner" } });
 
     const response = await managedLogin(new Request("http://localhost/api/v1/auth/login", {

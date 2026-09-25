@@ -14,7 +14,7 @@ export type UiToBackgroundMessage =
   | { type: "GET_AUDIO_PREFLIGHT" }
   | { type: "RUN_AUDIO_PROBE" }
   | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number; titleHint?: string }
-  | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string }
+  | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string; tabId?: number }
   | { type: "MEET_CAPTURE_ERROR"; meetingId: string; message: string }
   | { type: "STOP_RECORDING"; meetingId: string }
   | { type: "ADD_BOOKMARK"; meetingId: string; note?: string }
@@ -28,7 +28,7 @@ export type UiToBackgroundMessage =
   | { type: "RESUME_RECORDING"; meetingId: string }
   | { type: "DISCARD_RECORDING"; meetingId: string }
   | { type: "DELETE_MEETING"; meetingId: string }
-  | { type: "TEST_PROVIDER_KEY"; provider: ProviderKind; key: string };
+  | { type: "TEST_PROVIDER_KEY"; provider: ProviderKind; key: string; desktop?: boolean };
 
 export interface BackgroundState {
   activeMeeting: { id: string } | null;
@@ -50,6 +50,8 @@ export interface WidgetMeeting {
 
 export interface WidgetState {
   helperStatus: HelperConnectionStatus;
+  /** Where notes are written: the user's own provider keys, or Hosted AI. */
+  processingKind: "local_byok" | "managed";
   onboardingComplete: boolean;
   consentAcknowledged: boolean;
   widgetEnabled: boolean;
@@ -77,7 +79,8 @@ export type BackgroundToUiMessage =
   | { type: "TRANSCRIPT_UPDATE"; meetingId: string; speaker: Speaker; text: string; isFinal: boolean; utteranceId: number }
   | { type: "SUMMARY_READY"; meetingId: string; summary: string; actionItems: ActionItem[] }
   | { type: "PROCESSING_WARNING"; meetingId: string; message: string; recovery?: ErrorRecoveryCategory }
-  | { type: "RECORDING_ERROR"; meetingId: string | null; message: string; recovery?: ErrorRecoveryCategory }
+  /** `phase: "start"` marks a recording that never began: the person who asked for it is told in place, not by a toolbar badge. */
+  | { type: "RECORDING_ERROR"; meetingId: string | null; message: string; recovery?: ErrorRecoveryCategory; phase?: "start" }
   | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
   | { type: "DRIVE_EXPORT"; meetingId: string; status: DriveExportState["status"]; webViewLink?: string; message?: string }
   | { type: "HELPER_STATUS"; status: HelperConnectionStatus }

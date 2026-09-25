@@ -4,6 +4,8 @@ import { deleteObject } from "./objectStorage";
 import { randomUUID } from "node:crypto";
 import type { CaptureSource, CreateMeetingRequest, MeetingDetailResponse, MeetingMode, MeetingSummaryResponse, ProcessingMode } from "./types";
 import { MAX_SEARCH_LENGTH } from "./meetingConstants";
+import { makeSnippet, type HighlightPart } from "./snippet";
+import { utcDateString } from "./actionItems";
 
 export class ValidationError extends Error {}
 
@@ -210,6 +212,45 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
   return { id: input.id, title };
 }
 
+export type ProcessingStatus = "processing" | "complete" | "error";
+
+/** The most recent hosted-processing job for a meeting, in UI terms. */
+export interface ProcessingState {
+  jobId: string;
+  status: ProcessingStatus;
+  errorMessage: string | null;
+  updatedAt: string;
+}
+
+export interface MeetingListItem extends MeetingSummaryResponse {
+  processing: ProcessingState | null;
+  /** Where the search query matched, when it matched somewhere other than the title. */
+  match: { source: "summary" | "action item" | "transcript"; parts: HighlightPart[] } | null;
+}
+
+export interface MeetingDetail extends MeetingDetailResponse {
+  processing: ProcessingState | null;
+}
+
+const LATEST_JOB = {
+  orderBy: { createdAt: "desc" as const },
+  take: 1,
+  select: { id: true, status: true, errorMessage: true, updatedAt: true },
+};
+
+function toProcessingState(jobs: { id: string; status: string; errorMessage: string | null; updatedAt: Date }[]): ProcessingState | null {
+  const job = jobs[0];
+  if (!job) return null;
+  // queued/processing are one state to the user: work is in flight.
+  const status: ProcessingStatus = job.status === "complete" ? "complete" : job.status === "error" ? "error" : "processing";
+  return {
+    jobId: job.id,
+    status,
+    errorMessage: status === "error" ? job.errorMessage : null,
+    updatedAt: job.updatedAt.toISOString(),
+  };
+}
+
 export interface ListMeetingsOptions {
   query?: string;
   limit?: number;
@@ -219,7 +260,7 @@ export interface ListMeetingsOptions {
 export async function listMeetings(
   workspaceId: string,
   options: ListMeetingsOptions
-): Promise<{ meetings: MeetingSummaryResponse[]; total: number }> {
+): Promise<{ meetings: MeetingListItem[]; total: number }> {
   const query = options.query?.trim();
   if (query && query.length > MAX_SEARCH_LENGTH) {
     throw new ValidationError(`query must be ${MAX_SEARCH_LENGTH} characters or fewer`);
@@ -259,10 +300,15 @@ export async function listMeetings(
       orderBy: [{ startedAt: "desc" }, { id: "desc" }],
       take: limit,
       skip: offset,
-      include: { actionItems: { where: { status: "open" }, select: { id: true } } },
+      include: {
+        actionItems: { where: { status: "open" }, select: { id: true } },
+        processingJobs: LATEST_JOB,
+      },
     }),
     prisma.meeting.count({ where }),
   ]);
+
+  const matches = query ? await findMatches(rows, query) : new Map<string, MeetingListItem["match"]>();
 
   return {
     meetings: rows.map((row) => ({
@@ -271,18 +317,67 @@ export async function listMeetings(
       startedAt: row.startedAt.toISOString(),
       summaryPreview: row.summary.length > 200 ? `${row.summary.slice(0, 200)}…` : row.summary,
       openActionItems: row.actionItems.length,
+      processing: toProcessingState(row.processingJobs),
+      match: matches.get(row.id) ?? null,
     })),
     total,
   };
 }
 
-export async function getMeeting(workspaceId: string, id: string): Promise<MeetingDetailResponse | null> {
+/**
+ * Excerpts for the search results page. Ranking by relevance would need a
+ * generated tsvector column and GIN index (a schema change), so results stay
+ * newest-first; what we can do without one is show *why* each result matched.
+ * A title match needs no excerpt, and the summary is checked in memory, so
+ * only meetings that matched elsewhere cost an extra (batched) query.
+ */
+async function findMatches(
+  rows: { id: string; title: string; summary: string }[],
+  query: string,
+): Promise<Map<string, MeetingListItem["match"]>> {
+  const found = new Map<string, MeetingListItem["match"]>();
+  const unresolved: string[] = [];
+  for (const row of rows) {
+    const parts = makeSnippet(row.summary, query);
+    if (parts) found.set(row.id, { source: "summary", parts });
+    else if (!row.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())) unresolved.push(row.id);
+  }
+  if (unresolved.length === 0) return found;
+
+  const insensitive = { contains: query, mode: "insensitive" as const };
+  const [actions, segments] = await Promise.all([
+    prisma.actionItem.findMany({
+      where: { meetingId: { in: unresolved }, text: insensitive },
+      distinct: ["meetingId"],
+      select: { meetingId: true, text: true },
+    }),
+    prisma.transcriptSegment.findMany({
+      where: { meetingId: { in: unresolved }, text: insensitive },
+      orderBy: [{ meetingId: "asc" }, { order: "asc" }],
+      distinct: ["meetingId"],
+      select: { meetingId: true, text: true },
+    }),
+  ]);
+  for (const action of actions) {
+    const parts = makeSnippet(action.text, query);
+    if (parts) found.set(action.meetingId, { source: "action item", parts });
+  }
+  for (const segment of segments) {
+    if (found.has(segment.meetingId)) continue;
+    const parts = makeSnippet(segment.text, query);
+    if (parts) found.set(segment.meetingId, { source: "transcript", parts });
+  }
+  return found;
+}
+
+export async function getMeeting(workspaceId: string, id: string): Promise<MeetingDetail | null> {
   const row = await prisma.meeting.findFirst({
     where: { id, workspaceId },
     include: {
       transcript: { orderBy: { order: "asc" } },
       actionItems: true,
       uploads: { where: { status: "complete" }, select: { chunks: { select: { channel: true } } } },
+      processingJobs: LATEST_JOB,
     },
   });
   if (!row) return null;
@@ -294,6 +389,7 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     endedAt: row.endedAt.toISOString(),
     summary: row.summary,
     mode: row.mode as MeetingMode,
+    processing: toProcessingState(row.processingJobs),
     recordingAvailable: Boolean(row.recordingObjectKey) || row.uploads.some((upload) => upload.chunks.length > 0),
     recordingChannels: [...new Set(row.uploads.flatMap((upload) => upload.chunks.map((chunk) => chunk.channel)).filter((channel): channel is "mic" | "speaker" => channel === "mic" || channel === "speaker"))],
     transcript: row.transcript.map((segment) => ({
@@ -312,22 +408,59 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
   };
 }
 
-/**
- * A single meeting may carry up to MAX_ACTION_ITEMS (1,000), so an archive
- * of a few hundred meetings can hold six figures of rows — all of which the
- * unbounded version of this query loaded into memory and rendered as one
- * un-paginated list. The cap keeps the page responsive; the inbox is a
- * working list, not the archive, and the filter links narrow it further.
- */
-export const MAX_ACTION_ITEMS_PER_PAGE = 500;
+export const ACTION_ITEMS_PAGE_SIZE = 50;
 
-export async function listActionItems(workspaceId: string, status?: "open" | "done") {
-  return prisma.actionItem.findMany({
-    where: { meeting: { workspaceId }, ...(status ? { status } : {}) },
-    orderBy: [{ status: "asc" }, { dueAt: "asc" }, { id: "asc" }],
-    include: { meeting: { select: { id: true, title: true, startedAt: true } } },
-    take: MAX_ACTION_ITEMS_PER_PAGE,
-  });
+export interface ListActionItemsOptions {
+  status?: "open" | "done";
+  /** Only open items already past their due day. Implies status "open". */
+  overdue?: boolean;
+  /**
+   * Items from meetings this user recorded that are unassigned or assigned to
+   * them (matched by "you"/"me" or the parts of their email address).
+   */
+  mine?: { userId: string; names: string[] };
+  /** Id of the last item on the previous page. */
+  cursor?: string;
+  limit?: number;
+}
+
+/**
+ * The action-item inbox, open items first, then by due date (undated last),
+ * paged with a keyset cursor. A single meeting may carry up to
+ * MAX_ACTION_ITEMS (1,000), so an archive can hold six figures of rows —
+ * never load them all.
+ */
+export async function listActionItems(workspaceId: string, options: ListActionItemsOptions = {}) {
+  const limit = Math.min(Math.max(options.limit ?? ACTION_ITEMS_PAGE_SIZE, 1), 100);
+  const status = options.overdue ? "open" : options.status;
+  const where = {
+    meeting: { workspaceId },
+    ...(status ? { status } : {}),
+    ...(options.overdue ? { dueAt: { lt: new Date(`${utcDateString()}T00:00:00.000Z`) } } : {}),
+    ...(options.mine
+      ? {
+          userId: options.mine.userId,
+          OR: [
+            { owner: null },
+            ...options.mine.names.map((name) => ({ owner: { equals: name, mode: "insensitive" as const } })),
+          ],
+        }
+      : {}),
+  };
+  const [rows, total] = await Promise.all([
+    prisma.actionItem.findMany({
+      where,
+      // "open" sorts after "done" alphabetically, hence desc. `id` makes the
+      // order total, which the cursor needs to be stable across pages.
+      orderBy: [{ status: "desc" }, { dueAt: { sort: "asc", nulls: "last" } }, { id: "asc" }],
+      include: { meeting: { select: { id: true, title: true, startedAt: true } } },
+      take: limit + 1,
+      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 0 } : {}),
+    }),
+    prisma.actionItem.count({ where }),
+  ]);
+  const items = rows.slice(0, limit);
+  return { items, total, nextCursor: rows.length > limit ? rows[limit]!.id : null };
 }
 
 export async function updateActionItem(
@@ -349,6 +482,14 @@ export async function updateActionItem(
       ...(changes.dueAt !== undefined ? { dueAt: changes.dueAt ? new Date(changes.dueAt) : null } : {}),
     },
   });
+  return result.count > 0;
+}
+
+export async function renameMeeting(workspaceId: string, id: string, title: string): Promise<boolean> {
+  const trimmed = title.trim();
+  if (!trimmed) throw new ValidationError("title is required");
+  if (trimmed.length > MAX_TITLE_LENGTH) throw new ValidationError(`title must be ${MAX_TITLE_LENGTH} characters or fewer`);
+  const result = await prisma.meeting.updateMany({ where: { id, workspaceId }, data: { title: trimmed } });
   return result.count > 0;
 }
 

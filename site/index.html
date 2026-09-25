@@ -28,11 +28,11 @@
   <main>
     <p class="muted">AI Notetaker</p>
     <h1>Start taking notes without a meeting bot.</h1>
-    <p class="lede">Start with Google Meet browser capture in Chrome. For Zoom, Teams, Slack, and other desktop calls, add the native helper. Choose free local BYOK or optional Hosted AI after setup.</p>
+    <p class="lede">Take Google Meet notes in Chrome with your own API keys (free) or optional Hosted AI (paid). For Zoom, Teams, Slack, and other desktop calls, add the desktop helper.</p>
 
     <section class="card" aria-labelledby="start">
       <h2 id="start">1. Start with Google Meet</h2>
-      <p>Install the Chrome extension, open a Meet call, and choose <strong>Google Meet — capture this tab</strong>. No desktop helper or account is required for free local BYOK mode.</p>
+      <p>Install the Chrome extension, finish setup, then open a Meet call and choose <strong>Start notes</strong> from the extension. Using your own API keys requires no desktop helper or account.</p>
       <p id="extension-links">Checking the current release…</p>
     </section>
 
@@ -82,8 +82,8 @@
     platform.value = ['macos', 'windows', 'linux', 'unknown'].includes(hinted) ? hinted : detected.includes('mac') ? 'macos' : detected.includes('win') ? 'windows' : detected.includes('linux') ? 'linux' : 'unknown';
     const content = {
       macos: ['macOS', 'Download the signed DMG from the latest release or install the Homebrew Cask.', 'brew install --cask ai-notetaker', 'BlackHole is linked to the official Existential Audio installer and is never bundled.'],
-      windows: ['Windows', 'Download the signed installer or use WinGet/Chocolatey.', 'winget install AI-Notetaker', 'The native installer may install only base VB-CABLE and keeps VB-Audio attribution visible.'],
-      linux: ['Linux', 'Install the signed Debian package; use AppImage when your distribution does not use apt.', 'sudo apt install ./AI-Notetaker.deb', 'The helper creates its PulseAudio/PipeWire null sink when pactl is available.'],
+      windows: ['Windows', 'When released, download the signed installer or use WinGet/Chocolatey.', 'winget install --id AI.Notetaker --exact', 'The native installer may install only base VB-CABLE and keeps VB-Audio attribution visible.'],
+      linux: ['Linux', 'Download the Debian package; use AppImage when your distribution does not use apt.', '', 'Keep your normal audio output selected. The helper captures its PulseAudio/PipeWire monitor; null-sink routing is a fallback.'],
       unknown: ['your OS', 'Use the latest release page and choose the native artifact for your system.', '', 'The supported desktop targets are macOS, Windows, and Linux.']
     };
     let releaseManifest = null;
@@ -93,7 +93,7 @@
       const installCommand = published ? command : '';
       const releaseMessage = published
         ? `<a href="${releases}">View release artifacts</a>`
-        : '<p class="warning">No public signed release is available yet. The commands below become active after the release owner publishes the native artifacts and extension listing.</p>';
+        : '<p class="warning">A signed release and package-manager installation are not confirmed yet. Check the release page for available artifacts.</p><a href="' + releases + '">View releases</a>';
       instructions.innerHTML = `<article class="platform selected"><h3>${name}</h3><p>${description}</p>${installCommand ? `<code>${installCommand}</code>` : ''}<p class="muted">${driver}</p>${releaseMessage}</article>`;
     }
     platform.addEventListener('change', render);
