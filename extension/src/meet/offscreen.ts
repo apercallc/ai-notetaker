@@ -31,6 +31,37 @@ function errorMessage(error: unknown): string {
   return typeof message === "string" && message ? message : "Meet capture failed";
 }
 
+/**
+ * "Receiving end does not exist" and port-closed errors are transient here:
+ * the MV3 service worker can be killed and restarted between two audio
+ * chunks, and while it is down sendMessage rejects exactly this way. Losing
+ * the whole capture over one such blip — when every chunk is already
+ * durable-first in the worker once it comes back — is wrong; retry a few
+ * times with a short backoff and only give up once the worker stays
+ * unreachable for a while.
+ */
+function isTransientWorkerRestart(reason: unknown): boolean {
+  const message = errorMessage(reason);
+  return /receiving end does not exist|message port closed|The message port closed/i.test(message);
+}
+
+const CHUNK_SEND_ATTEMPTS = 4;
+const CHUNK_SEND_BACKOFF_MS = 250;
+
+/** Sends one chunk with bounded retries for transient worker-restart errors. */
+async function sendChunkWithRetry(payload: object): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = (await chrome.runtime.sendMessage(payload)) as { error?: string } | undefined;
+      if (response?.error) throw new Error(response.error);
+      return;
+    } catch (reason) {
+      if (attempt >= CHUNK_SEND_ATTEMPTS || !isTransientWorkerRestart(reason)) throw reason;
+      await new Promise((resolve) => setTimeout(resolve, CHUNK_SEND_BACKOFF_MS * attempt));
+    }
+  }
+}
+
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
   // Slices keep String.fromCharCode under the engine's argument-count limit.
@@ -83,15 +114,13 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
   node.port.onmessage = (event: MessageEvent) => {
     if (!(event.data instanceof ArrayBuffer)) return;
     const pcm16 = float32ToPcm16(new Float32Array(event.data));
-    const write: Promise<void> = chrome.runtime.sendMessage({
+    const write: Promise<void> = sendChunkWithRetry({
       type: "MEET_AUDIO_CHUNK",
       meetingId,
       channel,
       sampleRateHz: SAMPLE_RATE_HZ,
       pcm16Base64: toBase64(pcm16),
       ...(captureTabId === undefined ? {} : { tabId: captureTabId }),
-    }).then((response: { error?: string } | undefined) => {
-      if (response?.error) throw new Error(response.error);
     }).catch(() => {
       void chrome.runtime.sendMessage({
         type: "MEET_CAPTURE_ERROR",

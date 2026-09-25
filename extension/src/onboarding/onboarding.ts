@@ -96,6 +96,7 @@ function helperStatusCopy(): string {
     return `This helper (v${helperInfo?.helperVersion ?? "unknown"}) is incompatible. Install the current version.`;
   }
   if (helperStatus === "helper_not_found") return "Desktop helper not detected yet. Install it, launch it, then check again.";
+  if (helperStatus === "needs_pairing") return "The helper is paired with a different browser. Open the helper's tray menu and choose 'Pair New Browser', then check again.";
   if (helperStatus === "disconnected") return "Desktop helper is not responding. Launch it, then check again.";
   return "Checking for the desktop helper…";
 }

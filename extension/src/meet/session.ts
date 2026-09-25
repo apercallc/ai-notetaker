@@ -1,4 +1,5 @@
 import type { BackgroundController } from "../lib/backgroundController";
+import { getMeeting } from "../lib/storage";
 import type { MeetingMode } from "../types";
 import type { MeetCaptureController } from "./meetCapture";
 import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "./hints";
@@ -45,7 +46,20 @@ export async function startMeetRecording(
   options: StartMeetOptions,
 ): Promise<string> {
   const active = controller.getState().activeMeeting;
-  if (active) return active.id;
+  if (active) {
+    // Reuse is only correct when the active meeting is itself a Meet capture.
+    // A desktop-helper recording must not be handed back to the widget as if
+    // Meet audio were being captured — the user would see "Recording" while
+    // no Meet audio ever lands. Only one capture of each kind can be active,
+    // and desktop + Meet genuinely cannot run at once (both claim the mic),
+    // so surface a busy error instead of silently doing nothing.
+    const activeRecord = await getMeeting(active.id);
+    if (activeRecord?.captureSource === "meet") return active.id;
+    controller.reportStartFailure(
+      "A desktop recording is already running in the AI Notetaker helper. Stop it before starting notes for this call.",
+    );
+    return "";
+  }
   const discoveredTab = typeof options.tabId === "number" ? undefined : await discoverActiveMeetTab();
   const tabId = options.tabId ?? discoveredTab?.id;
   const titleHint = options.titleHint ?? (discoveredTab ? meetTitleForTab(discoveredTab) : undefined);

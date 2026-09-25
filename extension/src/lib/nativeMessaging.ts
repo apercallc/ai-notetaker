@@ -52,7 +52,13 @@ type IncomingMessageType = IncomingMessage["type"];
  * actionable "install the helper" state instead of silently retrying
  * forever.
  */
-export type HelperConnectionStatus = "connecting" | "connected" | "helper_not_found" | "disconnected" | "incompatible";
+export type HelperConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "helper_not_found"
+  | "disconnected"
+  | "needs_pairing"
+  | "incompatible";
 
 export class NativeMessagingClient {
   private port: chrome.runtime.Port | null = null;
@@ -61,6 +67,7 @@ export class NativeMessagingClient {
   private statusListeners: Set<Listener<HelperConnectionStatus>> = new Set();
   private currentStatus: HelperConnectionStatus | null = null;
   private reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
+  private reconnectTimerId: ReturnType<typeof setTimeout> | undefined;
 
   connect(): Promise<void> {
     if (this.connectPromise) return this.connectPromise;
@@ -175,12 +182,31 @@ export class NativeMessagingClient {
     }
     // Short delays (and non-Chrome test harnesses / older Chromium variants
     // with no chrome.alarms) use a plain timer, which chrome.alarms would
-    // otherwise round up to its 30s floor.
-    setTimeout(() => void this.connect(), delay);
+    // otherwise round up to its 30s floor. Track the id so cancelReconnect
+    // can stop it (a rejection must not be retried).
+    this.reconnectTimerId = setTimeout(() => {
+      this.reconnectTimerId = undefined;
+      void this.connect();
+    }, delay);
   }
 
   retryFromAlarm(): void {
     void this.connect();
+  }
+
+  /**
+   * Stops any scheduled reconnect — used when the helper has rejected the
+   * pairing handshake: retrying a deliberate rejection would hot-loop a
+   * fresh OS process per attempt. Recovery is user-gesture-driven (the
+   * helper tray's "Pair New Browser" item), after which connect() can be
+   * called again — connect() resets the backoff on success via handleMessage.
+   */
+  private cancelReconnect(): void {
+    if (chrome.alarms?.clear) void chrome.alarms.clear(HELPER_RETRY_ALARM);
+    if (this.reconnectTimerId !== undefined) {
+      clearTimeout(this.reconnectTimerId);
+      this.reconnectTimerId = undefined;
+    }
   }
 
   private handleMessage(raw: unknown): void {
@@ -194,14 +220,18 @@ export class NativeMessagingClient {
       void savePairingToken(raw.pairingToken);
     }
     if (raw.type === "error" && raw.code === "helper_not_paired") {
-      // The helper is reachable, but this browser profile lost or has a
-      // stale token (for example after clearing extension storage). Clear the
-      // browser copy before the host closes the connection so the scheduled
-      // reconnect can perform a fresh, origin-allowlisted pairing handshake.
-      // This is deliberately not the same as a missing host: installation is
-      // already proven, and sending the old token forever would strand the
-      // profile until the user edited app data manually.
+      // The helper refuses to re-mint its token for a browser that lost its
+      // copy — that is the security model (a rogue same-user process must
+      // not be able to pair by presenting null). Recovering requires a user
+      // gesture in the helper's tray menu, so stop the reconnect loop here
+      // instead of hot-retrying a rejection. Clear the stale browser copy so
+      // a manual retry (after the user picks "Pair New Browser" in the tray,
+      // which deletes the helper-side token) pairs cleanly via the
+      // first-ever-pairing branch.
       void clearPairingToken();
+      this.setStatus("needs_pairing");
+      this.cancelReconnect();
+      return;
     }
     const handlers = this.listeners.get(raw.type);
     if (!handlers) return;

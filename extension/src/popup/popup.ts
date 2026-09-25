@@ -248,7 +248,9 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]):
   if (helperStatus !== "connected") {
     statusEl.textContent = helperStatus === "incompatible"
       ? "The desktop helper needs an update. Open desktop setup to install the current version."
-      : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
+      : helperStatus === "needs_pairing"
+        ? "The helper is paired with a different browser. Open the helper's tray menu and choose 'Pair New Browser', then try again."
+        : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
     statusEl.className = "text-warning";
     if (checkButton) checkButton.disabled = true;
     if (probeButton) probeButton.disabled = true;

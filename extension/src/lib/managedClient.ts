@@ -196,19 +196,56 @@ export async function registerManagedMeeting(
   }, fetchImpl);
 }
 
+/**
+ * What gets uploaded. The array form is kept for small inputs and existing
+ * callers; the streaming form is the only safe shape for a real Meet
+ * recording — the manifest totals come from a key-only stats pass, and the
+ * chunks are pulled one at a time from IndexedDB so the service worker's
+ * heap never holds more than a single chunk (~48 kB) of audio.
+ */
+export type ManagedChunkSource = ManagedChunk[] | {
+  totalChunks: number;
+  totalBytes: number;
+  chunks: AsyncIterable<ManagedChunk>;
+};
+
+function isStreamingSource(source: ManagedChunkSource): source is { totalChunks: number; totalBytes: number; chunks: AsyncIterable<ManagedChunk> } {
+  return !Array.isArray(source);
+}
+
+/** PUTs one chunk with its SHA-256; shared by the array and streaming paths. */
+async function putManagedChunk(
+  config: ManagedServiceConfig,
+  uploadId: string,
+  index: number,
+  chunk: ManagedChunk,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  const bytes = chunk.bytes.slice();
+  const digest = await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer);
+  const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  await requestJson(config, `/api/v1/uploads/${encodeURIComponent(uploadId)}/chunks/${index}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream", "x-chunk-sha256": checksum, "x-audio-channel": chunk.channel },
+    body: bytes.buffer as ArrayBuffer,
+  }, fetchImpl);
+}
+
 export async function uploadManagedMeeting(
   config: ManagedServiceConfig,
   meetingId: string,
-  chunks: ManagedChunk[],
+  source: ManagedChunkSource,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ManagedUploadResult> {
-  if (chunks.length === 0) throw new Error("A managed meeting must contain at least one audio chunk");
-  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.bytes.byteLength, 0);
+  const { totalChunks, totalBytes } = isStreamingSource(source)
+    ? source
+    : { totalChunks: source.length, totalBytes: source.reduce((sum, chunk) => sum + chunk.bytes.byteLength, 0) };
+  if (totalChunks === 0) throw new Error("A managed meeting must contain at least one audio chunk");
   const idempotencyKey = `meeting:${meetingId}`;
   const manifest = await requestJson(config, "/api/v1/uploads", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ meetingId, totalChunks: chunks.length, totalBytes, idempotencyKey }),
+    body: JSON.stringify({ meetingId, totalChunks, totalBytes, idempotencyKey }),
   }, fetchImpl);
   const uploadId = typeof manifest.uploadId === "string" ? manifest.uploadId : "";
   if (!uploadId) throw new Error("Managed service returned no upload id");
@@ -218,15 +255,18 @@ export async function uploadManagedMeeting(
   // completed manifest, so replaying every chunk here would turn a recoverable
   // provider failure into a client-visible upload failure.
   if (manifest.status !== "complete") {
-    for (const chunk of chunks) {
-      const bytes = chunk.bytes.slice();
-      const digest = await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer);
-      const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-      await requestJson(config, `/api/v1/uploads/${encodeURIComponent(uploadId)}/chunks/${chunk.index}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/octet-stream", "x-chunk-sha256": checksum, "x-audio-channel": chunk.channel },
-        body: bytes.buffer as ArrayBuffer,
-      }, fetchImpl);
+    if (isStreamingSource(source)) {
+      // Streamed chunks carry their storage sequence, not their manifest
+      // index; the manifest expects dense 0..N-1 indices in iteration order.
+      let index = 0;
+      for await (const chunk of source.chunks) {
+        await putManagedChunk(config, uploadId, index, chunk, fetchImpl);
+        index += 1;
+      }
+    } else {
+      for (const chunk of source) {
+        await putManagedChunk(config, uploadId, chunk.index, chunk, fetchImpl);
+      }
     }
 
     await requestJson(config, `/api/v1/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST" }, fetchImpl);

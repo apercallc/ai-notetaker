@@ -36,19 +36,41 @@ const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
 const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => controller.sendMeetAudioChunk(meetingId, channel, pcm16, 48_000));
 
+// Declared before any listener that needs it: a tab event can wake the
+// worker at any point during top-level execution, and referencing a later
+// const from a listener would hit the temporal dead zone.
+// Restore the persisted capture map before the controller rehydrates
+// meeting state, so a tab-close event arriving during this same wake finds
+// the capture and finishes the meeting instead of stranding it.
+const readyPromise = (async () => {
+  await meetCapture.restoreCaptures();
+  await controller.init();
+})();
+
 // A captured tab that closes, or leaves its call, is the end of the call and
 // not a failure: the audio is already on disk, so finish the meeting the way
 // Stop does and write the notes. Same-call URL changes (query, hash) are ignored.
+//
+// Both paths MUST await the controller's ready promise: the worker may have
+// just been woken by this very tab event, and finishMeetCaptureForTab needs
+// the rehydrated meeting state (active id, chunk sequence, settings) that
+// init() restores from storage — calling it before init resolves would see
+// stale in-memory state and strand the meeting in "recording" with a stuck
+// REC badge.
 chrome.tabs.onRemoved?.addListener((tabId) => {
-  void finishMeetCaptureForTab(controller, meetCapture, tabId).catch((error) => {
-    console.warn("Meet capture cleanup after tab removal failed", error);
-  });
+  void readyPromise
+    .then(() => finishMeetCaptureForTab(controller, meetCapture, tabId))
+    .catch((error) => {
+      console.warn("Meet capture cleanup after tab removal failed", error);
+    });
 });
 chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
   if (typeof changeInfo.url !== "string") return;
-  void finishMeetCaptureForTab(controller, meetCapture, tabId, changeInfo.url).catch((error) => {
-    console.warn("Meet capture cleanup after tab navigation failed", error);
-  });
+  void readyPromise
+    .then(() => finishMeetCaptureForTab(controller, meetCapture, tabId, changeInfo.url))
+    .catch((error) => {
+      console.warn("Meet capture cleanup after tab navigation failed", error);
+    });
 });
 
 chrome.alarms?.onAlarm.addListener((alarm) => {
@@ -102,7 +124,6 @@ function updateBadge(message: BackgroundToUiMessage): void {
   else if (badge === "REC") showBadge("");
 }
 
-const readyPromise = controller.init();
 void readyPromise.then(syncReminderAlarm);
 void readyPromise.then(() => {
   if (controller.getState().activeMeeting) showBadge("REC");

@@ -250,7 +250,8 @@ export interface MeetingRecord {
   managedProcessing?: {
     uploadId?: string;
     jobId?: string;
-    status: "not_started" | "uploading" | "queued" | "processing" | "complete" | "error";
+    /** Statuses the hosted API may add later are stored verbatim; consumers map unknown ones to "processing". */
+    status: "not_started" | "uploading" | "queued" | "processing" | "complete" | "error" | (string & {});
     errorMessage?: string;
   };
 }
@@ -320,7 +321,7 @@ export type IncomingMessage =
     }
   | { type: "audio_probe_result"; micFrames: number; speakerFrames: number; passed: boolean; message: string }
   | { type: "capture_capabilities"; capabilities: CaptureCapabilities }
-  | { type: "managed_job_status"; meetingId: string; jobId: string; status: "queued" | "processing" | "complete" | "error"; message?: string; summary?: string; actionItems?: ActionItem[] };
+  | { type: "managed_job_status"; meetingId: string; jobId: string; status: "queued" | "processing" | "complete" | "error" | (string & {}); message?: string; summary?: string; actionItems?: ActionItem[] };
 
 export function isIncomingMessage(value: unknown): value is IncomingMessage {
   if (typeof value !== "object" || value === null) return false;
@@ -389,8 +390,14 @@ export function isIncomingMessage(value: unknown): value is IncomingMessage {
         typeof value.guidance === "string";
     }
     case "managed_job_status":
+      // The helper sends an empty jobId only on the upload-failure path
+      // (status "error") — every other status must identify a real job.
+      // Accept any non-empty status string: a hosted API that adds a new
+      // intermediate state must not have its transitions silently dropped
+      // (the controller maps unknown statuses to "processing"), while an
+      // empty status is never meaningful on this message.
       return hasNonEmptyString("meetingId") && (message.status === "error" ? isString("jobId") : hasNonEmptyString("jobId")) &&
-        (message.status === "queued" || message.status === "processing" || message.status === "complete" || message.status === "error") &&
+        hasNonEmptyString("status") &&
         (message.message === undefined || isString("message")) &&
         (message.summary === undefined || isString("summary")) &&
         (message.actionItems === undefined || (Array.isArray(message.actionItems) && message.actionItems.length <= 1_000 && message.actionItems.every(isActionItem)));

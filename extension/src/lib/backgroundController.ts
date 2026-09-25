@@ -16,7 +16,7 @@ import { testProviderKeyDirect } from "./testProviderKey";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
-import { clearBrowserMeetChunks, listBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
+import { browserMeetChunkStats, clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
 import { getManagedEntitlements, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment } from "../types";
@@ -88,6 +88,7 @@ export class BackgroundController {
     this.client.on("managed_job_status", (msg) => void this.handleManagedJobStatus(msg));
     this.client.on("error", (msg) => void this.handleError(msg));
     this.client.on("recording_started", (msg) => this.handleRecordingStarted(msg));
+    this.client.on("recording_stopped", (msg) => void this.handleRecordingStopped(msg));
     this.client.on("helper_info", (msg) => this.handleHelperInfo(msg));
     this.client.on("recovered_recording", (msg) => this.handleRecoveredRecording(msg));
     this.client.onStatusChange((status) => this.handleStatusChange(status));
@@ -432,18 +433,29 @@ export class BackgroundController {
     try {
       if (!this.settings) throw new Error("Meet settings are not loaded");
       if (this.settings.processingMode.kind === "managed") {
-        const chunks = await listBrowserMeetChunks(meetingId);
         const managed = this.settings.managedService;
         if (!managed) throw new Error("Hosted AI is not connected. Sign in again before processing this Meet recording.");
         if (!managedMeetingMatchesService(meeting, managed)) {
           throw new Error("This Meet recording belongs to a different hosted workspace. Sign in to that workspace before retrying.");
         }
+        // Stream the chunks: materializing every raw chunk in the worker at
+        // once (an hour of two-channel 48 kHz PCM16 is ~700 MB per
+        // browserStorage's own sizing note) is a heap exhaustion mid-upload.
+        // The manifest totals come from a key-only stats pass and each chunk
+        // is pulled from IndexedDB only when it is about to be PUT.
+        const stats = await browserMeetChunkStats(meetingId);
         const endedAt = new Date().toISOString();
         await registerManagedMeeting(managed, meeting, endedAt, this.fetchImpl);
         const upload = await uploadManagedMeeting(
           managed,
           meetingId,
-          chunks.map((chunk, index) => ({ channel: chunk.channel, index, bytes: chunk.bytes })),
+          {
+            totalChunks: stats.totalChunks,
+            totalBytes: stats.totalBytes,
+            chunks: (async function* (stream) {
+              for await (const chunk of stream) yield { channel: chunk.channel, index: 0, bytes: chunk.bytes };
+            })(streamBrowserMeetChunks(meetingId)),
+          },
           this.fetchImpl,
         );
         await updateMeeting(meetingId, (current) => ({
@@ -649,7 +661,7 @@ export class BackgroundController {
 
   private handleStatusChange(status: HelperConnectionStatus): void {
     this.helperStatus = status;
-    if (status === "helper_not_found" || status === "disconnected") this.helperInfo = null;
+    if (status === "helper_not_found" || status === "disconnected" || status === "needs_pairing") this.helperInfo = null;
     this.broadcast({ type: "HELPER_STATUS", status });
     // The helper holds settings in memory only for its own process
     // lifetime (protocol: they're re-sent each time the extension
@@ -674,6 +686,34 @@ export class BackgroundController {
 
   private handleRecordingStarted(msg: Extract<IncomingMessage, { type: "recording_started" }>): void {
     this.activeMeetingId = msg.meetingId;
+  }
+
+  /**
+   * The helper ended the capture on its own — not in reply to a Stop button
+   * press here (that path finalizes via stopRecording). This arrives after
+   * RESUME_RECORDING on a hosted-pending meeting (the helper completes the
+   * stop it deferred earlier) and after any helper-initiated stop. Without
+   * this, the meeting and every widget stayed "recording" forever while the
+   * helper had already moved on; the notes-only aftermath (summary_ready /
+   * managed_job_status) would then land on a meeting still showing live.
+   * Finalize the durable state exactly like Stop does, minus the request
+   * bookkeeping — the helper has already done its side.
+   */
+  private async handleRecordingStopped(msg: Extract<IncomingMessage, { type: "recording_stopped" }>): Promise<void> {
+    const meetingId = msg.meetingId;
+    const meeting = await getMeeting(meetingId);
+    if (!meeting) return;
+    // Only a live capture needs the transition; a meeting the user already
+    // stopped (status processing/error/complete) must not be moved backward
+    // into "processing" — that would erase an error the user should still see.
+    if (meeting.status !== "recording") return;
+    await updateMeeting(meetingId, (current) =>
+      current.status === "recording"
+        ? { ...current, status: "processing", endedAt: current.endedAt ?? new Date().toISOString() }
+        : current,
+    );
+    if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
   }
 
   private async handleTranscriptPartial(
