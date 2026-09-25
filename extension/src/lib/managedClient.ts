@@ -339,6 +339,28 @@ export async function uploadManagedMeeting(
   return { uploadId, jobId: job.jobId, meetingId };
 }
 
+/** Auto-share result: an expiring attendee link created after notes complete. */
+export interface ManagedShareResult {
+  shareId: string;
+  shareUrl: string;
+  expiresAt: string;
+}
+
+/** Creates an expiring share link server-side; the token never touches Meet tabs. */
+export async function createManagedMeetingShare(
+  config: ManagedServiceConfig,
+  meetingId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManagedShareResult> {
+  const body = await requestJson(config, `/api/v1/meetings/${encodeURIComponent(meetingId)}/share`, { method: "POST" }, fetchImpl);
+  if (typeof body.shareUrl !== "string" || !body.shareUrl) throw new Error("Managed service returned no share URL");
+  return {
+    shareId: typeof body.shareId === "string" ? body.shareId : "",
+    shareUrl: body.shareUrl,
+    expiresAt: typeof body.expiresAt === "string" ? body.expiresAt : "",
+  };
+}
+
 export async function getManagedJob(config: ManagedServiceConfig, jobId: string, fetchImpl: typeof fetch = fetch): Promise<{ status: string; meetingId: string; message?: string; summary?: string; actionItems?: ActionItem[] }> {
   const body = await requestJson(config, `/api/v1/jobs/${encodeURIComponent(jobId)}`, { method: "GET" }, fetchImpl);
   const result = body.meeting as { summary?: unknown; actionItems?: unknown } | undefined;

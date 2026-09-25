@@ -871,6 +871,31 @@ them without changing `CLAUDE.md` and the design spec first.
 
 ## Pre-production audit (2026-09-25) — deferred items
 
+Meet automation settings (2026-09-25), all in Settings → Shortcuts and Meet
+widget, all off by default except open-notes:
+
+- [x] Auto-record on joining a Google Meet call (`autoRecordOnMeetJoin`, off).
+      A tab landing on a call URL attempts a silent start; Chrome's invocation
+      gate on a first join saves the intent so the first toolbar click starts
+      recording on that single click. URL-based join detection only, one
+      attempt per call, re-armed when a tab joins a different call.
+- [x] One-tap attendee disclosure notice (`meetDisclosureNotice`, off): while
+      recording, the widget shows a Copy button with a short chat-ready
+      notice. The user pastes and sends it themselves — Meet's DOM is never
+      scraped or driven. Added the `clipboardWrite` permission.
+- [x] Auto-share notes with attendees (`autoShareNotesWithAttendees`, off,
+      Hosted AI only): after notes complete, the extension creates an
+      expiring share link via a new authenticated workspace-scoped
+      `POST /api/v1/meetings/{id}/share` route and shows it on the notes
+      page. Nobody receives the link unless the user sends it.
+- [x] Open notes when ready (`openNotesWhenReady`, ON): the notes tab opens
+      automatically when notes complete (Meet and desktop paths); the
+      notification is skipped in that mode and remains the off-mode fallback.
+- [ ] Live browser-side transcription during Meet calls: the widget already
+      shows the live transcript when the desktop helper streams it, but
+      extension-owned Meet capture still transcribes only after stop. In-call
+      streaming Deepgram for the browser path remains open work.
+
 Fixed in this pass (see commits ca6aea1 helper, 1e9a3fa extension, 9abc589
 webapp): pairing hardening + tray re-pair flow, IPC subscriber-leak pruning,
 StopRecording/stop-pipeline non-blocking, retry-worker cap + backoff,

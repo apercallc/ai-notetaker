@@ -10,6 +10,12 @@ export interface StartMeetOptions {
   tabId?: number;
   meetingMode?: MeetingMode;
   titleHint?: string;
+  /**
+   * Auto-attempt from the join watcher: failures are never broadcast (the
+   * user did not click anything), and Chrome's invocation gate still saves
+   * the one-click pending intent.
+   */
+  silent?: boolean;
 }
 
 /**
@@ -76,7 +82,7 @@ export async function startMeetRecording(
     // invocation. Remember the start so the toolbar click that opens the
     // popup completes it — one click total instead of click-then-click.
     if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
-    controller.reportStartFailure(description);
+    if (!options.silent) controller.reportStartFailure(description);
     return "";
   }
   const meetingId = await controller.startRecording(options.meetingMode, "meet", titleHint);
@@ -86,7 +92,13 @@ export async function startMeetRecording(
   } catch (error) {
     const description = describeCaptureFailure(error);
     if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
-    await controller.abortStart(meetingId, description);
+    if (options.silent) {
+      // Auto-attempt: tear down quietly; the saved intent makes the user's
+      // next toolbar click the one-click start.
+      await controller.abortStart(meetingId, description).catch(() => undefined);
+    } else {
+      await controller.abortStart(meetingId, description);
+    }
     return "";
   }
   // A start that succeeded (from the widget, the popup, or the shortcut —

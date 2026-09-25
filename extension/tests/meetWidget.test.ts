@@ -17,6 +17,7 @@ function baseState(overrides: Partial<WidgetState> = {}): WidgetState {
     callTitle: null,
     position: null,
     defaultMeetingMode: "general",
+  disclosureNoticeEnabled: false,
     active: null,
     latest: null,
     ...overrides,

@@ -5,6 +5,8 @@
  * this worker after ~30s idle and re-executes top-level code on the next
  * event (see extension/CLAUDE.md and the architecture spec §3.2).
  */
+import { maybeAutoStartMeetRecording, clearAutoRecordAttempt } from "./lib/autoRecord";
+import { getSettings } from "./lib/storage";
 import { BackgroundController } from "./lib/backgroundController";
 import { getExtensionOnboardingUrl } from "./lib/install";
 import { handleInstalled } from "./lib/installHandler";
@@ -58,6 +60,7 @@ const readyPromise = (async () => {
 // stale in-memory state and strand the meeting in "recording" with a stuck
 // REC badge.
 chrome.tabs.onRemoved?.addListener((tabId) => {
+  clearAutoRecordAttempt(tabId);
   void readyPromise
     .then(() => finishMeetCaptureForTab(controller, meetCapture, tabId))
     .catch((error) => {
@@ -71,6 +74,18 @@ chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
     .catch((error) => {
       console.warn("Meet capture cleanup after tab navigation failed", error);
     });
+  // Auto-record (opt-in): a tab landing on a Meet call URL attempts a start.
+  // clearAutoRecordAttempt re-arms per-call eligibility as tabs move on.
+  void readyPromise
+    .then(() =>
+      maybeAutoStartMeetRecording(tabId, changeInfo.url, {
+        getSettings,
+        isRecordingActive: () => controller.getState().activeMeeting !== null,
+        startMeetRecording: (options) => startMeetRecording(controller, meetCapture, { ...options, silent: true }),
+      }),
+    )
+    .then(() => clearAutoRecordAttempt(tabId, changeInfo.url))
+    .catch(() => undefined);
 });
 
 chrome.alarms?.onAlarm.addListener((alarm) => {

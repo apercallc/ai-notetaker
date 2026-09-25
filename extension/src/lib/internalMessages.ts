@@ -61,6 +61,8 @@ export interface WidgetState {
   /** Where the user last dropped the widget; the content script has no storage access of its own. */
   position: { x: number; y: number } | null;
   defaultMeetingMode: MeetingMode;
+  /** Show the one-tap-copy attendee disclosure notice while recording. */
+  disclosureNoticeEnabled: boolean;
   active: WidgetMeeting | null;
   /** Most recent finished (or finishing) meeting, so the widget can show "notes ready". */
   latest: Omit<WidgetMeeting, "bookmarks" | "transcript"> & { endedAt: string | null } | null;

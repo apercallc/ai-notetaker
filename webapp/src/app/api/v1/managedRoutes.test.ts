@@ -17,6 +17,7 @@ import { POST as billingWebhook } from "./billing/webhook/route";
 import { GET as currentGoogleCalendar } from "./google/calendar/current/route";
 import { POST as exportGoogleDrive } from "./google/drive/export/route";
 import { POST as reportClientError } from "./client-errors/route";
+import { POST as createShare } from "./meetings/[meetingId]/share/route";
 import { clientErrorLimiter } from "@/lib/clientErrors";
 import { prisma } from "@/lib/db";
 import { MAX_CHUNK_BYTES } from "@/lib/managedJobs";
@@ -488,6 +489,45 @@ describe("managed upload routes", () => {
     }));
     expect(flooded.status).toBe(429);
     expect(flooded.headers.get("retry-after")).toBeTruthy();
+  });
+
+  it("creates an extension-requested attendee share link scoped to the workspace", async () => {
+    const previousAppUrl = process.env.APP_URL;
+    process.env.APP_URL = "https://notes.example";
+    try {
+    const sessionId = await createPrincipal(USER_ID, "share-owner@example.com", WORKSPACE_ID);
+    const otherSessionId = await createPrincipal(OTHER_USER_ID, "share-other@example.com", OTHER_WORKSPACE_ID);
+    const meetingId = randomUUID();
+    await prisma.meeting.create({
+      data: {
+        id: meetingId,
+        userId: USER_ID,
+        workspaceId: WORKSPACE_ID,
+        title: "Shareable sync",
+        startedAt: new Date("2026-09-24T15:00:00.000Z"),
+        endedAt: new Date("2026-09-24T15:30:00.000Z"),
+        summary: "",
+      },
+    });
+
+    const context = { params: Promise.resolve({ meetingId }) };
+    const created = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST", headers: auth(sessionId) }), context);
+    expect(created.status).toBe(200);
+    const body = (await created.json()) as { shareUrl: string; expiresAt: string };
+    expect(body.shareUrl).toMatch(/\/share\/[A-Za-z0-9_-]+$/);
+    expect(Number.isFinite(Date.parse(body.expiresAt))).toBe(true);
+
+    // The same meeting is invisible to another workspace.
+    const cross = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST", headers: auth(otherSessionId) }), context);
+    expect(cross.status).toBe(400);
+
+    // Unauthenticated callers get nothing.
+    const anonymous = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST" }), context);
+    expect(anonymous.status).toBe(401);
+    } finally {
+      if (previousAppUrl === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = previousAppUrl;
+    }
   });
 });
 

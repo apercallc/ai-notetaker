@@ -18,7 +18,7 @@ import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
 import { browserMeetChunkStats, clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
-import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedGoogleCalendarEvent, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
+import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedGoogleCalendarEvent, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { reportManagedError } from "./errorReport";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment } from "../types";
 
@@ -350,15 +350,18 @@ export class BackgroundController {
    * audio: forget the meeting entirely rather than leave a "Failed" entry with
    * no recording behind it.
    */
-  async abortStart(meetingId: string, message: string): Promise<void> {
+  async abortStart(meetingId: string, message: string, options: { silent?: boolean } = {}): Promise<void> {
     // A Meet start that reached meeting creation but never captured audio.
     // Worth reporting in hosted mode: repeated failures here are the top of
-    // the "extension did nothing when I clicked start" funnel.
-    reportManagedError(
-      this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null,
-      new Error(message),
-      { surface: "meet_capture", meetingId, key: `meet-start-abort:${message}` },
-    );
+    // the "extension did nothing when I clicked start" funnel. Silent mode is
+    // the auto-record watcher: the user never clicked, so nothing is surfaced.
+    if (!options.silent) {
+      reportManagedError(
+        this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null,
+        new Error(message),
+        { surface: "meet_capture", meetingId, key: `meet-start-abort:${message}` },
+      );
+    }
     try {
       if (this.helperStatus === "connected") this.client.discardRecording(meetingId);
     } catch {
@@ -368,7 +371,7 @@ export class BackgroundController {
     this.meetChunkSequence.delete(meetingId);
     await deleteLocalMeeting(meetingId);
     if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
-    this.reportStartFailure(message);
+    if (!options.silent) this.reportStartFailure(message);
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
   }
 
@@ -495,6 +498,7 @@ export class BackgroundController {
             if (completed) {
               this.broadcast({ type: "SUMMARY_READY", meetingId, summary: completed.summary ?? "", actionItems: completed.actionItems });
               await this.syncToWebapp(completed);
+              await this.onNotesComplete(meetingId, completed);
             }
             await this.clearCompletedMeetChunks(meetingId);
             return;
@@ -517,6 +521,7 @@ export class BackgroundController {
       if (completed) {
         this.broadcast({ type: "SUMMARY_READY", meetingId, summary: result.summary, actionItems: result.actionItems });
         await this.syncToWebapp(completed);
+        await this.onNotesComplete(meetingId, completed);
       }
       await this.clearCompletedMeetChunks(meetingId);
     } catch (error) {
@@ -544,6 +549,37 @@ export class BackgroundController {
           : {}),
       }));
       this.broadcast({ type: "RECORDING_ERROR", meetingId, message: `${message} Saved Meet audio is available for retry.` });
+    }
+  }
+
+  /**
+   * Post-completion conveniences, run after the completed meeting is durable:
+   * auto-share (creates an expiring attendee link when the setting is on and
+   * a Hosted AI session exists) and open-notes (focus the notes tab instead
+   * of only notifying). Both are best-effort — a failure here must never
+   * demote a completed meeting.
+   */
+  private async onNotesComplete(meetingId: string, completed: MeetingRecord): Promise<void> {
+    if (this.settings?.autoShareNotesWithAttendees && !completed.attendeeShare) {
+      const managed = this.settings.processingMode.kind === "managed" ? this.settings.managedService : null;
+      if (managed) {
+        try {
+          const share = await createManagedMeetingShare(managed, meetingId, this.fetchImpl);
+          await updateMeeting(meetingId, (current) => ({
+            ...current,
+            attendeeShare: { shareUrl: share.shareUrl, expiresAt: share.expiresAt, createdAt: new Date().toISOString() },
+          }));
+        } catch (error) {
+          reportManagedError(managed, error, { surface: "managed_job", meetingId, key: `auto-share:${meetingId}` });
+        }
+      }
+    }
+    if (this.settings?.openNotesWhenReady) {
+      try {
+        await chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(meetingId)}`) });
+      } catch {
+        // The notification (already sent via SUMMARY_READY) remains the fallback.
+      }
     }
   }
 
@@ -666,6 +702,7 @@ export class BackgroundController {
       callTitle: this.currentCallTitle(settings),
       position: await getWidgetPosition(),
       defaultMeetingMode: settings.defaultMeetingMode,
+      disclosureNoticeEnabled: settings.meetDisclosureNotice === true,
       active: activeRecord
         ? {
             id: activeRecord.id,
@@ -816,6 +853,7 @@ export class BackgroundController {
     });
     await this.syncToWebapp(meeting);
     void this.exportToDrive(meeting);
+    await this.onNotesComplete(msg.meetingId, meeting);
     if (meeting.captureSource === "meet") {
       void clearBrowserMeetChunks(meeting.id)
         .catch(() => undefined)
@@ -842,6 +880,7 @@ export class BackgroundController {
       this.broadcast({ type: "SUMMARY_READY", meetingId: msg.meetingId, summary: msg.summary, actionItems: msg.actionItems ?? [] });
       void this.syncToWebapp(meeting);
       void this.exportToDrive(meeting);
+      void this.onNotesComplete(msg.meetingId, meeting);
       if (meeting.captureSource === "meet") {
         void clearBrowserMeetChunks(meeting.id)
           .catch(() => undefined)

@@ -120,6 +120,14 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
       return `
           <div class="stack">
             ${
+              ctx.state?.disclosureNoticeEnabled
+                ? `<div class="disclosure" id="disclosure-card">
+              <p class="note" id="disclosure-text">Notify the call: this meeting is being transcribed.</p>
+              <button type="button" class="btn secondary block" id="copy-disclosure">Copy notice for chat</button>
+            </div>`
+                : ""
+            }
+            ${
               ctx.state?.helperStatus === "connected"
                 ? `<div class="transcript-wrap">
               <div class="transcript" id="transcript" role="log" aria-live="off" aria-label="Live transcript" tabindex="0"></div>

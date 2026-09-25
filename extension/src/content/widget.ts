@@ -1,4 +1,5 @@
 import { formatOffset } from "../lib/bookmarks";
+import { MEET_DISCLOSURE_TEXT } from "../lib/autoRecord";
 import { escapeHtml } from "../lib/html";
 import type { BackgroundToUiMessage, UiToBackgroundMessage, WidgetMeeting, WidgetState } from "../lib/internalMessages";
 import { createStopConfirm, STOP_CONFIRM_LABEL, STOP_LABEL, type StopConfirmOptions } from "../lib/stopConfirm";
@@ -405,6 +406,25 @@ export class MeetWidget {
         event.preventDefault();
         void this.flagMoment(input?.value ?? "");
       });
+      this.root.querySelector("#copy-disclosure")?.addEventListener("click", () => void this.copyDisclosure());
+    }
+  }
+
+  /** One-tap attendee disclosure: copies the notice for pasting into Meet chat. */
+  private async copyDisclosure(): Promise<void> {
+    const button = this.root.querySelector<HTMLButtonElement>("#copy-disclosure");
+    if (!button) return;
+    const done = (label: string): void => {
+      button.textContent = label;
+      window.setTimeout(() => {
+        button.textContent = "Copy notice for chat";
+      }, 2_500);
+    };
+    try {
+      await navigator.clipboard.writeText(MEET_DISCLOSURE_TEXT);
+      done("Copied — paste it in the chat");
+    } catch {
+      done("Copy failed — select the text manually");
     }
   }
 

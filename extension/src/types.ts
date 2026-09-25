@@ -152,6 +152,14 @@ export interface NotetakerSettings {
   consentDisclosureAcknowledged: boolean;
   /** Show the floating notes widget on Google Meet calls. */
   showMeetWidget: boolean;
+  /** Try to start notes automatically when a Google Meet call tab is joined. */
+  autoRecordOnMeetJoin: boolean;
+  /** Show a one-tap-copy attendee disclosure notice while recording a Meet call. */
+  meetDisclosureNotice: boolean;
+  /** Automatically create an expiring share link for finished notes (Hosted AI or connected webapp). */
+  autoShareNotesWithAttendees: boolean;
+  /** Open the notes in a new tab as soon as they are ready, not just notify. */
+  openNotesWhenReady: boolean;
   /** Notify shortly before a calendar event with a Google Meet link starts. */
   calendarReminders: boolean;
   calendar: CalendarConnection | null;
@@ -171,6 +179,10 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
   showMeetWidget: true,
+  autoRecordOnMeetJoin: false,
+  meetDisclosureNotice: false,
+  autoShareNotesWithAttendees: false,
+  openNotesWhenReady: true,
   calendarReminders: true,
   calendar: null,
   drive: null,
@@ -247,6 +259,12 @@ export interface MeetingRecord {
   processingMode?: ProcessingMode;
   consentAcknowledged?: boolean;
   captureChannels?: CaptureChannelMetadata[];
+  /** Attendee share link auto-created for this meeting (auto-share setting). */
+  attendeeShare?: {
+    shareUrl: string;
+    expiresAt: string;
+    createdAt: string;
+  };
   managedProcessing?: {
     uploadId?: string;
     jobId?: string;
