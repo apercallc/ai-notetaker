@@ -78,6 +78,7 @@ struct DeepgramStreamingSession {
     read_task: JoinHandle<()>,
     closed: Arc<AtomicBool>,
     utterance_id: u32,
+    sample_rate_hz: u32,
 }
 
 #[async_trait]
@@ -113,13 +114,31 @@ impl StreamingSession for DeepgramStreamingSession {
         self.closed.load(Ordering::Relaxed)
     }
 
+    fn sample_rate_hz(&self) -> u32 {
+        self.sample_rate_hz
+    }
+
     async fn close(&mut self) -> Vec<(TranscriptSegment, u32)> {
         let _ = self
             .write
             .send(WsMessage::Text(r#"{"type":"CloseStream"}"#.to_string()))
             .await;
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        let trailing = self.try_recv_segments().await;
+        // Drain with a deadline instead of a blind fixed sleep: 300ms was
+        // long enough to add latency to every stop yet short enough to
+        // discard trailing finals whenever the provider took longer to
+        // flush, cutting off the last words of the meeting. Poll for up to
+        // 2s and return as soon as results stop arriving.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut trailing = Vec::new();
+        loop {
+            let received = self.try_recv_segments().await;
+            let got_any = !received.is_empty();
+            trailing.extend(received);
+            if !got_any || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         self.read_task.abort();
         trailing
     }
@@ -182,6 +201,7 @@ impl TranscriptionProvider for DeepgramProvider {
             read_task,
             closed,
             utterance_id: 0,
+            sample_rate_hz,
         }))
     }
 

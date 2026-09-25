@@ -158,36 +158,55 @@ fn remove_stale_socket_file(_dir: &Path) -> bool {
 /// per connection in message order, so long-running work (the stop pipeline)
 /// must be spawned by the handler rather than awaited, or it would stall the
 /// audio chunks queued behind it.
-pub async fn run_ipc_server<F, Fut>(dir: &Path, handler: F) -> std::io::Result<()>
+pub async fn run_ipc_server<F, Fut, D>(
+    dir: &Path,
+    handler: F,
+    on_disconnect: D,
+) -> std::io::Result<()>
 where
     F: Fn(ExtensionToHelper, OutSender) -> Fut + Clone + Send + 'static,
     Fut: std::future::Future<Output = bool> + Send,
+    D: Fn(OutSender) + Clone + Send + 'static,
 {
     ensure_socket_directory(dir)?;
     let listener = bind_listener(dir)?;
-    serve(listener, handler).await
+    serve(listener, handler, on_disconnect).await
 }
 
-async fn serve<F, Fut>(listener: Listener, handler: F) -> std::io::Result<()>
+async fn serve<F, Fut, D>(listener: Listener, handler: F, on_disconnect: D) -> std::io::Result<()>
 where
     F: Fn(ExtensionToHelper, OutSender) -> Fut + Clone + Send + 'static,
     Fut: std::future::Future<Output = bool> + Send,
+    D: Fn(OutSender) + Clone + Send + 'static,
 {
+    // accept() failures like EMFILE (descriptor exhaustion) repeat instantly;
+    // continuing in a tight loop busy-spins the CPU at 100% while the tray
+    // app looks alive but serves nothing. Back off after consecutive
+    // failures and reset as soon as one connection gets through.
+    let mut consecutive_failures = 0u32;
     loop {
         let conn = match listener.accept().await {
-            Ok(conn) => conn,
-            // One connection failing to be accepted (a descriptor limit, a
-            // client that hung up mid-handshake) must not take the whole
-            // server down with it — returning here would end the accept loop
-            // permanently and leave the tray app running but unreachable.
+            Ok(conn) => {
+                consecutive_failures = 0;
+                conn
+            }
             Err(error) => {
+                // One connection failing to be accepted (a descriptor limit, a
+                // client that hung up mid-handshake) must not take the whole
+                // server down with it — returning here would end the accept
+                // loop permanently and leave the tray app running but
+                // unreachable.
                 tracing::warn!("ipc accept failed: {error}");
+                consecutive_failures = consecutive_failures.saturating_add(1);
+                let delay_ms = std::cmp::min(50 * consecutive_failures, 2_000);
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
                 continue;
             }
         };
         let handler = handler.clone();
+        let on_disconnect = on_disconnect.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(conn, handler).await {
+            if let Err(e) = handle_connection(conn, handler, on_disconnect).await {
                 tracing::warn!("ipc connection error: {e}");
             }
         });
@@ -225,10 +244,15 @@ fn protocol_error(message: &str) -> HelperToExtension {
     }
 }
 
-async fn handle_connection<F, Fut>(conn: LocalStream, handler: F) -> std::io::Result<()>
+async fn handle_connection<F, Fut, D>(
+    conn: LocalStream,
+    handler: F,
+    on_disconnect: D,
+) -> std::io::Result<()>
 where
     F: Fn(ExtensionToHelper, OutSender) -> Fut,
     Fut: std::future::Future<Output = bool>,
+    D: Fn(OutSender),
 {
     let (mut read_half, mut write_half) = tokio::io::split(conn);
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<HelperToExtension>();
@@ -305,7 +329,14 @@ where
         }
     }
 
+    // Drop the last sender before awaiting the writer, and let the app-level
+    // subscriber registry (main.rs) prune this connection's entries. Those
+    // registry clones kept out_rx open forever after a disconnect — parking
+    // the writer task and leaking one task plus one registry entry per
+    // connection for any meeting that saw no further traffic.
+    let dropped = out_tx.clone();
     drop(out_tx);
+    on_disconnect(dropped);
     let _ = writer_task.await;
     outcome
 }
@@ -339,23 +370,27 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let seen_for_handler = seen.clone();
         let listener = bind_listener(dir).unwrap();
-        tokio::spawn(serve(listener, move |msg, out| {
-            let seen = seen_for_handler.clone();
-            async move {
-                match msg {
-                    ExtensionToHelper::Hello { .. } => {
-                        seen.lock().unwrap().push("hello".into());
-                        true
+        tokio::spawn(serve(
+            listener,
+            move |msg, out| {
+                let seen = seen_for_handler.clone();
+                async move {
+                    match msg {
+                        ExtensionToHelper::Hello { .. } => {
+                            seen.lock().unwrap().push("hello".into());
+                            true
+                        }
+                        ExtensionToHelper::StopRecording { meeting_id, .. } => {
+                            seen.lock().unwrap().push("stop".into());
+                            let _ = out.send(HelperToExtension::RecordingStopped { meeting_id });
+                            true
+                        }
+                        _ => true,
                     }
-                    ExtensionToHelper::StopRecording { meeting_id, .. } => {
-                        seen.lock().unwrap().push("stop".into());
-                        let _ = out.send(HelperToExtension::RecordingStopped { meeting_id });
-                        true
-                    }
-                    _ => true,
                 }
-            }
-        }));
+            },
+            |_| {},
+        ));
         seen
     }
 

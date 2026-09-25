@@ -135,6 +135,14 @@ pub trait StreamingSession: Send + Sync {
     fn is_closed(&self) -> bool;
     /// Signal end-of-audio and drain any trailing final segments.
     async fn close(&mut self) -> Vec<(TranscriptSegment, u32)>;
+    /// The sample rate this session was negotiated with. The pipeline
+    /// compares it against incoming frames: audio at a different rate must
+    /// reopen the session, or the provider transcribes garbage. Sessions
+    /// that don't track it default to reporting no change (0), which the
+    /// pipeline treats as "rate unknown — keep streaming".
+    fn sample_rate_hz(&self) -> u32 {
+        0
+    }
 }
 
 #[async_trait]
@@ -263,11 +271,26 @@ pub fn parse_summary_json(text: &str) -> Result<Summary, ProviderError> {
     let parsed: serde_json::Value = serde_json::from_str(trimmed)
         .map_err(|e| ProviderError::BadResponse(format!("model reply wasn't valid JSON: {e}")))?;
 
+    // A missing or empty "summary" string is a bad reply, not an acceptable
+    // empty note: accepting it would finalize the meeting with no summary and
+    // mark it processed, so the retry queue would never engage and the user
+    // would see a permanently empty note. Models occasionally reply with
+    // valid JSON but an empty summary field when they hit output limits or
+    // refuse; treating that as a parse failure routes it through the same
+    // retry/backoff path as any other bad reply. Action items are allowed to
+    // be absent — a summary alone is a legitimate outcome.
     let summary = parsed
         .get("summary")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_string();
+        .ok_or_else(|| {
+            ProviderError::BadResponse("model reply had no summary field".to_string())
+        })?;
+    if summary.trim().is_empty() {
+        return Err(ProviderError::BadResponse(
+            "model reply had an empty summary".to_string(),
+        ));
+    }
+    let summary = summary.to_string();
     let action_items = parsed
         .get("action_items")
         .and_then(serde_json::Value::as_array)

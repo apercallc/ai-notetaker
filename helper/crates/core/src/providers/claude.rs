@@ -196,6 +196,26 @@ mod tests {
     }
 
     #[test]
+    fn missing_or_empty_summary_is_a_bad_response_error() {
+        // A JSON reply with no summary field must not finalize a meeting
+        // with an empty note — it has to stay retryable.
+        assert!(matches!(
+            parse_summary_json(r#"{"action_items": [{"text": "ship v1"}]}"#).unwrap_err(),
+            ProviderError::BadResponse(_)
+        ));
+        // Same for whitespace-only: not an acceptable note.
+        assert!(matches!(
+            parse_summary_json(r#"{"summary": "   ", "action_items": []}"#).unwrap_err(),
+            ProviderError::BadResponse(_)
+        ));
+        // And a missing field entirely (nulls or wrong types).
+        assert!(matches!(
+            parse_summary_json(r#"{"summary": 42, "action_items": []}"#).unwrap_err(),
+            ProviderError::BadResponse(_)
+        ));
+    }
+
+    #[test]
     fn extracts_text_from_full_anthropic_response_shape() {
         let body = json!({
             "content": [ { "type": "text", "text": "{\"summary\": \"ok\", \"action_items\": []}" } ]

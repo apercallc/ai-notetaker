@@ -215,7 +215,11 @@ struct AppState {
     pipelines: Mutex<HashMap<Uuid, Arc<Mutex<Pipeline>>>>,
     retry_tasks: Mutex<HashMap<Uuid, RetryWorker>>,
     managed_tasks: Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>,
-    subscribers: Mutex<HashMap<Uuid, Vec<ipc::OutSender>>>,
+    // std Mutex, not tokio: the IPC layer needs a synchronous disconnect
+    // callback to prune a dead connection's entries before its writer task
+    // is awaited, and every critical section here is short with no .await
+    // inside — see subscribe_meeting/send_meeting_message/prune_subscribers.
+    subscribers: std::sync::Mutex<HashMap<Uuid, Vec<ipc::OutSender>>>,
 }
 
 struct RetryWorker {
@@ -472,8 +476,7 @@ async fn poll_managed_job(
                     summary: None,
                     action_items: None,
                 },
-            )
-            .await;
+            );
             return;
         }
     };
@@ -510,8 +513,7 @@ async fn poll_managed_job(
                     summary: None,
                     action_items: None,
                 },
-            )
-            .await;
+            );
             return;
         }
         if !response.status().is_success() {
@@ -543,8 +545,7 @@ async fn poll_managed_job(
                     summary: None,
                     action_items: None,
                 },
-            )
-            .await;
+            );
             return;
         }
         if status == "complete" {
@@ -582,8 +583,7 @@ async fn poll_managed_job(
                     summary,
                     action_items,
                 },
-            )
-            .await;
+            );
             return;
         }
         if status != last_status {
@@ -599,8 +599,7 @@ async fn poll_managed_job(
                     summary: None,
                     action_items: None,
                 },
-            )
-            .await;
+            );
         }
     }
 
@@ -615,8 +614,7 @@ async fn poll_managed_job(
             summary: None,
             action_items: None,
         },
-    )
-    .await;
+    );
 }
 
 /// Runs one durable managed-processing attempt. If the helper stopped before
@@ -653,8 +651,7 @@ async fn run_managed_processing(
                         summary: None,
                         action_items: None,
                     },
-                )
-                .await;
+                );
                 return;
             }
         },
@@ -671,8 +668,7 @@ async fn run_managed_processing(
             summary: None,
             action_items: None,
         },
-    )
-    .await;
+    );
     poll_managed_job(state, service, meeting_id, job_id).await;
 }
 
@@ -699,7 +695,10 @@ async fn start_managed_worker(
     tasks.insert(meeting_id, task);
 }
 
-fn pairing_token_path(root: &std::path::Path) -> std::path::PathBuf {
+/// Location of the pairing token inside the (0700) data directory. Shared
+/// with the tray's "Pair New Browser" item, which deletes this file to
+/// authorize a re-pair.
+pub(crate) fn pairing_token_path(root: &std::path::Path) -> std::path::PathBuf {
     root.join("pairing_token.txt")
 }
 
@@ -755,8 +754,25 @@ fn pairing_token_matches(expected: &str, provided: &str) -> bool {
 /// or its local storage was cleared. Native Messaging has already enforced
 /// the extension origin, so issue a new local token instead of stranding that
 /// profile behind an app-data file the user cannot reasonably find.
+///
+/// BUT: re-issuing on a null token when a token already exists would let any
+/// same-user process that can reach the 0700 socket mint itself a fresh valid
+/// token (hello with `pairing_token: null`) — defeating the token entirely.
+/// So an existing token is only ever replaced after the user clears it from
+/// the tray's "Pair New Browser" item, which deletes the token file. The
+/// first-ever pairing (no token on disk) stays automatic, as does repair of a
+/// blank/corrupt file left by an interrupted write.
 fn should_issue_pairing_token(existing: Option<&str>, presented: Option<&str>) -> bool {
-    existing.is_none() || presented.is_none()
+    // Only the first-ever pairing (no token on disk) auto-mints. An existing
+    // token is replaced only after the user clears it via the tray's
+    // "Pair New Browser" item, which deletes the token file. `load_pairing_token`
+    // maps a blank/corrupt file to None, so interrupted-write repair still
+    // works through the first-ever branch. `presented` is intentionally
+    // unused: whether the browser lost its copy cannot distinguish "fresh
+    // profile" from "rogue same-user process", so it must not authorize a
+    // reissue.
+    let _ = presented;
+    existing.is_none()
 }
 
 fn secure_data_dir(root: &std::path::Path) -> std::io::Result<()> {
@@ -821,7 +837,7 @@ fn main() {
                 pipelines: Mutex::new(HashMap::new()),
                 retry_tasks: Mutex::new(HashMap::new()),
                 managed_tasks: Mutex::new(HashMap::new()),
-                subscribers: Mutex::new(HashMap::new()),
+                subscribers: std::sync::Mutex::new(HashMap::new()),
             });
             let tray = tray::initialize(app.handle(), root.clone());
             if let Ok(interrupted) = state
@@ -833,11 +849,19 @@ fn main() {
             let ipc_state = state.clone();
             let ipc_tray = tray.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(error) = ipc::run_ipc_server(&root, move |msg, out_tx| {
-                    let state = ipc_state.clone();
-                    let tray = ipc_tray.clone();
-                    async move { handle_message(state, tray, msg, out_tx).await }
-                })
+                let prune_state = ipc_state.clone();
+                let on_disconnect = move |disconnected: ipc::OutSender| {
+                    prune_subscribers(&prune_state, disconnected)
+                };
+                if let Err(error) = ipc::run_ipc_server(
+                    &root,
+                    move |msg, out_tx| {
+                        let state = ipc_state.clone();
+                        let tray = ipc_tray.clone();
+                        async move { handle_message(state, tray, msg, out_tx).await }
+                    },
+                    on_disconnect,
+                )
                 .await
                 {
                     tracing::error!("IPC server stopped: {error}");
@@ -899,7 +923,10 @@ async fn handle_message(
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: None,
                     code: ErrorCode::HelperNotPaired,
-                    message: "pairing token missing or mismatched".into(),
+                    message: "pairing token missing or mismatched. \
+                              If this browser lost its token, use the helper's tray menu: \
+                              Pair New Browser, then reconnect."
+                        .into(),
                 });
                 return false;
             }
@@ -915,7 +942,7 @@ async fn handle_message(
             // state by an unclean shutdown, once per new connection.
             let active_ids: HashSet<Uuid> = state.active.lock().await.keys().copied().collect();
             for meeting_id in &active_ids {
-                subscribe_meeting(&state, *meeting_id, out_tx.clone()).await;
+                subscribe_meeting(&state, *meeting_id, out_tx.clone());
                 let _ = out_tx.send(HelperToExtension::RecordingStarted {
                     meeting_id: *meeting_id,
                 });
@@ -948,7 +975,7 @@ async fn handle_message(
             capture_source,
             processing_mode,
         } => {
-            subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
+            subscribe_meeting(&state, meeting_id, out_tx.clone());
             let settings_guard = state.settings.lock().await;
             let Some(settings) = settings_guard.clone() else {
                 let _ = out_tx.send(HelperToExtension::Error {
@@ -1032,6 +1059,12 @@ async fn handle_message(
                 Err(e) => {
                     tray.set_recording(false);
                     let _ = state.store.mark_stopped(meeting_id, chrono::Utc::now());
+                    // A start that failed before any audio was captured leaves
+                    // an empty meeting directory that would haunt history and
+                    // "Open Latest Note". Remove it — but only while it holds
+                    // no recoverable audio; a directory with bytes on disk is
+                    // never deleted.
+                    remove_meeting_if_no_audio(&state.store, meeting_id);
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
                         code: ErrorCode::DeviceNotFound,
@@ -1187,7 +1220,7 @@ async fn handle_message(
             if !is_external {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: "browser audio arrived for a meeting that is not using Meet capture"
                         .into(),
                 });
@@ -1196,9 +1229,12 @@ async fn handle_message(
             let pcm16 = match decode_browser_audio_chunk(&pcm16_base64, sample_rate_hz) {
                 Ok(bytes) => bytes,
                 Err(message) => {
+                    // Bad browser payloads are a protocol/payload problem, not
+                    // a missing device — DeviceNotFound sends the user
+                    // device-hunting for a bug in the capture path.
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::ProtocolMismatch,
                         message,
                     });
                     return true;
@@ -1207,7 +1243,7 @@ async fn handle_message(
             let Some(active) = state.active.lock().await.get(&meeting_id).cloned() else {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: "Meet capture pipeline is no longer active".into(),
                 });
                 return true;
@@ -1225,9 +1261,11 @@ async fn handle_message(
             ) {
                 Ok(existing_len) => existing_len,
                 Err(message) => {
+                    // A failed disk write is a storage failure, not a missing
+                    // audio device.
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message,
                     });
                     return true;
@@ -1261,67 +1299,97 @@ async fn handle_message(
                 }
                 active.audio_processing.finish().await;
             }
-            if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
-                if !flagged_moments.is_empty() {
-                    let moments: Vec<FlaggedMoment> = flagged_moments
-                        .into_iter()
-                        .map(|moment| FlaggedMoment {
-                            offset_ms: moment.offset_ms,
-                            note: moment.note,
-                            position_percent: moment.position_percent,
-                        })
-                        .collect();
-                    // A summary without flags is still a good summary, so a
-                    // failure to store them must never block stopping.
-                    if let Err(error) = pipeline
-                        .lock()
-                        .await
-                        .record_flagged_moments(meeting_id, &moments)
-                    {
-                        tracing::warn!(%meeting_id, %error, "could not store flagged moments");
-                    }
-                }
-                let managed = active_recording.as_ref().is_some_and(|active| {
-                    matches!(active.processing_mode, ProcessingMode::Managed { .. })
-                });
-                let messages = if managed {
-                    pipeline
-                        .lock()
-                        .await
-                        .stop_capture_only(meeting_id)
-                        .map(|message| vec![message])
-                } else {
-                    pipeline.lock().await.stop_recording(meeting_id).await
-                };
-                tray.set_recording(false);
-                match messages {
-                    Ok(messages) => {
-                        for m in messages {
-                            send_meeting_message(&state, meeting_id, m).await;
-                        }
-                        if managed {
-                            match managed_service_from_state(&state).await {
-                                Ok(service) => match retry_managed_upload(|| {
-                                    upload_managed_recording(&state.store, meeting_id, &service)
+            let has_pipeline = state.pipelines.lock().await.contains_key(&meeting_id);
+            if has_pipeline {
+                // The stop pipeline (transcription flush, summary, and for
+                // managed mode an upload with 3x60s retry timeouts) can run
+                // for minutes. Awaiting it here blocked this connection's
+                // IPC loop — the one ipc.rs documents must never block — so
+                // Meet AudioChunk frames for other (or this) meeting queued
+                // up behind it. Spawn it: replies flow through the meeting
+                // subscriber registry, exactly like transcript partials.
+                let state = state.clone();
+                let tray = tray.clone();
+                let out_tx_for_stop = out_tx.clone();
+                tokio::spawn(async move {
+                    if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
+                        if !flagged_moments.is_empty() {
+                            let moments: Vec<FlaggedMoment> = flagged_moments
+                                .into_iter()
+                                .map(|moment| FlaggedMoment {
+                                    offset_ms: moment.offset_ms,
+                                    note: moment.note,
+                                    position_percent: moment.position_percent,
                                 })
+                                .collect();
+                            // A summary without flags is still a good summary, so a
+                            // failure to store them must never block stopping.
+                            if let Err(error) = pipeline
+                                .lock()
                                 .await
-                                {
-                                    Ok(job_id) => {
-                                        if let Err(error) =
-                                            state.store.set_managed_job_id(meeting_id, &job_id)
+                                .record_flagged_moments(meeting_id, &moments)
+                            {
+                                tracing::warn!(%meeting_id, %error, "could not store flagged moments");
+                            }
+                        }
+                        let managed = active_recording.as_ref().is_some_and(|active| {
+                            matches!(active.processing_mode, ProcessingMode::Managed { .. })
+                        });
+                        let messages = if managed {
+                            pipeline
+                                .lock()
+                                .await
+                                .stop_capture_only(meeting_id)
+                                .map(|message| vec![message])
+                        } else {
+                            pipeline.lock().await.stop_recording(meeting_id).await
+                        };
+                        tray.set_recording(false);
+                        match messages {
+                            Ok(messages) => {
+                                for m in messages {
+                                    send_meeting_message(&state, meeting_id, m);
+                                }
+                                if managed {
+                                    match managed_service_from_state(&state).await {
+                                        Ok(service) => match retry_managed_upload(|| {
+                                            upload_managed_recording(
+                                                &state.store,
+                                                meeting_id,
+                                                &service,
+                                            )
+                                        })
+                                        .await
                                         {
-                                            tracing::error!(%meeting_id, %error, "could not persist managed job id");
-                                        }
-                                        start_managed_worker(
-                                            state.clone(),
-                                            service,
-                                            meeting_id,
-                                            Some(job_id),
-                                        )
-                                        .await;
-                                    }
-                                    Err(error) => {
-                                        send_meeting_message(
+                                            Ok(job_id) => {
+                                                if let Err(error) = state
+                                                    .store
+                                                    .set_managed_job_id(meeting_id, &job_id)
+                                                {
+                                                    tracing::error!(%meeting_id, %error, "could not persist managed job id");
+                                                }
+                                                start_managed_worker(
+                                                    state.clone(),
+                                                    service,
+                                                    meeting_id,
+                                                    Some(job_id),
+                                                )
+                                                .await;
+                                            }
+                                            Err(error) => send_meeting_message(
+                                                &state,
+                                                meeting_id,
+                                                HelperToExtension::ManagedJobStatus {
+                                                    meeting_id,
+                                                    job_id: String::new(),
+                                                    status: "error".into(),
+                                                    message: Some(error),
+                                                    summary: None,
+                                                    action_items: None,
+                                                },
+                                            ),
+                                        },
+                                        Err(error) => send_meeting_message(
                                             &state,
                                             meeting_id,
                                             HelperToExtension::ManagedJobStatus {
@@ -1332,42 +1400,26 @@ async fn handle_message(
                                                 summary: None,
                                                 action_items: None,
                                             },
-                                        )
-                                        .await
+                                        ),
                                     }
-                                },
-                                Err(error) => {
-                                    send_meeting_message(
-                                        &state,
-                                        meeting_id,
-                                        HelperToExtension::ManagedJobStatus {
-                                            meeting_id,
-                                            job_id: String::new(),
-                                            status: "error".into(),
-                                            message: Some(error),
-                                            summary: None,
-                                            action_items: None,
-                                        },
-                                    )
-                                    .await
                                 }
+                            }
+                            Err(e) => {
+                                let _ = out_tx_for_stop.send(HelperToExtension::Error {
+                                    meeting_id: Some(meeting_id),
+                                    code: ErrorCode::ProviderUnreachable,
+                                    message: e.to_string(),
+                                });
                             }
                         }
                     }
-                    Err(e) => {
-                        let _ = out_tx.send(HelperToExtension::Error {
-                            meeting_id: Some(meeting_id),
-                            code: ErrorCode::ProviderUnreachable,
-                            message: e.to_string(),
-                        });
+                    // Keep the worker alive after capture stops so persisted failed
+                    // chunks still retry. It exits once the queue drains (or the
+                    // connection disappears), rather than being abandoned here.
+                    if let Some(worker) = state.retry_tasks.lock().await.get(&meeting_id) {
+                        worker.request_stop();
                     }
-                }
-            }
-            // Keep the worker alive after capture stops so persisted failed
-            // chunks still retry. It exits once the queue drains (or the
-            // connection disappears), rather than being abandoned here.
-            if let Some(worker) = state.retry_tasks.lock().await.get(&meeting_id) {
-                worker.request_stop();
+                });
             }
             true
         }
@@ -1378,7 +1430,7 @@ async fn handle_message(
         ExtensionToHelper::ResumeRecording { meeting_id } => {
             if let Ok(meta) = state.store.load_meta(meeting_id) {
                 if meta.managed_pending {
-                    subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
+                    subscribe_meeting(&state, meeting_id, out_tx.clone());
                     match managed_service_from_state(&state).await {
                         Ok(service) if managed_identity_matches(&meta, &service) => {
                             match state.store.mark_stopped(meeting_id, chrono::Utc::now()) {
@@ -1428,11 +1480,11 @@ async fn handle_message(
                     return true;
                 }
             };
-            subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
+            subscribe_meeting(&state, meeting_id, out_tx.clone());
             match pipeline.lock().await.recover_recording(meeting_id).await {
                 Ok(messages) => {
                     for message in messages {
-                        send_meeting_message(&state, meeting_id, message).await;
+                        send_meeting_message(&state, meeting_id, message);
                     }
                 }
                 Err(error) => {
@@ -1616,21 +1668,69 @@ fn spawn_retry_worker(
     let stop_signal = stop_when_empty.clone();
     let task = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
+        // Attempt budget for a pending summary that keeps failing (e.g. a
+        // revoked key). Without a cap the worker re-called the paid API
+        // every 5 seconds forever and the meeting never reached a terminal
+        // state. Backoff doubles per failure up to a 10-minute floor between
+        // attempts, and after MAX_SUMMARY_ATTEMPTS the meeting is marked
+        // failed with a user-visible error instead of retrying endlessly.
+        const MAX_SUMMARY_ATTEMPTS: u32 = 6;
+        let mut summary_attempts = 0u32;
+        let mut summary_backoff_until: Option<tokio::time::Instant> = None;
         loop {
             ticker.tick().await;
-            let (messages, queue_empty, summary_pending) = {
+            if let Some(until) = summary_backoff_until {
+                if tokio::time::Instant::now() >= until {
+                    // Backoff elapsed — allow a fresh summary attempt.
+                    summary_backoff_until = None;
+                }
+            }
+            // Collect under the lock, process outside it. Holding the
+            // pipeline lock across process_due_retries/process_pending_summary
+            // network calls (120s timeouts, several jobs per tick) froze
+            // live transcript streaming for every frame that arrived during
+            // a retry burst.
+            let work = {
                 let mut pipeline = pipeline.lock().await;
                 let now = chrono::Utc::now();
                 let mut messages = pipeline.process_due_retries(now).await;
-                messages.extend(pipeline.process_pending_summary(meeting_id).await);
+                if summary_backoff_until.is_none() {
+                    messages.extend(pipeline.process_pending_summary(meeting_id).await);
+                    summary_attempts = summary_attempts.saturating_add(1);
+                }
                 (
                     messages,
                     pipeline.retry_queue_len() == 0,
                     pipeline.has_pending_summary(meeting_id),
                 )
             };
-            for message in messages {
-                send_meeting_message(&state, meeting_id, message).await;
+            for message in work.0 {
+                send_meeting_message(&state, meeting_id, message);
+            }
+            let (queue_empty, summary_pending) = (work.1, work.2);
+            if summary_pending && summary_attempts >= MAX_SUMMARY_ATTEMPTS {
+                let _ = state.store.clear_summary_pending(meeting_id);
+                send_meeting_message(
+                    &state,
+                    meeting_id,
+                    HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::ProviderAuthFailed,
+                        message: "The summary could not be generated after several attempts. \
+                                  Check the summarization provider key in Settings and stop again \
+                                  or re-summarize to retry."
+                            .into(),
+                    },
+                );
+                summary_attempts = 0;
+            } else if summary_pending {
+                // Exponential backoff: 5s, 10s, 20s, 40s, 80s, capped at 10 min.
+                let delay_secs = std::cmp::min(5u64 * (1 << summary_attempts.min(7)), 600);
+                summary_backoff_until =
+                    Some(tokio::time::Instant::now() + std::time::Duration::from_secs(delay_secs));
+            } else {
+                summary_attempts = 0;
+                summary_backoff_until = None;
             }
             if stop_signal.load(Ordering::Acquire) && queue_empty && !summary_pending {
                 state.pipelines.lock().await.remove(&meeting_id);
@@ -1665,7 +1765,7 @@ fn spawn_audio_processing_queue(
                 )
                 .await;
             for message in messages {
-                send_meeting_message(&state, meeting_id, message).await;
+                send_meeting_message(&state, meeting_id, message);
             }
         }
     });
@@ -1698,13 +1798,37 @@ fn persist_audio_frame(
     Ok(existing_len)
 }
 
+/// Removes a meeting directory that a failed start left behind — but only
+/// while both audio channels are provably empty. A directory holding any
+/// captured bytes is recoverable audio and is never deleted, whatever the
+/// start failure was.
+fn remove_meeting_if_no_audio(store: &MeetingStore, meeting_id: Uuid) {
+    let empty = [
+        notetaker_core::storage::MIC_FILE,
+        notetaker_core::storage::SPEAKER_FILE,
+    ]
+    .iter()
+    .all(|file| {
+        store
+            .audio_len(meeting_id, file)
+            .map(|len| len == 0)
+            .unwrap_or(false)
+    });
+    if !empty {
+        return;
+    }
+    if let Err(error) = store.delete_meeting(meeting_id) {
+        tracing::warn!(%meeting_id, %error, "could not remove the empty meeting left by a failed start");
+    }
+}
+
 async fn start_pending_retry_workers(
     state: Arc<AppState>,
     settings: Settings,
     out_tx: ipc::OutSender,
 ) {
     for meeting_id in pending_processing_meeting_ids(&state.data_dir) {
-        subscribe_meeting(&state, meeting_id, out_tx.clone()).await;
+        subscribe_meeting(&state, meeting_id, out_tx.clone());
         if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
             let worker_running = state
                 .retry_tasks
@@ -1758,8 +1882,8 @@ async fn start_pending_retry_workers(
     }
 }
 
-async fn subscribe_meeting(state: &Arc<AppState>, meeting_id: Uuid, out_tx: ipc::OutSender) {
-    let mut subscribers = state.subscribers.lock().await;
+fn subscribe_meeting(state: &Arc<AppState>, meeting_id: Uuid, out_tx: ipc::OutSender) {
+    let mut subscribers = lock_subscribers(state);
     let entries = subscribers.entry(meeting_id).or_default();
     entries.retain(|sender| !sender.is_closed());
     if !entries.iter().any(|sender| sender.same_channel(&out_tx)) {
@@ -1767,8 +1891,21 @@ async fn subscribe_meeting(state: &Arc<AppState>, meeting_id: Uuid, out_tx: ipc:
     }
 }
 
-async fn send_meeting_message(state: &Arc<AppState>, meeting_id: Uuid, message: HelperToExtension) {
-    let mut subscribers = state.subscribers.lock().await;
+/// Removes every registry entry that belongs to the disconnected
+/// connection's channel. Called synchronously from the IPC layer right
+/// before the connection's writer task is awaited, so the writer's
+/// `recv()` can return None instead of being held open forever by stale
+/// registry clones.
+fn prune_subscribers(state: &Arc<AppState>, disconnected: ipc::OutSender) {
+    let mut subscribers = lock_subscribers(state);
+    subscribers.retain(|_, entries| {
+        entries.retain(|sender| !sender.same_channel(&disconnected));
+        !entries.is_empty()
+    });
+}
+
+fn send_meeting_message(state: &Arc<AppState>, meeting_id: Uuid, message: HelperToExtension) {
+    let mut subscribers = lock_subscribers(state);
     let Some(entries) = subscribers.get_mut(&meeting_id) else {
         return;
     };
@@ -1776,6 +1913,17 @@ async fn send_meeting_message(state: &Arc<AppState>, meeting_id: Uuid, message: 
     if entries.is_empty() {
         subscribers.remove(&meeting_id);
     }
+}
+
+/// Unpoisonable lock helper for the short, await-free subscriber registry
+/// critical sections.
+fn lock_subscribers(
+    state: &Arc<AppState>,
+) -> std::sync::MutexGuard<'_, HashMap<Uuid, Vec<ipc::OutSender>>> {
+    state
+        .subscribers
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn pending_processing_meeting_ids(root: &Path) -> Vec<Uuid> {
@@ -1850,7 +1998,7 @@ async fn start_pending_managed_workers(
             );
             continue;
         }
-        subscribe_meeting(&state, meta.id, out_tx.clone()).await;
+        subscribe_meeting(&state, meta.id, out_tx.clone());
         start_managed_worker(
             state.clone(),
             service.clone(),
@@ -1998,9 +2146,14 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_browser_token_can_repair_an_existing_helper_pairing() {
+    fn a_missing_browser_token_does_not_repair_an_existing_helper_pairing() {
+        // First-ever pairing: no token on disk → auto-mint.
         assert!(should_issue_pairing_token(None, None));
-        assert!(should_issue_pairing_token(Some("helper-token"), None));
+        // An existing token is never re-issued on a null presented token —
+        // that is exactly the rogue same-user-process path the token guards
+        // against. Re-pairing requires the tray's "Pair New Browser" item,
+        // which deletes the token file (so `existing` becomes None).
+        assert!(!should_issue_pairing_token(Some("helper-token"), None));
         assert!(!should_issue_pairing_token(
             Some("helper-token"),
             Some("helper-token")
