@@ -243,6 +243,9 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await controller.deleteMeeting(message.meetingId);
       return {};
     case "TEST_PROVIDER_KEY":
-      return controller.testProviderKey(message.provider, message.key, { desktop: message.desktop === true });
+      // Always direct from the extension (see lib/testProviderKey.ts). The
+      // desktop flag is accepted for older UI pages but no longer routes
+      // through the helper, so setup is never blocked by a missing helper.
+      return controller.testProviderKey(message.provider, message.key);
   }
 }

@@ -376,6 +376,23 @@ function resetKeyTest(): void {
   keyResult = null;
 }
 
+/**
+ * Typed keys used to live only in the DOM until "Finish setup" — abandoning
+ * the tab lost them. Persist debounced, straight into chrome.storage.local
+ * (via the background, which also pushes them to the helper when one is
+ * connected). Saving here does NOT mark onboarding complete, so returning
+ * to setup resumes with the keys intact and the finish gate unchanged.
+ */
+let keyAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleKeyAutosave(): void {
+  if (keyAutosaveTimer !== null) clearTimeout(keyAutosaveTimer);
+  keyAutosaveTimer = setTimeout(() => {
+    keyAutosaveTimer = null;
+    readOnboardingProviderFields();
+    chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings }).catch(() => undefined);
+  }, 800);
+}
+
 // ---------- rendering ----------
 
 function navButtons(): string {
@@ -455,11 +472,11 @@ async function runKeyTest(): Promise<boolean> {
     resultEl.className = "result";
   }
   try {
-    // Meet keys are checked straight from the extension; desktop-call keys by the helper that will use them.
-    const options = { desktop };
+    // Keys are checked straight from the extension for both capture paths; a
+    // missing helper can no longer block this test.
     const [transcriptionResult, summarizationResult] = await Promise.all([
-      testApiKey(providers.transcription, providers.transcriptionKey, options),
-      testApiKey(providers.summarization, providers.summarizationKey, options),
+      testApiKey(providers.transcription, providers.transcriptionKey),
+      testApiKey(providers.summarization, providers.summarizationKey),
     ]);
     const bothValid = transcriptionResult.valid && summarizationResult.valid;
     providerTestsPassed = bothValid;
@@ -467,7 +484,7 @@ async function runKeyTest(): Promise<boolean> {
     return bothValid;
   } catch {
     providerTestsPassed = false;
-    show(false, desktop ? "The desktop helper could not test the keys. Check that it is running and try again." : "The keys could not be tested. Check your connection and try again.");
+    show(false, "The keys could not be tested. Check your connection and try again.");
     return false;
   } finally {
     if (button) button.disabled = false;
@@ -773,6 +790,7 @@ function wireEvents(): void {
         resultEl.textContent = "";
         resultEl.className = "result";
       }
+      scheduleKeyAutosave();
     });
   }
 

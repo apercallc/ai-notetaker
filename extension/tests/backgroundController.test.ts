@@ -916,14 +916,19 @@ describe("BackgroundController", () => {
     );
   });
 
-  it("routes desktop key checks through the native messaging client", async () => {
+  it("checks keys directly from the extension even for desktop setup, without the helper", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+    controller.setFetchImpl(fetchImpl as unknown as typeof fetch);
 
+    // `desktop: true` used to route through the helper, which made a
+    // missing helper block desktop onboarding's key gate entirely.
     const result = await controller.testProviderKey("deepgram", "some-key", { desktop: true });
 
-    expect(client.testProviderKey).toHaveBeenCalledWith("deepgram", "some-key");
-    expect(result).toEqual({ valid: true, message: "ok" });
+    expect(client.testProviderKey).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("api.deepgram.com"), expect.anything());
+    expect(result.valid).toBe(true);
   });
 
   it("checks Meet-path keys directly from the extension, without the helper", async () => {

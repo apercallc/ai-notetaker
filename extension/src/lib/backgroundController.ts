@@ -569,10 +569,17 @@ export class BackgroundController {
 
   /**
    * Meet keys are used by this extension, so they are checked with a direct
-   * provider call. Only keys destined for the desktop helper are checked by it.
+   * provider call — as are desktop keys: they are pushed to the helper
+   * verbatim with the settings, so the same check proves them to both
+   * users, without making a missing helper block setup.
    */
   testProviderKey(provider: ProviderKind, key: string, options: { desktop?: boolean } = {}): Promise<{ valid: boolean; message: string }> {
-    if (options.desktop) return this.client.testProviderKey(provider, key);
+    // `desktop` is ignored: every key the extension saves is also pushed
+    // verbatim to the helper with the settings, so a direct check proves the
+    // key to both users of it. The old helper-routed path made a missing
+    // helper block desktop onboarding entirely (the user cannot finish
+    // setup before the helper exists — that is the whole point of the flow).
+    void options;
     return testProviderKeyDirect(provider, key, this.fetchImpl);
   }
 
