@@ -82,24 +82,78 @@ async function stripePost(path: string, form: URLSearchParams): Promise<Record<s
 
 export async function createCheckoutSession(workspaceId: string, email: string, priceId: string, successUrl: string, cancelUrl: string) {
   const price = priceFor(priceId);
-  const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
-  if (hasLiveSubscription(subscription)) {
+  // Validate the redirect targets before claiming anything: a rejected
+  // request must not leave a checkout_pending row behind (it would block
+  // the user's next, valid attempt for an hour) nor consume the mutex.
+  const success = validateBillingRedirect(successUrl);
+  const cancel = validateBillingRedirect(cancelUrl);
+  // Claim a checkout slot before talking to Stripe. The read-then-create
+  // pattern let two concurrent owner requests both pass hasLiveSubscription
+  // and create two live subscriptions (double billing, Stripe support needed
+  // to untangle). The status row acts as a mutex: a fresh `checkout_pending`
+  // blocks a second session, a stale one (abandoned checkout over an hour
+  // ago) is reclaimable, and any live status still routes to the portal.
+  await claimCheckoutSlot(workspaceId);
+  try {
+    const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+    const form = new URLSearchParams({
+      mode: "subscription",
+      "line_items[0][price]": price,
+      "line_items[0][quantity]": "1",
+      success_url: success,
+      cancel_url: cancel,
+      "metadata[workspaceId]": workspaceId,
+      "subscription_data[metadata][workspaceId]": workspaceId,
+    });
+    if (subscription?.stripeCustomerId) form.set("customer", subscription.stripeCustomerId);
+    else form.set("customer_email", email);
+    const body = await stripePost("checkout/sessions", form);
+    if (typeof body.url !== "string") throw new BillingError("Stripe returned no checkout URL");
+    return body.url;
+  } catch (error) {
+    // Never leave the mutex claimed when no checkout session exists.
+    await prisma.workspaceSubscription
+      .updateMany({ where: { workspaceId, status: "checkout_pending", stripeSubscriptionId: null }, data: { status: "inactive" } })
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
+/** How long an uncompleted checkout session blocks a new one for the workspace. */
+const CHECKOUT_PENDING_MS = 60 * 60 * 1_000;
+
+async function claimCheckoutSlot(workspaceId: string): Promise<void> {
+  const existing = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+  if (hasLiveSubscription(existing)) {
     throw new BillingPortalRequiredError("This workspace already has a subscription. Use Manage billing to change or cancel your plan.");
   }
-  const form = new URLSearchParams({
-    mode: "subscription",
-    "line_items[0][price]": price,
-    "line_items[0][quantity]": "1",
-    success_url: validateBillingRedirect(successUrl),
-    cancel_url: validateBillingRedirect(cancelUrl),
-    "metadata[workspaceId]": workspaceId,
-    "subscription_data[metadata][workspaceId]": workspaceId,
+  if (!existing) {
+    try {
+      await prisma.workspaceSubscription.create({ data: { workspaceId, status: "checkout_pending" } });
+      return;
+    } catch (error) {
+      if ((error as { code?: string }).code !== "P2002") throw error;
+      // Another request created the row first; fall through and let the
+      // conditional claim below decide.
+    }
+  }
+  const claimed = await prisma.workspaceSubscription.updateMany({
+    where: {
+      workspaceId,
+      OR: [
+        { status: { notIn: [...LIVE_SUBSCRIPTION_STATUSES, "checkout_pending"] } },
+        // A pending claim from a checkout the user abandoned long ago is stale.
+        { status: "checkout_pending", updatedAt: { lt: new Date(Date.now() - CHECKOUT_PENDING_MS) } },
+      ],
+    },
+    data: { status: "checkout_pending" },
   });
-  if (subscription?.stripeCustomerId) form.set("customer", subscription.stripeCustomerId);
-  else form.set("customer_email", email);
-  const body = await stripePost("checkout/sessions", form);
-  if (typeof body.url !== "string") throw new BillingError("Stripe returned no checkout URL");
-  return body.url;
+  if (claimed.count === 1) return;
+  const blocked = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+  if (hasLiveSubscription(blocked)) {
+    throw new BillingPortalRequiredError("This workspace already has a subscription. Use Manage billing to change or cancel your plan.");
+  }
+  throw new BillingError("A checkout session was just started for this workspace. Complete it or try again in a few minutes.");
 }
 
 export async function createPortalSession(workspaceId: string, returnUrl: string) {
@@ -368,7 +422,21 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
       const mapped = planForPrice(priceId);
       if (mapped) plan = mapped;
       else if ((current?.plan === "hosted_pro" || current?.plan === "hosted_team") && current.stripeSubscriptionId === subscriptionId) plan = current.plan;
-      else throw new BillingError("Stripe subscription uses a price that is not configured as a hosted plan");
+      else {
+        // An unmapped price is an operator configuration gap, not a transient
+        // failure: retrying the same event can never succeed. Throwing here
+        // rolled back the BillingEvent dedupe row, so Stripe retried (and
+        // re-failed) forever, disabling the webhook endpoint by timeout and
+        // freezing plan changes for EVERY tenant. Record the event, leave
+        // billing state untouched, and surface it in the logs instead.
+        console.error("stripe subscription event ignored: subscription price is not configured as a hosted plan", {
+          eventId,
+          eventType,
+          workspaceId,
+          priceId: priceId ?? "(none)",
+        });
+        return;
+      }
     }
     const { start, end } = periodOf(object);
     const graceEndsAt = reportedStatus === "past_due"

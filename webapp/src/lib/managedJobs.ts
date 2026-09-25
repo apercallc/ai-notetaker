@@ -126,17 +126,32 @@ export async function createManagedUpload(
     }
   }
 
-  const created = await prisma.managedUpload.create({
-    data: {
-      workspaceId,
-      meetingId: input.meetingId,
-      totalChunks: input.totalChunks,
-      totalBytes: input.totalBytes,
-      idempotencyKey: input.idempotencyKey,
-      expiresAt: new Date(Date.now() + MANAGED_UPLOAD_TTL_MS),
-    },
-    include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
-  });
+  let created;
+  try {
+    created = await prisma.managedUpload.create({
+      data: {
+        workspaceId,
+        meetingId: input.meetingId,
+        totalChunks: input.totalChunks,
+        totalBytes: input.totalBytes,
+        idempotencyKey: input.idempotencyKey,
+        expiresAt: new Date(Date.now() + MANAGED_UPLOAD_TTL_MS),
+      },
+      include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
+    });
+  } catch (error) {
+    // Two concurrent createManagedUpload calls with the same idempotency key
+    // (both past the expired-cleanup branch) race this insert. The loser
+    // sees the winner's row: return it as the idempotent result instead of
+    // surfacing a 500 the client can only blindly retry.
+    if ((error as { code?: string }).code !== "P2002") throw error;
+    const winner = await prisma.managedUpload.findUnique({
+      where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey: input.idempotencyKey } },
+      include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
+    });
+    if (!winner) throw error;
+    created = winner;
+  }
   return {
     ...created,
     chunks: created.chunks.map(({ objectKey: _objectKey, ...chunk }) => chunk),
