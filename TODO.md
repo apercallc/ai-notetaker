@@ -872,9 +872,11 @@ them without changing `CLAUDE.md` and the design spec first.
 ## Pre-production audit (2026-09-25) — deferred items
 
 Meet automation settings (2026-09-25), all in Settings → Shortcuts and Meet
-widget, all off by default except open-notes:
+widget. Auto-record is on by default (but still requires onboarding and
+recording-consent acknowledgement); attendee disclosure and auto-share are off;
+open-notes is on:
 
-- [x] Auto-record on joining a Google Meet call (`autoRecordOnMeetJoin`, off).
+- [x] Auto-record on joining a Google Meet call (`autoRecordOnMeetJoin`, on).
       A tab landing on a call URL attempts a silent start; Chrome's invocation
       gate on a first join saves the intent so the first toolbar click starts
       recording on that single click. URL-based join detection only, one

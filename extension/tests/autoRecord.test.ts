@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAutoRecordAttempt, maybeAutoStartMeetRecording, resetAutoRecordTrackingForTests } from "../src/lib/autoRecord";
+import { DEFAULT_SETTINGS } from "../src/types";
 
 const CALL_URL = "https://meet.google.com/abc-defg-hij";
 const OTHER_CALL_URL = "https://meet.google.com/xyz-klmn-pqr";
@@ -19,6 +20,13 @@ beforeEach(() => {
 });
 
 describe("maybeAutoStartMeetRecording", () => {
+  it("defaults auto-record on while keeping disclosure and share off and opening notes on", () => {
+    expect(DEFAULT_SETTINGS.autoRecordOnMeetJoin).toBe(true);
+    expect(DEFAULT_SETTINGS.meetDisclosureNotice).toBe(false);
+    expect(DEFAULT_SETTINGS.autoShareNotesWithAttendees).toBe(false);
+    expect(DEFAULT_SETTINGS.openNotesWhenReady).toBe(true);
+  });
+
   it("attempts a start when a tab lands on a call URL and the setting is on", async () => {
     const d = deps();
     await expect(maybeAutoStartMeetRecording(7, CALL_URL, d)).resolves.toBe(true);

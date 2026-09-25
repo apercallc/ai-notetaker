@@ -179,7 +179,7 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
   showMeetWidget: true,
-  autoRecordOnMeetJoin: false,
+  autoRecordOnMeetJoin: true,
   meetDisclosureNotice: false,
   autoShareNotesWithAttendees: false,
   openNotesWhenReady: true,
