@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.0.280",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.1",
     "esbuild": "^0.25.0",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^25.0.0",
