@@ -1,6 +1,6 @@
 /** User-facing instructions for the two things Chrome makes a person do once before Meet capture works. */
 export const CAPTURE_PERMISSION_HINT =
-  "Chrome needs one click first. Click the Notetaker icon in the Chrome toolbar (or use the shortcut) while this tab is open, then start notes.";
+  "Chrome needs one click to allow capture. Click the Notetaker icon in the Chrome toolbar (or use the shortcut) — that click starts the notes.";
 
 export const ACTIVE_CAPTURE_HINT =
   "This tab is already being captured. Reload the Meet tab (you will rejoin the call), then start again.";

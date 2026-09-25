@@ -5,6 +5,7 @@ import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode
 import { escapeHtml } from "../lib/html";
 import { getExtensionOnboardingUrl } from "../lib/install";
 import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
+import { takePendingMeetStart } from "../meet/pendingStart";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
@@ -13,6 +14,8 @@ let historyQuery = "";
 let desktopChosen = false;
 /** Why the last start did not begin; shown in place, since the popup has no other channel for it. */
 let startError = "";
+/** The Meet tab this popup most recently detected as active, kept for the pending-start handoff. */
+let lastActiveMeetTab: { id: number } | null = null;
 const MEET_HOME = "https://meet.google.com/";
 
 function onboardingUrl(): string {
@@ -315,10 +318,39 @@ function modeChip(settings: Awaited<ReturnType<typeof getSettings>>): string {
   return `<p class="mode-chip" id="mode-chip"><span class="sr-only">Notes are written with: </span>${label}</p>`;
 }
 
+/**
+ * A remembered widget start is only honored when the popup opened on that
+ * same Meet tab while nothing is recording. A different tab (the person moved
+ * on), a live recording (someone started elsewhere — the shortcut), or a
+ * stale session entry must never trigger an auto-start.
+ */
+function isPendingStartCurrent(intent: { tabId: number }, state: BackgroundState): boolean {
+  if (state.activeMeeting) return false;
+  const tab = lastActiveMeetTab;
+  return tab?.id === intent.tabId;
+}
+
+async function resumePendingStart(intent: { tabId: number; meetingMode?: string; titleHint?: string }): Promise<void> {
+  try {
+    const response = await sendToBackground<{ meetingId?: string }>({
+      type: "START_RECORDING",
+      captureSource: "meet",
+      meetingMode: (intent.meetingMode ?? "general") as MeetingMode,
+      tabId: intent.tabId,
+      ...(intent.titleHint ? { titleHint: intent.titleHint } : {}),
+    });
+    if (!response?.meetingId) return;
+    await renderSafely();
+  } catch {
+    // The auto-start is a convenience; the popup's Start button remains.
+  }
+}
+
 /** The popup's idle view knows where the person is: on a Meet call, it is one button. */
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
   const meetings = await listMeetings(historyQuery ? undefined : 5, historyQuery || undefined);
   const meetTab = await activeMeetTab();
+  lastActiveMeetTab = meetTab && typeof meetTab.id === "number" ? { id: meetTab.id } : null;
   const onMeet = meetTab !== undefined;
   const desktop = !onMeet && (desktopChosen || helperStatus === "connected");
   const helperReady = helperStatus === "connected";
@@ -469,6 +501,15 @@ async function render(): Promise<void> {
     await renderActiveRecording(state.activeMeeting.id, state.helperStatus);
   } else {
     await renderIdleState(state.helperStatus, settings);
+    // Chrome just granted this popup's click as the tab invocation — the one
+    // thing the in-call widget's click can never be. If the widget's start was
+    // blocked waiting for exactly this moment, finish what it started now,
+    // on this same click, instead of showing the person a Start button they
+    // already pressed once.
+    const intent = await takePendingMeetStart();
+    if (intent && isPendingStartCurrent(intent, state)) {
+      void resumePendingStart(intent);
+    }
   }
 
   if (state.recoverableMeeting) {

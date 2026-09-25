@@ -111,6 +111,7 @@ describe("settings storage", () => {
       chromeMock.runtime.lastError = { message: "storage quota exceeded" };
       callback?.();
       chromeMock.runtime.lastError = undefined;
+      return Promise.resolve();
     });
     await expect(saveSettings({ ...DEFAULT_SETTINGS })).rejects.toThrow("storage quota exceeded");
   });

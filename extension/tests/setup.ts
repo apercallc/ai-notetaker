@@ -7,28 +7,35 @@ import { vi } from "vitest";
  */
 function createStorageArea() {
   let store: Record<string, unknown> = {};
+  // Real Chrome storage areas support BOTH the callback form and the promise
+  // form (callback omitted). The mock implements both so promise-based code
+  // (meet/pendingStart.ts) and callback-based code (popup desktop-intent)
+  // exercise against the same store.
+  const get = vi.fn((keys: string | string[] | null, callback?: (items: Record<string, unknown>) => void) => {
+    const result: Record<string, unknown> = {};
+    if (keys === null) Object.assign(result, store);
+    else {
+      const keyList = Array.isArray(keys) ? keys : [keys];
+      for (const key of keyList) if (key in store) result[key] = store[key];
+    }
+    callback?.(result);
+    return Promise.resolve(result);
+  });
+  const set = vi.fn((items: Record<string, unknown>, callback?: () => void) => {
+    store = { ...store, ...items };
+    callback?.();
+    return Promise.resolve();
+  });
+  const remove = vi.fn((keys: string | string[], callback?: () => void) => {
+    const keyList = Array.isArray(keys) ? keys : [keys];
+    for (const key of keyList) delete store[key];
+    callback?.();
+    return Promise.resolve();
+  });
   return {
-    get: vi.fn((keys: string | string[] | null, callback: (items: Record<string, unknown>) => void) => {
-      if (keys === null) {
-        callback({ ...store });
-        return;
-      }
-      const keyList = Array.isArray(keys) ? keys : [keys];
-      const result: Record<string, unknown> = {};
-      for (const key of keyList) {
-        if (key in store) result[key] = store[key];
-      }
-      callback(result);
-    }),
-    set: vi.fn((items: Record<string, unknown>, callback?: () => void) => {
-      store = { ...store, ...items };
-      callback?.();
-    }),
-    remove: vi.fn((keys: string | string[], callback?: () => void) => {
-      const keyList = Array.isArray(keys) ? keys : [keys];
-      for (const key of keyList) delete store[key];
-      callback?.();
-    }),
+    get,
+    set,
+    remove,
     _dump: () => store,
     _reset: () => {
       store = {};

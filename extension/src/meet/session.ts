@@ -4,6 +4,7 @@ import type { MeetingMode } from "../types";
 import type { MeetCaptureController } from "./meetCapture";
 import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "./hints";
 import { isMeetUrl, meetTitleForTab } from "./meetContext";
+import { savePendingMeetStart, clearPendingMeetStartFor } from "./pendingStart";
 
 export interface StartMeetOptions {
   tabId?: number;
@@ -70,7 +71,12 @@ export async function startMeetRecording(
   try {
     await capture.preflight(tabId);
   } catch (error) {
-    controller.reportStartFailure(describeCaptureFailure(error));
+    const description = describeCaptureFailure(error);
+    // Chrome's activeTab gate: the widget's click cannot be the first
+    // invocation. Remember the start so the toolbar click that opens the
+    // popup completes it — one click total instead of click-then-click.
+    if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
+    controller.reportStartFailure(description);
     return "";
   }
   const meetingId = await controller.startRecording(options.meetingMode, "meet", titleHint);
@@ -78,9 +84,15 @@ export async function startMeetRecording(
   try {
     await capture.start(tabId, meetingId);
   } catch (error) {
-    await controller.abortStart(meetingId, describeCaptureFailure(error));
+    const description = describeCaptureFailure(error);
+    if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
+    await controller.abortStart(meetingId, description);
     return "";
   }
+  // A start that succeeded (from the widget, the popup, or the shortcut —
+  // the shortcut press is itself the invocation) retires any remembered
+  // handoff for this tab, so the next popup open never double-starts.
+  await clearPendingMeetStartFor(tabId);
   return meetingId;
 }
 

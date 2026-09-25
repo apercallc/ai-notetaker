@@ -106,6 +106,37 @@ describe("startMeetRecording", () => {
     expect(controller.abortStart).not.toHaveBeenCalled();
   });
 
+  it("remembers a Chrome-gated start so the toolbar click can finish it", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.preflight.mockRejectedValue(new Error("Extension has not been invoked for the current page"));
+    const [c, k] = asTypes();
+
+    await startMeetRecording(c, k, { tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
+
+    // The blocked start's options survive for the popup's one-click handoff.
+    expect(chromeMock.storage.session._dump()["notetaker.pendingMeetStart"]).toEqual({ tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
+  });
+
+  it("does not remember a start that failed for any other reason", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.preflight.mockRejectedValue(new Error("Cannot capture a tab with an active stream."));
+    const [c, k] = asTypes();
+
+    await startMeetRecording(c, k, { tabId: 9 });
+
+    expect(chromeMock.storage.session._dump()["notetaker.pendingMeetStart"]).toBeUndefined();
+  });
+
+  it("retires a remembered start once capture actually begins", async () => {
+    const { controller, capture, asTypes } = fakes();
+    const [c, k] = asTypes();
+    await new Promise<void>((resolve) => chromeMock.storage.session.set({ "notetaker.pendingMeetStart": { tabId: 9, meetingMode: "sales" } }, resolve));
+
+    await startMeetRecording(c, k, { tabId: 9 });
+
+    expect(chromeMock.storage.session._dump()["notetaker.pendingMeetStart"]).toBeUndefined();
+  });
+
   it("aborts a start whose capture fails after the meeting was created, leaving no failed meeting", async () => {
     const { controller, capture, asTypes } = fakes();
     capture.start.mockRejectedValue(new Error("Extension has not been invoked for the current page"));
