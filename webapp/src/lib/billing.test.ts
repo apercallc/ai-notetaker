@@ -25,21 +25,26 @@ afterEach(() => {
 
 describe("Stripe checkout redirect safety", () => {
   it("allows only the configured app origin", async () => {
+    const workspaceId = randomUUID();
     const originalKey = process.env.STRIPE_SECRET_KEY;
     const originalPrice = process.env.STRIPE_PRICE_HOSTED_PRO;
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ url: "https://notes.example.com/checkout" }), { status: 200 }));
     process.env.STRIPE_SECRET_KEY = "sk_test";
     process.env.STRIPE_PRICE_HOSTED_PRO = "price_pro_redirect";
     process.env.APP_URL = "https://notes.example.com";
+    // claimCheckoutSlot writes a checkout_pending row for the workspace, so
+    // the FK target must exist.
+    await prisma.workspace.create({ data: { id: workspaceId, name: "Checkout redirect workspace" } });
     try {
-      await expect(createCheckoutSession("workspace", "owner@example.com", "price_pro_redirect", "https://notes.example.com/billing?checkout=success", "https://notes.example.com/billing?checkout=cancelled")).resolves.toBe("https://notes.example.com/checkout");
+      await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_redirect", "https://notes.example.com/billing?checkout=success", "https://notes.example.com/billing?checkout=cancelled")).resolves.toBe("https://notes.example.com/checkout");
       const checkoutRequest = fetchSpy.mock.calls[0]?.[1];
       expect(checkoutRequest?.body).toBeInstanceOf(URLSearchParams);
       const checkoutForm = checkoutRequest?.body as URLSearchParams;
-      expect(checkoutForm.get("metadata[workspaceId]")).toBe("workspace");
-      expect(checkoutForm.get("subscription_data[metadata][workspaceId]")).toBe("workspace");
-      await expect(createCheckoutSession("workspace", "owner@example.com", "price_pro_redirect", "https://evil.example/return", "https://notes.example.com/billing")).rejects.toThrow("configured APP_URL origin");
+      expect(checkoutForm.get("metadata[workspaceId]")).toBe(workspaceId);
+      expect(checkoutForm.get("subscription_data[metadata][workspaceId]")).toBe(workspaceId);
+      await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_redirect", "https://evil.example/return", "https://notes.example.com/billing")).rejects.toThrow("configured APP_URL origin");
     } finally {
+      await prisma.workspace.delete({ where: { id: workspaceId } });
       fetchSpy.mockRestore();
       if (originalKey === undefined) delete process.env.STRIPE_SECRET_KEY;
       else process.env.STRIPE_SECRET_KEY = originalKey;

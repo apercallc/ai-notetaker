@@ -535,7 +535,8 @@ impl SourceDebouncer {
 }
 
 fn spawn_parec_with_source(program: &str, source: &str) -> Result<Child, AudioError> {
-    Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args([
             "-d",
             source,
@@ -546,9 +547,29 @@ fn spawn_parec_with_source(program: &str, source: &str) -> Result<Child, AudioEr
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| AudioError::StreamError(format!("failed to spawn parec: {e}")))
+        .stderr(Stdio::piped());
+    // ETXTBSY can surface on Linux when the binary was written moments ago
+    // (tests exec freshly written scripts); the exec races the kernel's
+    // write-reference release. Transient, so retry briefly before failing.
+    let mut last_error = None;
+    for attempt in 0..10 {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                last_error = Some(error);
+                std::thread::sleep(Duration::from_millis(10 * (attempt + 1)));
+            }
+            Err(error) => {
+                return Err(AudioError::StreamError(format!(
+                    "failed to spawn parec: {error}"
+                )))
+            }
+        }
+    }
+    Err(AudioError::StreamError(format!(
+        "failed to spawn parec: {}",
+        last_error.expect("retry loop always records the last error")
+    )))
 }
 
 fn read_parec_frames(
