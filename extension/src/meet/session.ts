@@ -1,13 +1,21 @@
 import type { BackgroundController } from "../lib/backgroundController";
+import { getMeeting } from "../lib/storage";
 import type { MeetingMode } from "../types";
 import type { MeetCaptureController } from "./meetCapture";
 import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "./hints";
 import { isMeetUrl, meetTitleForTab } from "./meetContext";
+import { savePendingMeetStart, clearPendingMeetStartFor } from "./pendingStart";
 
 export interface StartMeetOptions {
   tabId?: number;
   meetingMode?: MeetingMode;
   titleHint?: string;
+  /**
+   * Auto-attempt from the join watcher: failures are never broadcast (the
+   * user did not click anything), and Chrome's invocation gate still saves
+   * the one-click pending intent.
+   */
+  silent?: boolean;
 }
 
 /**
@@ -45,7 +53,20 @@ export async function startMeetRecording(
   options: StartMeetOptions,
 ): Promise<string> {
   const active = controller.getState().activeMeeting;
-  if (active) return active.id;
+  if (active) {
+    // Reuse is only correct when the active meeting is itself a Meet capture.
+    // A desktop-helper recording must not be handed back to the widget as if
+    // Meet audio were being captured — the user would see "Recording" while
+    // no Meet audio ever lands. Only one capture of each kind can be active,
+    // and desktop + Meet genuinely cannot run at once (both claim the mic),
+    // so surface a busy error instead of silently doing nothing.
+    const activeRecord = await getMeeting(active.id);
+    if (activeRecord?.captureSource === "meet") return active.id;
+    controller.reportStartFailure(
+      "A desktop recording is already running in the AI Notetaker helper. Stop it before starting notes for this call.",
+    );
+    return "";
+  }
   const discoveredTab = typeof options.tabId === "number" ? undefined : await discoverActiveMeetTab();
   const tabId = options.tabId ?? discoveredTab?.id;
   const titleHint = options.titleHint ?? (discoveredTab ? meetTitleForTab(discoveredTab) : undefined);
@@ -56,7 +77,13 @@ export async function startMeetRecording(
   try {
     await capture.preflight(tabId);
   } catch (error) {
-    controller.reportStartFailure(describeCaptureFailure(error));
+    const description = describeCaptureFailure(error);
+    // Chrome's activeTab gate: the widget's click cannot be the first
+    // invocation. Remember the start so the toolbar click that opens the
+    // popup completes it — one click total instead of click-then-click.
+    if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
+    if (options.silent && description === CAPTURE_PERMISSION_HINT) controller.reportCaptureInvocationRequired(tabId);
+    else if (!options.silent) controller.reportStartFailure(description);
     return "";
   }
   const meetingId = await controller.startRecording(options.meetingMode, "meet", titleHint);
@@ -64,9 +91,23 @@ export async function startMeetRecording(
   try {
     await capture.start(tabId, meetingId);
   } catch (error) {
-    await controller.abortStart(meetingId, describeCaptureFailure(error));
+    const description = describeCaptureFailure(error);
+    if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
+    if (options.silent) {
+      // Auto-attempt: tear down quietly; the saved intent makes the user's
+      // next toolbar click the one-click start. Tell only this Meet tab what
+      // Chrome requires; this expected first-use gate is not a recording error.
+      if (description === CAPTURE_PERMISSION_HINT) controller.reportCaptureInvocationRequired(tabId);
+      await controller.abortStart(meetingId, description, { silent: true }).catch(() => undefined);
+    } else {
+      await controller.abortStart(meetingId, description);
+    }
     return "";
   }
+  // A start that succeeded (from the widget, the popup, or the shortcut —
+  // the shortcut press is itself the invocation) retires any remembered
+  // handoff for this tab, so the next popup open never double-starts.
+  await clearPendingMeetStartFor(tabId);
   return meetingId;
 }
 

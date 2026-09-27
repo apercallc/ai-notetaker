@@ -6,3 +6,7 @@ import { assertManagedStartupConfig } from "./lib/deploymentConfig";
 export function register(): void {
   assertManagedStartupConfig();
 }
+
+// @sentry/nextjs load hook: imports instrumentation-server.ts (Sentry.init for
+// the Node.js server runtime) when the file exists. See
+// node_modules/next/dist/docs for the instrumentation contract.

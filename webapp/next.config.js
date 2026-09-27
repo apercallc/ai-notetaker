@@ -11,14 +11,18 @@ const isProduction = process.env.NODE_ENV === "production";
 // origin. React's dev overlay needs eval outside production only. Stripe
 // hosts appear in form-action because a billing form POSTs here and is then
 // redirected to Stripe Checkout / the billing portal.
+const sentryIngest = process.env.NEXT_PUBLIC_SENTRY_DSN?.trim()
+  ? new URL(process.env.NEXT_PUBLIC_SENTRY_DSN).origin
+  : null;
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  `img-src 'self' data: blob:${sentryIngest ? ` ${sentryIngest}` : ""}`,
   "font-src 'self' data:",
   "media-src 'self' blob:",
-  `connect-src 'self'${isProduction ? "" : " ws: wss:"}`,
+  `connect-src 'self'${sentryIngest ? ` ${sentryIngest}` : ""}${isProduction ? "" : " ws: wss:"}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self' https://checkout.stripe.com https://billing.stripe.com",

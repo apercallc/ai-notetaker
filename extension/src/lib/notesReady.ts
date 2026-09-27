@@ -1,10 +1,13 @@
-import { getMeeting } from "./storage";
+import { getMeeting, getSettings } from "./storage";
 
 const PREFIX = "notes-ready:";
 
-/** "Notes ready — Open": the person is usually back in the call or another tab by now. */
+/** "Notes ready — Open": the person is usually back in the call or another tab by now.
+ * Skipped entirely when openNotesWhenReady already opened the notes tab. */
 export async function notifyNotesReady(meetingId: string): Promise<void> {
   if (!chrome.notifications) return;
+  const settings = await getSettings().catch(() => null);
+  if (settings?.openNotesWhenReady) return;
   const meeting = await getMeeting(meetingId).catch(() => undefined);
   await new Promise<void>((resolve) => {
     chrome.notifications.create(

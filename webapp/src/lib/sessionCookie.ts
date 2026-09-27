@@ -28,16 +28,24 @@ function isLocalHost(host: string | null): boolean {
  * browser silently drops, and every sign-in would appear to succeed and
  * bounce straight back to /login. Order of trust:
  *   1. INSECURE_COOKIES=true — operator explicitly opts out.
- *   2. The protocol the request actually used (x-forwarded-proto, Origin).
- *   3. APP_URL's protocol.
- *   4. Fail safe: Secure in production, not in development.
+ *   2. APP_URL's protocol — deployment configuration, not client input.
+ *   3. Fail safe: Secure in production, not in development.
+ *
+ * The per-request protocol (x-forwarded-proto, Origin) is deliberately NOT
+ * trusted for the Secure decision. Those headers are client-influenced on
+ * the first hop; a request carrying a spoofed `x-forwarded-proto: http`
+ * could otherwise downgrade the session cookie to non-Secure and have it
+ * leak in cleartext under a network attacker. The per-request protocol is
+ * still used by cookiesLikelyDropped (a hint, not a security decision) to
+ * detect the opposite problem: a genuine http deployment where the browser
+ * would drop a Secure cookie.
  */
 export function shouldUseSecureCookies(context: Pick<RequestContext, "protocol" | "host">): boolean {
   if (process.env.INSECURE_COOKIES === "true") return false;
-  if (context.protocol) return context.protocol === "https";
   if (isLocalHost(context.host)) return false;
   const configured = appUrlProtocol();
   if (configured) return configured === "https";
+  if (context.protocol) return context.protocol === "https";
   return process.env.NODE_ENV === "production";
 }
 

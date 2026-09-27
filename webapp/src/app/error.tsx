@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import * as Sentry from "@sentry/nextjs";
+import { useEffect } from "react";
 import { errorCopyForPath } from "@/lib/errorCopy";
 
 /**
@@ -9,6 +11,9 @@ import { errorCopyForPath } from "@/lib/errorCopy";
  * reading notes is safe to reassure, a billing page is not — and the
  * digest is shown so a user reporting the problem can quote something
  * that maps to a line in our logs.
+ *
+ * The useEffect reports through the DSN-gated client SDK: a self-hosted
+ * build has no NEXT_PUBLIC_SENTRY_DSN, so nothing is sent.
  */
 export default function ErrorPage({
   error,
@@ -17,7 +22,17 @@ export default function ErrorPage({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const copy = errorCopyForPath(usePathname());
+  const pathname = usePathname();
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      try {
+        Sentry.captureException(error, { tags: { path: pathname } });
+      } catch {
+        // reporting must never worsen the error state
+      }
+    }
+  }, [error, pathname]);
+  const copy = errorCopyForPath(pathname);
   return (
     <main className="container error-state" role="alert">
       <h1>{copy.title}</h1>
