@@ -51,6 +51,15 @@ describe("popup capture routing", () => {
     expect(document.querySelector("#use-desktop")?.textContent).toContain("Zoom or Teams");
     expect(document.body.textContent).not.toContain("Install desktop helper");
     expect(document.querySelector("#mode-chip")?.textContent).toContain("Your own API keys");
+    expect(document.querySelector("#meet-auto-record-guidance")?.textContent).toContain("Auto-record on join is on");
+  });
+
+  it("shows that auto-record on join is enabled on the Meet popup", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" });
+
+    await vi.waitFor(() => expect(document.querySelector("#start-recording")).not.toBeNull());
+    expect(document.querySelector("#meet-auto-record-guidance")?.textContent).toContain("Auto-record on join is on");
+    expect(document.querySelector("#meet-auto-record-guidance")?.textContent).toContain("one toolbar click starts it");
   });
 
   it("offers one Start button on a Meet tab and starts browser capture with the tab id", async () => {

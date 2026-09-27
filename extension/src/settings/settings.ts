@@ -95,6 +95,14 @@ function readFormIntoSettings(includeProviderChoice = true): void {
   if (reminders) settings.calendarReminders = reminders.checked;
   const widget = document.getElementById("show-meet-widget") as HTMLInputElement | null;
   if (widget) settings.showMeetWidget = widget.checked;
+  const checked = (id: string, apply: (value: boolean) => void): void => {
+    const input = document.getElementById(id) as HTMLInputElement | null;
+    if (input) apply(input.checked);
+  };
+  checked("auto-record-join", (value) => { settings.autoRecordOnMeetJoin = value; });
+  checked("meet-disclosure-notice", (value) => { settings.meetDisclosureNotice = value; });
+  checked("auto-share-notes", (value) => { settings.autoShareNotesWithAttendees = value; });
+  checked("open-notes-when-ready", (value) => { settings.openNotesWhenReady = value; });
   const meetingMode = inputValue("default-meeting-mode") as NotetakerSettings["defaultMeetingMode"] | undefined;
   if (meetingMode) settings.defaultMeetingMode = meetingMode;
   const vocabulary = inputValue("custom-vocabulary");
@@ -155,6 +163,46 @@ function render(options: RenderOptions = {}): void {
         <p class="field-hint text-secondary">
           A small movable pill on the call page with one-click recording, the live transcript,
           and a way to flag moments. Turn it off to use only the toolbar popup and shortcuts.
+        </p>
+      </div>
+      <div class="field checkbox-field">
+        <label for="auto-record-join">
+          <input type="checkbox" id="auto-record-join" ${settings.autoRecordOnMeetJoin ? "checked" : ""} />
+          Start notes automatically when I join a Google Meet call
+        </label>
+        <p class="field-hint text-secondary">
+          Chrome requires one click on a call tab before it allows capture: the first time you
+          join a call, click the Notetaker icon once and recording starts on that click. After
+          that, joining a call in the same tab records automatically.
+        </p>
+      </div>
+      <div class="field checkbox-field">
+        <label for="meet-disclosure-notice">
+          <input type="checkbox" id="meet-disclosure-notice" ${settings.meetDisclosureNotice ? "checked" : ""} />
+          Offer a one-tap notice to tell the call it's being transcribed
+        </label>
+        <p class="field-hint text-secondary">
+          While recording, the widget shows a Copy button with a short message you can paste
+          into the meeting chat. You stay in control of sending it.
+        </p>
+      </div>
+      <div class="field checkbox-field">
+        <label for="auto-share-notes">
+          <input type="checkbox" id="auto-share-notes" ${settings.autoShareNotesWithAttendees ? "checked" : ""} />
+          Create a share link for the notes when a meeting ends (Hosted AI)
+        </label>
+        <p class="field-hint text-secondary">
+          After notes are written, an expiring attendee link is created automatically and shown
+          on the notes page. Nobody receives it unless you send it.
+        </p>
+      </div>
+      <div class="field checkbox-field">
+        <label for="open-notes-when-ready">
+          <input type="checkbox" id="open-notes-when-ready" ${settings.openNotesWhenReady ? "checked" : ""} />
+          Open the notes in a new tab as soon as they're ready
+        </label>
+        <p class="field-hint text-secondary">
+          When off, a notification appears instead and opens the notes when clicked.
         </p>
       </div>
       <p class="field-hint text-secondary" id="shortcut-summary" aria-live="polite">Checking your keyboard shortcuts…</p>

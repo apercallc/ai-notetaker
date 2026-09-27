@@ -354,10 +354,16 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   const onMeet = meetTab !== undefined;
   const desktop = !onMeet && (desktopChosen || helperStatus === "connected");
   const helperReady = helperStatus === "connected";
+  const autoRecordGuidance = settings.autoRecordOnMeetJoin
+    ? onMeet
+      ? "Auto-record on join is on. If Chrome blocks the first start, one toolbar click starts it—no second Start notes step."
+      : "Auto-record on join is on. Join a Google Meet call to start notes automatically; if Chrome blocks the first start, click Notetaker once on the call tab."
+    : "Auto-record on join is off. Start notes from the call widget or toolbar, or enable auto-record in Settings.";
   const controls = onMeet || desktop
     ? `
       <button class="primary record-toggle" id="start-recording"${desktop ? " disabled" : ""}>Start notes</button>
       ${modeChip(settings)}
+      ${onMeet ? `<p id="meet-auto-record-guidance" class="field-hint text-secondary">${autoRecordGuidance}</p>` : ""}
       <label class="meeting-mode-picker" for="meeting-mode">Notes style
         <select id="meeting-mode">${meetingModeOptions(settings.defaultMeetingMode)}</select>
       </label>
@@ -382,7 +388,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       <button class="primary record-toggle" id="open-meet">Open Google Meet</button>
       ${modeChip(settings)}
       <p id="start-error" class="start-error" role="alert"${startError ? "" : " hidden"}>${escapeHtml(startError)}</p>
-      <p class="field-hint text-secondary">Join a call, then click this icon on the Meet tab to start notes.</p>
+      <p id="meet-auto-record-guidance" class="field-hint text-secondary">${autoRecordGuidance}</p>
       <button type="button" class="text-link" id="use-desktop">Recording Zoom or Teams instead?</button>`;
   app.innerHTML = `
     ${renderHeader(true)}
