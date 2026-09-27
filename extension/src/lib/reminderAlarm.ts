@@ -1,10 +1,11 @@
 import { isMeetUrl } from "../meet/meetContext";
 import { REMINDER_ALARM, REMINDER_BUTTON_OPEN, REMINDER_POLL_MINUTES, checkMeetReminders } from "./reminders";
 import { getRemindedCalls, getSettings, saveRemindedCalls } from "./storage";
+import { hasOptionalPermission } from "./optionalPermissions";
 
 /** The alarm exists only while it has work to do, so an unconfigured extension never wakes. */
 export async function syncReminderAlarm(): Promise<void> {
-  if (!chrome.alarms) return;
+  if (!chrome.alarms || !(await hasOptionalPermission({ permissions: ["alarms"] }))) return;
   const settings = await getSettings();
   const wanted = settings.calendar?.provider === "google" && settings.calendarReminders;
   if (!wanted) {

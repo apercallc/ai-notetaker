@@ -6,6 +6,7 @@ import { escapeHtml } from "../lib/html";
 import { getExtensionOnboardingUrl } from "../lib/install";
 import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
 import { takePendingMeetStart } from "../meet/pendingStart";
+import { providerHostPermissions, requestOptionalPermission } from "../lib/optionalPermissions";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
@@ -253,7 +254,9 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]):
       ? "The desktop helper needs an update. Open desktop setup to install the current version."
       : helperStatus === "needs_pairing"
         ? "The helper is paired with a different browser. Open the helper's tray menu and choose 'Pair New Browser', then try again."
-        : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
+        : helperStatus === "permission_required"
+          ? "Chrome has not granted Native Messaging access. Open desktop setup and choose Check desktop helper to allow it."
+          : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
     statusEl.className = "text-warning";
     if (checkButton) checkButton.disabled = true;
     if (probeButton) probeButton.disabled = true;
@@ -435,6 +438,19 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
     const errorEl = document.getElementById("start-error");
     if (errorEl) errorEl.hidden = true;
     try {
+      if (onMeet && settings.processingMode.kind === "local_byok") {
+        const providers = [settings.transcriptionProvider, settings.summarizationProvider]
+          .filter((provider, index, all) => Boolean(settings.apiKeys[provider]?.trim()) && all.indexOf(provider) === index);
+        if (providers.length > 0 && !(await requestOptionalPermission(providerHostPermissions(providers)))) {
+          startError = "Chrome provider access was not granted. Your call was not started. Allow the selected AI provider sites in Settings, then try again.";
+          if (errorEl) {
+            errorEl.textContent = startError;
+            errorEl.hidden = false;
+          }
+          if (startButton) startButton.disabled = false;
+          return;
+        }
+      }
       const meetingMode = (document.getElementById("meeting-mode") as HTMLSelectElement).value as MeetingMode;
       const titleHint = meetTitleForTab(meetTab);
       await sendToBackground({

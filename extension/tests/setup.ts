@@ -69,6 +69,10 @@ export const chromeMock = {
     launchWebAuthFlow: vi.fn(),
     getRedirectURL: vi.fn(() => "https://fake-extension-id.chromiumapp.org/"),
   },
+  permissions: {
+    contains: vi.fn(async (_request: chrome.permissions.Permissions) => true),
+    request: vi.fn(async (_request: chrome.permissions.Permissions) => true),
+  },
   tabs: {
     get: vi.fn(async () => ({ id: 1, url: "https://meet.google.com/test" })),
     query: vi.fn(async (): Promise<Array<{ id?: number; url?: string; title?: string }>> => []),
@@ -94,6 +98,10 @@ export const chromeMock = {
     this.identity.launchWebAuthFlow.mockReset();
     this.identity.getRedirectURL.mockReset();
     this.identity.getRedirectURL.mockReturnValue("https://fake-extension-id.chromiumapp.org/");
+    this.permissions.contains.mockReset();
+    this.permissions.contains.mockResolvedValue(true);
+    this.permissions.request.mockReset();
+    this.permissions.request.mockResolvedValue(true);
     this.tabs.get.mockReset();
     this.tabs.get.mockResolvedValue({ id: 1, url: "https://meet.google.com/test" });
     this.tabs.query?.mockReset();

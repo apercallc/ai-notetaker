@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { testProviderKeyDirect } from "../src/lib/testProviderKey";
+import { chromeMock } from "./setup";
 
 describe("direct provider key validation", () => {
   it.each([
@@ -24,5 +25,14 @@ describe("direct provider key validation", () => {
     const request = vi.fn();
     expect((await testProviderKeyDirect("groq", " ", request)).valid).toBe(false);
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("does not send a key to a provider whose optional host permission is missing", async () => {
+    chromeMock.permissions.contains.mockResolvedValue(false);
+    const request = vi.fn();
+    const result = await testProviderKeyDirect("deepseek", "secret", request);
+    expect(result).toEqual({ valid: false, message: "Chrome access to DeepSeek was not granted. Allow it in Settings, then test again." });
+    expect(request).not.toHaveBeenCalled();
+    chromeMock.permissions.contains.mockResolvedValue(true);
   });
 });

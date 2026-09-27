@@ -12,6 +12,7 @@
  * The helper keeps its own test_provider_key for its tray/CLI surfaces.
  */
 import type { ProviderKind } from "../types";
+import { hasOptionalPermission, providerHostPermission, providerPermissionName } from "./optionalPermissions";
 
 export interface KeyTestResult {
   valid: boolean;
@@ -82,6 +83,9 @@ export async function testProviderKeyDirect(
   const trimmed = key.trim();
   if (trimmed.length === 0) return { valid: false, message: "Enter an API key first." };
   const name = PROVIDER_NAMES[provider];
+  if (!(await hasOptionalPermission(providerHostPermission(provider)))) {
+    return { valid: false, message: `Chrome access to ${providerPermissionName(provider)} was not granted. Allow it in Settings, then test again.` };
+  }
   const request = keyCheckRequest(provider, trimmed);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), KEY_CHECK_TIMEOUT_MS);

@@ -1,5 +1,6 @@
 import type { ActionItem, BrowserAudioChannel, MeetingMode, NotetakerSettings, ProviderKind, TranscriptSegment } from "../types";
 import { CAPTURE_SAMPLE_RATE_HZ, downsampleTo16k, msToSamples, pcm16ToWav, peakAmplitude, samplesToMs } from "./wav";
+import { hasOptionalPermission, providerHostPermissions, providerPermissionName } from "../lib/optionalPermissions";
 
 export interface BrowserMeetChunk {
   channel: BrowserAudioChannel;
@@ -649,6 +650,11 @@ export async function processBrowserMeetRecording(
   if (!transcriptionKey) throw new Error(`Missing ${settings.transcriptionProvider} API key`);
   const summaryKey = settings.apiKeys[settings.summarizationProvider];
   if (!summaryKey) throw new Error(`Missing ${settings.summarizationProvider} API key`);
+  const requiredProviders = [...new Set([settings.transcriptionProvider, settings.summarizationProvider])];
+  if (!(await hasOptionalPermission(providerHostPermissions(requiredProviders)))) {
+    const names = requiredProviders.map(providerPermissionName).join(" and ");
+    throw new Error(`Chrome access to ${names} was not granted. Your Meet audio is saved locally. Allow the provider sites in Settings, then retry processing from this meeting page.`);
+  }
 
   const parsedStart = options.startedAt ? Date.parse(options.startedAt) : Number.NaN;
   const startedAtEpoch = Number.isFinite(parsedStart) ? parsedStart : undefined;

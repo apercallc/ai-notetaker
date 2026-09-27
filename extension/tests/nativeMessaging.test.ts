@@ -38,14 +38,57 @@ afterEach(() => {
 });
 
 describe("NativeMessagingClient", () => {
-  it("connects to the exact host name from the protocol doc", () => {
+  it("connects to the exact host name from the protocol doc", async () => {
     const port = createFakePort();
     chromeMock.runtime.connectNative.mockReturnValue(port);
 
     const client = new NativeMessagingClient();
-    client.connect();
+    await client.connect();
 
     expect(chromeMock.runtime.connectNative).toHaveBeenCalledWith("com.ainotetaker.helper");
+  });
+
+  it("does not probe the helper until optional Native Messaging access is granted", async () => {
+    chromeMock.permissions.contains.mockResolvedValue(false);
+    const client = new NativeMessagingClient();
+    const statuses: string[] = [];
+    client.onStatusChange((status) => statuses.push(status));
+
+    await client.connect();
+
+    expect(chromeMock.runtime.connectNative).not.toHaveBeenCalled();
+    expect(statuses).toEqual(["permission_required"]);
+  });
+
+  it("keeps extension startup healthy if Chrome cannot check Native Messaging access", async () => {
+    chromeMock.permissions.contains.mockRejectedValueOnce(new Error("permissions unavailable"));
+    const client = new NativeMessagingClient();
+    const statuses: string[] = [];
+    client.onStatusChange((status) => statuses.push(status));
+
+    await expect(client.connect()).resolves.toBeUndefined();
+
+    expect(chromeMock.runtime.connectNative).not.toHaveBeenCalled();
+    expect(statuses).toEqual(["permission_required"]);
+  });
+
+  it("falls back to an in-memory retry if optional alarm access is denied", async () => {
+    vi.useFakeTimers();
+    const alarms = { create: vi.fn(), clear: vi.fn() };
+    Object.assign(chromeMock, { alarms });
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    chromeMock.permissions.contains.mockImplementation(async (request) => request.permissions?.includes("nativeMessaging") ?? false);
+    const client = new NativeMessagingClient();
+    (client as unknown as { reconnectBackoffMs: number }).reconnectBackoffMs = 30_000;
+    await client.connect();
+
+    port._emitDisconnect();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);
+    expect(alarms.create).not.toHaveBeenCalled();
   });
 
   it("sends a hello message with a null pairing token on first-ever connection", async () => {
@@ -248,6 +291,7 @@ describe("NativeMessagingClient", () => {
       client.onStatusChange((s) => statuses.push(s));
 
       const connectPromise = client.connect();
+      await vi.waitFor(() => expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(1));
       // The helper vanishes before the awaited pairing-token read gets to
       // send() — handleDisconnect nulls this.port first, so sendHello()
       // rejects and connect() must still resolve rather than wedge.
@@ -519,7 +563,7 @@ describe("NativeMessagingClient", () => {
     expect(ports[0]?.postMessage).toHaveBeenCalledWith({ type: "delete_meeting", meetingId: "m" });
     ports[0]?._emitDisconnect();
     client.retryFromAlarm();
-    expect(ports.length).toBeGreaterThanOrEqual(2);
+    await vi.waitFor(() => expect(ports.length).toBeGreaterThanOrEqual(2));
   });
 
   describe("testProviderKey", () => {

@@ -4,6 +4,7 @@ import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { escapeHtml } from "../lib/html";
 import { estimateMeetingCost } from "../lib/costEstimate";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
+import { hasOptionalPermission, providerHostPermission, providerHostPermissions, providerPermissionName, requestOptionalPermission } from "../lib/optionalPermissions";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
 import { loginManaged, MANAGED_SERVICE_ORIGIN, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl } from "../lib/managedClient";
 import {
@@ -530,13 +531,21 @@ function wireEvents(): void {
       const provider = button.dataset.provider as ProviderKind;
       const input = document.getElementById(`key-${provider}`) as HTMLInputElement;
       const resultEl = document.getElementById(`test-result-${provider}`);
+      if (!input.value.trim()) {
+        setResult(resultEl, "Enter an API key first.", "invalid");
+        return;
+      }
       button.disabled = true;
       setResult(resultEl, "Checking…", "pending");
       try {
+        if (!(await requestOptionalPermission(providerHostPermission(provider)))) {
+          setResult(resultEl, `Chrome access to ${providerPermissionName(provider)} was not granted. Allow it to test this key.`, "invalid");
+          return;
+        }
         const result = await testApiKey(provider, input.value);
         setResult(resultEl, result.message, result.valid ? "valid" : "invalid");
       } catch {
-        setResult(resultEl, "The helper could not test this key. Check that it is running and try again.", "invalid");
+        setResult(resultEl, "The key could not be tested. Check your connection and try again.", "invalid");
       } finally {
         button.disabled = false;
       }
@@ -591,8 +600,46 @@ function wireEvents(): void {
     saveButton.disabled = true;
     setResult(statusEl, "Saving…", "pending");
     try {
+      let selected: ProviderKind[] = [];
+      if (settings.processingMode.kind === "local_byok") {
+        selected = [settings.transcriptionProvider, settings.summarizationProvider].filter((provider, index, all) =>
+          Boolean(settings.apiKeys[provider]?.trim()) && all.indexOf(provider) === index,
+        );
+      }
+      const remindersNeedAlarm = settings.calendar?.provider === "google" && settings.calendarReminders;
+      const providerRequest = providerHostPermissions(selected);
+      const requestedOrigins = providerRequest.origins ?? [];
+      const permissionRequest: chrome.permissions.Permissions = {
+        ...(selected.length > 0 ? { origins: requestedOrigins } : {}),
+        ...(remindersNeedAlarm ? { permissions: ["alarms"] } : {}),
+      };
+      let permissionApiFailed = false;
+      if (selected.length > 0 || remindersNeedAlarm) {
+        try {
+          await requestOptionalPermission(permissionRequest);
+        } catch {
+          permissionApiFailed = true;
+        }
+      }
+      let providerAccessGranted = selected.length === 0;
+      let alarmAccessGranted = !remindersNeedAlarm;
+      try {
+        if (selected.length > 0) providerAccessGranted = await hasOptionalPermission(providerRequest);
+        if (remindersNeedAlarm) alarmAccessGranted = await hasOptionalPermission({ permissions: ["alarms"] });
+      } catch {
+        permissionApiFailed = true;
+      }
       await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
-      setResult(statusEl, "Saved.", "valid");
+      if (permissionApiFailed) {
+        setResult(statusEl, "Settings were saved, but Chrome permission access could not be checked. Test your provider key and save again before recording.", "invalid");
+      } else {
+        const warnings = [
+          !providerAccessGranted ? "provider access was denied; Meet audio remains saved locally and can be retried after granting access" : "",
+          !alarmAccessGranted ? "Chrome alarm access was denied; calendar reminders are paused until you allow it and save again" : "",
+        ].filter(Boolean);
+        if (warnings.length > 0) setResult(statusEl, `Saved, but ${warnings.join("; ")}.`, "invalid");
+        else setResult(statusEl, "Saved.", "valid");
+      }
       setTimeout(() => {
         if (statusEl?.textContent === "Saved.") setResult(statusEl, "", "pending");
       }, 2000);

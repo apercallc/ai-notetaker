@@ -1,6 +1,7 @@
 import { generatePkcePair } from "./calendar";
 import { driveTitle, formatMeetingNotes } from "./meetingNotes";
 import type { DriveConnection, MeetingRecord } from "../types";
+import { requestLegacyGoogleIdentityPermission } from "./optionalPermissions";
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -52,6 +53,9 @@ export async function connectGoogleDrive(
   clientSecret: string | undefined,
   fetchImpl: typeof fetch = fetch,
 ): Promise<DriveConnection> {
+  if (!(await requestLegacyGoogleIdentityPermission())) {
+    throw new Error("Chrome identity access was not granted. Allow it to connect the legacy device-only Google Drive integration.");
+  }
   const redirectUri = chrome.identity.getRedirectURL();
   const { verifier, challenge } = await generatePkcePair();
   const state = crypto.randomUUID();

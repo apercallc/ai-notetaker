@@ -54,6 +54,17 @@ describe("syncReminderAlarm", () => {
     Object.assign(chromeMock, { alarms: undefined });
     await expect(syncReminderAlarm()).resolves.toBeUndefined();
   });
+
+  it("does not create a reminder alarm until the optional alarm permission is granted", async () => {
+    const { alarms } = installChrome();
+    chromeMock.permissions.contains.mockResolvedValue(false);
+    await saveSettings({ ...DEFAULT_SETTINGS, calendar: google, calendarReminders: true });
+
+    await syncReminderAlarm();
+
+    expect(alarms.create).not.toHaveBeenCalled();
+    chromeMock.permissions.contains.mockResolvedValue(true);
+  });
 });
 
 describe("runMeetReminders", () => {

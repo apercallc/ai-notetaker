@@ -8,6 +8,7 @@ import { loginManaged, managedSignupUrl } from "../lib/managedClient";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { MEET_AUTO_RECORD_GUIDANCE } from "../lib/autoRecord";
 import { microphoneAlreadyAllowed, requestMicrophone, type MicOutcome } from "../meet/micPermission";
+import { providerHostPermissions, requestDesktopHelperPermissions, requestOptionalPermission } from "../lib/optionalPermissions";
 
 /**
  * First-run setup. The Google Meet path is one screen and a finish screen:
@@ -43,6 +44,7 @@ let onboardingSummarizer: "gemini" | "deepseek" = "gemini";
 let managedDraft = { url: "", email: "" };
 let helperStatus: BackgroundState["helperStatus"] = "connecting";
 let helperInfo: BackgroundState["helperInfo"] = null;
+let helperAlarmPermissionMissing = false;
 let toggleShortcut = "";
 let busy = false;
 
@@ -91,7 +93,7 @@ function renderStepIndicator(): string {
 
 function helperStatusCopy(): string {
   if (helperStatus === "connected") {
-    return `Desktop helper ${helperInfo?.helperVersion ? `v${helperInfo.helperVersion} ` : ""}is connected. Continue to the audio check.`;
+    return `Desktop helper ${helperInfo?.helperVersion ? `v${helperInfo.helperVersion} ` : ""}is connected. Continue to the audio check.${helperAlarmPermissionMissing ? " Chrome alarm access was denied, so retries may pause while this browser is closed." : ""}`;
   }
   if (helperStatus === "incompatible") {
     return `This helper (v${helperInfo?.helperVersion ?? "unknown"}) is incompatible. Install the current version.`;
@@ -99,6 +101,7 @@ function helperStatusCopy(): string {
   if (helperStatus === "helper_not_found") return "Desktop helper not detected yet. Install it, launch it, then check again.";
   if (helperStatus === "needs_pairing") return "The helper is paired with a different browser. Open the helper's tray menu and choose 'Pair New Browser', then check again.";
   if (helperStatus === "disconnected") return "Desktop helper is not responding. Launch it, then check again.";
+  if (helperStatus === "permission_required") return "Allow Native Messaging so the extension can talk to the desktop helper. Chrome will ask when you check.";
   return "Checking for the desktop helper…";
 }
 
@@ -479,6 +482,11 @@ async function runKeyTest(): Promise<boolean> {
     resultEl.className = "result";
   }
   try {
+    if (!(await requestOptionalPermission(providerHostPermissions([providers.transcription, providers.summarization])))) {
+      providerTestsPassed = false;
+      show(false, "Chrome access to the selected AI providers was not granted. Allow both provider sites to test keys and process your saved Meet audio.");
+      return false;
+    }
     // Keys are checked straight from the extension for both capture paths; a
     // missing helper can no longer block this test.
     const [transcriptionResult, summarizationResult] = await Promise.all([
@@ -596,6 +604,8 @@ async function advance(): Promise<void> {
     switch (step) {
       case "helper":
         if (helperStatus === "connected") goNext();
+        else if (helperStatus === "permission_required")
+          showStepError("Allow Native Messaging from Check desktop helper so the extension can reach your desktop helper.");
         else
           showStepError(
             helperStatus === "helper_not_found"
@@ -657,6 +667,13 @@ function wireEvents(): void {
     button.disabled = true;
     if (status) status.textContent = "Checking for the desktop helper…";
     try {
+      const permissions = await requestDesktopHelperPermissions();
+      if (!permissions.nativeMessaging) {
+        if (status) status.textContent = "Chrome did not grant Native Messaging access. Desktop calls need this permission; choose Allow and check again.";
+        button.disabled = false;
+        return;
+      }
+      helperAlarmPermissionMissing = !permissions.alarms;
       const state = await chrome.runtime.sendMessage({ type: "CHECK_HELPER" }) as BackgroundState;
       helperStatus = state.helperStatus;
       helperInfo = state.helperInfo;

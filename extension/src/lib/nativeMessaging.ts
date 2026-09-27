@@ -9,6 +9,7 @@
  * recording state, not this client's in-memory state.
  */
 import { clearPairingToken, getPairingToken, savePairingToken } from "./storage";
+import { hasOptionalPermission } from "./optionalPermissions";
 import {
   isIncomingMessage,
   type IncomingMessage,
@@ -58,7 +59,8 @@ export type HelperConnectionStatus =
   | "helper_not_found"
   | "disconnected"
   | "needs_pairing"
-  | "incompatible";
+  | "incompatible"
+  | "permission_required";
 
 export class NativeMessagingClient {
   private port: chrome.runtime.Port | null = null;
@@ -72,40 +74,53 @@ export class NativeMessagingClient {
   connect(): Promise<void> {
     if (this.connectPromise) return this.connectPromise;
 
-    const connection = new Promise<void>((resolve) => {
-      this.setStatus("connecting");
-      let port: chrome.runtime.Port;
+    const connection = (async (): Promise<void> => {
+      let granted = false;
       try {
-        port = chrome.runtime.connectNative(HOST_NAME);
+        granted = await hasOptionalPermission({ permissions: ["nativeMessaging"] });
       } catch {
-        // Chrome throws synchronously from connectNative for an
-        // unregistered host — same meaning as the not-found disconnect
-        // below, except no port was ever created so no onDisconnect
-        // listener will ever fire. Route it through the shared not-found
-        // path (status + backoff) and resolve, so init() and GET_STATE
-        // never wedge on a helper that isn't installed.
-        this.handleHostMissing();
-        resolve();
+        // An API check failure is still a clear, recoverable permission state;
+        // it must not reject background initialization for Meet users.
+      }
+      if (!granted) {
+        this.setStatus("permission_required");
         return;
       }
-      this.port = port;
-      port.onMessage.addListener((raw: unknown) => this.handleMessage(raw));
-      // A reconnect creates a new Port. Pass the instance through so a late
-      // disconnect from an older port cannot tear down the newer connection.
-      port.onDisconnect.addListener(() => this.handleDisconnect(port));
-      // If the helper dies between connect and hello, handleDisconnect has
-      // already nulled this.port, so sendHello() rejects when it gets to
-      // send() — resolve on either outcome for the same reason as above:
-      // the connection *attempt* is over, and status listeners carry the
-      // real state. A pending connect() promise is what the background
-      // worker awaits before it can answer GET_STATE, so it must settle
-      // exactly when the helper is missing, not hang. Resolve with
-      // undefined either way — the error reason itself is not a result.
-      void this.sendHello().then(
-        () => resolve(),
-        () => resolve(),
-      );
-    });
+      await new Promise<void>((resolve) => {
+        this.setStatus("connecting");
+        let port: chrome.runtime.Port;
+        try {
+          port = chrome.runtime.connectNative(HOST_NAME);
+        } catch {
+          // Chrome throws synchronously from connectNative for an
+          // unregistered host — same meaning as the not-found disconnect
+          // below, except no port was ever created so no onDisconnect
+          // listener will ever fire. Route it through the shared not-found
+          // path (status + backoff) and resolve, so init() and GET_STATE
+          // never wedge on a helper that isn't installed.
+          this.handleHostMissing();
+          resolve();
+          return;
+        }
+        this.port = port;
+        port.onMessage.addListener((raw: unknown) => this.handleMessage(raw));
+        // A reconnect creates a new Port. Pass the instance through so a late
+        // disconnect from an older port cannot tear down the newer connection.
+        port.onDisconnect.addListener(() => this.handleDisconnect(port));
+        // If the helper dies between connect and hello, handleDisconnect has
+        // already nulled this.port, so sendHello() rejects when it gets to
+        // send() — resolve on either outcome for the same reason as above:
+        // the connection *attempt* is over, and status listeners carry the
+        // real state. A pending connect() promise is what the background
+        // worker awaits before it can answer GET_STATE, so it must settle
+        // exactly when the helper is missing, not hang. Resolve with
+        // undefined either way — the error reason itself is not a result.
+        void this.sendHello().then(
+          () => resolve(),
+          () => resolve(),
+        );
+      });
+    })();
     this.connectPromise = connection;
     void connection.then(
       () => {
@@ -177,13 +192,26 @@ export class NativeMessagingClient {
     this.reconnectBackoffMs = Math.min(this.reconnectBackoffMs * 2, MAX_RECONNECT_BACKOFF_MS);
     if (delay >= MIN_ALARM_DELAY_MS && chrome.alarms?.create) {
       // An alarm wakes a suspended MV3 service worker; setTimeout does not.
-      void chrome.alarms.create(HELPER_RETRY_ALARM, { delayInMinutes: delay / 60_000 });
+      // It is an optional permission, so preserve the in-memory retry path if
+      // the user declined it or revoked access while the extension was open.
+      void hasOptionalPermission({ permissions: ["alarms"] })
+        .then((granted) => {
+          if (granted) {
+            return chrome.alarms.create(HELPER_RETRY_ALARM, { delayInMinutes: delay / 60_000 });
+          }
+          this.scheduleReconnectTimer(delay);
+        })
+        .catch(() => this.scheduleReconnectTimer(delay));
       return;
     }
     // Short delays (and non-Chrome test harnesses / older Chromium variants
     // with no chrome.alarms) use a plain timer, which chrome.alarms would
     // otherwise round up to its 30s floor. Track the id so cancelReconnect
     // can stop it (a rejection must not be retried).
+    this.scheduleReconnectTimer(delay);
+  }
+
+  private scheduleReconnectTimer(delay: number): void {
     this.reconnectTimerId = setTimeout(() => {
       this.reconnectTimerId = undefined;
       void this.connect();
@@ -202,7 +230,11 @@ export class NativeMessagingClient {
    * called again — connect() resets the backoff on success via handleMessage.
    */
   private cancelReconnect(): void {
-    if (chrome.alarms?.clear) void chrome.alarms.clear(HELPER_RETRY_ALARM);
+    if (chrome.alarms?.clear) {
+      void hasOptionalPermission({ permissions: ["alarms"] })
+        .then((granted) => granted ? chrome.alarms?.clear(HELPER_RETRY_ALARM) : undefined)
+        .catch(() => undefined);
+    }
     if (this.reconnectTimerId !== undefined) {
       clearTimeout(this.reconnectTimerId);
       this.reconnectTimerId = undefined;

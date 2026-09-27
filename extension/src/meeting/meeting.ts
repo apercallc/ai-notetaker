@@ -2,6 +2,7 @@ import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, updateMee
 import { escapeHtml } from "../lib/html";
 import { syncMeetingToWebapp } from "../lib/webappSync";
 import { speakerLabel } from "../types";
+import { providerHostPermissions, requestOptionalPermission } from "../lib/optionalPermissions";
 import { formatOffset, transcriptIndexForBookmark } from "../lib/bookmarks";
 import type { BackgroundToUiMessage } from "../lib/internalMessages";
 import {
@@ -96,6 +97,7 @@ async function render(focusActionId?: string): Promise<void> {
     app.innerHTML = `<p class="error-state" role="alert">Meeting not found. It may have been deleted.</p>`;
     return;
   }
+  const settings = await getSettings();
 
   removeLiveListener?.();
   removeLiveListener = null;
@@ -225,6 +227,14 @@ async function render(focusActionId?: string): Promise<void> {
     const button = document.getElementById("retry-processing") as HTMLButtonElement;
     button.disabled = true;
     try {
+      if (settings.processingMode.kind === "local_byok") {
+        const providers = [...new Set([settings.transcriptionProvider, settings.summarizationProvider])];
+        if (!(await requestOptionalPermission(providerHostPermissions(providers)))) {
+          showMeetingError("Chrome provider access was not granted. Your Meet audio is still saved locally. Allow the selected AI provider sites, then retry processing.");
+          button.disabled = false;
+          return;
+        }
+      }
       await chrome.runtime.sendMessage({ type: "RETRY_MEETING_PROCESSING", meetingId: id });
       await render();
     } catch (error) {

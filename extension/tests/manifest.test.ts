@@ -15,8 +15,11 @@ describe("manifest.json cross-browser fields", () => {
     expect(manifest.content_scripts).toHaveLength(1);
     expect(manifest.content_scripts[0]?.matches).toEqual(["https://meet.google.com/*"]);
     expect(manifest.content_scripts[0]?.js).toEqual(["content/meetWidget.js"]);
-    expect(manifest.host_permissions).toEqual([
-      "https://meet.google.com/*",
+    expect(manifest.host_permissions).toEqual(["https://meet.google.com/*"]);
+    expect(manifest.optional_host_permissions).toEqual([
+      "https://*/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*",
       "https://api.deepgram.com/*",
       "https://api.groq.com/*",
       "https://api.anthropic.com/*",
@@ -36,8 +39,10 @@ describe("manifest.json cross-browser fields", () => {
 
   it("asks only for the permissions the features need", () => {
     expect([...manifest.permissions].sort()).toEqual(
-      ["activeTab", "alarms", "clipboardWrite", "identity", "nativeMessaging", "notifications", "offscreen", "storage", "tabCapture", "unlimitedStorage"].sort(),
+      ["activeTab", "clipboardWrite", "notifications", "offscreen", "storage", "tabCapture", "unlimitedStorage"].sort(),
     );
+    expect([...manifest.optional_permissions].sort()).toEqual(["alarms", "identity", "nativeMessaging"].sort());
     expect(manifest.host_permissions).toContain("https://meet.google.com/*");
+    expect(manifest.host_permissions).not.toContain("https://api.deepgram.com/*");
   });
 });

@@ -15,6 +15,7 @@
  */
 
 import { isMeetUrl } from "../meet/meetContext";
+import { requestLegacyGoogleIdentityPermission } from "./optionalPermissions";
 
 export interface CalendarEvent {
   title: string;
@@ -231,6 +232,9 @@ export async function connectCalendar(
   clientSecret: string | undefined,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CalendarConnection> {
+  if (!(await requestLegacyGoogleIdentityPermission())) {
+    throw new Error("Chrome identity access was not granted. Allow it to connect the legacy device-only calendar integration.");
+  }
   const redirectUri = getRedirectUri();
   const { verifier, challenge } = await generatePkcePair();
   const authUrl = buildAuthorizationUrl(provider, clientId, redirectUri, challenge);

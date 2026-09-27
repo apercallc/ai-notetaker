@@ -214,7 +214,9 @@ export class BackgroundController {
         meetingId: null,
         phase: "start",
         message:
-          this.helperStatus === "incompatible"
+          this.helperStatus === "permission_required"
+            ? "Chrome has not granted Native Messaging access. Open desktop helper setup, allow access, and check the helper again."
+            : this.helperStatus === "incompatible"
             ? "The desktop helper needs an update before it can record. Open the install page to update it."
             : "The desktop helper is not connected. Install and start it, then check again.",
       });

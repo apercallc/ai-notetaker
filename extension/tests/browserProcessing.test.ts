@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseSummaryReply, processBrowserMeetRecording, type BrowserMeetChunk } from "../src/meet/browserProcessing";
 import { DEFAULT_SETTINGS, type NotetakerSettings } from "../src/types";
+import { chromeMock } from "./setup";
 
 const START = "2026-09-24T10:00:00.000Z";
 const START_MS = Date.parse(START);
@@ -61,6 +62,16 @@ function blobBytes(body: unknown): Promise<Uint8Array> {
 afterEach(() => vi.useRealTimers());
 
 describe("browser Meet processing", () => {
+  it("does not call a BYOK provider without optional host access and tells the user how to recover", async () => {
+    chromeMock.permissions.contains.mockResolvedValue(false);
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(processBrowserMeetRecording(settings(), "general", [], fetchImpl)).rejects.toThrow(
+      "Chrome access to Deepgram and Anthropic was not granted. Your Meet audio is saved locally. Allow the provider sites in Settings, then retry processing from this meeting page.",
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+    chromeMock.permissions.contains.mockResolvedValue(true);
+  });
+
   it("sends WAV to Deepgram per channel and interleaves both channels chronologically by call offset", async () => {
     const wavs: Array<{ bytes: Uint8Array; url: string; headers: Record<string, string> }> = [];
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
