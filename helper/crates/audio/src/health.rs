@@ -8,6 +8,7 @@
 //! [`crate::AudioCapture::subscribe_health`].
 
 use notetaker_core::providers::AudioChannel;
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 use std::time::Duration;
 use tokio::sync::broadcast;
 
@@ -82,10 +83,12 @@ impl Default for HealthHub {
 /// Exponential retry delay (1 s, 2 s, 4 s, then capped at 5 s) used when a
 /// source keeps failing to come back.
 #[derive(Debug, Default)]
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 pub(crate) struct Backoff {
     attempt: u32,
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 impl Backoff {
     pub(crate) fn next_delay(&mut self) -> Duration {
         let seconds = (1_u64 << self.attempt.min(3)).min(5);

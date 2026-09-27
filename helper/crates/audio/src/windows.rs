@@ -645,10 +645,16 @@ fn wasapi_loopback_body(
         Err(error) => return AttemptOutcome::Failed(error.to_string()),
     };
     let device = match pinned {
-        Some(name) => match enumerator.get_device_with_name(name) {
-            Ok(device) => device,
-            Err(error) => return AttemptOutcome::Failed(error.to_string()),
-        },
+        Some(name) => {
+            let devices = match enumerator.get_device_collection(&wasapi::Direction::Render) {
+                Ok(devices) => devices,
+                Err(error) => return AttemptOutcome::Failed(error.to_string()),
+            };
+            match devices.get_device_with_name(name) {
+                Ok(device) => device,
+                Err(error) => return AttemptOutcome::Failed(error.to_string()),
+            }
+        }
         None => match enumerator.get_default_device(&wasapi::Direction::Render) {
             Ok(device) => device,
             Err(error) => return AttemptOutcome::Failed(error.to_string()),

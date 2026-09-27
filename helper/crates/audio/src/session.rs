@@ -3,15 +3,20 @@
 //! stop-then-start can never leave an old capture alive), the startup
 //! handshake, and delivery of frames to the app's callback.
 
-use crate::{AudioError, CapturedFrame};
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
+use crate::AudioError;
+use crate::CapturedFrame;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 use std::time::Duration;
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 use tokio::sync::oneshot;
 
 pub(crate) type FrameCallback = Box<dyn Fn(CapturedFrame) + Send + Sync>;
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 pub(crate) type ReadySender = oneshot::Sender<Result<(), String>>;
 
 pub(crate) struct CaptureSession {
@@ -34,6 +39,7 @@ impl CaptureSession {
 
     /// Marks the session running and returns the flag the worker threads poll.
     /// Call before spawning them, so they do not observe a stale `false`.
+    #[cfg(any(target_os = "linux", target_os = "windows", test))]
     pub(crate) fn arm(&self) -> Arc<AtomicBool> {
         self.running.store(true, Ordering::SeqCst);
         self.running.clone()
@@ -77,6 +83,7 @@ impl CaptureSession {
 }
 
 /// Waits for the capture thread's startup verdict.
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 pub(crate) async fn await_ready(
     ready_rx: oneshot::Receiver<Result<(), String>>,
     timeout: Duration,
