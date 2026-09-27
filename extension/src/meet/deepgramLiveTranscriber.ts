@@ -25,6 +25,12 @@ export interface DeepgramLiveTranscriberOptions {
 const LIVE_URL = "wss://api.deepgram.com/v1/listen";
 const MAX_PENDING_CHUNKS_PER_CHANNEL = 8;
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
@@ -85,7 +91,7 @@ export class DeepgramLiveTranscriber {
     const socket = this.sockets.get(channel);
     if (socket?.readyState === WebSocket.OPEN) {
       try {
-        socket.send(pcm16);
+        socket.send(toArrayBuffer(pcm16));
       } catch {
         this.fail("The live transcript connection was interrupted");
       }
@@ -143,7 +149,7 @@ export class DeepgramLiveTranscriber {
     if (!queue) return;
     for (const chunk of queue.splice(0)) {
       try {
-        socket.send(chunk);
+        socket.send(toArrayBuffer(chunk));
       } catch {
         this.fail("The live transcript connection was interrupted");
         return;

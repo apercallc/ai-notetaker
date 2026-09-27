@@ -53,8 +53,8 @@ describe("DeepgramLiveTranscriber", () => {
     const pcm = new Uint8Array([1, 2, 3, 4]);
     stream.send("mic", pcm);
     stream.send("speaker", pcm);
-    expect(FakeSocket.instances[0]?.sent).toEqual([pcm]);
-    expect(FakeSocket.instances[1]?.sent).toEqual([pcm]);
+    expect([...new Uint8Array(FakeSocket.instances[0]?.sent[0] as ArrayBuffer)]).toEqual([...pcm]);
+    expect([...new Uint8Array(FakeSocket.instances[1]?.sent[0] as ArrayBuffer)]).toEqual([...pcm]);
     await stream.stop();
     expect(FakeSocket.instances.every((socket) => socket.close.mock.calls.length === 1)).toBe(true);
   });
