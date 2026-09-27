@@ -104,6 +104,17 @@ Implementation plan:
 - [x] Bind durable managed Meet and desktop-helper retries to their original
       account/workspace identity; switching hosted workspaces fails closed
       instead of moving an old recording into the new tenant.
+- [x] Add optional live transcript for extension-owned Meet recordings using
+      the user's local Deepgram key: mic and speaker remain separate, and each
+      audio chunk is persisted locally before it is sent over the streaming
+      connection. Transcript updates are stored locally; provider failure does
+      not stop capture.
+- [x] Explain the one-click Chrome capture gate accurately in onboarding and
+      the in-call widget; if Chrome blocks auto-start, one toolbar click hands
+      the pending recording directly to capture without a second Start action.
+- [ ] Enable live transcription for Hosted AI only after adding server-owned
+      real-time usage reservation/metering and a verified short-lived Deepgram
+      token flow; other providers continue to create transcripts after stop.
 - [ ] Complete real Chrome/Meet, provider, deployment, storage, and billing
       acceptance evidence before advertising hosted mode.
 
@@ -870,6 +881,38 @@ them without changing `CLAUDE.md` and the design spec first.
 - Cellular/PSTN call interception and DRM/protected audio: not promised.
 
 ## Pre-production audit (2026-09-25) — deferred items
+
+Meet automation settings (2026-09-25), all in Settings → Shortcuts and Meet
+widget. Auto-record is on by default (but still requires onboarding and
+recording-consent acknowledgement); attendee disclosure and auto-share are off;
+open-notes is on:
+
+- [x] Auto-record on joining a Google Meet call (`autoRecordOnMeetJoin`, on).
+      A tab landing on a call URL attempts a silent start; Chrome's invocation
+      gate on a first join saves the intent so the first toolbar click starts
+      recording on that single click. URL-based join detection only, one
+      attempt per call, re-armed when a tab joins a different call.
+- [x] Chrome's first-use `activeTab` gate now shows a brief, non-error
+      "One Chrome step" message in the in-call widget. It tells the user that
+      the toolbar click/assigned shortcut starts the pending recording; the
+      widget no longer offers a futile retry. Chrome still requires this
+      invocation and it cannot be bypassed by an extension.
+- [x] One-tap attendee disclosure notice (`meetDisclosureNotice`, off): while
+      recording, the widget shows a Copy button with a short chat-ready
+      notice. The user pastes and sends it themselves — Meet's DOM is never
+      scraped or driven. Added the `clipboardWrite` permission.
+- [x] Auto-share notes with attendees (`autoShareNotesWithAttendees`, off,
+      Hosted AI only): after notes complete, the extension creates an
+      expiring share link via a new authenticated workspace-scoped
+      `POST /api/v1/meetings/{id}/share` route and shows it on the notes
+      page. Nobody receives the link unless the user sends it.
+- [x] Open notes when ready (`openNotesWhenReady`, ON): the notes tab opens
+      automatically when notes complete (Meet and desktop paths); the
+      notification is skipped in that mode and remains the off-mode fallback.
+- [ ] Live browser-side transcription during Meet calls: the widget already
+      shows the live transcript when the desktop helper streams it, but
+      extension-owned Meet capture still transcribes only after stop. In-call
+      streaming Deepgram for the browser path remains open work.
 
 Fixed in this pass (see commits ca6aea1 helper, 1e9a3fa extension, 9abc589
 webapp): pairing hardening + tray re-pair flow, IPC subscriber-leak pruning,
