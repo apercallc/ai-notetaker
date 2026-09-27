@@ -10,6 +10,8 @@ export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
 export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
 export type ErrorRecoveryCategory = "retry" | "check_provider_key" | "check_audio" | "check_billing" | "install_helper" | "update_helper" | "sign_in";
+export type LiveTranscriptStatus = "connecting" | "available" | "unavailable" | "not_supported";
+
 
 /** Maps stable helper error codes to safe actions without exposing provider internals. */
 export function errorRecoveryCategory(code: string): ErrorRecoveryCategory {
@@ -152,6 +154,14 @@ export interface NotetakerSettings {
   consentDisclosureAcknowledged: boolean;
   /** Show the floating notes widget on Google Meet calls. */
   showMeetWidget: boolean;
+  /** Try to start notes automatically when a Google Meet call tab is joined. */
+  autoRecordOnMeetJoin: boolean;
+  /** Show a one-tap-copy attendee disclosure notice while recording a Meet call. */
+  meetDisclosureNotice: boolean;
+  /** Automatically create an expiring share link for finished notes (Hosted AI or connected webapp). */
+  autoShareNotesWithAttendees: boolean;
+  /** Open the notes in a new tab as soon as they are ready, not just notify. */
+  openNotesWhenReady: boolean;
   /** Notify shortly before a calendar event with a Google Meet link starts. */
   calendarReminders: boolean;
   calendar: CalendarConnection | null;
@@ -171,6 +181,10 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
   showMeetWidget: true,
+  autoRecordOnMeetJoin: true,
+  meetDisclosureNotice: false,
+  autoShareNotesWithAttendees: false,
+  openNotesWhenReady: true,
   calendarReminders: true,
   calendar: null,
   drive: null,
@@ -238,6 +252,7 @@ export interface MeetingRecord {
   actionItems: ActionItem[];
   mode?: MeetingMode;
   status: "recording" | "processing" | "complete" | "error";
+  liveTranscriptStatus?: LiveTranscriptStatus;
   errorMessage?: string;
   attendees?: string[];
   bookmarks?: Bookmark[];
@@ -247,6 +262,12 @@ export interface MeetingRecord {
   processingMode?: ProcessingMode;
   consentAcknowledged?: boolean;
   captureChannels?: CaptureChannelMetadata[];
+  /** Attendee share link auto-created for this meeting (auto-share setting). */
+  attendeeShare?: {
+    shareUrl: string;
+    expiresAt: string;
+    createdAt: string;
+  };
   managedProcessing?: {
     uploadId?: string;
     jobId?: string;

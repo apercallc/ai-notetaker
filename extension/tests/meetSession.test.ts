@@ -11,6 +11,7 @@ function fakes(active: { id: string } | null = null) {
     stopRecording: vi.fn(async (_id: string): Promise<void> => undefined),
     addBookmark: vi.fn(async () => true),
     reportStartFailure: vi.fn(),
+    reportCaptureInvocationRequired: vi.fn(),
     abortStart: vi.fn(async () => undefined),
     getState: vi.fn(() => ({ activeMeeting: active })),
   };
@@ -106,6 +107,18 @@ describe("startMeetRecording", () => {
     expect(controller.abortStart).not.toHaveBeenCalled();
   });
 
+  it("shows a direct instruction instead of treating the expected Chrome gate as a silent failure", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.preflight.mockRejectedValue(new Error("Extension has not been invoked for the current page"));
+    const [c, k] = asTypes();
+
+    await startMeetRecording(c, k, { tabId: 9, silent: true });
+
+    expect(controller.reportCaptureInvocationRequired).toHaveBeenCalledWith(9);
+    expect(controller.reportStartFailure).not.toHaveBeenCalled();
+    expect(controller.startRecording).not.toHaveBeenCalled();
+  });
+
   it("remembers a Chrome-gated start so the toolbar click can finish it", async () => {
     const { controller, capture, asTypes } = fakes();
     capture.preflight.mockRejectedValue(new Error("Extension has not been invoked for the current page"));
@@ -135,6 +148,17 @@ describe("startMeetRecording", () => {
     await startMeetRecording(c, k, { tabId: 9 });
 
     expect(chromeMock.storage.session._dump()["notetaker.pendingMeetStart"]).toBeUndefined();
+  });
+
+  it("aborts a silent auto-start that is still Chrome-gated without reporting an error", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.start.mockRejectedValue(new Error("Extension has not been invoked for the current page"));
+    const [c, k] = asTypes();
+
+    expect(await startMeetRecording(c, k, { tabId: 9, silent: true })).toBe("");
+    expect(controller.reportCaptureInvocationRequired).toHaveBeenCalledWith(9);
+    expect(controller.abortStart).toHaveBeenCalledWith("m1", CAPTURE_PERMISSION_HINT, { silent: true });
+    expect(controller.failRecording).not.toHaveBeenCalled();
   });
 
   it("aborts a start whose capture fails after the meeting was created, leaving no failed meeting", async () => {
