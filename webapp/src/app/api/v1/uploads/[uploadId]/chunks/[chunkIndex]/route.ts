@@ -49,11 +49,25 @@ export async function PUT(request: Request, context: { params: Promise<{ uploadI
         await tx.uploadChunk.create({ data: { uploadId, chunkIndex, channel, byteLength: bytes.byteLength, checksum, objectKey } });
       });
     } catch (error) {
+      // The object was written before the transaction; if the row never
+      // committed (expiry race, transient DB error), no record points at the
+      // stored bytes — nothing would ever clean them up. Remove the object
+      // unless the losing-insert P2002 path below proves a row exists.
+      if ((error as { code?: string }).code !== "P2002") {
+        await deleteObject(objectKey).catch((cleanupError) => {
+          console.error("managed upload chunk orphan cleanup failed", {
+            requestId,
+            uploadId,
+            chunkIndex,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          });
+        });
+        throw error;
+      }
       // Two retries can pass the initial read before either transaction
       // commits. Treat the losing unique-constraint insert as the same
       // idempotent retry, while removing a different payload's orphaned
       // object. The normal pre-check alone cannot close this race.
-      if ((error as { code?: string }).code !== "P2002") throw error;
       const committed = await prisma.uploadChunk.findUnique({ where: { uploadId_chunkIndex: { uploadId, chunkIndex } } });
       if (committed && committed.checksum === checksum && committed.byteLength === bytes.byteLength && committed.channel === channel) {
         return NextResponse.json({ uploadId, chunkIndex, checksum, byteLength: bytes.byteLength, replayed: true }, { headers: { "x-request-id": requestId } });

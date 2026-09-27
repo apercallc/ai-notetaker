@@ -1,12 +1,15 @@
 /**
  * "Test this API key", shared by onboarding and settings.
  *
- * Google Meet recordings are processed by the extension itself, so its keys are
- * checked the same way: a minimal authenticated request straight from the
- * extension to the provider (host permissions already cover these hosts).
- * Desktop-call keys are used by the native helper, so with `desktop: true` the
- * check is routed through the helper instead. Either way the page asks the
- * background worker; the key is never fetched from a UI page.
+ * The extension holds provider keys in its own chrome.storage.local and can
+ * reach every provider directly (host permissions already cover these
+ * hosts), so every "test key" runs as a minimal authenticated request
+ * straight from the extension — onboarding included. The desktop helper
+ * receives the same keys verbatim via the settings push, so testing from
+ * the extension proves the key to the party that will actually use it;
+ * routing the check through the helper instead made a not-yet-installed
+ * helper a hard blocker for finishing setup, for no validation benefit.
+ * The helper keeps its own test_provider_key for its tray/CLI surfaces.
  */
 import type { ProviderKind } from "../types";
 
@@ -16,7 +19,8 @@ export interface KeyTestResult {
 }
 
 export interface KeyTestOptions {
-  /** The key will be used by the desktop helper, so the helper must vouch for it. */
+  /** @deprecated Keys are validated directly from the extension regardless of
+   * the capture surface; kept only for wire compatibility of the internal message. */
   desktop?: boolean;
 }
 

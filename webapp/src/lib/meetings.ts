@@ -132,28 +132,48 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
 
   // IDs originate on clients. Never let a managed client re-use an ID from a
   // different tenant, and do this check before deleting child rows.
-  const existing = await prisma.meeting.findUnique({
-    where: { id: input.id },
-    select: { workspaceId: true, summary: true, startedAt: true, endedAt: true },
-  });
-  if (existing && existing.workspaceId !== workspaceId) {
-    throw new ValidationError("meeting belongs to another workspace");
-  }
+  //
+  // The ownership check and the writes run in ONE interactive transaction:
+  // with the check outside, a meeting created by workspace A after workspace
+  // B's read committed let B's upsert take the update branch — overwriting
+  // A's meeting and cascading deletes onto A's transcript/action-item rows.
   const isManagedRegistration = input.processingMode === "managed" && input.summary === "" && input.transcript.length === 0 && input.actionItems.length === 0;
-  // Registration is deliberately idempotent: a retry must not erase a
-  // transcript/summary that was already persisted by an earlier attempt,
-  // including a valid result whose summary happens to be empty.
-  const preserveExistingContent = Boolean(existing && isManagedRegistration);
-  const storedSummary = preserveExistingContent ? existing?.summary ?? "" : input.summary;
-  const storedStartedAt = preserveExistingContent ? existing?.startedAt ?? new Date(input.startedAt) : new Date(input.startedAt);
-  const storedEndedAt = preserveExistingContent ? existing?.endedAt ?? new Date(input.endedAt) : new Date(input.endedAt);
 
-  await prisma.$transaction([
-    ...(preserveExistingContent ? [] : [
-      prisma.transcriptSegment.deleteMany({ where: { meetingId: input.id } }),
-      prisma.actionItem.deleteMany({ where: { meetingId: input.id } }),
-    ]),
-    prisma.meeting.upsert({
+  // Client-supplied action-item ids are used as the global primary key. The
+  // same id reused by a different meeting (or workspace) violates the unique
+  // constraint and aborts the whole sync with a 500. Re-key collisions up
+  // front; the meeting's own rows are deleted below, so only foreign owners
+  // matter.
+  const clientActionIds = input.actionItems.map((item) => item.id).filter((id): id is string => Boolean(id));
+  const foreignActionIds = new Set(
+    clientActionIds.length > 0
+      ? (await prisma.actionItem.findMany({ where: { id: { in: clientActionIds }, meeting: { NOT: { id: input.id } } }, select: { id: true } })).map((row) => row.id)
+      : [],
+  );
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.meeting.findUnique({
+      where: { id: input.id },
+      select: { workspaceId: true, summary: true, startedAt: true, endedAt: true },
+    });
+    if (existing && existing.workspaceId !== workspaceId) {
+      throw new ValidationError("meeting belongs to another workspace");
+    }
+    // Registration is deliberately idempotent: a retry must not erase a
+    // transcript/summary that was already persisted by an earlier attempt,
+    // including a valid result whose summary happens to be empty.
+    const preserveExistingContent = Boolean(existing && isManagedRegistration);
+    const storedSummary = preserveExistingContent ? existing?.summary ?? "" : input.summary;
+    const storedStartedAt = preserveExistingContent ? existing?.startedAt ?? new Date(input.startedAt) : new Date(input.startedAt);
+    const storedEndedAt = preserveExistingContent ? existing?.endedAt ?? new Date(input.endedAt) : new Date(input.endedAt);
+
+    // Sequential awaits inside the interactive transaction: same atomicity
+    // as the old batched form, valid on the tx client.
+    if (!preserveExistingContent) {
+      await tx.transcriptSegment.deleteMany({ where: { meetingId: input.id } });
+      await tx.actionItem.deleteMany({ where: { meetingId: input.id } });
+    }
+    await tx.meeting.upsert({
       where: { id: input.id },
       create: {
         id: input.id,
@@ -176,38 +196,34 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
         endedAt: storedEndedAt,
         summary: storedSummary,
       },
-    }),
-    ...(preserveExistingContent ? [] : input.transcript.length > 0
-      ? [
-          prisma.transcriptSegment.createMany({
-            data: input.transcript.map((segment, index) => ({
-              meetingId: input.id,
-              userId,
-              speaker: segment.speaker,
-              text: segment.text,
-              timestamp: new Date(segment.timestamp),
-              order: index,
-            })),
-          }),
-        ]
-      : []),
-    ...(preserveExistingContent ? [] : input.actionItems.length > 0
-      ? [
-          prisma.actionItem.createMany({
-            data: input.actionItems.map((item) => ({
-              id: item.id ?? randomUUID(),
-              meetingId: input.id,
-              userId,
-              text: item.text,
-              owner: item.owner ?? null,
-              status: item.status ?? "open",
-              dueAt: item.dueAt ? new Date(item.dueAt) : null,
-              completedAt: item.completedAt ? new Date(item.completedAt) : null,
-            })),
-          }),
-        ]
-      : []),
-  ]);
+    });
+    if (!preserveExistingContent && input.transcript.length > 0) {
+      await tx.transcriptSegment.createMany({
+        data: input.transcript.map((segment, index) => ({
+          meetingId: input.id,
+          userId,
+          speaker: segment.speaker,
+          text: segment.text,
+          timestamp: new Date(segment.timestamp),
+          order: index,
+        })),
+      });
+    }
+    if (!preserveExistingContent && input.actionItems.length > 0) {
+      await tx.actionItem.createMany({
+        data: input.actionItems.map((item) => ({
+          id: item.id && !foreignActionIds.has(item.id) ? item.id : randomUUID(),
+          meetingId: input.id,
+          userId,
+          text: item.text,
+          owner: item.owner ?? null,
+          status: item.status ?? "open",
+          dueAt: item.dueAt ? new Date(item.dueAt) : null,
+          completedAt: item.completedAt ? new Date(item.completedAt) : null,
+        })),
+      });
+    }
+  });
 
   return { id: input.id, title };
 }
