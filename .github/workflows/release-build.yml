@@ -66,11 +66,11 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Package extension fallback ZIP
-        run: zip -r "../ai-notetaker-extension-${GITHUB_REF_NAME}.zip" dist
+        run: zip -r "../ai-notetaker-extension-${GITHUB_SHA}.zip" dist
       - uses: actions/upload-artifact@v4
         with:
-          name: extension-${{ github.ref_name }}
-          path: ai-notetaker-extension-${{ github.ref_name }}.zip
+          name: extension-${{ github.sha }}
+          path: ai-notetaker-extension-${{ github.sha }}.zip
 
   helper:
     name: Build helper (${{ matrix.os }})
