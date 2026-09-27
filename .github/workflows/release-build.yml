@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: node scripts/validate-release-manifest.mjs release/manifest.json
@@ -56,7 +56,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -67,7 +67,7 @@ jobs:
       - run: npm run build
       - name: Package extension fallback ZIP
         run: zip -r "../ai-notetaker-extension-${GITHUB_SHA}.zip" dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: extension-${{ github.sha }}
           path: ai-notetaker-extension-${{ github.sha }}.zip
@@ -166,7 +166,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "signtool failed on $($target.FullName)" }
           }
           Remove-Item $pfxPath
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: helper-${{ matrix.os }}-${{ github.sha }}
           path: helper/target/release/bundle
@@ -244,7 +244,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: actions/download-artifact@v4

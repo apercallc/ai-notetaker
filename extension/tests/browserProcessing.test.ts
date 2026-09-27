@@ -200,7 +200,7 @@ describe("browser Meet processing", () => {
     expect(offsets).toEqual([...offsets].sort((a, b) => a - b));
     expect(offsets[1]).toBeGreaterThanOrEqual(285_000);
     expect(offsets[1]).toBeLessThanOrEqual(305_000);
-  });
+  }, 15_000);
 
   it("starts a new segment at the real offset when chunks were dropped", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) =>

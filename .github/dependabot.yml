@@ -10,11 +10,19 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: eslint
+        versions: ["10.x"]
+      - dependency-name: typescript
+        versions: ["7.x"]
   - package-ecosystem: cargo
     directory: /helper
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: cpal
+        versions: [">=0.17.0"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

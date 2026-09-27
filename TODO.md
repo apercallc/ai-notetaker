@@ -12,6 +12,19 @@ them drift apart. Scope is governed by the root `CLAUDE.md`: anything it lists
 as out of scope (mobile capture, cellular/PSTN, DRM audio, non-Chrome browser
 ports) lives under "Ideas" at the bottom, not in the roadmap.
 
+## Dependency maintenance (2026-09-27)
+
+- [x] Align extension Vitest, coverage, esbuild, jsdom, Chrome types, and
+      TypeScript; migrate the WebSocket audio payload for TypeScript 7.
+- [x] Migrate the helper's direct `rand` use to 0.10.
+- [x] Migrate the webapp's Prisma CLI and client together to 7, including the
+      PostgreSQL adapter and patched transitive dependencies.
+- [ ] Revisit CPAL 0.17+ after macOS 13 support is preserved; current CoreAudio
+      releases require macOS 14.2 while this app supports macOS 13.
+- [ ] Revisit webapp TypeScript 7 and ESLint 10 after `eslint-config-next`
+      supports them. The current version fails parsing or linting with those
+      majors. Dependabot ignores only the blocked major versions for now.
+
 ## Approved product migration (2026-09-24)
 
 Implementation plan:
