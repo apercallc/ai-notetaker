@@ -14,6 +14,8 @@ export interface MeetAudioChunk {
 
 const MEET_HOST = /(^|\.)meet\.google\.com$/i;
 const SAMPLE_RATE_HZ = 48_000;
+/** chrome.storage.session key for the active-capture map. */
+const SESSION_CAPTURES_KEY = "meet-active-captures";
 
 /** Converts Web Audio's normalized float samples to little-endian PCM16. */
 export function float32ToPcm16(samples: Float32Array): Uint8Array {
@@ -89,6 +91,41 @@ export class MeetCaptureController {
   constructor(private readonly sendChunk: (chunk: Uint8Array, meetingId: string, channel: BrowserAudioChannel) => void | Promise<void> = () => {}) {}
 
   /**
+   * The active-capture map is process memory, and the MV3 service worker can
+   * be killed and restarted mid-call while the offscreen document keeps
+   * capturing. chrome.storage.session has exactly the right lifetime (cleared
+   * on browser exit, shared across worker restarts), so a restarted worker can
+   * re-attach: without this, a suspended worker plus a closed tab left the
+   * meeting in "recording" forever with a stuck REC badge, because
+   * stopForTab found nothing to finish.
+   */
+  private async persistCaptures(): Promise<void> {
+    try {
+      const entries = [...this.activeMeetings.entries()].map(([meetingId, capture]) => [meetingId, capture] as const);
+      await chrome.storage.session?.set({ [SESSION_CAPTURES_KEY]: entries });
+    } catch {
+      // Storage unavailability must never break the live capture itself.
+    }
+  }
+
+  /** Restores the capture map after a service-worker restart. */
+  async restoreCaptures(): Promise<void> {
+    try {
+      const stored = (await chrome.storage.session?.get?.(SESSION_CAPTURES_KEY))?.[SESSION_CAPTURES_KEY] as
+        | Array<[string, { tabId: number; callCode: string | null }]>
+        | undefined;
+      if (!Array.isArray(stored)) return;
+      for (const [meetingId, capture] of stored) {
+        if (typeof meetingId === "string" && capture && typeof capture.tabId === "number") {
+          this.activeMeetings.set(meetingId, { tabId: capture.tabId, callCode: capture.callCode ?? null });
+        }
+      }
+    } catch {
+      // A failed restore just means tab-close cleanup works on best effort.
+    }
+  }
+
+  /**
    * Everything that must hold before capture can begin: the tab is a Meet tab,
    * the browser can capture, the microphone is allowed, and Chrome has been
    * told to let us capture this tab (it refuses until the user has clicked the
@@ -129,6 +166,7 @@ export class MeetCaptureController {
       throw new Error(response?.error ?? "Google Meet capture could not start.");
     }
     this.activeMeetings.set(meetingId, { tabId, callCode: callCodeOf(url) });
+    await this.persistCaptures();
   }
 
   async stop(meetingId: string): Promise<void> {
@@ -144,6 +182,7 @@ export class MeetCaptureController {
       // recreate the offscreen graph, and tab-removal cleanup must still be
       // able to report the durable meeting as retryable.
       this.activeMeetings.delete(meetingId);
+      await this.persistCaptures();
       await chrome.offscreen.closeDocument().catch(() => {});
     }
   }

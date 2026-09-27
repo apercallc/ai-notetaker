@@ -5,6 +5,8 @@
  * this worker after ~30s idle and re-executes top-level code on the next
  * event (see extension/CLAUDE.md and the architecture spec §3.2).
  */
+import { maybeAutoStartMeetRecording, clearAutoRecordAttempt } from "./lib/autoRecord";
+import { getSettings } from "./lib/storage";
 import { BackgroundController } from "./lib/backgroundController";
 import { getExtensionOnboardingUrl } from "./lib/install";
 import { handleInstalled } from "./lib/installHandler";
@@ -36,19 +38,54 @@ const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
 const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => controller.sendMeetAudioChunk(meetingId, channel, pcm16, 48_000));
 
+// Declared before any listener that needs it: a tab event can wake the
+// worker at any point during top-level execution, and referencing a later
+// const from a listener would hit the temporal dead zone.
+// Restore the persisted capture map before the controller rehydrates
+// meeting state, so a tab-close event arriving during this same wake finds
+// the capture and finishes the meeting instead of stranding it.
+const readyPromise = (async () => {
+  await meetCapture.restoreCaptures();
+  await controller.init();
+})();
+
 // A captured tab that closes, or leaves its call, is the end of the call and
 // not a failure: the audio is already on disk, so finish the meeting the way
 // Stop does and write the notes. Same-call URL changes (query, hash) are ignored.
+//
+// Both paths MUST await the controller's ready promise: the worker may have
+// just been woken by this very tab event, and finishMeetCaptureForTab needs
+// the rehydrated meeting state (active id, chunk sequence, settings) that
+// init() restores from storage — calling it before init resolves would see
+// stale in-memory state and strand the meeting in "recording" with a stuck
+// REC badge.
 chrome.tabs.onRemoved?.addListener((tabId) => {
-  void finishMeetCaptureForTab(controller, meetCapture, tabId).catch((error) => {
-    console.warn("Meet capture cleanup after tab removal failed", error);
-  });
+  clearAutoRecordAttempt(tabId);
+  void readyPromise
+    .then(() => finishMeetCaptureForTab(controller, meetCapture, tabId))
+    .catch((error) => {
+      console.warn("Meet capture cleanup after tab removal failed", error);
+    });
 });
 chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
   if (typeof changeInfo.url !== "string") return;
-  void finishMeetCaptureForTab(controller, meetCapture, tabId, changeInfo.url).catch((error) => {
-    console.warn("Meet capture cleanup after tab navigation failed", error);
-  });
+  void readyPromise
+    .then(() => finishMeetCaptureForTab(controller, meetCapture, tabId, changeInfo.url))
+    .catch((error) => {
+      console.warn("Meet capture cleanup after tab navigation failed", error);
+    });
+  // Auto-record (opt-in): a tab landing on a Meet call URL attempts a start.
+  // clearAutoRecordAttempt re-arms per-call eligibility as tabs move on.
+  void readyPromise
+    .then(() =>
+      maybeAutoStartMeetRecording(tabId, changeInfo.url, {
+        getSettings,
+        isRecordingActive: () => controller.getState().activeMeeting !== null,
+        startMeetRecording: (options) => startMeetRecording(controller, meetCapture, { ...options, silent: true }),
+      }),
+    )
+    .then(() => clearAutoRecordAttempt(tabId, changeInfo.url))
+    .catch(() => undefined);
 });
 
 chrome.alarms?.onAlarm.addListener((alarm) => {
@@ -102,7 +139,6 @@ function updateBadge(message: BackgroundToUiMessage): void {
   else if (badge === "REC") showBadge("");
 }
 
-const readyPromise = controller.init();
 void readyPromise.then(syncReminderAlarm);
 void readyPromise.then(() => {
   if (controller.getState().activeMeeting) showBadge("REC");
@@ -208,6 +244,12 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await meetCapture.stop(message.meetingId);
       await controller.failRecording(message.meetingId, message.message.slice(0, 500) || "Meet audio capture failed.");
       return {};
+    case "MEET_LIVE_TRANSCRIPT_STATUS":
+      await controller.updateMeetLiveTranscriptStatus(message.meetingId, message.status);
+      return {};
+    case "MEET_LIVE_TRANSCRIPT_UPDATE":
+      await controller.addMeetLiveTranscript(message);
+      return {};
     case "SAVE_SETTINGS":
       await controller.saveSettings(message.settings);
       await syncReminderAlarm();
@@ -222,6 +264,9 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await controller.deleteMeeting(message.meetingId);
       return {};
     case "TEST_PROVIDER_KEY":
-      return controller.testProviderKey(message.provider, message.key, { desktop: message.desktop === true });
+      // Always direct from the extension (see lib/testProviderKey.ts). The
+      // desktop flag is accepted for older UI pages but no longer routes
+      // through the helper, so setup is never blocked by a missing helper.
+      return controller.testProviderKey(message.provider, message.key);
   }
 }

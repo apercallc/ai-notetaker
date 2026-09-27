@@ -3,6 +3,7 @@ import { requestIdFrom } from "@/lib/apiErrors";
 import { runManagedJob } from "@/lib/managedWorker";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { isValidWorkerToken } from "@/lib/secureCompare";
+import { captureServerError } from "@/lib/observability";
 
 export async function POST(request: Request, context: { params: Promise<{ jobId: string }> }) {
   const requestId = requestIdFrom(request);
@@ -23,6 +24,8 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
       jobId,
       error: error instanceof Error ? error.message : String(error),
     });
+    // A failed job means a customer's uploaded recording produced no notes.
+    captureServerError(error, { requestId, workspaceId, jobId, path: "managed-job-run" });
     return NextResponse.json({ error: "managed processing failed", requestId }, { status: 500, headers: { "x-request-id": requestId } });
   }
 }

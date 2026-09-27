@@ -10,9 +10,10 @@ import { changePassword } from "@/lib/accounts";
 import { formatRetryAfter } from "@/lib/loginThrottle";
 import { passwordProblemMessage } from "@/lib/passwordPolicy";
 import { createApiToken, revokeApiToken, revokeAllApiTokens } from "@/lib/apiTokens";
-import { deleteMeeting } from "@/lib/meetings";
+import { deleteObject } from "@/lib/objectStorage";
 import { deleteUserSessions, revokeUserSession, setSessionActiveWorkspace } from "@/lib/sessions";
 import { getUserRole, removeWorkspaceMember } from "@/lib/workspaces";
+import { disconnectGoogle } from "@/lib/googleIntegration";
 
 /**
  * Expected failures are returned as values, never thrown: Next replaces a
@@ -121,6 +122,14 @@ export async function switchWorkspaceAction(formData: FormData): Promise<void> {
   redirect("/meetings");
 }
 
+// ---------------------------------------------------------- Google OAuth
+
+export async function disconnectGoogleAction(): Promise<void> {
+  const session = await requireSession({ allowPasswordChange: true });
+  await disconnectGoogle(session.userId);
+  revalidatePath("/account");
+}
+
 // ------------------------------------------------------------ danger zone
 
 export type LeaveWorkspaceState = { ok: true; accountDeleted: boolean } | { ok: false; error: string };
@@ -181,16 +190,43 @@ export async function deleteWorkspaceAction(formData: FormData): Promise<DeleteW
     })
   ).map((membership) => membership.userId);
 
-  // Legacy meetings have no Workspace foreign key. Remove their private
-  // objects through the same cleanup path as individual meeting deletion.
-  const meetings = await prisma.meeting.findMany({ where: { workspaceId: session.workspaceId }, select: { id: true } });
-  for (const meeting of meetings) await deleteMeeting(session.workspaceId, meeting.id);
-  await prisma.workspace.delete({ where: { id: session.workspaceId } });
+  // Legacy meetings have no Workspace foreign key. Gather every private
+  // object key up front, then delete the rows in ONE transaction so a
+  // mid-loop failure cannot leave a half-deleted workspace (some meetings
+  // gone, workspace still present, user confused about what happened).
+  // Object storage is cleaned up after the commit; a storage failure logs
+  // the orphaned keys for operator repair rather than rolling back a
+  // deletion the user already confirmed.
+  const meetings = await prisma.meeting.findMany({
+    where: { workspaceId: session.workspaceId },
+    select: { id: true, recordingObjectKey: true, uploads: { select: { objectKey: true, chunks: { select: { objectKey: true } } } } },
+  });
+  const objectKeys = meetings.flatMap((meeting) => [
+    meeting.recordingObjectKey,
+    ...meeting.uploads.flatMap((upload) => [upload.objectKey, ...upload.chunks.map((chunk) => chunk.objectKey)]),
+  ]).filter((key): key is string => Boolean(key));
 
-  // An account whose last workspace is gone can never sign in again and
-  // would squat its email address — remove it.
-  for (const userId of memberUserIds) {
-    await prisma.user.deleteMany({ where: { id: userId, memberships: { none: {} } } });
+  await prisma.$transaction(async (tx) => {
+    // Deletes cascade from the workspace row to membership/subscription/
+    // upload/job/share rows, but legacy meetings have no Workspace relation,
+    // so they are removed explicitly — inside the same transaction.
+    await tx.meeting.deleteMany({ where: { workspaceId: session.workspaceId } });
+    await tx.workspace.delete({ where: { id: session.workspaceId } });
+    // An account whose last workspace is gone can never sign in again and
+    // would squat its email address — remove it.
+    for (const userId of memberUserIds) {
+      await tx.user.deleteMany({ where: { id: userId, memberships: { none: {} } } });
+    }
+  });
+
+  const cleanup = await Promise.allSettled(objectKeys.map((key) => deleteObject(key)));
+  const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failures.length) {
+    console.error("workspace deletion object cleanup failed", {
+      workspaceId: session.workspaceId,
+      failedObjects: failures.length,
+      firstError: failures[0]?.reason instanceof Error ? failures[0].reason.message : String(failures[0]?.reason),
+    });
   }
 
   await clearSessionCookie();

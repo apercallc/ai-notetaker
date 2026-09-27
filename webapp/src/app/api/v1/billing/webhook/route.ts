@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requestIdFrom } from "@/lib/apiErrors";
 import { applyStripeEvent, verifyStripeSignature } from "@/lib/billing";
 import { managedHostingEnabled } from "@/lib/managedAuth";
+import { captureServerError } from "@/lib/observability";
 
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
@@ -25,6 +26,9 @@ export async function POST(request: Request) {
       requestId,
       error: error instanceof Error ? error.message : String(error),
     });
+    // Billing is a critical path: a failed webhook means a paying customer's
+    // state did not change. Capture with the Stripe event id when present.
+    captureServerError(error, { requestId, path: "stripe-webhook" });
     return NextResponse.json({ error: "webhook processing failed", requestId }, { status: 500, headers: { "x-request-id": requestId } });
   }
 }

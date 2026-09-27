@@ -168,17 +168,30 @@ describe("BackgroundController", () => {
       captureSource: "meet",
       processingMode,
     });
-    vi.spyOn(browserStorage, "listBrowserMeetChunks").mockResolvedValue([{ channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) }]);
+    vi.spyOn(browserStorage, "browserMeetChunkStats").mockResolvedValue({ totalChunks: 1, totalBytes: 2 });
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockImplementation(async function* () {
+      yield { channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) };
+    });
     vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
     vi.spyOn(managedClient, "registerManagedMeeting").mockResolvedValue();
-    vi.spyOn(managedClient, "uploadManagedMeeting").mockResolvedValue({ uploadId: "upload-1", jobId: "job-1", meetingId: "pending-managed-meet" });
+    const upload = vi.spyOn(managedClient, "uploadManagedMeeting").mockResolvedValue({ uploadId: "upload-1", jobId: "job-1", meetingId: "pending-managed-meet" });
     vi.spyOn(managedClient, "getManagedJob").mockResolvedValue({ status: "complete", meetingId: "pending-managed-meet", summary: "Recovered summary", actionItems: [] });
     const controller = new BackgroundController(createFakeClient(), vi.fn());
 
     await controller.init();
 
     await vi.waitFor(async () => expect((await getMeeting("pending-managed-meet"))?.status).toBe("complete"));
-    expect(managedClient.uploadManagedMeeting).toHaveBeenCalledWith(managedService, "pending-managed-meet", [{ channel: "speaker", index: 0, bytes: new Uint8Array([1, 2]) }], expect.any(Function));
+    // The upload must be streamed (stats + async iterable), never a
+    // materialized chunk array — an hour-long Meet is ~700 MB of PCM16.
+    const uploadCall = upload.mock.calls[0];
+    expect(uploadCall?.[0]).toEqual(managedService);
+    expect(uploadCall?.[1]).toBe("pending-managed-meet");
+    expect(uploadCall?.[2]).toMatchObject({ totalChunks: 1, totalBytes: 2 });
+    expect(uploadCall?.[3]).toEqual(expect.any(Function));
+    const streamed = uploadCall?.[2] as { chunks: AsyncIterable<{ channel: string; bytes: Uint8Array }> };
+    const collected: Array<{ channel: string; bytes: Uint8Array }> = [];
+    for await (const chunk of streamed.chunks) collected.push({ channel: chunk.channel, bytes: chunk.bytes });
+    expect(collected).toEqual([{ channel: "speaker", bytes: new Uint8Array([1, 2]) }]);
   });
 
   it("drains an errored managed Meet after a fresh hosted sign-in", async () => {
@@ -199,7 +212,10 @@ describe("BackgroundController", () => {
       processingMode,
       managedProcessing: { uploadId: "upload-old", jobId: "job-old", status: "error", errorMessage: "session expired" },
     });
-    vi.spyOn(browserStorage, "listBrowserMeetChunks").mockResolvedValue([{ channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) }]);
+    vi.spyOn(browserStorage, "browserMeetChunkStats").mockResolvedValue({ totalChunks: 1, totalBytes: 2 });
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockImplementation(async function* () {
+      yield { channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) };
+    });
     vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
     vi.spyOn(managedClient, "registerManagedMeeting").mockResolvedValue();
     vi.spyOn(managedClient, "uploadManagedMeeting").mockResolvedValue({ uploadId: "upload-new", jobId: "job-new", meetingId: "expired-session-meet" });
@@ -210,7 +226,10 @@ describe("BackgroundController", () => {
     await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
 
     await vi.waitFor(async () => expect((await getMeeting("expired-session-meet"))?.status).toBe("complete"));
-    expect(managedClient.uploadManagedMeeting).toHaveBeenCalledWith(managedService, "expired-session-meet", [{ channel: "speaker", index: 0, bytes: new Uint8Array([1, 2]) }], expect.any(Function));
+    const uploadCall = (managedClient.uploadManagedMeeting as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as unknown[];
+    expect(uploadCall?.[0]).toEqual(managedService);
+    expect(uploadCall?.[1]).toBe("expired-session-meet");
+    expect(uploadCall?.[2]).toMatchObject({ totalChunks: 1, totalBytes: 2 });
   });
 
   it("does not replay a pending managed Meet into another workspace", async () => {
@@ -897,14 +916,19 @@ describe("BackgroundController", () => {
     );
   });
 
-  it("routes desktop key checks through the native messaging client", async () => {
+  it("checks keys directly from the extension even for desktop setup, without the helper", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+    controller.setFetchImpl(fetchImpl as unknown as typeof fetch);
 
+    // `desktop: true` used to route through the helper, which made a
+    // missing helper block desktop onboarding's key gate entirely.
     const result = await controller.testProviderKey("deepgram", "some-key", { desktop: true });
 
-    expect(client.testProviderKey).toHaveBeenCalledWith("deepgram", "some-key");
-    expect(result).toEqual({ valid: true, message: "ok" });
+    expect(client.testProviderKey).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("api.deepgram.com"), expect.anything());
+    expect(result.valid).toBe(true);
   });
 
   it("checks Meet-path keys directly from the extension, without the helper", async () => {
@@ -1085,5 +1109,31 @@ describe("BackgroundController: in-call widget support", () => {
     await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId: "" }));
     expect((await controller.getWidgetState()).callTitle).toBe("Weekly sync");
     expect(findCurrentEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists live transcript updates and exposes live status to the widget", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg" } });
+    const meetingId = await controller.startRecording("general", "meet");
+
+    await controller.updateMeetLiveTranscriptStatus(meetingId, "available");
+    await controller.addMeetLiveTranscript({
+      meetingId,
+      channel: "mic",
+      speaker: "you",
+      text: "Planning the launch",
+      isFinal: false,
+      utteranceId: 1,
+      offsetMs: 2400,
+    });
+
+    expect(await getMeeting(meetingId)).toMatchObject({
+      liveTranscriptStatus: "available",
+      transcript: [expect.objectContaining({ speaker: "you", text: "Planning the launch", isFinal: false, utteranceId: 1, offsetMs: 2400 })],
+    });
+    expect((await controller.getWidgetState()).active).toMatchObject({ liveTranscriptStatus: "available" });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "TRANSCRIPT_UPDATE", meetingId, text: "Planning the launch", isFinal: false, utteranceId: 1 }));
   });
 });
