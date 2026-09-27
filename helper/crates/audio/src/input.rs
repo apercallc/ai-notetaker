@@ -7,6 +7,7 @@
 use crate::convert::{samples_to_mono_pcm16, SampleToF32};
 #[cfg(any(target_os = "linux", target_os = "windows", test))]
 use crate::health::Backoff;
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 use crate::health::{CaptureHealthKind, HealthHub};
 #[cfg(any(target_os = "linux", target_os = "windows", test))]
 use crate::AudioDeviceInfo;
