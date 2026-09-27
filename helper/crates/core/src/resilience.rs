@@ -40,12 +40,12 @@ pub fn backoff_for_attempt(attempt: u32) -> Duration {
 /// jitter the whole batch retries in lockstep and re-triggers the same rate
 /// limit, over and over, in step with itself.
 fn jitter_for(backoff: Duration) -> Duration {
-    use rand::Rng;
+    use rand::RngExt;
     let span = backoff.num_milliseconds() / 4;
     if span <= 0 {
         return Duration::zero();
     }
-    Duration::milliseconds(rand::thread_rng().gen_range(0..=span))
+    Duration::milliseconds(rand::rng().random_range(0..=span))
 }
 
 fn jittered_backoff(attempt: u32) -> Duration {
