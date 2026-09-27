@@ -407,6 +407,36 @@ pub enum ErrorCode {
     ProviderUnreachable,
     DeviceNotFound,
     HelperNotPaired,
+    /// Sent by the Native Messaging relay itself (never by the helper) when
+    /// it could not reach, or auto-start, the persistent helper process.
+    HelperNotRunning,
+    /// A message the helper could not parse or does not understand.
+    ProtocolMismatch,
+    MicPermissionDenied,
+    ScreenPermissionDenied,
+    DiskFull,
+    StorageError,
+    CaptureLost,
+}
+
+impl ErrorCode {
+    /// The stable wire name (`snake_case`), for logs and tests.
+    pub fn as_wire_str(self) -> &'static str {
+        match self {
+            ErrorCode::ProviderAuthFailed => "provider_auth_failed",
+            ErrorCode::ProviderRateLimited => "provider_rate_limited",
+            ErrorCode::ProviderUnreachable => "provider_unreachable",
+            ErrorCode::DeviceNotFound => "device_not_found",
+            ErrorCode::HelperNotPaired => "helper_not_paired",
+            ErrorCode::HelperNotRunning => "helper_not_running",
+            ErrorCode::ProtocolMismatch => "protocol_mismatch",
+            ErrorCode::MicPermissionDenied => "mic_permission_denied",
+            ErrorCode::ScreenPermissionDenied => "screen_permission_denied",
+            ErrorCode::DiskFull => "disk_full",
+            ErrorCode::StorageError => "storage_error",
+            ErrorCode::CaptureLost => "capture_lost",
+        }
+    }
 }
 
 /// Generates a new pairing token. Per the protocol doc, this is sent to the
@@ -642,5 +672,28 @@ mod tests {
             base64::engine::general_purpose::STANDARD
                 .encode(vec![0_u8; MAX_BROWSER_AUDIO_CHUNK_BYTES + 1]);
         assert!(decode_browser_audio_chunk(&too_large, 48_000).is_err());
+    }
+
+    #[test]
+    fn error_codes_keep_their_stable_wire_names() {
+        for code in [
+            ErrorCode::ProviderAuthFailed,
+            ErrorCode::ProviderRateLimited,
+            ErrorCode::ProviderUnreachable,
+            ErrorCode::DeviceNotFound,
+            ErrorCode::HelperNotPaired,
+            ErrorCode::HelperNotRunning,
+            ErrorCode::ProtocolMismatch,
+            ErrorCode::MicPermissionDenied,
+            ErrorCode::ScreenPermissionDenied,
+            ErrorCode::DiskFull,
+            ErrorCode::StorageError,
+            ErrorCode::CaptureLost,
+        ] {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::String(code.as_wire_str().to_string())
+            );
+        }
     }
 }

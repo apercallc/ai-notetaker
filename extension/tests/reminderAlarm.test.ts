@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
-import { openReminderCall, runMeetReminders, syncReminderAlarm } from "../src/lib/reminderAlarm";
+import { handleReminderButton, openReminderCall, registerReminderNotificationHandlers, runMeetReminders, syncReminderAlarm } from "../src/lib/reminderAlarm";
 import { REMINDER_ALARM } from "../src/lib/reminders";
 import { resetCalendarCaches } from "../src/lib/calendar";
 import { saveRemindedCalls, saveSettings } from "../src/lib/storage";
@@ -29,7 +29,7 @@ describe("syncReminderAlarm", () => {
     await saveSettings({ ...DEFAULT_SETTINGS, calendar: google, calendarReminders: true });
 
     await syncReminderAlarm();
-    expect(alarms.create).toHaveBeenCalledWith(REMINDER_ALARM, { periodInMinutes: 1 });
+    expect(alarms.create).toHaveBeenCalledWith(REMINDER_ALARM, { periodInMinutes: 5 });
 
     alarms.get.mockResolvedValue({ name: REMINDER_ALARM });
     await syncReminderAlarm();
@@ -69,7 +69,7 @@ describe("runMeetReminders", () => {
     expect(await runMeetReminders(() => false)).toBe(1);
     expect(notifications.create).toHaveBeenCalledWith(
       expect.stringMatching(/^meet-reminder:abc-defg-hij:/),
-      expect.objectContaining({ type: "basic", title: "Weekly sync is starting" }),
+      expect.objectContaining({ type: "basic", title: "Weekly sync is starting", buttons: [{ title: "Open call" }] }),
       expect.any(Function),
     );
     expect(await runMeetReminders(() => false)).toBe(0);
@@ -94,5 +94,33 @@ describe("openReminderCall", () => {
     expect(await openReminderCall("missing")).toBe(false);
     expect(await openReminderCall("bad")).toBe(false);
     expect(tabs.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("reminder notification button", () => {
+  it("opens the call from the Open call button and ignores other buttons", async () => {
+    const { tabs } = installChrome();
+    await saveRemindedCalls({ n1: { url: "https://meet.google.com/abc-defg-hij", at: 1 } });
+
+    expect(await handleReminderButton("n1", 1)).toBe(false);
+    expect(tabs.create).not.toHaveBeenCalled();
+    expect(await handleReminderButton("n1", 0)).toBe(true);
+    expect(tabs.create).toHaveBeenCalledWith({ url: "https://meet.google.com/abc-defg-hij" });
+  });
+
+  it("registers the button listener only where the notifications API exists", async () => {
+    Object.assign(chromeMock, { notifications: undefined });
+    expect(() => registerReminderNotificationHandlers()).not.toThrow();
+
+    const onButtonClicked = { addListener: vi.fn() };
+    Object.assign(chromeMock, { notifications: { onButtonClicked, create: vi.fn(), clear: vi.fn() } });
+    registerReminderNotificationHandlers();
+    expect(onButtonClicked.addListener).toHaveBeenCalledTimes(1);
+
+    const { tabs } = installChrome();
+    await saveRemindedCalls({ n2: { url: "https://meet.google.com/xyz-abcd-efg", at: 1 } });
+    const listener = onButtonClicked.addListener.mock.calls[0]![0] as (id: string, index: number) => void;
+    listener("n2", 0);
+    await vi.waitFor(() => expect(tabs.create).toHaveBeenCalledWith({ url: "https://meet.google.com/xyz-abcd-efg" }));
   });
 });

@@ -79,7 +79,7 @@ describe("addMember", () => {
 
     const result = await addMember(formData({ email: "teammate@example.com" }));
 
-    expect(result).toEqual({ ok: false, error: "teammate@example.com is already on this team." });
+    expect(result).toEqual({ ok: false, error: "Could not add this address. Send an invitation instead." });
     expect(await prisma.user.count()).toBe(2);
   });
 

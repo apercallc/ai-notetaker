@@ -3,8 +3,14 @@ import { prisma } from "./db";
 import { getMeeting } from "./meetings";
 import type { MeetingDetailResponse } from "./types";
 
-export const DEFAULT_SHARE_EXPIRY_DAYS = 7;
-export const MAX_SHARE_EXPIRY_DAYS = 30;
+export interface ActiveShare {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+const DEFAULT_SHARE_EXPIRY_DAYS = 7;
+const MAX_SHARE_EXPIRY_DAYS = 30;
 
 export class SharingValidationError extends Error {}
 
@@ -45,6 +51,24 @@ export async function revokeMeetingShare(workspaceId: string, shareId: string): 
   return result.count > 0;
 }
 
+/**
+ * Links that still work. Tokens are stored only as a hash, so an existing
+ * link's URL cannot be reconstructed here: the owner sees it once, at
+ * creation. This list exists so they can see and revoke what is out there.
+ */
+export async function listActiveShares(workspaceId: string, meetingId: string): Promise<ActiveShare[]> {
+  const rows = await prisma.meetingShareToken.findMany({
+    where: { workspaceId, meetingId, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, createdAt: true, expiresAt: true },
+  });
+  return rows.map((row) => ({ id: row.id, createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString() }));
+}
+
+/**
+ * The public view of a meeting. Deliberately narrower than the owner's view:
+ * processing state and provider error text are internal and never leave.
+ */
 export async function getSharedMeeting(token: string): Promise<MeetingDetailResponse | null> {
   if (!token || token.length > 128) return null;
   const share = await prisma.meetingShareToken.findFirst({
@@ -52,5 +76,9 @@ export async function getSharedMeeting(token: string): Promise<MeetingDetailResp
     select: { workspaceId: true, meetingId: true },
   });
   if (!share) return null;
-  return getMeeting(share.workspaceId, share.meetingId);
+  const meeting = await getMeeting(share.workspaceId, share.meetingId);
+  if (!meeting) return null;
+  const { processing: _internal, ...publicView } = meeting;
+  void _internal;
+  return publicView;
 }

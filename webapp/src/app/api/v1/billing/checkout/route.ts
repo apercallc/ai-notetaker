@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
 import { readManagedJson } from "@/lib/managedJobs";
-import { BillingError, createCheckoutSession } from "@/lib/billing";
+import { BillingError, BillingPortalRequiredError, createCheckoutSession } from "@/lib/billing";
 
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
@@ -19,6 +19,10 @@ export async function POST(request: Request) {
     const url = await createCheckoutSession(session.workspaceId, session.email, priceId, successUrl, cancelUrl);
     return NextResponse.json({ url }, { headers: { "x-request-id": requestId } });
   } catch (error) {
+    if (error instanceof BillingPortalRequiredError) {
+      // A live subscription already exists: the client must manage it in the portal.
+      return NextResponse.json({ error: error.message, portalRequired: true }, { status: 409, headers: { "x-request-id": requestId } });
+    }
     return apiErrorResponse(error, { requestId });
   }
 }

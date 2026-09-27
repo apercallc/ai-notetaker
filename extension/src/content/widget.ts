@@ -1,6 +1,9 @@
 import { formatOffset } from "../lib/bookmarks";
+import { MEET_DISCLOSURE_TEXT } from "../lib/autoRecord";
 import { escapeHtml } from "../lib/html";
 import type { BackgroundToUiMessage, UiToBackgroundMessage, WidgetMeeting, WidgetState } from "../lib/internalMessages";
+import { createStopConfirm, STOP_CONFIRM_LABEL, STOP_LABEL, type StopConfirmOptions } from "../lib/stopConfirm";
+import { CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "../meet/hints";
 import { speakerLabel, type MeetingMode, type Speaker } from "../types";
 import { canStart, deriveView, formatElapsed, type WidgetUi, type WidgetView } from "./widgetModel";
 import { ICONS, errorMessage, readyKey, renderPanel, renderPill, type TemplateContext } from "./widgetTemplates";
@@ -47,7 +50,7 @@ export class MeetWidget {
   private position: Position = DEFAULT_POSITION;
   private timer: number | null = null;
   private toastTimer: number | null = null;
-  private stopArmedTimer: number | null = null;
+  private stopConfirms: Array<{ cancel: () => void }> = [];
   private announceTimer: number | null = null;
   private refreshInFlight: Promise<void> | null = null;
   private refreshQueued = false;
@@ -114,7 +117,8 @@ export class MeetWidget {
     this.destroyed = true;
     this.stopTimer();
     this.endDrag?.();
-    for (const timer of [this.stopArmedTimer, this.announceTimer, this.toastTimer]) if (timer !== null) window.clearTimeout(timer);
+    this.cancelStopConfirms();
+    for (const timer of [this.announceTimer, this.toastTimer]) if (timer !== null) window.clearTimeout(timer);
     window.removeEventListener("resize", this.onResize);
     this.host.remove();
   }
@@ -129,8 +133,9 @@ export class MeetWidget {
       case "RECORDING_ERROR":
         // A helper problem that arrives while nobody asked to record (for
         // example a pairing failure at connect time) belongs in the helper
-        // status, not in a "couldn't take notes" card.
-        if (message.meetingId !== null || this.ui.starting || this.state?.active) {
+        // status, not in a "couldn't take notes" card. A start that failed does
+        // belong here, whoever asked for it (this button or the shortcut).
+        if (message.meetingId !== null || message.phase === "start" || this.ui.starting || this.state?.active) {
           this.ui = { ...this.ui, starting: false, error: message.message, errorRecovery: message.recovery };
         }
         void this.refresh();
@@ -140,6 +145,11 @@ export class MeetWidget {
       case "HELPER_STATUS":
         void this.refresh();
         return;
+      case "CAPTURE_INVOCATION_REQUIRED":
+        this.ui = { ...this.ui, starting: false, error: CAPTURE_PERMISSION_HINT };
+        this.expanded = true;
+        this.render();
+        return;
       case "PROCESSING_WARNING":
         this.ui = { ...this.ui, warning: message.message };
         this.showToast("A transcription chunk will be retried automatically.");
@@ -148,6 +158,15 @@ export class MeetWidget {
       default:
         return;
     }
+  }
+
+  /**
+   * The person is back on this tab. If they just went to allow the microphone,
+   * the "needs the microphone" card has done its job: show Start again.
+   */
+  resume(): Promise<void> {
+    if (this.ui.error === MIC_PERMISSION_HINT) this.ui = { ...this.ui, error: null, errorRecovery: undefined };
+    return this.refresh();
   }
 
   /** Re-reads background state. Concurrent calls collapse into one trailing refresh. */
@@ -224,6 +243,7 @@ export class MeetWidget {
     const hadFocus = this.shadow.activeElement !== null;
     this.root.dataset.view = view;
     this.root.dataset.expanded = String(this.expanded);
+    this.cancelStopConfirms();
     this.root.replaceChildren();
     const ctx = this.templateContext();
     this.root.insertAdjacentHTML("beforeend", renderPill(view, ctx));
@@ -263,7 +283,18 @@ export class MeetWidget {
       const previousScroll = transcript.scrollTop;
       transcript.replaceChildren();
       if (active.transcript.length === 0) {
-        transcript.insertAdjacentHTML("beforeend", `<p class="empty">Listening… the transcript appears here within a few seconds.</p>`);
+        const empty = this.root.ownerDocument.createElement("p");
+        empty.className = "empty";
+        empty.textContent = active.liveTranscriptStatus === "connecting"
+          ? "Connecting to live transcript…"
+          : active.liveTranscriptStatus === "available"
+            ? "Listening for live transcript…"
+            : active.liveTranscriptStatus === "unavailable"
+              ? "Live transcript unavailable. Your full transcript will be ready after you stop recording."
+              : active.liveTranscriptStatus === "not_supported"
+                ? "Live transcript needs a Deepgram key in local mode; Hosted AI and other providers prepare it after you stop."
+                : "Your transcript will appear here after you stop recording.";
+        transcript.append(empty);
       }
       for (const segment of active.transcript) this.upsertTranscriptLine(segment.speaker, segment.text, segment.isFinal, segment.utteranceId, true);
       transcript.scrollTop = initial || this.pinnedToBottom ? transcript.scrollHeight : previousScroll;
@@ -326,12 +357,6 @@ export class MeetWidget {
     on("#open-setup", () => openPage("onboarding"));
     on("#set-shortcut", () => openPage("shortcuts"));
     on("#allow-mic", () => openPage("microphone"));
-    // Meet is the browser-first entry point. Reopen the mode chooser here so
-    // a missing helper never turns an in-call Meet widget into an unexplained
-    // desktop-installer redirect. Desktop users can still reach the installer
-    // from the desktop option in onboarding.
-    on("#helper-setup", () => openPage("onboarding"));
-    on("#helper-check", () => void this.deps.send({ type: "CHECK_HELPER" }).then(() => this.refresh()).catch(() => {}));
     on("#open-notes", () => {
       const id = this.state?.latest?.id;
       if (id) void this.deps.send({ type: "OPEN_MEETING", meetingId: id }).catch(() => {});
@@ -348,8 +373,30 @@ export class MeetWidget {
     });
     on("#start", () => void this.start());
     on("#pill-start", () => void this.start());
-    on("#stop", () => void this.stop());
-    on("#pill-stop", () => this.confirmStop());
+    this.bindStop("#stop", {
+      arm: (button) => {
+        button.classList.add("armed");
+        button.setAttribute("aria-label", "Confirm: stop notes");
+        button.textContent = STOP_CONFIRM_LABEL;
+      },
+      disarm: (button) => {
+        button.classList.remove("armed");
+        button.removeAttribute("aria-label");
+        button.textContent = STOP_LABEL;
+      },
+    });
+    this.bindStop("#pill-stop", {
+      arm: (button) => {
+        button.classList.add("armed");
+        button.setAttribute("aria-label", "Confirm: stop notes");
+        button.textContent = STOP_CONFIRM_LABEL;
+      },
+      disarm: (button) => {
+        button.classList.remove("armed");
+        button.setAttribute("aria-label", STOP_LABEL);
+        button.innerHTML = ICONS.stop;
+      },
+    });
     on("#pill-bookmark", () => void this.flagMoment(""));
     this.root.querySelector<HTMLSelectElement>("#mode")?.addEventListener("change", (event) => {
       this.selectedMode = (event.target as HTMLSelectElement).value as MeetingMode;
@@ -375,6 +422,25 @@ export class MeetWidget {
         event.preventDefault();
         void this.flagMoment(input?.value ?? "");
       });
+      this.root.querySelector("#copy-disclosure")?.addEventListener("click", () => void this.copyDisclosure());
+    }
+  }
+
+  /** One-tap attendee disclosure: copies the notice for pasting into Meet chat. */
+  private async copyDisclosure(): Promise<void> {
+    const button = this.root.querySelector<HTMLButtonElement>("#copy-disclosure");
+    if (!button) return;
+    const done = (label: string): void => {
+      button.textContent = label;
+      window.setTimeout(() => {
+        button.textContent = "Copy notice for chat";
+      }, 2_500);
+    };
+    try {
+      await navigator.clipboard.writeText(MEET_DISCLOSURE_TEXT);
+      done("Copied — paste it in the chat");
+    } catch {
+      done("Copy failed — select the text manually");
     }
   }
 
@@ -407,7 +473,7 @@ export class MeetWidget {
       });
       this.ui = { ...this.ui, starting: false };
       if (!response?.meetingId && !this.ui.error) {
-        this.ui = { ...this.ui, error: "Recording could not start. Check that the desktop helper is running, then try again." };
+        this.ui = { ...this.ui, error: "Recording could not start. Try again." };
       }
       this.pinnedToBottom = true;
       this.noteDraft = "";
@@ -421,26 +487,32 @@ export class MeetWidget {
     await this.refresh();
   }
 
-  /** The pill's stop sits beside the flag button and ends the recording, so it asks once. */
-  private confirmStop(): void {
-    const button = this.root.querySelector<HTMLButtonElement>("#pill-stop");
+  /**
+   * Stopping ends the recording, so the pill's stop and the panel's stop (and
+   * the popup's) all ask the same way: press once to arm, press again to stop.
+   */
+  private bindStop(
+    selector: string,
+    look: { arm: (button: HTMLButtonElement) => void; disarm: (button: HTMLButtonElement) => void },
+  ): void {
+    const button = this.root.querySelector<HTMLButtonElement>(selector);
     if (!button) return;
-    if (this.stopArmedTimer !== null) {
-      window.clearTimeout(this.stopArmedTimer);
-      this.stopArmedTimer = null;
-      void this.stop();
-      return;
-    }
-    button.classList.add("armed");
-    button.setAttribute("aria-label", "Confirm: stop recording and write notes");
-    button.textContent = "Stop?";
-    this.announce("Press stop again to end the recording and write your notes");
-    this.stopArmedTimer = window.setTimeout(() => {
-      this.stopArmedTimer = null;
-      button.classList.remove("armed");
-      button.setAttribute("aria-label", "Stop recording and write notes");
-      button.innerHTML = ICONS.stop;
-    }, 3000);
+    const options: StopConfirmOptions = {
+      arm: () => {
+        look.arm(button);
+        this.announce("Press stop again to end the recording and write your notes");
+      },
+      disarm: () => look.disarm(button),
+      confirm: () => void this.stop(),
+    };
+    const confirm = createStopConfirm(options);
+    this.stopConfirms.push(confirm);
+    button.addEventListener("click", confirm.press);
+  }
+
+  private cancelStopConfirms(): void {
+    for (const confirm of this.stopConfirms) confirm.cancel();
+    this.stopConfirms = [];
   }
 
   private async stop(): Promise<void> {

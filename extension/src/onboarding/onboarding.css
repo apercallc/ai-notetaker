@@ -216,3 +216,68 @@ label.checkbox-row {
   gap: var(--space-2);
   font-weight: 400;
 }
+
+/* Screen sections and results. Results carry a glyph so success and failure
+   never rely on color alone. */
+.setup-section {
+  margin: var(--space-3) 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.setup-section h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--space-2);
+}
+
+.result {
+  margin: var(--space-2) 0 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.result:empty {
+  display: none;
+}
+
+.result.ok {
+  color: var(--color-success-text, var(--color-success));
+}
+
+.result.ok::before {
+  content: "\2713  ";
+  font-weight: 700;
+}
+
+.result.error {
+  color: var(--color-danger);
+}
+
+.result.error::before {
+  content: "\2717  ";
+  font-weight: 700;
+}
+
+.text-link {
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  margin: 0 2px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--color-bg-elevated);
+  font: inherit;
+  font-size: 0.875em;
+  text-align: center;
+}

@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { requestIdFrom } from "@/lib/apiErrors";
 import { runManagedJob } from "@/lib/managedWorker";
 import { managedHostingEnabled } from "@/lib/managedAuth";
+import { isValidWorkerToken } from "@/lib/secureCompare";
+import { captureServerError } from "@/lib/observability";
 
 export async function POST(request: Request, context: { params: Promise<{ jobId: string }> }) {
   const requestId = requestIdFrom(request);
   if (!managedHostingEnabled()) return NextResponse.json({ error: "managed hosting is disabled", requestId }, { status: 404, headers: { "x-request-id": requestId } });
-  const workerToken = process.env.MANAGED_WORKER_TOKEN;
-  if (!workerToken || request.headers.get("x-worker-token") !== workerToken) {
+  if (!isValidWorkerToken(request.headers.get("x-worker-token"))) {
     return NextResponse.json({ error: "worker authentication required", requestId }, { status: 401, headers: { "x-request-id": requestId } });
   }
   const { jobId } = await context.params;
@@ -23,6 +24,8 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
       jobId,
       error: error instanceof Error ? error.message : String(error),
     });
+    // A failed job means a customer's uploaded recording produced no notes.
+    captureServerError(error, { requestId, workspaceId, jobId, path: "managed-job-run" });
     return NextResponse.json({ error: "managed processing failed", requestId }, { status: 500, headers: { "x-request-id": requestId } });
   }
 }

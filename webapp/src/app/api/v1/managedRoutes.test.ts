@@ -14,6 +14,11 @@ import { POST as pollNextJob } from "./jobs/next/route";
 import { POST as checkout } from "./billing/checkout/route";
 import { POST as portal } from "./billing/portal/route";
 import { POST as billingWebhook } from "./billing/webhook/route";
+import { GET as currentGoogleCalendar } from "./google/calendar/current/route";
+import { POST as exportGoogleDrive } from "./google/drive/export/route";
+import { POST as reportClientError } from "./client-errors/route";
+import { POST as createShare } from "./meetings/[meetingId]/share/route";
+import { clientErrorLimiter } from "@/lib/clientErrors";
 import { prisma } from "@/lib/db";
 import { MAX_CHUNK_BYTES } from "@/lib/managedJobs";
 import { hashPassword } from "@/lib/passwords";
@@ -27,6 +32,9 @@ const originalStorageDir = process.env.OBJECT_STORAGE_DIR;
 const originalWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const originalHostedProPrice = process.env.STRIPE_PRICE_HOSTED_PRO;
 const originalManagedHosting = process.env.MANAGED_HOSTING;
+const originalGoogleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+const originalGoogleClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+const originalGoogleEncryptionKey = process.env.GOOGLE_OAUTH_ENCRYPTION_KEY;
 
 function auth(sessionId: string): HeadersInit {
   return { authorization: `Bearer ${sessionId}`, "content-type": "application/json" };
@@ -37,7 +45,7 @@ function authForWorkspace(sessionId: string, workspaceId: string): HeadersInit {
 }
 
 async function createPrincipal(userId: string, email: string, workspaceId: string, role = "owner"): Promise<string> {
-  await prisma.user.create({ data: { id: userId, email, passwordHash: "test-hash" } });
+  await prisma.user.create({ data: { id: userId, email, passwordHash: "test-hash", emailVerifiedAt: new Date() } });
   await prisma.workspaceMembership.create({ data: { userId, workspaceId, role } });
   const session = await prisma.session.create({
     data: { userId, expiresAt: new Date(Date.now() + 60 * 60 * 1_000) },
@@ -50,6 +58,9 @@ beforeEach(async () => {
   storageDir = await mkdtemp(path.join(os.tmpdir(), "ai-notetaker-managed-route-"));
   process.env.OBJECT_STORAGE_DIR = storageDir;
   process.env.MANAGED_WORKER_TOKEN = "route-worker-token";
+  delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+  delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  delete process.env.GOOGLE_OAUTH_ENCRYPTION_KEY;
   await prisma.workspace.createMany({
     data: [
       { id: WORKSPACE_ID, name: "Route test workspace" },
@@ -71,6 +82,12 @@ afterEach(async () => {
   else process.env.STRIPE_PRICE_HOSTED_PRO = originalHostedProPrice;
   if (originalManagedHosting === undefined) delete process.env.MANAGED_HOSTING;
   else process.env.MANAGED_HOSTING = originalManagedHosting;
+  if (originalGoogleClientId === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+  else process.env.GOOGLE_OAUTH_CLIENT_ID = originalGoogleClientId;
+  if (originalGoogleClientSecret === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  else process.env.GOOGLE_OAUTH_CLIENT_SECRET = originalGoogleClientSecret;
+  if (originalGoogleEncryptionKey === undefined) delete process.env.GOOGLE_OAUTH_ENCRYPTION_KEY;
+  else process.env.GOOGLE_OAUTH_ENCRYPTION_KEY = originalGoogleEncryptionKey;
 });
 
 describe("managed upload routes", () => {
@@ -86,7 +103,7 @@ describe("managed upload routes", () => {
 
   it("logs a managed client in before any session exists", async () => {
     const password = "correct horse battery staple";
-    await prisma.user.create({ data: { id: USER_ID, email: "login-route@example.com", passwordHash: await hashPassword(password) } });
+    await prisma.user.create({ data: { id: USER_ID, email: "login-route@example.com", passwordHash: await hashPassword(password), emailVerifiedAt: new Date() } });
     await prisma.workspaceMembership.create({ data: { userId: USER_ID, workspaceId: WORKSPACE_ID, role: "owner" } });
 
     const response = await managedLogin(new Request("http://localhost/api/v1/auth/login", {
@@ -131,6 +148,21 @@ describe("managed upload routes", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("x-request-id")).toBe("managed-auth-test");
     expect(await response.json()).toEqual({ error: "managed session required", requestId: "managed-auth-test" });
+  });
+
+  it("returns a safe 503 when Google integration configuration is absent", async () => {
+    const sessionId = await createPrincipal(USER_ID, "google-route@example.com", WORKSPACE_ID);
+    const calendar = await currentGoogleCalendar(new Request("http://localhost/api/v1/google/calendar/current", { headers: auth(sessionId) }));
+    expect(calendar.status).toBe(503);
+    expect(await calendar.json()).toMatchObject({ error: "Google integration is not configured. Ask an administrator to configure it." });
+
+    const drive = await exportGoogleDrive(new Request("http://localhost/api/v1/google/drive/export", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ meetingId: randomUUID() }),
+    }));
+    expect(drive.status).toBe(503);
+    expect(await drive.json()).toMatchObject({ error: "Google integration is not configured. Ask an administrator to configure it." });
   });
 
   it("protects the worker poll and returns an empty 204 when the queue is idle", async () => {
@@ -421,6 +453,81 @@ describe("managed upload routes", () => {
       body: payload,
     }));
     expect(invalid.status).toBe(400);
+  });
+
+  it("accepts a bounded extension error report and rejects unauthenticated or malformed ones", async () => {
+    clientErrorLimiter.clear();
+    const sessionId = await createPrincipal(USER_ID, "error-reporter@example.com", WORKSPACE_ID);
+    const good = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ message: "meet upload failed mid-chunk", surface: "managed_upload", meetingId: "meet-1", extensionVersion: "0.1.0" }),
+    }));
+    expect(good.status).toBe(200);
+    await expect(good.json()).resolves.toEqual(expect.objectContaining({ received: true }));
+
+    const badSurface = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ message: "boom", surface: "made-up-surface" }),
+    }));
+    expect(badSurface.status).toBe(400);
+
+    const unauthenticated = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "boom", surface: "popup" }),
+    }));
+    expect(unauthenticated.status).toBe(401);
+
+    clientErrorLimiter.clear();
+    for (let i = 0; i < 20; i += 1) clientErrorLimiter.hit(USER_ID);
+    const flooded = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
+      method: "POST",
+      headers: auth(sessionId),
+      body: JSON.stringify({ message: "loop", surface: "background" }),
+    }));
+    expect(flooded.status).toBe(429);
+    expect(flooded.headers.get("retry-after")).toBeTruthy();
+  });
+
+  it("creates an extension-requested attendee share link scoped to the workspace", async () => {
+    const previousAppUrl = process.env.APP_URL;
+    process.env.APP_URL = "https://notes.example";
+    try {
+    const sessionId = await createPrincipal(USER_ID, "share-owner@example.com", WORKSPACE_ID);
+    const otherSessionId = await createPrincipal(OTHER_USER_ID, "share-other@example.com", OTHER_WORKSPACE_ID);
+    const meetingId = randomUUID();
+    await prisma.meeting.create({
+      data: {
+        id: meetingId,
+        userId: USER_ID,
+        workspaceId: WORKSPACE_ID,
+        title: "Shareable sync",
+        startedAt: new Date("2026-09-24T15:00:00.000Z"),
+        endedAt: new Date("2026-09-24T15:30:00.000Z"),
+        summary: "",
+      },
+    });
+
+    const context = { params: Promise.resolve({ meetingId }) };
+    const created = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST", headers: auth(sessionId) }), context);
+    expect(created.status).toBe(200);
+    const body = (await created.json()) as { shareUrl: string; expiresAt: string };
+    expect(body.shareUrl).toMatch(/\/share\/[A-Za-z0-9_-]+$/);
+    expect(Number.isFinite(Date.parse(body.expiresAt))).toBe(true);
+
+    // The same meeting is invisible to another workspace.
+    const cross = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST", headers: auth(otherSessionId) }), context);
+    expect(cross.status).toBe(400);
+
+    // Unauthenticated callers get nothing.
+    const anonymous = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST" }), context);
+    expect(anonymous.status).toBe(401);
+    } finally {
+      if (previousAppUrl === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = previousAppUrl;
+    }
   });
 });
 

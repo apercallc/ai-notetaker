@@ -10,6 +10,8 @@ export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
 export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
 export type ErrorRecoveryCategory = "retry" | "check_provider_key" | "check_audio" | "check_billing" | "install_helper" | "update_helper" | "sign_in";
+export type LiveTranscriptStatus = "connecting" | "available" | "unavailable" | "not_supported";
+
 
 /** Maps stable helper error codes to safe actions without exposing provider internals. */
 export function errorRecoveryCategory(code: string): ErrorRecoveryCategory {
@@ -152,6 +154,14 @@ export interface NotetakerSettings {
   consentDisclosureAcknowledged: boolean;
   /** Show the floating notes widget on Google Meet calls. */
   showMeetWidget: boolean;
+  /** Try to start notes automatically when a Google Meet call tab is joined. */
+  autoRecordOnMeetJoin: boolean;
+  /** Show a one-tap-copy attendee disclosure notice while recording a Meet call. */
+  meetDisclosureNotice: boolean;
+  /** Automatically create an expiring share link for finished notes (Hosted AI or connected webapp). */
+  autoShareNotesWithAttendees: boolean;
+  /** Open the notes in a new tab as soon as they are ready, not just notify. */
+  openNotesWhenReady: boolean;
   /** Notify shortly before a calendar event with a Google Meet link starts. */
   calendarReminders: boolean;
   calendar: CalendarConnection | null;
@@ -171,6 +181,10 @@ export const DEFAULT_SETTINGS: NotetakerSettings = {
   onboardingComplete: false,
   consentDisclosureAcknowledged: false,
   showMeetWidget: true,
+  autoRecordOnMeetJoin: true,
+  meetDisclosureNotice: false,
+  autoShareNotesWithAttendees: false,
+  openNotesWhenReady: true,
   calendarReminders: true,
   calendar: null,
   drive: null,
@@ -206,6 +220,8 @@ export interface TranscriptSegment {
   isFinal: boolean;
   /** Absent on segments recorded before this field existed. */
   utteranceId?: number;
+  /** Milliseconds since the call started, when available from browser capture. */
+  offsetMs?: number;
 }
 
 export interface ActionItem {
@@ -236,6 +252,7 @@ export interface MeetingRecord {
   actionItems: ActionItem[];
   mode?: MeetingMode;
   status: "recording" | "processing" | "complete" | "error";
+  liveTranscriptStatus?: LiveTranscriptStatus;
   errorMessage?: string;
   attendees?: string[];
   bookmarks?: Bookmark[];
@@ -245,10 +262,17 @@ export interface MeetingRecord {
   processingMode?: ProcessingMode;
   consentAcknowledged?: boolean;
   captureChannels?: CaptureChannelMetadata[];
+  /** Attendee share link auto-created for this meeting (auto-share setting). */
+  attendeeShare?: {
+    shareUrl: string;
+    expiresAt: string;
+    createdAt: string;
+  };
   managedProcessing?: {
     uploadId?: string;
     jobId?: string;
-    status: "not_started" | "uploading" | "queued" | "processing" | "complete" | "error";
+    /** Statuses the hosted API may add later are stored verbatim; consumers map unknown ones to "processing". */
+    status: "not_started" | "uploading" | "queued" | "processing" | "complete" | "error" | (string & {});
     errorMessage?: string;
   };
 }
@@ -318,7 +342,7 @@ export type IncomingMessage =
     }
   | { type: "audio_probe_result"; micFrames: number; speakerFrames: number; passed: boolean; message: string }
   | { type: "capture_capabilities"; capabilities: CaptureCapabilities }
-  | { type: "managed_job_status"; meetingId: string; jobId: string; status: "queued" | "processing" | "complete" | "error"; message?: string; summary?: string; actionItems?: ActionItem[] };
+  | { type: "managed_job_status"; meetingId: string; jobId: string; status: "queued" | "processing" | "complete" | "error" | (string & {}); message?: string; summary?: string; actionItems?: ActionItem[] };
 
 export function isIncomingMessage(value: unknown): value is IncomingMessage {
   if (typeof value !== "object" || value === null) return false;
@@ -387,8 +411,14 @@ export function isIncomingMessage(value: unknown): value is IncomingMessage {
         typeof value.guidance === "string";
     }
     case "managed_job_status":
+      // The helper sends an empty jobId only on the upload-failure path
+      // (status "error") — every other status must identify a real job.
+      // Accept any non-empty status string: a hosted API that adds a new
+      // intermediate state must not have its transitions silently dropped
+      // (the controller maps unknown statuses to "processing"), while an
+      // empty status is never meaningful on this message.
       return hasNonEmptyString("meetingId") && (message.status === "error" ? isString("jobId") : hasNonEmptyString("jobId")) &&
-        (message.status === "queued" || message.status === "processing" || message.status === "complete" || message.status === "error") &&
+        hasNonEmptyString("status") &&
         (message.message === undefined || isString("message")) &&
         (message.summary === undefined || isString("summary")) &&
         (message.actionItems === undefined || (Array.isArray(message.actionItems) && message.actionItems.length <= 1_000 && message.actionItems.every(isActionItem)));

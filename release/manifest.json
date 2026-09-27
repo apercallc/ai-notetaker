@@ -21,8 +21,8 @@
       "updateCommand": "brew upgrade --cask ai-notetaker"
     },
     "winget": {
-      "installCommand": "winget install AI-Notetaker",
-      "updateCommand": "winget upgrade AI-Notetaker"
+      "installCommand": "winget install --id AI.Notetaker --exact",
+      "updateCommand": "winget upgrade --id AI.Notetaker --exact"
     },
     "chocolatey": {
       "installCommand": "choco install ai-notetaker",

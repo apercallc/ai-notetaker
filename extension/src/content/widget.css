@@ -169,6 +169,11 @@
   color: #fff;
 }
 
+.btn.danger.armed {
+  outline: 2px solid var(--text, currentColor);
+  outline-offset: 2px;
+}
+
 .icon-btn.stop.armed {
   width: auto;
   padding: 0 12px;

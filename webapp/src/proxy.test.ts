@@ -13,10 +13,14 @@ function request(path: string, init: { method?: string; headers?: HeadersInit; b
 }
 
 describe("managed API proxy boundaries", () => {
+  const originalManagedHosting = process.env.MANAGED_HOSTING;
+
   beforeEach(() => {
     getSessionUser.mockReset();
     delete process.env.MANAGED_WORKER_TOKEN;
     delete process.env.MANAGED_EXTENSION_ORIGIN;
+    if (originalManagedHosting === undefined) delete process.env.MANAGED_HOSTING;
+    else process.env.MANAGED_HOSTING = originalManagedHosting;
   });
 
   it("allows managed login to reach the public login handler", async () => {
@@ -58,5 +62,34 @@ describe("managed API proxy boundaries", () => {
     const response = await proxy(request("/api/v1/jobs/next", { method: "POST", headers: { "x-worker-token": "worker-secret" } }));
     expect(response.status).toBe(200);
     expect(getSessionUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("legacy AUTH_TOKEN ingest availability", () => {
+  beforeEach(() => {
+    delete process.env.LEGACY_INGEST_ENABLED;
+  });
+
+  it("keeps the legacy ingest API available on self-hosted deployments", async () => {
+    delete process.env.MANAGED_HOSTING;
+    const response = await proxy(request("/api/meetings", { method: "GET" }));
+    expect(response.status).toBe(401);
+  });
+
+  it("returns not found for the legacy ingest API in managed mode", async () => {
+    process.env.MANAGED_HOSTING = "true";
+    const response = await proxy(request("/api/meetings", { method: "GET", headers: { authorization: "Bearer anything", "x-request-id": "proxy-legacy-off" } }));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "not found", requestId: "proxy-legacy-off" });
+
+    const detail = await proxy(request("/api/meetings/some-id", { method: "DELETE" }));
+    expect(detail.status).toBe(404);
+  });
+
+  it("lets an operator opt back into the legacy ingest API in managed mode", async () => {
+    process.env.MANAGED_HOSTING = "true";
+    process.env.LEGACY_INGEST_ENABLED = "true";
+    const response = await proxy(request("/api/meetings", { method: "GET" }));
+    expect(response.status).toBe(401);
   });
 });

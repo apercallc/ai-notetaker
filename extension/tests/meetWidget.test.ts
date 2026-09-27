@@ -9,6 +9,7 @@ const NOW = Date.parse("2026-09-24T12:00:00.000Z");
 function baseState(overrides: Partial<WidgetState> = {}): WidgetState {
   return {
     helperStatus: "connected",
+    processingKind: "local_byok",
     onboardingComplete: true,
     consentAcknowledged: true,
     widgetEnabled: true,
@@ -16,6 +17,7 @@ function baseState(overrides: Partial<WidgetState> = {}): WidgetState {
     callTitle: null,
     position: null,
     defaultMeetingMode: "general",
+  disclosureNoticeEnabled: false,
     active: null,
     latest: null,
     ...overrides,
@@ -225,7 +227,7 @@ describe("MeetWidget: starting a recording", () => {
     expect($(".toast")?.textContent).toBe("Recording started. Let everyone know.");
   });
 
-  it("tells the user how to give Chrome the one click it needs, and offers the shortcut when one is set", async () => {
+  it("gives a one-step Chrome instruction without offering a retry that cannot work", async () => {
     harness = await createHarness();
     const { $, click, respond, widget } = harness;
     respond("START_RECORDING", () => {
@@ -237,11 +239,11 @@ describe("MeetWidget: starting a recording", () => {
     await click("#start");
 
     expect($(".nt")?.dataset.view).toBe("error");
-    expect($(".note.error")?.textContent).toContain("Click the Notetaker icon in the Chrome toolbar");
-    expect(Array.from($(".note.error")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["Alt", "Shift", "R"]);
-    respond("START_RECORDING", () => ({ meetingId: "" }));
-    await click("#retry");
-    expect(harness.sent.filter((message) => message.type === "START_RECORDING")).toHaveLength(2);
+    expect($("h2")?.textContent).toBe("One Chrome step");
+    expect($(".note.warning")?.textContent).toContain("Click it once; recording will start automatically.");
+    expect(Array.from($(".note.warning")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["Alt", "Shift", "R"]);
+    expect($("#retry")).toBeNull();
+    expect($("#dismiss")?.textContent).toBe("Got it");
   });
 
   it("does not promise a shortcut Chrome never assigned", async () => {
@@ -254,21 +256,21 @@ describe("MeetWidget: starting a recording", () => {
     await click("#toggle");
     await click("#start");
 
-    expect($(".note.error kbd")).toBeNull();
-    expect($(".note.error")?.textContent).not.toMatch(/Or press/);
+    expect($(".note.warning kbd")).toBeNull();
+    expect($(".note.warning")?.textContent).not.toMatch(/Or press/);
   });
 
   it("shows macOS-style bindings as individual keycaps", async () => {
     harness = await createHarness(baseState({ shortcuts: { toggle: "⌥⇧R", bookmark: "⌥⇧B" } }));
     await harness.click("#toggle");
     expect(Array.from(harness.$(".panel .keys")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["⌥", "⇧", "R"]);
-    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start taking notes (⌥⇧R)");
+    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start notes (⌥⇧R)");
   });
 
   it("offers to set a shortcut when none is assigned", async () => {
     harness = await createHarness(baseState({ shortcuts: { toggle: "", bookmark: "" } }));
     await harness.click("#toggle");
-    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start taking notes");
+    expect(harness.$("#pill-start")?.getAttribute("title")).toBe("Start notes");
     await harness.click("#set-shortcut");
     expect(harness.sent).toContainEqual({ type: "OPEN_PAGE", page: "shortcuts" });
   });
@@ -354,7 +356,15 @@ describe("MeetWidget: recording", () => {
     expect($(".pill-main")?.textContent).toContain("Recording");
     expect($("#elapsed")?.textContent).toBe("02:00");
     expect($("#pill-bookmark")?.getAttribute("aria-label")).toBe("Flag this moment");
-    expect($("#pill-stop")?.getAttribute("aria-label")).toMatch(/Stop recording/);
+    expect($("#pill-stop")?.getAttribute("aria-label")).toBe("Stop notes");
+  });
+
+  it("shows the live transcript connection state without promising unavailable captions", async () => {
+    harness = await recording({ liveTranscriptStatus: "connecting" });
+    expect(harness.$("#transcript .empty")?.textContent).toBe("Connecting to live transcript…");
+    harness.setState(baseState({ active: activeMeeting({ liveTranscriptStatus: "unavailable" }) }));
+    await harness.widget.refresh();
+    expect(harness.$("#transcript .empty")?.textContent).toBe("Live transcript unavailable. Your full transcript will be ready after you stop recording.");
   });
 
   it("renders the live transcript from state and upserts provisional lines in place", async () => {
@@ -464,7 +474,7 @@ describe("MeetWidget: recording", () => {
 
     await harness.click("#pill-stop");
     expect(harness.sent.some((message) => message.type === "STOP_RECORDING")).toBe(false);
-    expect(harness.$("#pill-stop")?.textContent).toBe("Stop?");
+    expect(harness.$("#pill-stop")?.textContent).toBe("Stop notes?");
     await harness.click("#pill-stop");
 
     expect(harness.sent).toContainEqual({ type: "STOP_RECORDING", meetingId: "m1" });
@@ -659,9 +669,12 @@ describe("MeetWidget: edge cases and resilience", () => {
     expect(harness.$("#helper-note")).toBeNull();
   });
 
-  it("stops from the panel button too", async () => {
+  it("stops from the panel button too, after the same two-press confirm", async () => {
     harness = await createHarness(baseState({ active: activeMeeting() }));
     await harness.click("#toggle");
+    await harness.click("#stop");
+    expect(harness.sent.some((message) => message.type === "STOP_RECORDING")).toBe(false);
+    expect(harness.$("#stop")?.textContent).toBe("Stop notes?");
     await harness.click("#stop");
     expect(harness.sent).toContainEqual({ type: "STOP_RECORDING", meetingId: "m1" });
   });
@@ -672,6 +685,7 @@ describe("MeetWidget: edge cases and resilience", () => {
       throw new Error("port closed");
     });
     await harness.click("#toggle");
+    await harness.click("#stop");
     await harness.click("#stop");
     expect(harness.$(".nt")?.dataset.view).toBe("recording");
   });
@@ -804,7 +818,7 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     harness = await createHarness();
     harness.respond("START_RECORDING", () => ({ meetingId: "" }));
 
-    expect(harness.$("#pill-start")?.textContent).toBe("Start");
+    expect(harness.$("#pill-start")?.textContent).toBe("Start notes");
     await harness.click("#pill-start");
     expect(harness.sent).toContainEqual(expect.objectContaining({ type: "START_RECORDING", captureSource: "meet" }));
   });
@@ -833,7 +847,7 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     harness.$<HTMLButtonElement>("#start")!.click();
     await harness.flush();
 
-    expect(harness.$(".panel")?.textContent).toMatch(/sent to your own transcription provider/);
+    expect(harness.$(".panel")?.textContent).toMatch(/sent to your transcription and summary providers, using your own API keys/);
     release?.();
     await harness.flush();
   });

@@ -4,31 +4,51 @@
  * so it is requested here, on a normal tab, and stays granted afterwards.
  */
 import { escapeHtml } from "../lib/html";
+import { requestMicrophone, type MicOutcome } from "./micPermission";
 
 const app = document.getElementById("app")!;
 
-type Outcome = "granted" | "blocked" | "no-device";
+/** The Meet tab that sent the person here, when they came from the in-call widget. */
+function returnTabId(): number | null {
+  const value = new URLSearchParams(window.location.search).get("returnTo");
+  const id = value === null ? NaN : Number(value);
+  return Number.isInteger(id) && id >= 0 ? id : null;
+}
 
-export async function requestMicrophone(): Promise<Outcome> {
+/**
+ * After a grant, put the person back in their call and get out of the way.
+ * Returns false (and leaves this tab open with instructions) when the call tab
+ * is gone or Chrome will not switch to it.
+ */
+export async function returnToCall(): Promise<boolean> {
+  const tabId = returnTabId();
+  if (tabId === null) return false;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((track) => track.stop());
-    return "granted";
-  } catch (error) {
-    return error instanceof DOMException && error.name === "NotFoundError" ? "no-device" : "blocked";
+    const tab = await chrome.tabs.update(tabId, { active: true });
+    if (typeof tab?.windowId === "number") await chrome.windows?.update(tab.windowId, { focused: true });
+    const current = await chrome.tabs.getCurrent();
+    if (typeof current?.id !== "number") return false;
+    await chrome.tabs.remove(current.id);
+    return true;
+  } catch {
+    return false;
   }
 }
+
+type Outcome = MicOutcome;
+
+export { requestMicrophone };
 
 function render(outcome: Outcome | "asking"): void {
   const copy = {
     asking: {
       title: "Allow your microphone",
-      body: "Chrome is asking for permission. Choose <strong>Allow</strong> so Notetaker can hear you in Google Meet. Audio is saved on this device and sent only to the transcription provider you chose.",
+      body: "Chrome is asking for permission. Choose <strong>Allow</strong> so Notetaker can hear you in Google Meet. Your microphone is only used while you are taking notes.",
       action: false,
     },
     granted: {
       title: "Microphone allowed",
-      body: "You're set. Close this tab, go back to your Meet call, and start taking notes. You won't be asked again.",
+      body: "You're set. Close this tab, go back to your Meet call, and start notes. You won't be asked again.",
       action: false,
     },
     blocked: {
@@ -53,7 +73,9 @@ function render(outcome: Outcome | "asking"): void {
 
 async function run(): Promise<void> {
   render("asking");
-  render(await requestMicrophone());
+  const outcome = await requestMicrophone();
+  render(outcome);
+  if (outcome === "granted") await returnToCall();
 }
 
 void run();

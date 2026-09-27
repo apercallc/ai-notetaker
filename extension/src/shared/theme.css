@@ -25,7 +25,11 @@
      value with white text on it (solid buttons), since contrast is
      symmetric between a color pair. */
   --color-recording: #c62828;
-  --color-success: #34c759;
+  /* Success is used as TEXT on the page and elevated backgrounds, so it is the
+     AA-passing green (#1a7f37 is ~5.1:1 on white, ~4.7:1 on --color-bg-elevated).
+     Apple's systemGreen (#34c759) is only ~2.2:1 on white. */
+  --color-success: #1a7f37;
+  --color-success-text: var(--color-success);
   --color-danger: #c62828;
   /* A separate token for solid/filled buttons: needs white text on it to
      clear 4.5:1 in its own right, not just be legible as plain text on the
@@ -62,7 +66,10 @@
        specifically so white text on it clears 4.5:1 too. */
     --color-recording: #ff453a;
     --color-success: #30d158;
-    --color-danger: #ff453a;
+    --color-success-text: var(--color-success);
+    /* Lighter than --color-recording: as small error text on the elevated
+       surface #ff453a is only ~4.1:1; #ff6961 clears 4.5:1 there too. */
+    --color-danger: #ff6961;
     --color-danger-solid: #8b1a1a;
     --color-warning: #ffa426;
   }
@@ -231,4 +238,92 @@ textarea::placeholder {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Shared status, hint, callout and toggle primitives (settings, meeting,
+ * actions, onboarding and popup all use these). Status is never conveyed by
+ * color alone: valid/invalid/error carry a leading glyph, and the CSS
+ * alt-text (after the slash) gives screen readers the word.
+ * ------------------------------------------------------------------------- */
+.field-hint {
+  font-size: 0.75rem;
+  margin-top: var(--space-1);
+}
+
+.test-result {
+  font-size: 0.75rem;
+  margin-top: var(--space-1);
+}
+
+.text-success,
+.test-result.valid {
+  color: var(--color-success-text);
+}
+
+.text-warning {
+  color: var(--color-warning);
+}
+
+.text-warning.with-icon::before {
+  content: "\26A0\00a0";
+  content: "\26A0\00a0" / "Warning: ";
+}
+
+.text-danger,
+.test-result.invalid {
+  color: var(--color-danger);
+}
+
+.test-result.valid:not(:empty)::before {
+  content: "\2713\00a0";
+  content: "\2713\00a0" / "Success: ";
+}
+
+.test-result.invalid:not(:empty)::before,
+.error-state:not(:empty)::before {
+  content: "\26A0\00a0";
+  content: "\26A0\00a0" / "Error: ";
+}
+
+.callout {
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.callout.warning {
+  border-left: 3px solid var(--color-warning);
+}
+
+.callout > :first-child {
+  margin-top: 0;
+}
+
+.callout > :last-child {
+  margin-bottom: 0;
+}
+
+.tier-toggle {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.tier-toggle button {
+  flex: 1;
+}
+
+.tier-toggle button.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+/* An error that replaces or interrupts a page region: centered like an empty
+   state, danger-colored, and prefixed with a glyph (see above). */
+.error-state {
+  color: var(--color-danger);
+  text-align: center;
+  padding: var(--space-4) var(--space-2);
 }

@@ -40,7 +40,7 @@ Native Messaging relay; they do not install the Chrome extension.
 brew install --cask ai-notetaker
 
 # Windows PowerShell
-winget install AI-Notetaker
+winget install AI.Notetaker
 # Chocolatey is also supported: choco install ai-notetaker
 ```
 
