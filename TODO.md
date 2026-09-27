@@ -104,6 +104,17 @@ Implementation plan:
 - [x] Bind durable managed Meet and desktop-helper retries to their original
       account/workspace identity; switching hosted workspaces fails closed
       instead of moving an old recording into the new tenant.
+- [x] Add optional live transcript for extension-owned Meet recordings using
+      the user's local Deepgram key: mic and speaker remain separate, and each
+      audio chunk is persisted locally before it is sent over the streaming
+      connection. Transcript updates are stored locally; provider failure does
+      not stop capture.
+- [x] Explain the one-click Chrome capture gate accurately in onboarding and
+      the in-call widget; if Chrome blocks auto-start, one toolbar click hands
+      the pending recording directly to capture without a second Start action.
+- [ ] Enable live transcription for Hosted AI only after adding server-owned
+      real-time usage reservation/metering and a verified short-lived Deepgram
+      token flow; other providers continue to create transcripts after stop.
 - [ ] Complete real Chrome/Meet, provider, deployment, storage, and billing
       acceptance evidence before advertising hosted mode.
 
@@ -119,11 +130,12 @@ decided yet.
       Today onboarding treats both modes as equals and Hosted needs a
       user-entered service URL. Requires the trial/quota policy from the design
       spec (section 6) to be affordable first.
-- [ ] (b) Create a project-owned Google OAuth client for Calendar and Drive
-      through `chrome.identity`, replacing the current requirement that every
-      user create their own Google Cloud OAuth client. Needs Google consent
-      screen verification for the sensitive scopes; keep the user-owned client
-      path as an advanced option.
+- [x] Implement a project-owned **server** Google OAuth client for Calendar and
+      Drive: per-user encrypted-at-rest connections, CSRF state + PKCE callback,
+      authenticated extension endpoints, and account connect/disconnect controls.
+      Google consent-screen verification plus a live credential/configuration
+      test remain release-owner work; legacy extension BYOK setup remains a
+      separate compatibility path until it is explicitly removed.
 - [ ] (c) Move `nativeMessaging`, `identity`, `alarms`, and the five AI provider
       host permissions (Deepgram, Anthropic, Groq, Gemini, DeepSeek) to
       optional permissions requested when the feature is first used, so the
@@ -168,6 +180,18 @@ reintroducing its old assumptions.
 
 ## Quality, error handling, and open-source operations (2026-09-21)
 
+- [x] Sentry error handling (2026-09-25): webapp server (`instrumentation-server.ts`
+      + `lib/observability.ts` capture on API 500s, Stripe webhook, managed job
+      runs), client (`instrumentation-client.ts` + error boundaries, CSP
+      connect-src extended only when a DSN is configured), and the managed
+      worker script — all strictly DSN-gated so self-hosted builds have zero
+      telemetry. Extension Hosted-AI mode reports bounded, deduplicated error
+      records to a new authenticated, rate-limited
+      `/api/v1/client-errors` endpoint; local BYOK never reports. Releases tag
+      from `RAILWAY_GIT_COMMIT_SHA`. The helper intentionally stays
+      local-logs-only (privacy boundary, documented in `docs/data-handling.md`).
+      Live Sentry DSN configuration on the managed deployment remains
+      release-owner work.
 - [x] Add reproducible coverage commands and CI artifacts for every surface;
       the current deterministic gates report 96.20% extension lines and
       93.63% webapp lines, with 152 Rust tests, 382 extension tests, and 151
@@ -855,6 +879,66 @@ them without changing `CLAUDE.md` and the design spec first.
 - Supported Firefox, Edge, or Brave builds, including Mozilla AMO signing and
   Edge Add-ons listings.
 - Cellular/PSTN call interception and DRM/protected audio: not promised.
+
+## Pre-production audit (2026-09-25) — deferred items
+
+Meet automation settings (2026-09-25), all in Settings → Shortcuts and Meet
+widget. Auto-record is on by default (but still requires onboarding and
+recording-consent acknowledgement); attendee disclosure and auto-share are off;
+open-notes is on:
+
+- [x] Auto-record on joining a Google Meet call (`autoRecordOnMeetJoin`, on).
+      A tab landing on a call URL attempts a silent start; Chrome's invocation
+      gate on a first join saves the intent so the first toolbar click starts
+      recording on that single click. URL-based join detection only, one
+      attempt per call, re-armed when a tab joins a different call.
+- [x] Chrome's first-use `activeTab` gate now shows a brief, non-error
+      "One Chrome step" message in the in-call widget. It tells the user that
+      the toolbar click/assigned shortcut starts the pending recording; the
+      widget no longer offers a futile retry. Chrome still requires this
+      invocation and it cannot be bypassed by an extension.
+- [x] One-tap attendee disclosure notice (`meetDisclosureNotice`, off): while
+      recording, the widget shows a Copy button with a short chat-ready
+      notice. The user pastes and sends it themselves — Meet's DOM is never
+      scraped or driven. Added the `clipboardWrite` permission.
+- [x] Auto-share notes with attendees (`autoShareNotesWithAttendees`, off,
+      Hosted AI only): after notes complete, the extension creates an
+      expiring share link via a new authenticated workspace-scoped
+      `POST /api/v1/meetings/{id}/share` route and shows it on the notes
+      page. Nobody receives the link unless the user sends it.
+- [x] Open notes when ready (`openNotesWhenReady`, ON): the notes tab opens
+      automatically when notes complete (Meet and desktop paths); the
+      notification is skipped in that mode and remains the off-mode fallback.
+- [ ] Live browser-side transcription during Meet calls: the widget already
+      shows the live transcript when the desktop helper streams it, but
+      extension-owned Meet capture still transcribes only after stop. In-call
+      streaming Deepgram for the browser path remains open work.
+
+Fixed in this pass (see commits ca6aea1 helper, 1e9a3fa extension, 9abc589
+webapp): pairing hardening + tray re-pair flow, IPC subscriber-leak pruning,
+StopRecording/stop-pipeline non-blocking, retry-worker cap + backoff,
+cross-tenant upsertMeeting TOCTOU, checkout double-billing mutex, cookie
+Secure flag, managed Meet upload streaming (~700MB → bounded), recording_stopped
+listener, Meet capture state persistence + tab-close finalization, Gemini
+query-param key leak, recover even-byte clamp, empty-summary retry.
+
+Consciously deferred (why):
+
+- [ ] Extension `listMeetings` search loads full meeting records (summaries
+      included) to match a query, while popup/history only needs the list
+      view. Fixing this means splitting transcripts/summaries into separate
+      storage keys or adding a lightweight index — a storage schema
+      migration with a data-move path, too risky to land pre-launch.
+      Revisit with the planned history indexing work.
+- [ ] Webapp Dockerfile keeps `prisma` CLI in production dependencies:
+      `scripts/docker-entrypoint.mjs` runs `npx prisma migrate deploy` at
+      container start, so the CLI must ship. Revisit only if entrypoint
+      switches to a build-time migration step or a standalone engine.
+- [ ] Helper `stop_capture_only` (pipeline.rs) drops mic/speaker streaming
+      sessions without `close()` — audit lead from the delegation sweep,
+      not re-verified against the current code after the pipeline rework;
+      sessions drop when the process exits, but an explicit close would
+      flush provider buffers cleanly. Verify on the next pipeline pass.
 
 ---
 

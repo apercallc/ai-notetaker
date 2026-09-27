@@ -167,6 +167,8 @@ fn try_initialize<R: Runtime>(
     let open_folder =
         MenuItem::with_id(app, "open-folder", "Open Notes Folder", true, None::<&str>)?;
     let open_logs = MenuItem::with_id(app, "open-logs", "Open Logs", true, None::<&str>)?;
+    let pair_browser =
+        MenuItem::with_id(app, "pair-browser", "Pair New Browser…", true, None::<&str>)?;
     let launch_at_login = MenuItem::with_id(
         app,
         "launch-at-login",
@@ -191,6 +193,7 @@ fn try_initialize<R: Runtime>(
             &open_latest,
             &open_folder,
             &open_logs,
+            &pair_browser,
             &launch_at_login,
             &quit,
         ],
@@ -210,6 +213,31 @@ fn try_initialize<R: Runtime>(
             }
             "open-logs" => {
                 let _ = open_with_default_app(&logs_dir);
+            }
+            "pair-browser" => {
+                // User-gesture re-pairing. The IPC layer cannot tell a fresh
+                // Chrome profile that lost its token copy from a rogue
+                // same-user process minting one, so reissue is only allowed
+                // after this explicit menu action deletes the token file
+                // (see `should_issue_pairing_token`). Deleting the file here
+                // means the next hello takes the first-ever-pairing branch
+                // and auto-mints a fresh token; the extension's reconnect
+                // loop picks it up on its own.
+                let path = crate::pairing_token_path(&data_dir);
+                match std::fs::remove_file(&path) {
+                    Ok(()) => tracing::info!(?path, "pairing token cleared for re-pairing"),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        // No token existed — the next hello auto-pairs anyway.
+                    }
+                    Err(error) => {
+                        tracing::warn!(?path, %error, "could not clear pairing token");
+                        crate::notify::Notifier::default().notify_deduped(
+                            "pairing-reset-failed",
+                            "AI Notetaker",
+                            "Could not reset browser pairing. Check the logs.",
+                        );
+                    }
+                }
             }
             "launch-at-login" => toggle_autostart(app, &launch_at_login),
             "quit" => app.exit(0),
@@ -280,8 +308,17 @@ fn open_with_default_app(path: &Path) -> std::io::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
+        // `cmd /C start` does not follow MSVC argument-quoting rules, so
+        // std's automatic per-arg escaping (used by `args`) is wrong here:
+        // a path containing spaces or cmd metacharacters (& ^ %) breaks the
+        // start line. raw_arg hands cmd the exact line we built, with the
+        // path explicitly quoted; the leading "" is start's title slot.
+        use std::os::windows::process::CommandExt;
         Command::new("cmd")
-            .args(["/C", "start", "", &path.to_string_lossy()])
+            .raw_arg(format!(
+                "/C start \"\" \"{}\"",
+                path.to_string_lossy().replace('"', "")
+            ))
             .spawn()?;
     }
     Ok(())

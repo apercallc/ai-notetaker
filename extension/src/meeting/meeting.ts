@@ -107,6 +107,9 @@ async function render(focusActionId?: string): Promise<void> {
   app.innerHTML = `
     <div class="title-row" id="title-row">${titleRowHtml(title)}</div>
     <p class="meeting-meta text-secondary">${new Date(meeting.startedAt).toLocaleString()}</p>
+    ${meeting.attendeeShare
+      ? `<p class="drive-export-status" role="status">Attendee share link (expires ${escapeHtml(new Date(meeting.attendeeShare.expiresAt).toLocaleDateString())}): <a href="${escapeHtml(meeting.attendeeShare.shareUrl)}" target="_blank" rel="noreferrer">${escapeHtml(meeting.attendeeShare.shareUrl)}</a></p>`
+      : ""}
     ${meeting.driveExport?.status === "exported"
       ? `<p class="drive-export-status text-success" role="status">Saved to <a href="${safeDriveLink(meeting.driveExport.webViewLink)}" target="_blank" rel="noreferrer">Google Drive</a>.</p>`
       : meeting.driveExport?.status === "pending"

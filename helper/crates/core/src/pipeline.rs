@@ -103,7 +103,7 @@ impl Pipeline {
         &mut self,
         meeting_id: Uuid,
     ) -> Result<HelperToExtension, PipelineError> {
-        self.store.create_meeting_with_options(
+        self.store.create_or_resume_meeting_with_options(
             meeting_id,
             Utc::now(),
             self.summary_options.mode,
@@ -278,6 +278,8 @@ impl Pipeline {
             ),
         };
 
+        let mut messages = Vec::new();
+
         if session.is_none() || session.as_ref().is_some_and(|s| s.is_closed()) {
             *session = None;
             gap_start.get_or_insert(existing_len);
@@ -294,9 +296,42 @@ impl Pipeline {
                     return vec![];
                 }
             }
+        } else if session
+            .as_ref()
+            .is_some_and(|s| s.sample_rate_hz() != 0 && s.sample_rate_hz() != sample_rate_hz)
+        {
+            // A mid-call device switch can change the sample rate (44.1k ↔
+            // 48k). An open session negotiated for the old rate would
+            // transcribe every following frame as garbage, so close it and
+            // reopen at the new rate. Audio is durable on disk; closing
+            // only ends the live stream, and the gap is backfilled below.
+            if let Some(mut old) = session.take() {
+                let trailing = old.close().await;
+                for (segment, utterance_id) in trailing {
+                    if segment.is_final {
+                        let _ = self
+                            .store
+                            .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
+                    }
+                    messages.push(HelperToExtension::TranscriptPartial {
+                        meeting_id,
+                        speaker: segment.speaker,
+                        text: segment.text,
+                        is_final: segment.is_final,
+                        utterance_id,
+                    });
+                }
+            }
+            gap_start.get_or_insert(existing_len);
+            match self
+                .transcription_provider
+                .open_streaming_session(channel, sample_rate_hz)
+                .await
+            {
+                Ok(new_session) => *session = Some(new_session),
+                Err(_) => return messages,
+            }
         }
-
-        let mut messages = Vec::new();
 
         let gap_start = match channel {
             AudioChannel::Mic => &mut self.mic_stream_gap_start,
@@ -588,7 +623,15 @@ impl Pipeline {
                 .saturating_mul(TRANSCRIPTION_BATCH_SECONDS);
             let mut offset = start;
             while offset < end {
-                let batch_end = (offset + batch_size.max(2)).min(end);
+                // Clamp the batch end to an even byte boundary: PCM16 samples
+                // are two bytes, and a crash can leave the final write short by
+                // one. Feeding an odd-length slice would hand the provider a
+                // misaligned final sample (garbage audio) — a trailing byte is
+                // not worth transcribing and is simply dropped.
+                let batch_end = (offset + batch_size.max(2)).min(end & !1usize);
+                if batch_end <= offset {
+                    break;
+                }
                 let pcm16 =
                     self.store
                         .read_audio_range(meeting_id, channel_file, offset, batch_end)?;

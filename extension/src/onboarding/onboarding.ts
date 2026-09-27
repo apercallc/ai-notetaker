@@ -6,6 +6,7 @@ import { detectInstallPlatform, getInstallPageUrl, type InstallPlatform } from "
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
 import { loginManaged, managedSignupUrl } from "../lib/managedClient";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
+import { MEET_AUTO_RECORD_GUIDANCE } from "../lib/autoRecord";
 import { microphoneAlreadyAllowed, requestMicrophone, type MicOutcome } from "../meet/micPermission";
 
 /**
@@ -96,6 +97,7 @@ function helperStatusCopy(): string {
     return `This helper (v${helperInfo?.helperVersion ?? "unknown"}) is incompatible. Install the current version.`;
   }
   if (helperStatus === "helper_not_found") return "Desktop helper not detected yet. Install it, launch it, then check again.";
+  if (helperStatus === "needs_pairing") return "The helper is paired with a different browser. Open the helper's tray menu and choose 'Pair New Browser', then check again.";
   if (helperStatus === "disconnected") return "Desktop helper is not responding. Launch it, then check again.";
   return "Checking for the desktop helper…";
 }
@@ -323,12 +325,18 @@ function renderSetupStep(): string {
 
 function renderDoneStep(): string {
   const keys = toggleShortcut ? shortcutKeys(toggleShortcut).map((key) => `<kbd>${escapeHtml(key)}</kbd>`).join("") : "";
-  const startLine = keys
-    ? `In a call, press ${keys} or click the toolbar icon to start notes.`
-    : "In a call, click the Notetaker toolbar icon to start notes.";
+  const startLine = settings.autoRecordOnMeetJoin
+    ? MEET_AUTO_RECORD_GUIDANCE
+    : keys
+      ? `In a call, press ${keys} or click the toolbar icon to start notes.`
+      : "In a call, click the Notetaker toolbar icon to start notes.";
+  const transcriptLine = settings.processingMode.kind === "local_byok" && settings.transcriptionProvider === "deepgram"
+    ? "With your Deepgram key, the transcript appears live when the connection is available; otherwise it is ready after you stop."
+    : "Your full transcript is ready after you stop recording.";
   return `
     <h1 tabindex="-1" data-view-heading>You're all set</h1>
     <p>${startLine}</p>
+    <p class="text-secondary">${transcriptLine}</p>
     <p class="text-secondary">Tip: pin Notetaker from Chrome's puzzle-piece menu so the icon is always one click away. Your notes are written when you stop, and Chrome shows a notification when they are ready.</p>
     ${desktop ? `<p class="text-secondary">For Zoom, Teams, or Slack, click the toolbar icon during your call and choose Start notes.</p>` : ""}
     <p><button type="button" class="primary" id="open-meet">Open Google Meet</button></p>
@@ -373,6 +381,23 @@ function readOnboardingProviderFields(): { transcription: ProviderKind; summariz
 function resetKeyTest(): void {
   providerTestsPassed = false;
   keyResult = null;
+}
+
+/**
+ * Typed keys used to live only in the DOM until "Finish setup" — abandoning
+ * the tab lost them. Persist debounced, straight into chrome.storage.local
+ * (via the background, which also pushes them to the helper when one is
+ * connected). Saving here does NOT mark onboarding complete, so returning
+ * to setup resumes with the keys intact and the finish gate unchanged.
+ */
+let keyAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleKeyAutosave(): void {
+  if (keyAutosaveTimer !== null) clearTimeout(keyAutosaveTimer);
+  keyAutosaveTimer = setTimeout(() => {
+    keyAutosaveTimer = null;
+    readOnboardingProviderFields();
+    chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings }).catch(() => undefined);
+  }, 800);
 }
 
 // ---------- rendering ----------
@@ -454,11 +479,11 @@ async function runKeyTest(): Promise<boolean> {
     resultEl.className = "result";
   }
   try {
-    // Meet keys are checked straight from the extension; desktop-call keys by the helper that will use them.
-    const options = { desktop };
+    // Keys are checked straight from the extension for both capture paths; a
+    // missing helper can no longer block this test.
     const [transcriptionResult, summarizationResult] = await Promise.all([
-      testApiKey(providers.transcription, providers.transcriptionKey, options),
-      testApiKey(providers.summarization, providers.summarizationKey, options),
+      testApiKey(providers.transcription, providers.transcriptionKey),
+      testApiKey(providers.summarization, providers.summarizationKey),
     ]);
     const bothValid = transcriptionResult.valid && summarizationResult.valid;
     providerTestsPassed = bothValid;
@@ -466,7 +491,7 @@ async function runKeyTest(): Promise<boolean> {
     return bothValid;
   } catch {
     providerTestsPassed = false;
-    show(false, desktop ? "The desktop helper could not test the keys. Check that it is running and try again." : "The keys could not be tested. Check your connection and try again.");
+    show(false, "The keys could not be tested. Check your connection and try again.");
     return false;
   } finally {
     if (button) button.disabled = false;
@@ -772,6 +797,7 @@ function wireEvents(): void {
         resultEl.textContent = "";
         resultEl.className = "result";
       }
+      scheduleKeyAutosave();
     });
   }
 

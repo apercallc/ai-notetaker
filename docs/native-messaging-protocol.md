@@ -121,9 +121,10 @@ file on Unix-like systems.
 { "type": "discard_recording", "meetingId": "<uuid>" }
 { "type": "delete_meeting", "meetingId": "<uuid>" }
 
-// Settings-page "test key" button for desktop-helper processing. The
-// browser-owned Meet path may call its selected provider directly after local
-// IndexedDB persistence; desktop settings remain helper-routed.
+// Helper-side "test key" — retained for the helper's tray/CLI surfaces and
+// older extension builds. The extension now validates every key directly
+// (host permissions cover the providers; the helper receives keys verbatim
+// via the settings push), so setup is never blocked by a missing helper.
 { "type": "test_provider_key", "provider": "deepgram" | "groq" | "claude" | "gemini" | "deepseek", "key": "..." }
 ```
 

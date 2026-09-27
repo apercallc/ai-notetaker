@@ -116,7 +116,12 @@ the Postgres volume and all stored meeting history.
    acceptance and operations checklist.
 5. Deploy. The start command (`railway.json`) runs pending database
    migrations automatically before starting the server — no manual
-   migration step.
+   migration step. For managed Google Calendar/Drive integration, set
+   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and a base64-encoded
+   32-byte `GOOGLE_OAUTH_ENCRYPTION_KEY` (for example, `openssl rand -base64 32`),
+   then register `https://ai-notetaker.apercallc.com/api/google/oauth/callback`
+   as the Google OAuth redirect URI. These values stay server-side; they must
+   never be added to the extension.
 6. For managed hosting, create a second Railway service from the same
    `webapp/` source and select `railway-worker.json` as its Railway config.
    Give it the same `DATABASE_URL`, `AUTH_TOKEN`, and `MANAGED_WORKER_TOKEN`,
