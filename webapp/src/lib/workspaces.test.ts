@@ -82,7 +82,13 @@ describe("managed workspace setup and selection", () => {
     const first = await createHostedWorkspaceWithOwner(" OWNER@Example.com ", "hash", "Hosted Team");
     const second = await createHostedWorkspaceWithOwner("other@example.com", "hash", "Other Team");
     const guest = await addWorkspaceMember(first.workspaceId, "guest@example.com", "hash");
-    await prisma.workspaceMembership.create({ data: { userId: guest.userId, workspaceId: second.workspaceId, role: "member" } });
+    await prisma.workspaceMembership.update({
+      where: { userId_workspaceId: { userId: guest.userId, workspaceId: first.workspaceId } },
+      data: { createdAt: new Date("2026-01-01T00:00:00.000Z") },
+    });
+    await prisma.workspaceMembership.create({
+      data: { userId: guest.userId, workspaceId: second.workspaceId, role: "member", createdAt: new Date("2026-01-02T00:00:00.000Z") },
+    });
 
     expect(await listUserWorkspaces(guest.userId)).toEqual([
       { id: first.workspaceId, name: "Hosted Team", role: "member" },
