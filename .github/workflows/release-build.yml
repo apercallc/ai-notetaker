@@ -247,19 +247,19 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: extension-${{ github.ref_name }}
           path: release-assets/extension
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: helper-ubuntu-latest-${{ github.ref_name }}
           path: release-assets/helper-ubuntu
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: helper-macos-latest-${{ github.ref_name }}
           path: release-assets/helper-macos
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: helper-windows-latest-${{ github.ref_name }}
           path: release-assets/helper-windows
