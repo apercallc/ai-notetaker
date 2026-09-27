@@ -945,7 +945,7 @@ describe("BackgroundController", () => {
   });
 });
 
-describe("BackgroundController: in-call widget support", () => {
+describe("BackgroundController: recovery and in-call widget support", () => {
   it("uses the tab-derived title hint when no calendar event names the call", async () => {
     vi.mocked(findCurrentEvent).mockResolvedValue(null);
     const controller = new BackgroundController(createFakeClient(), vi.fn());
@@ -1135,5 +1135,82 @@ describe("BackgroundController: in-call widget support", () => {
     });
     expect((await controller.getWidgetState()).active).toMatchObject({ liveTranscriptStatus: "available" });
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "TRANSCRIPT_UPDATE", meetingId, text: "Planning the launch", isFinal: false, utteranceId: 1 }));
+  });
+
+  it("fails a Meet recording durably without asking a disconnected helper to stop it", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording("general", "meet");
+    client.emitStatus("disconnected");
+
+    await controller.failRecording(meetingId, "Meet capture permission was revoked.");
+
+    expect(client.stopRecording).not.toHaveBeenCalled();
+    expect(controller.getState().activeMeeting).toBeNull();
+    expect(await getMeeting(meetingId)).toMatchObject({ status: "error", errorMessage: "Meet capture permission was revoked." });
+    expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId, message: "Meet capture permission was revoked." });
+  });
+
+  it("aborts an unstarted Meet and removes its meeting and locally saved chunks", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const clearChunks = vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording("general", "meet");
+    clearChunks.mockClear();
+
+    await controller.abortStart(meetingId, "The Meet tab closed before capture started.");
+
+    expect(client.discardRecording).toHaveBeenCalledWith(meetingId);
+    expect(clearChunks).toHaveBeenCalledWith(meetingId);
+    expect(await getMeeting(meetingId)).toBeNull();
+    expect(controller.getState().activeMeeting).toBeNull();
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", meetingId: null, phase: "start" }));
+    expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId });
+  });
+
+  it("reports capture invocation requirements and retryable Drive export setup", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+
+    controller.reportStartFailure("Capture did not start.");
+    controller.reportCaptureInvocationRequired(42);
+    await controller.retryDriveExport("missing-meeting");
+
+    expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId: null, message: "Capture did not start.", phase: "start" });
+    expect(broadcast).toHaveBeenCalledWith({ type: "CAPTURE_INVOCATION_REQUIRED", tabId: 42 });
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DRIVE_EXPORT" }));
+
+    const meetingId = await controller.startRecording();
+    await controller.retryDriveExport(meetingId);
+    expect(broadcast).toHaveBeenCalledWith({
+      type: "DRIVE_EXPORT",
+      meetingId,
+      status: "error",
+      message: "Connect Google Drive in your account before retrying the export.",
+    });
+  });
+
+  it("finalizes a helper-initiated stop and reconnects when helper status is stale", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    client.emit("recording_stopped", { meetingId });
+
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.status).toBe("processing"));
+    expect((await getMeeting(meetingId))?.endedAt).toEqual(expect.any(String));
+    expect(controller.getState().activeMeeting).toBeNull();
+    expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId });
+
+    client.emitStatus("helper_not_found");
+    await controller.checkHelper();
+    expect(client.connect).toHaveBeenCalledTimes(2);
   });
 });
