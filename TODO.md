@@ -19,6 +19,8 @@ ports) lives under "Ideas" at the bottom, not in the roadmap.
 - [x] Migrate the helper's direct `rand` use to 0.10.
 - [x] Migrate the webapp's Prisma CLI and client together to 7, including the
       PostgreSQL adapter and patched transitive dependencies.
+- [x] Refresh compatible helper, webapp, and release workflow dependencies;
+      retain CPAL 0.15 until the macOS 13 compatibility gate is resolved.
 - [ ] Revisit CPAL 0.17+ after macOS 13 support is preserved; current CoreAudio
       releases require macOS 14.2 while this app supports macOS 13.
 - [ ] Revisit webapp TypeScript 7 and ESLint 10 after `eslint-config-next`

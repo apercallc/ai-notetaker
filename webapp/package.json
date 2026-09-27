@@ -19,26 +19,27 @@
     "managed:worker": "node scripts/managed-worker.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1139.0",
+    "@aws-sdk/client-s3": "^3.1141.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@sentry/nextjs": "^11.0.0",
     "dotenv": "^18.0.4",
-    "next": "16.3.5",
+    "next": "16.3.6",
     "pg": "^8.23.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitest/coverage-v8": "^5.0.1",
-    "eslint": "^9.0.0",
-    "eslint-config-next": "16.3.5",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "@vitest/coverage-v8": "^5.0.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.3.6",
     "prisma": "^7.10.0",
-    "typescript": "^5.6.2",
-    "vitest": "^5.0.1"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^5.0.2"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.2",

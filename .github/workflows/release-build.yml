@@ -182,12 +182,12 @@ jobs:
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GitHub Container Registry
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: metadata
         with:
           images: ghcr.io/${{ github.repository_owner }}/ai-notetaker-webapp
@@ -214,11 +214,11 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
       - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: metadata
         with:
           images: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/ai-notetaker-webapp
@@ -247,19 +247,19 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: extension-${{ github.ref_name }}
           path: release-assets/extension
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: helper-ubuntu-latest-${{ github.ref_name }}
           path: release-assets/helper-ubuntu
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: helper-macos-latest-${{ github.ref_name }}
           path: release-assets/helper-macos
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: helper-windows-latest-${{ github.ref_name }}
           path: release-assets/helper-windows

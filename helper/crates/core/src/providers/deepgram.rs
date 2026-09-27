@@ -86,7 +86,7 @@ impl StreamingSession for DeepgramStreamingSession {
     async fn send_audio(&mut self, pcm16: &[u8]) -> Result<(), ProviderError> {
         if self
             .write
-            .send(WsMessage::Binary(pcm16.to_vec()))
+            .send(WsMessage::Binary(pcm16.to_vec().into()))
             .await
             .is_err()
         {
@@ -121,7 +121,7 @@ impl StreamingSession for DeepgramStreamingSession {
     async fn close(&mut self) -> Vec<(TranscriptSegment, u32)> {
         let _ = self
             .write
-            .send(WsMessage::Text(r#"{"type":"CloseStream"}"#.to_string()))
+            .send(WsMessage::Text(r#"{"type":"CloseStream"}"#.into()))
             .await;
         // Drain with a deadline instead of a blind fixed sleep: 300ms was
         // long enough to add latency to every stop yet short enough to
@@ -436,7 +436,11 @@ mod tests {
                     Err(_) => return,
                 };
                 for message in messages {
-                    if ws.send(WsMessage::Text(message.to_string())).await.is_err() {
+                    if ws
+                        .send(WsMessage::Text(message.to_string().into()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }

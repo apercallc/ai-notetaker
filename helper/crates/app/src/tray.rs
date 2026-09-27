@@ -63,7 +63,10 @@ struct TrayIcons {
 fn decode_icon(bytes: &'static [u8]) -> Result<Image<'static>, Box<dyn std::error::Error>> {
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let mut reader = decoder.read_info()?;
-    let mut rgba = vec![0; reader.output_buffer_size()];
+    let size = reader
+        .output_buffer_size()
+        .ok_or("tray icon is too large to decode")?;
+    let mut rgba = vec![0; size];
     let info = reader.next_frame(&mut rgba)?;
     Ok(Image::new_owned(rgba, info.width, info.height))
 }

@@ -93,12 +93,24 @@ pub enum ProviderError {
     BadResponse(String),
 }
 
+/// Every reqwest client must be built through this: reqwest is compiled
+/// without a bundled rustls crypto provider, so the process-wide ring
+/// provider has to be installed before the first client exists.
+pub fn http_client_builder() -> reqwest::ClientBuilder {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        // Err means another component already installed a provider.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+    reqwest::Client::builder()
+}
+
 /// Provider calls must not be able to hold the pipeline forever when a
 /// network, DNS, or upstream service stalls. The timeout is deliberately long
 /// enough for a normal five-second audio batch and a summary request while
 /// still allowing the retry queue to make progress.
 pub(crate) fn provider_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    http_client_builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(120))
         .build()

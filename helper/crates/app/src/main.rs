@@ -49,7 +49,7 @@ const MANAGED_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 const MANAGED_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn managed_http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+    notetaker_core::providers::http_client_builder()
         .connect_timeout(MANAGED_CONNECT_TIMEOUT)
         .timeout(MANAGED_REQUEST_TIMEOUT)
         .build()
@@ -389,7 +389,10 @@ async fn upload_managed_recording(
             let chunk = store
                 .read_audio_range(meeting_id, channel_file, offset, end)
                 .map_err(|error| format!("managed audio could not be read: {error}"))?;
-            let checksum = format!("{:x}", Sha256::digest(&chunk));
+            let checksum: String = Sha256::digest(&chunk)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
             let response = client
                 .put(format!("{base}/api/v1/uploads/{upload_id}/chunks/{index}"))
                 .bearer_auth(&service.access_token)
