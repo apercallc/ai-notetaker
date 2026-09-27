@@ -58,7 +58,8 @@ user's own BYOK responsibility, documented in `README.md`'s cost table.
   or bundled — confirmed by reading `fetch-vb-cable.ps1`, which only ever
   requests `Download_CABLE/VBCABLE_Driver_Pack45.zip`.
 - **Linux.** Wraps the user's own PulseAudio/PipeWire null-sink facilities
-  via `cpal`/`pactl`; no third-party driver is bundled, wrapped, or linked,
+  via `cpal`, `pactl`, and the distro-provided `parec` executable from
+  `pulseaudio-utils`; no third-party driver is bundled, wrapped, or linked,
   so no separate license applies.
 
 ## Renewal

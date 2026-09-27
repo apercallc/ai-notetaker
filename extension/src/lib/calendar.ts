@@ -14,11 +14,15 @@
  * block or delay starting a recording.
  */
 
+import { isMeetUrl } from "../meet/meetContext";
+
 export interface CalendarEvent {
   title: string;
   attendees: string[];
   startsAt: string;
   endsAt: string;
+  /** A Google Meet join link, when the event has one. */
+  meetUrl?: string;
 }
 
 export interface CalendarConnection {
@@ -77,6 +81,8 @@ interface GoogleEventDateTime {
 
 interface GoogleEvent {
   summary?: string;
+  hangoutLink?: string;
+  conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> };
   attendees?: GoogleEventAttendee[];
   start?: GoogleEventDateTime;
   end?: GoogleEventDateTime;
@@ -93,6 +99,7 @@ interface OutlookEventAttendee {
 
 interface OutlookEventDateTime {
   dateTime?: string;
+  timeZone?: string;
 }
 
 interface OutlookEvent {
@@ -100,6 +107,31 @@ interface OutlookEvent {
   attendees?: OutlookEventAttendee[];
   start?: OutlookEventDateTime;
   end?: OutlookEventDateTime;
+  isAllDay?: boolean;
+}
+
+/**
+ * Microsoft Graph returns `2026-09-23T14:00:00.0000000` with the zone in a
+ * sibling `timeZone` field rather than in the string, and `calendarView`
+ * answers in UTC unless a `Prefer: outlook.timezone` header asks otherwise.
+ * `new Date()` reads a date-time with no offset as *local* time, so left
+ * alone every Outlook event lands wrong by the user's UTC offset — enough to
+ * match the previous meeting, or none at all.
+ */
+function outlookIsoString(value: OutlookEventDateTime | undefined): string {
+  const raw = value?.dateTime;
+  if (!raw) return "";
+  const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+  if (hasOffset) return raw;
+  // Anything other than UTC would need a real timezone database to resolve;
+  // we only ever request the default, which is UTC.
+  return value?.timeZone && value.timeZone.toUpperCase() !== "UTC" ? raw : `${raw}Z`;
+}
+
+function meetLinkOf(event: GoogleEvent): { meetUrl: string } | Record<string, never> {
+  const video = event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri;
+  const link = event.hangoutLink ?? video;
+  return link && isMeetUrl(link) ? { meetUrl: link } : {};
 }
 
 const PROVIDER_CONFIG: Record<"google" | "outlook", ProviderConfig> = {
@@ -111,14 +143,24 @@ const PROVIDER_CONFIG: Record<"google" | "outlook", ProviderConfig> = {
       `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(dayStartIso)}&timeMax=${encodeURIComponent(dayEndIso)}`,
     parseEvents: (body) => {
       const items = (body as { items?: GoogleEvent[] }).items ?? [];
-      return items.map((item) => ({
-        title: item.summary ?? "",
-        attendees: (item.attendees ?? [])
-          .map((attendee) => attendee.displayName || attendee.email || "")
-          .filter((name) => name.length > 0),
-        startsAt: item.start?.dateTime ?? item.start?.date ?? "",
-        endsAt: item.end?.dateTime ?? item.end?.date ?? "",
-      }));
+      return (
+        items
+          // All-day entries carry `start.date` (a bare YYYY-MM-DD) instead of
+          // `start.dateTime`, and they span the entire day — so "PTO",
+          // "Conference", or a birthday would match as the current event and
+          // silently become the title of a real meeting. Only timed events
+          // describe something you could actually be in right now.
+          .filter((item) => !!item.start?.dateTime && !!item.end?.dateTime)
+          .map((item) => ({
+            title: item.summary ?? "",
+            attendees: (item.attendees ?? [])
+              .map((attendee) => attendee.displayName || attendee.email || "")
+              .filter((name) => name.length > 0),
+            startsAt: item.start?.dateTime ?? "",
+            endsAt: item.end?.dateTime ?? "",
+            ...meetLinkOf(item),
+          }))
+      );
     },
   },
   outlook: {
@@ -129,14 +171,18 @@ const PROVIDER_CONFIG: Record<"google" | "outlook", ProviderConfig> = {
       `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(dayStartIso)}&endDateTime=${encodeURIComponent(dayEndIso)}`,
     parseEvents: (body) => {
       const items = (body as { value?: OutlookEvent[] }).value ?? [];
-      return items.map((item) => ({
-        title: item.subject ?? "",
-        attendees: (item.attendees ?? [])
-          .map((attendee) => attendee.emailAddress?.name || attendee.emailAddress?.address || "")
-          .filter((name) => name.length > 0),
-        startsAt: item.start?.dateTime ?? "",
-        endsAt: item.end?.dateTime ?? "",
-      }));
+      return items
+        // Same reason as Google's date-only filter: an all-day entry spans
+        // the whole day and would hijack a real meeting's title.
+        .filter((item) => item.isAllDay !== true)
+        .map((item) => ({
+          title: item.subject ?? "",
+          attendees: (item.attendees ?? [])
+            .map((attendee) => attendee.emailAddress?.name || attendee.emailAddress?.address || "")
+            .filter((name) => name.length > 0),
+          startsAt: outlookIsoString(item.start),
+          endsAt: outlookIsoString(item.end),
+        }));
     },
   },
 };
@@ -226,7 +272,32 @@ export async function connectCalendar(
   };
 }
 
-async function refreshAccessToken(connection: CalendarConnection, fetchImpl: typeof fetch): Promise<string | null> {
+/**
+ * Refreshed access tokens, kept in memory only. The reminder alarm checks the
+ * calendar every minute; without this, a connection whose stored token has
+ * expired would hit the token endpoint on every check.
+ */
+const refreshedTokens = new Map<string, { token: string; validUntil: number }>();
+const EARLY_EXPIRY_MS = 60_000;
+const EVENTS_CACHE_MS = 3 * 60_000;
+const eventsCache = new Map<string, { at: number; events: CalendarEvent[] }>();
+
+export function resetCalendarCaches(): void {
+  refreshedTokens.clear();
+  eventsCache.clear();
+}
+
+async function accessTokenFor(connection: CalendarConnection, fetchImpl: typeof fetch, now: Date): Promise<string | null> {
+  if (new Date(connection.expiresAt).getTime() > now.getTime()) return connection.accessToken;
+  const cached = refreshedTokens.get(connection.refreshToken);
+  if (cached && cached.validUntil > now.getTime()) return cached.token;
+  const refreshed = await refreshAccessToken(connection, fetchImpl);
+  if (!refreshed) return null;
+  refreshedTokens.set(connection.refreshToken, { token: refreshed.token, validUntil: now.getTime() + refreshed.expiresInMs - EARLY_EXPIRY_MS });
+  return refreshed.token;
+}
+
+async function refreshAccessToken(connection: CalendarConnection, fetchImpl: typeof fetch): Promise<{ token: string; expiresInMs: number } | null> {
   const config = PROVIDER_CONFIG[connection.provider];
   const body = new URLSearchParams({
     client_id: connection.clientId,
@@ -244,7 +315,29 @@ async function refreshAccessToken(connection: CalendarConnection, fetchImpl: typ
     });
     if (!response.ok) return null;
     const tokens = (await response.json()) as TokenResponse;
-    return tokens.access_token;
+    return { token: tokens.access_token, expiresInMs: (Number.isFinite(tokens.expires_in) ? tokens.expires_in : 0) * 1000 };
+  } catch {
+    return null;
+  }
+}
+
+/** Today's timed events, or null on any failure (never throws; see the module doc). */
+async function loadTodaysEvents(connection: CalendarConnection, fetchImpl: typeof fetch, now: Date): Promise<CalendarEvent[] | null> {
+  try {
+    const accessToken = await accessTokenFor(connection, fetchImpl, now);
+    if (!accessToken) return null;
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(now);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const config = PROVIDER_CONFIG[connection.provider];
+    const response = await fetchImpl(config.eventsUrl(dayStart.toISOString(), dayEnd.toISOString()), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(CALENDAR_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    return config.parseEvents(await response.json());
   } catch {
     return null;
   }
@@ -259,34 +352,36 @@ export async function findCurrentEvent(
   connection: CalendarConnection,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CalendarEvent | null> {
-  try {
-    let accessToken = connection.accessToken;
-    if (new Date(connection.expiresAt).getTime() <= Date.now()) {
-      const refreshed = await refreshAccessToken(connection, fetchImpl);
-      if (!refreshed) return null;
-      accessToken = refreshed;
-    }
+  const now = new Date();
+  const events = await loadTodaysEvents(connection, fetchImpl, now);
+  const nowMs = now.getTime();
+  return events?.find((event) => new Date(event.startsAt).getTime() <= nowMs && nowMs <= new Date(event.endsAt).getTime()) ?? null;
+}
 
-    const now = new Date();
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(now);
-    dayEnd.setHours(23, 59, 59, 999);
+/** How far ahead of a call's start, and how long after, a reminder is still useful. */
+export const REMINDER_LEAD_MS = 90_000;
+export const REMINDER_GRACE_MS = 5 * 60_000;
 
-    const config = PROVIDER_CONFIG[connection.provider];
-    const response = await fetchImpl(config.eventsUrl(dayStart.toISOString(), dayEnd.toISOString()), {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(CALENDAR_REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) return null;
-
-    const events = config.parseEvents(await response.json());
-    const nowMs = now.getTime();
-    return (
-      events.find((event) => new Date(event.startsAt).getTime() <= nowMs && nowMs <= new Date(event.endsAt).getTime()) ??
-      null
-    );
-  } catch {
-    return null;
+/** Meet-linked events that are about to start or only just started. Never throws. */
+export async function findMeetEventsStartingSoon(
+  connection: CalendarConnection,
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<CalendarEvent[]> {
+  // The window is re-evaluated locally on every check; only the fetch is cached.
+  const cacheKey = connection.refreshToken;
+  const cached = eventsCache.get(cacheKey);
+  let events: CalendarEvent[] | null;
+  if (cached && now.getTime() - cached.at < EVENTS_CACHE_MS) {
+    events = cached.events;
+  } else {
+    events = await loadTodaysEvents(connection, fetchImpl, now);
+    if (events) eventsCache.set(cacheKey, { at: now.getTime(), events });
   }
+  const nowMs = now.getTime();
+  return (events ?? []).filter((event) => {
+    if (!event.meetUrl) return false;
+    const startsMs = new Date(event.startsAt).getTime();
+    return Number.isFinite(startsMs) && startsMs - REMINDER_LEAD_MS <= nowMs && nowMs <= startsMs + REMINDER_GRACE_MS;
+  });
 }

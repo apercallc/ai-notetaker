@@ -5,7 +5,7 @@
  * and the root CLAUDE.md non-negotiable constraints list). Do not add a
  * `.sync` call anywhere in this file.
  */
-import { DEFAULT_SETTINGS, type MeetingRecord, type NotetakerSettings } from "../types";
+import { DEFAULT_SETTINGS, type MeetingRecord, type NotetakerSettings, type ProcessingMode } from "../types";
 
 const KEYS = {
   settings: "notetaker.settings",
@@ -13,7 +13,13 @@ const KEYS = {
   meetingsIndex: "notetaker.meetings.index", // ordered list of meeting IDs
   meetingPrefix: "notetaker.meeting.", // + id
   webappSyncOutbox: "notetaker.webappSync.outbox",
+  remindedCalls: "notetaker.remindedCalls",
+  widgetPosition: "notetaker.widget.position",
 } as const;
+
+function validManagedIdentity(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 200 && !/[\u0000-\u001f\u007f]/.test(value);
+}
 
 function storageGet<T>(key: string | string[]): Promise<T | undefined> {
   return new Promise((resolve, reject) => {
@@ -56,19 +62,49 @@ function storageRemove(keys: string | string[]): Promise<void> {
 
 export async function getSettings(): Promise<NotetakerSettings> {
   const stored = await storageGet<NotetakerSettings>(KEYS.settings);
-  if (!stored) return DEFAULT_SETTINGS;
+  // Callers mutate the settings they get back (onboarding edits it in place),
+  // so never hand out DEFAULT_SETTINGS itself or any array/object inside it.
+  const defaults = structuredClone(DEFAULT_SETTINGS);
+  if (!stored) return defaults;
   return {
-    ...DEFAULT_SETTINGS,
+    ...defaults,
     ...stored,
-    apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...(stored.apiKeys ?? {}) },
-    defaultMeetingMode: stored.defaultMeetingMode ?? DEFAULT_SETTINGS.defaultMeetingMode,
+    apiKeys: { ...defaults.apiKeys, ...(stored.apiKeys ?? {}) },
+    processingMode:
+      stored.processingMode?.kind === "managed" &&
+      stored.managedService &&
+      validManagedIdentity(stored.managedService.accountId) &&
+      validManagedIdentity(stored.managedService.workspaceId) &&
+      validManagedIdentity(stored.managedService.accessToken) &&
+      validManagedIdentity(stored.managedService.baseUrl)
+        ? {
+            kind: "managed",
+            accountId: stored.managedService.accountId,
+            workspaceId: stored.managedService.workspaceId,
+            plan: stored.managedService.plan,
+          }
+        : ({ kind: "local_byok" } satisfies ProcessingMode),
+    managedService:
+      stored.managedService && typeof stored.managedService === "object"
+        ? {
+            baseUrl: typeof stored.managedService.baseUrl === "string" ? stored.managedService.baseUrl.replace(/\/$/, "") : "",
+            accessToken: typeof stored.managedService.accessToken === "string" ? stored.managedService.accessToken : "",
+            accountId: typeof stored.managedService.accountId === "string" ? stored.managedService.accountId : "",
+            workspaceId: typeof stored.managedService.workspaceId === "string" ? stored.managedService.workspaceId : "",
+            plan: typeof stored.managedService.plan === "string" ? stored.managedService.plan : "free",
+          }
+        : defaults.managedService,
+    defaultMeetingMode: stored.defaultMeetingMode ?? defaults.defaultMeetingMode,
     customVocabulary: Array.isArray(stored.customVocabulary)
       ? stored.customVocabulary.filter((term): term is string => typeof term === "string").slice(0, 100)
-      : DEFAULT_SETTINGS.customVocabulary,
+      : defaults.customVocabulary,
     customSummaryInstructions:
       typeof stored.customSummaryInstructions === "string"
         ? stored.customSummaryInstructions.slice(0, 4_000)
-        : DEFAULT_SETTINGS.customSummaryInstructions,
+        : defaults.customSummaryInstructions,
+    showMeetWidget: typeof stored.showMeetWidget === "boolean" ? stored.showMeetWidget : defaults.showMeetWidget,
+    calendarReminders: typeof stored.calendarReminders === "boolean" ? stored.calendarReminders : defaults.calendarReminders,
+    drive: stored.drive && typeof stored.drive === "object" ? stored.drive : defaults.drive,
   };
 }
 
@@ -83,6 +119,16 @@ export async function getPairingToken(): Promise<string | null> {
 
 export async function savePairingToken(token: string): Promise<void> {
   await storageSet({ [KEYS.pairingToken]: token });
+}
+
+/**
+ * Removes only the local browser copy of the Native Messaging pairing token.
+ * The helper requests a fresh token on the next hello, which lets a new
+ * Chrome profile recover after its local storage was cleared without asking
+ * the user to find and delete an app-data file by hand.
+ */
+export async function clearPairingToken(): Promise<void> {
+  await storageRemove(KEYS.pairingToken);
 }
 
 /**
@@ -203,4 +249,47 @@ export async function queueWebappSync(meeting: MeetingRecord): Promise<void> {
 
 export async function removeWebappSyncOutbox(id: string): Promise<void> {
   await enqueueWebappOutboxMutation((outbox) => outbox.filter((meeting) => meeting.id !== id));
+}
+
+export interface RemindedCall {
+  url: string;
+  at: number;
+}
+
+/** Calls already reminded about, keyed by notification id, so a call is announced once. */
+export async function getRemindedCalls(): Promise<Record<string, RemindedCall>> {
+  const stored = await storageGet<Record<string, RemindedCall>>(KEYS.remindedCalls);
+  return stored && typeof stored === "object" ? stored : {};
+}
+
+export async function saveRemindedCalls(calls: Record<string, RemindedCall>): Promise<void> {
+  await storageSet({ [KEYS.remindedCalls]: calls });
+}
+
+export interface WidgetPosition {
+  x: number;
+  y: number;
+}
+
+/** Where the user last dropped the in-call widget. Owned here so the content script never touches storage. */
+export async function getWidgetPosition(): Promise<WidgetPosition | null> {
+  const stored = await storageGet<Partial<WidgetPosition>>(KEYS.widgetPosition);
+  return isWidgetPosition(stored) ? { x: stored.x, y: stored.y } : null;
+}
+
+export async function saveWidgetPosition(position: WidgetPosition): Promise<void> {
+  if (!isWidgetPosition(position)) return;
+  await storageSet({ [KEYS.widgetPosition]: { x: Math.round(position.x), y: Math.round(position.y) } });
+}
+
+function isWidgetPosition(value: unknown): value is WidgetPosition {
+  const candidate = value as Partial<WidgetPosition> | null | undefined;
+  return (
+    typeof candidate?.x === "number" &&
+    typeof candidate?.y === "number" &&
+    Number.isFinite(candidate.x) &&
+    Number.isFinite(candidate.y) &&
+    Math.abs(candidate.x) < 100_000 &&
+    Math.abs(candidate.y) < 100_000
+  );
 }

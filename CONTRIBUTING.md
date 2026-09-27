@@ -26,15 +26,19 @@ signing, deployment, and store submission as separate evidence.
 
 ## Architecture boundaries
 
-- The helper owns capture, transcription, summarization, retries, and recovery.
-- The extension is a thin UI and communicates through Native Messaging.
+- The extension owns botless Google Meet capture, IndexedDB-first browser
+  durability, and Meet-local BYOK or managed processing. For desktop calls,
+  it is a thin UI that communicates with the helper through Native Messaging.
+- The helper owns long-running desktop capture, local BYOK processing,
+  managed upload recovery, retries, and crash recovery.
 - Do not add an open TCP or localhost WebSocket listener.
 - Keep microphone and speaker audio separate and persist raw audio before a
   provider call.
-- Provider keys belong in `chrome.storage.local`; never add them to sync or the
-  optional webapp.
-- The webapp is self-hosted by each user and must authenticate every route
-  except `/api/health`.
+- Local BYOK provider keys belong in `chrome.storage.local`; never add them to
+  sync or send them to the hosted service. Managed provider keys stay
+  server-side.
+- The webapp supports both user-operated self-hosting and project-operated
+  managed hosting, and must authenticate every route except `/api/health`.
 
 ## Pull requests
 

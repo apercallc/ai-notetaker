@@ -17,7 +17,7 @@ manually.
 From `helper/crates/app/`:
 
 ```sh
-npx --yes @tauri-apps/cli@latest build --bundles deb,appimage
+npx --yes @tauri-apps/cli@2.11.5 build --bundles deb,appimage
 ```
 
 The Tauri configuration also declares macOS `dmg` and Windows `msi`/`nsis`
@@ -40,7 +40,7 @@ Native Messaging relay; they do not install the Chrome extension.
 brew install --cask ai-notetaker
 
 # Windows PowerShell
-winget install AI-Notetaker
+winget install AI.Notetaker
 # Chocolatey is also supported: choco install ai-notetaker
 ```
 
@@ -48,12 +48,20 @@ Linux users should install the signed `.deb` from the release page. The
 AppImage is a fallback for distributions that cannot use the Debian package,
 but it cannot safely register a Native Messaging relay inside a transient
 mount, so the `.deb` or an explicit stable-path registration is preferred.
+The Debian package depends on `pulseaudio-utils`, which supplies both `pactl`
+for virtual-device setup/probing and `parec` for monitor capture.
 
 Package-manager packages are pinned to a release URL and SHA-256; they must
 never fetch a floating “latest” binary during installation. Update a
 package-managed helper with its package manager. Direct-download installs use
-the Tauri updater once release signing and the owner-controlled updater key
-are configured.
+the newer native installer until the Tauri updater key and endpoint are
+configured. Never mix the two update mechanisms.
+
+The release workflow publishes GitHub Release assets and `SHA256SUMS` for every
+version tag. It also renders the Homebrew, WinGet, and Chocolatey package files
+when `CHROME_WEB_STORE_URL` is configured as a repository variable. Publishing
+those package files to the external registries still requires the release-owner
+credentials and review described in [`../release/README.md`](../release/README.md).
 
 Linux CI installs the Tauri v2 WebKitGTK, GTK, Ayatana AppIndicator, and
 librsvg development packages in addition to the ALSA headers.
@@ -113,7 +121,7 @@ disabled until the owner supplies a real signing key; enable
 generating and protecting the key pair:
 
 ```sh
-npx --yes @tauri-apps/cli@latest signer generate -w ~/.tauri/ai-notetaker.key
+npx --yes @tauri-apps/cli@2.11.5 signer generate -w ~/.tauri/ai-notetaker.key
 ```
 
 Only the owner may replace `REPLACE_WITH_OWNER_GENERATED_TAURI_UPDATER_PUBLIC_KEY`,

@@ -4,10 +4,14 @@ cask "ai-notetaker" do
 
   url "__URL__", verified: "github.com/apercallc/ai-notetaker/"
   name "AI Notetaker"
-  desc "Local-first, self-hosted AI meeting notetaker"
+  desc "Botless meeting notes with free local BYOK or optional hosted AI"
   homepage "https://apercallc.github.io/ai-notetaker/"
 
   app "AI Notetaker.app"
+
+  # Development fallback only. A published Cask must be rendered from a
+  # signed release manifest; see docs/code-signing-policy.md.
+  no_quarantine
 
   postflight do
     system_command staged_path.join("AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh")

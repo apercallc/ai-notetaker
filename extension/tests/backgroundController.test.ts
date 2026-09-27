@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { BackgroundController, type NativeClientLike } from "../src/lib/backgroundController";
-import { getMeeting, saveSettings } from "../src/lib/storage";
+import { getMeeting, saveSettings, saveWidgetPosition } from "../src/lib/storage";
 import { DEFAULT_SETTINGS } from "../src/types";
+import * as browserStorage from "../src/meet/browserStorage";
+import * as browserProcessing from "../src/meet/browserProcessing";
+import * as managedClient from "../src/lib/managedClient";
 
 vi.mock("../src/lib/calendar", () => ({ findCurrentEvent: vi.fn() }));
 import { findCurrentEvent } from "../src/lib/calendar";
+import { exportMeetingToDrive } from "../src/lib/drive";
+
+vi.mock("../src/lib/drive", () => ({ exportMeetingToDrive: vi.fn() }));
 
 function createFakeClient(): NativeClientLike & {
   emit: (type: string, payload: Record<string, unknown>) => void;
@@ -15,7 +21,7 @@ function createFakeClient(): NativeClientLike & {
   return {
     connect: vi.fn(async () => {
       for (const handler of handlers.get("helper_info") ?? []) {
-        handler({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 1, platform: "linux" });
+        handler({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 3, platform: "linux" });
       }
     }),
     on: vi.fn((type: string, handler: (msg: unknown) => void) => {
@@ -36,6 +42,9 @@ function createFakeClient(): NativeClientLike & {
       speaker: "test speaker",
       ready: true,
       guidance: "ready",
+      nativeLoopback: false,
+      virtualDeviceFallback: true,
+      permissionRequired: false,
     })),
     runAudioProbe: vi.fn(async () => ({ micFrames: 1, speakerFrames: 1, passed: true, message: "ok" })),
     testProviderKey: vi.fn(async () => ({ valid: true, message: "ok" })),
@@ -59,6 +68,36 @@ beforeEach(async () => {
 });
 
 describe("BackgroundController", () => {
+  it("processes Meet locally with a connected helper, preserving call times and model notes", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    const chunks = (async function* () { yield { channel: "mic" as const, sequence: 0, bytes: new Uint8Array([1, 2]) }; })();
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockReturnValue(chunks);
+    const process = vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockResolvedValue({ transcript: [{ speaker: "you", text: "Hello", isFinal: true, timestamp: "2026-09-24T15:00:00Z", offsetMs: 123 }], summary: "Notes", title: "Planning", actionItems: [] });
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
+    const id = await controller.startRecording("general", "meet");
+    const original = await getMeeting(id);
+    await controller.stopRecording(id);
+    expect(client.startRecording).not.toHaveBeenCalled();
+    expect(client.stopRecording).not.toHaveBeenCalled();
+    expect(process).toHaveBeenCalledWith(expect.any(Object), "general", chunks, expect.any(Function), { startedAt: original?.startedAt });
+    expect(await getMeeting(id)).toMatchObject({ status: "complete", title: "Planning", summary: "Notes", transcript: [expect.objectContaining({ offsetMs: 123 })], endedAt: expect.any(String) });
+  });
+
+  it("acknowledges a Meet chunk only after its durable write finishes", async () => {
+    let finish!: () => void;
+    vi.spyOn(browserStorage, "appendBrowserMeetChunk").mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    let acknowledged = false;
+    const write = controller.sendMeetAudioChunk("durable", "mic", new Uint8Array([1, 2])).then(() => { acknowledged = true; });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(acknowledged).toBe(false);
+    finish();
+    await write;
+    expect(acknowledged).toBe(true);
+  });
   it("connects and pushes current settings on init", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
@@ -78,9 +117,230 @@ describe("BackgroundController", () => {
 
     const meetingId = await controller.startRecording();
 
-    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "general");
+    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "general", "desktop", { kind: "local_byok" }, expect.any(String));
     const stored = await getMeeting(meetingId);
     expect(stored?.status).toBe("recording");
+  });
+
+  it("pushes managed settings to the helper and preserves the mode on the meeting", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const managedSettings = {
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const,
+      managedService: {
+        baseUrl: "https://notes.example.com",
+        accessToken: "session",
+        accountId: "acct",
+        workspaceId: "workspace",
+        plan: "hosted_pro",
+      },
+    };
+
+    await controller.saveSettings(managedSettings);
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }), { status: 200 })));
+    expect(client.pushSettings).toHaveBeenLastCalledWith(expect.objectContaining({ processingMode: managedSettings.processingMode, managedService: managedSettings.managedService }));
+
+    const meetingId = await controller.startRecording("general", "desktop");
+    expect(client.startRecording).toHaveBeenLastCalledWith(meetingId, "general", "desktop", managedSettings.processingMode, expect.any(String));
+    expect((await getMeeting(meetingId))?.processingMode).toEqual(managedSettings.processingMode);
+
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode: { kind: "local_byok" }, managedService: null });
+    expect(client.pushSettings).toHaveBeenLastCalledWith(expect.objectContaining({ processingMode: { kind: "local_byok" }, managedService: null }));
+  });
+
+  it("resumes a managed Meet processing record after the service worker restarts", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    await saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "pending-managed-meet",
+      title: "Pending Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "processing",
+      captureSource: "meet",
+      processingMode,
+    });
+    vi.spyOn(browserStorage, "browserMeetChunkStats").mockResolvedValue({ totalChunks: 1, totalBytes: 2 });
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockImplementation(async function* () {
+      yield { channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) };
+    });
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(managedClient, "registerManagedMeeting").mockResolvedValue();
+    const upload = vi.spyOn(managedClient, "uploadManagedMeeting").mockResolvedValue({ uploadId: "upload-1", jobId: "job-1", meetingId: "pending-managed-meet" });
+    vi.spyOn(managedClient, "getManagedJob").mockResolvedValue({ status: "complete", meetingId: "pending-managed-meet", summary: "Recovered summary", actionItems: [] });
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+
+    await controller.init();
+
+    await vi.waitFor(async () => expect((await getMeeting("pending-managed-meet"))?.status).toBe("complete"));
+    // The upload must be streamed (stats + async iterable), never a
+    // materialized chunk array — an hour-long Meet is ~700 MB of PCM16.
+    const uploadCall = upload.mock.calls[0];
+    expect(uploadCall?.[0]).toEqual(managedService);
+    expect(uploadCall?.[1]).toBe("pending-managed-meet");
+    expect(uploadCall?.[2]).toMatchObject({ totalChunks: 1, totalBytes: 2 });
+    expect(uploadCall?.[3]).toEqual(expect.any(Function));
+    const streamed = uploadCall?.[2] as { chunks: AsyncIterable<{ channel: string; bytes: Uint8Array }> };
+    const collected: Array<{ channel: string; bytes: Uint8Array }> = [];
+    for await (const chunk of streamed.chunks) collected.push({ channel: chunk.channel, bytes: chunk.bytes });
+    expect(collected).toEqual([{ channel: "speaker", bytes: new Uint8Array([1, 2]) }]);
+  });
+
+  it("drains an errored managed Meet after a fresh hosted sign-in", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "new-session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "expired-session-meet",
+      title: "Expired session Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "error",
+      errorMessage: "Managed service session expired. Saved Meet audio is available for retry.",
+      captureSource: "meet",
+      processingMode,
+      managedProcessing: { uploadId: "upload-old", jobId: "job-old", status: "error", errorMessage: "session expired" },
+    });
+    vi.spyOn(browserStorage, "browserMeetChunkStats").mockResolvedValue({ totalChunks: 1, totalBytes: 2 });
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockImplementation(async function* () {
+      yield { channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) };
+    });
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(managedClient, "registerManagedMeeting").mockResolvedValue();
+    vi.spyOn(managedClient, "uploadManagedMeeting").mockResolvedValue({ uploadId: "upload-new", jobId: "job-new", meetingId: "expired-session-meet" });
+    vi.spyOn(managedClient, "getManagedJob").mockResolvedValue({ status: "complete", meetingId: "expired-session-meet", summary: "Recovered after sign-in", actionItems: [] });
+
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+
+    await vi.waitFor(async () => expect((await getMeeting("expired-session-meet"))?.status).toBe("complete"));
+    const uploadCall = (managedClient.uploadManagedMeeting as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as unknown[];
+    expect(uploadCall?.[0]).toEqual(managedService);
+    expect(uploadCall?.[1]).toBe("expired-session-meet");
+    expect(uploadCall?.[2]).toMatchObject({ totalChunks: 1, totalBytes: 2 });
+  });
+
+  it("does not replay a pending managed Meet into another workspace", async () => {
+    const originalMode = { kind: "managed", accountId: "acct-old", workspaceId: "workspace-old", plan: "hosted_pro" } as const;
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "wrong-workspace-meet",
+      title: "Wrong workspace Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "error",
+      errorMessage: "session expired",
+      captureSource: "meet",
+      processingMode: originalMode,
+      managedProcessing: { status: "error", errorMessage: "session expired" },
+    });
+    const listChunks = vi.spyOn(browserStorage, "listBrowserMeetChunks");
+    const upload = vi.spyOn(managedClient, "uploadManagedMeeting");
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct-new", workspaceId: "workspace-new", plan: "hosted_pro" },
+      managedService: { baseUrl: "https://notes.example.com", accessToken: "new-session", accountId: "acct-new", workspaceId: "workspace-new", plan: "hosted_pro" },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(listChunks).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    await expect(getMeeting("wrong-workspace-meet")).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("keeps a completed Meet when IndexedDB cleanup fails", async () => {
+    await (await import("../src/lib/storage")).saveMeeting({
+      id: "cleanup-failure-meet",
+      title: "Cleanup failure Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "error",
+      errorMessage: "temporary provider error",
+      captureSource: "meet",
+      processingMode: { kind: "local_byok" },
+    });
+    vi.spyOn(browserStorage, "listBrowserMeetChunks").mockResolvedValue([{ channel: "speaker", sequence: 0, bytes: new Uint8Array([1, 2]) }]);
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockRejectedValue(new Error("IndexedDB unavailable"));
+    vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockResolvedValue({ transcript: [], summary: "Recovered", actionItems: [] });
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+
+    await controller.init();
+    await controller.retryProcessing("cleanup-failure-meet");
+
+    await expect(getMeeting("cleanup-failure-meet")).resolves.toMatchObject({ status: "complete", summary: "Recovered" });
+  });
+
+  it("blocks managed recording before creating a meeting when hosted quota is unavailable", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "local" },
+      managedService: { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "local" },
+    });
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "local", status: "inactive", used: 0, limit: 0, remaining: 0, canProcess: false, inPaymentGrace: false }), { status: 200 })));
+
+    expect(await controller.startRecording("general", "meet")).toBe("");
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", recovery: "check_billing" }));
+  });
+
+  it("two overlapping start requests produce one recording, not two", async () => {
+    // activeMeetingId is only assigned after the calendar lookup's await, so
+    // a double-click (or the popup and a shortcut firing together) used to
+    // slip two requests through the guard and capture the same call twice.
+    let releaseCalendar: (() => void) | undefined;
+    vi.mocked(findCurrentEvent).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCalendar = () => resolve(null);
+        }),
+    );
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      calendar: {
+        provider: "google",
+        clientId: "x",
+        accessToken: "a",
+        refreshToken: "r",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+
+    const first = controller.startRecording();
+    const second = controller.startRecording();
+    releaseCalendar?.();
+    const [firstId, secondId] = await Promise.all([first, second]);
+
+    expect(firstId).toBe(secondId);
+    expect(client.startRecording).toHaveBeenCalledTimes(1);
   });
 
   it("titles the meeting from the matching calendar event when one is connected", async () => {
@@ -170,6 +430,7 @@ describe("BackgroundController", () => {
     expect(broadcast).toHaveBeenCalledWith({
       type: "RECORDING_ERROR",
       meetingId: null,
+      phase: "start",
       message: "Acknowledge the recording consent notice in setup before recording.",
     });
   });
@@ -182,7 +443,7 @@ describe("BackgroundController", () => {
 
     const meetingId = await controller.startRecording();
 
-    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "standup");
+    expect(client.startRecording).toHaveBeenCalledWith(meetingId, "standup", "desktop", { kind: "local_byok" }, expect.any(String));
     expect((await getMeeting(meetingId))?.mode).toBe("standup");
   });
 
@@ -307,6 +568,60 @@ describe("BackgroundController", () => {
     ]);
   });
 
+  it("clears extension-owned Meet chunks when the helper completes managed processing", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }), { status: 200 })));
+    const clearChunks = vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+
+    const meetingId = await controller.startRecording("general", "meet");
+    client.emit("managed_job_status", { meetingId, jobId: "job-1", status: "complete", summary: "Managed summary", actionItems: [] });
+
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.status).toBe("complete"));
+    expect(clearChunks).toHaveBeenCalledWith(meetingId);
+  });
+
+  it("keeps local completion successful when Drive export fails", async () => {
+    vi.mocked(exportMeetingToDrive).mockRejectedValue(new Error("Drive request failed: 503"));
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      drive: { clientId: "client", accessToken: "token", expiresAt: Date.now() + 60_000 },
+    });
+    const meetingId = await controller.startRecording();
+
+    client.emit("summary_ready", { meetingId, summary: "Saved locally", actionItems: [] });
+
+    await vi.waitFor(async () => {
+      expect((await getMeeting(meetingId))?.status).toBe("complete");
+      expect((await getMeeting(meetingId))?.driveExport).toEqual(expect.objectContaining({ status: "error" }));
+    });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "DRIVE_EXPORT", status: "error", meetingId }));
+  });
+
+  it("exports a completed meeting asynchronously when Drive is connected", async () => {
+    vi.mocked(exportMeetingToDrive).mockResolvedValue({ fileId: "doc-1", webViewLink: "https://docs.google.com/document/d/doc-1/edit" });
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const drive = { clientId: "client", accessToken: "token", expiresAt: Date.now() + 60_000 };
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, drive });
+    const meetingId = await controller.startRecording();
+    client.emit("summary_ready", { meetingId, summary: "Saved to Drive", actionItems: [] });
+
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.driveExport?.status).toBe("exported"));
+    expect(exportMeetingToDrive).toHaveBeenCalledWith(expect.objectContaining({ id: meetingId }), drive, expect.any(Function));
+  });
+
   it("POSTs the finished meeting to the webapp when one is configured", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
@@ -414,7 +729,7 @@ describe("BackgroundController", () => {
     const controller = new BackgroundController(client, broadcast);
     await controller.init();
     client.emit("error", { meetingId: "unknown", code: "provider_error", message: "failed" });
-    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId: "unknown", message: "failed" }));
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId: "unknown", message: "failed", recovery: "retry" }));
     expect(await getMeeting("unknown")).toBeNull();
   });
 
@@ -431,7 +746,7 @@ describe("BackgroundController", () => {
       await controller.init();
       const meetingId = await controller.startRecording();
       client.emit("error", { meetingId, code: "temporary", message });
-      await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "PROCESSING_WARNING", meetingId, message }));
+      await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "PROCESSING_WARNING", meetingId, message, recovery: "retry" }));
       expect((await getMeeting(meetingId))?.status).toBe("recording");
     }
   });
@@ -567,6 +882,7 @@ describe("BackgroundController", () => {
     expect(broadcast).toHaveBeenCalledWith({
       type: "RECORDING_ERROR",
       meetingId: null,
+      phase: "start",
       message: "The desktop helper is not connected. Install and start it, then check again.",
     });
   });
@@ -600,13 +916,224 @@ describe("BackgroundController", () => {
     );
   });
 
-  it("delegates testProviderKey to the native messaging client rather than calling a provider directly", async () => {
+  it("checks keys directly from the extension even for desktop setup, without the helper", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+    controller.setFetchImpl(fetchImpl as unknown as typeof fetch);
+
+    // `desktop: true` used to route through the helper, which made a
+    // missing helper block desktop onboarding's key gate entirely.
+    const result = await controller.testProviderKey("deepgram", "some-key", { desktop: true });
+
+    expect(client.testProviderKey).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("api.deepgram.com"), expect.anything());
+    expect(result.valid).toBe(true);
+  });
+
+  it("checks Meet-path keys directly from the extension, without the helper", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    const fetchImpl = vi.fn(async () => new Response("{\"access_token\":\"t\"}", { status: 200 }));
+    controller.setFetchImpl(fetchImpl as unknown as typeof fetch);
 
     const result = await controller.testProviderKey("deepgram", "some-key");
 
-    expect(client.testProviderKey).toHaveBeenCalledWith("deepgram", "some-key");
-    expect(result).toEqual({ valid: true, message: "ok" });
+    expect(client.testProviderKey).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("api.deepgram.com"), expect.anything());
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe("BackgroundController: in-call widget support", () => {
+  it("uses the tab-derived title hint when no calendar event names the call", async () => {
+    vi.mocked(findCurrentEvent).mockResolvedValue(null);
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+
+    const meetingId = await controller.startRecording("general", "meet", "Google Meet abc-defg-hij");
+
+    expect((await getMeeting(meetingId))?.title).toBe("Google Meet abc-defg-hij");
+  });
+
+  it("announces a started recording so open widgets can update", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+
+    const meetingId = await controller.startRecording();
+
+    expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId });
+  });
+
+  it("flags moments in the active recording as offsets from its start", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    expect(await controller.addBookmark(meetingId, "  decision on pricing ")).toBe(true);
+
+    const stored = await getMeeting(meetingId);
+    expect(stored?.bookmarks).toHaveLength(1);
+    expect(stored?.bookmarks?.[0]).toMatchObject({ note: "decision on pricing" });
+    expect(stored?.bookmarks?.[0]?.offsetMs).toBeGreaterThanOrEqual(0);
+    expect(broadcast).toHaveBeenLastCalledWith({ type: "MEETING_STATE_CHANGED", meetingId });
+  });
+
+  it("hands the flagged moments to the helper when the recording stops, so the summary can weigh them", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await controller.addBookmark(meetingId, "Pricing decision");
+    await controller.addBookmark(meetingId);
+
+    await controller.stopRecording(meetingId);
+
+    expect(client.stopRecording).toHaveBeenCalledWith(meetingId, [
+      expect.objectContaining({ offsetMs: expect.any(Number), note: "Pricing decision" }),
+      expect.objectContaining({ offsetMs: expect.any(Number), note: "" }),
+    ]);
+  });
+
+  it("stops exactly as before when nothing was flagged", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    await controller.stopRecording(meetingId);
+
+    expect(client.stopRecording).toHaveBeenCalledWith(meetingId);
+  });
+
+  it("refuses to flag a moment for a meeting that is not the active recording", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await controller.stopRecording(meetingId);
+
+    expect(await controller.addBookmark(meetingId, "too late")).toBe(false);
+    expect(await controller.addBookmark("someone-else", "nope")).toBe(false);
+    expect((await getMeeting(meetingId))?.bookmarks).toBeUndefined();
+  });
+
+  it("reports widget state for an idle helper with the latest meeting", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await controller.stopRecording(meetingId);
+
+    const state = await controller.getWidgetState();
+
+    expect(state).toMatchObject({
+      helperStatus: "connected",
+      onboardingComplete: true,
+      consentAcknowledged: true,
+      widgetEnabled: true,
+      active: null,
+      latest: { id: meetingId, status: "processing" },
+    });
+  });
+
+  it("reports widget state for an active recording with a bounded transcript and its bookmarks", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    for (let index = 0; index < 60; index += 1) {
+      client.emit("transcript_partial", { meetingId, speaker: "you", text: `line ${index}`, isFinal: true, utteranceId: index });
+    }
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.transcript).toHaveLength(60));
+    await controller.addBookmark(meetingId, "key point");
+
+    const state = await controller.getWidgetState();
+
+    expect(state.latest).toBeNull();
+    expect(state.active?.id).toBe(meetingId);
+    expect(state.active?.transcript).toHaveLength(40);
+    expect(state.active?.transcript.at(-1)?.text).toBe("line 59");
+    expect(state.active?.bookmarks.map((bookmark) => bookmark.note)).toEqual(["key point"]);
+  });
+
+  it("tells open widgets when settings change, since they cannot watch storage themselves", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    broadcast.mockClear();
+
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, showMeetWidget: false });
+
+    expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId: "" });
+  });
+
+  it("reports where the user left the widget", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    expect((await controller.getWidgetState()).position).toBeNull();
+    await saveWidgetPosition({ x: 40, y: 50 });
+    expect((await controller.getWidgetState()).position).toEqual({ x: 40, y: 50 });
+  });
+
+  it("lets the user turn the widget off from settings", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, showMeetWidget: false });
+
+    expect((await controller.getWidgetState()).widgetEnabled).toBe(false);
+  });
+
+  it("names the current call from the calendar without ever delaying the widget", async () => {
+    vi.mocked(findCurrentEvent).mockClear();
+    let release: (() => void) | undefined;
+    vi.mocked(findCurrentEvent).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ title: "Weekly sync", attendees: [], startsAt: new Date().toISOString(), endsAt: new Date().toISOString() });
+        }),
+    );
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      onboardingComplete: true,
+      consentDisclosureAcknowledged: true,
+      calendar: { provider: "google", clientId: "x", accessToken: "a", refreshToken: "r", expiresAt: new Date(Date.now() + 60_000).toISOString() },
+    });
+
+    expect((await controller.getWidgetState()).callTitle).toBeNull();
+    release?.();
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId: "" }));
+    expect((await controller.getWidgetState()).callTitle).toBe("Weekly sync");
+    expect(findCurrentEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists live transcript updates and exposes live status to the widget", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg" } });
+    const meetingId = await controller.startRecording("general", "meet");
+
+    await controller.updateMeetLiveTranscriptStatus(meetingId, "available");
+    await controller.addMeetLiveTranscript({
+      meetingId,
+      channel: "mic",
+      speaker: "you",
+      text: "Planning the launch",
+      isFinal: false,
+      utteranceId: 1,
+      offsetMs: 2400,
+    });
+
+    expect(await getMeeting(meetingId)).toMatchObject({
+      liveTranscriptStatus: "available",
+      transcript: [expect.objectContaining({ speaker: "you", text: "Planning the launch", isFinal: false, utteranceId: 1, offsetMs: 2400 })],
+    });
+    expect((await controller.getWidgetState()).active).toMatchObject({ liveTranscriptStatus: "available" });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "TRANSCRIPT_UPDATE", meetingId, text: "Planning the launch", isFinal: false, utteranceId: 1 }));
   });
 });

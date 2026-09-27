@@ -27,8 +27,10 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/scripts/docker-entrypoint.mjs ./scripts/docker-entrypoint.mjs
+COPY --from=builder /app/scripts/managed-worker.mjs ./scripts/managed-worker.mjs
 COPY --from=builder /app/next.config.js ./next.config.js
 
+RUN mkdir -p /app/.data && chown -R node:node /app/.data
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

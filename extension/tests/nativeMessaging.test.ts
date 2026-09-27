@@ -58,6 +58,37 @@ describe("NativeMessagingClient", () => {
     expect(port.postMessage).toHaveBeenCalledWith({ type: "hello", pairingToken: null });
   });
 
+  it("starts Meet capture explicitly while preserving the desktop message shape", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.startRecording("meeting-1", "general", "meet");
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: "start_recording",
+      meetingId: "meeting-1",
+      meetingMode: "general",
+      captureSource: "meet",
+    });
+  });
+
+  it("sends bounded base64 PCM16 chunks on the selected channel", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.sendAudioChunk("meeting-1", "speaker", new Uint8Array([1, 2, 3, 4]), 48_000);
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: "audio_chunk",
+      meetingId: "meeting-1",
+      channel: "speaker",
+      sampleRateHz: 48_000,
+      pcm16Base64: "AQIDBA==",
+    });
+  });
+
   it("sends the previously stored pairing token on reconnect", async () => {
     await storage.savePairingToken("existing-token");
     const port = createFakePort();
@@ -83,6 +114,25 @@ describe("NativeMessagingClient", () => {
     expect(await storage.getPairingToken()).toBe("new-token-123");
   });
 
+  it("clears a stale token when the installed helper rejects pairing", async () => {
+    await storage.savePairingToken("stale-token");
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    port._emitMessage({
+      type: "error",
+      meetingId: null,
+      code: "helper_not_paired",
+      message: "pairing token missing or mismatched",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(await storage.getPairingToken()).toBeNull();
+  });
+
   it("dispatches helper compatibility information", async () => {
     const port = createFakePort();
     chromeMock.runtime.connectNative.mockReturnValue(port);
@@ -91,12 +141,12 @@ describe("NativeMessagingClient", () => {
 
     const handler = vi.fn();
     client.on("helper_info", handler);
-    port._emitMessage({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 1, platform: "linux" });
+    port._emitMessage({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 2, platform: "linux" });
 
     expect(handler).toHaveBeenCalledWith({
       type: "helper_info",
       helperVersion: "0.1.0",
-      protocolVersion: 1,
+      protocolVersion: 2,
       platform: "linux",
     });
   });
@@ -144,6 +194,7 @@ describe("NativeMessagingClient", () => {
   });
 
   it("does not let a stale port disconnect a newer connection", async () => {
+    vi.useFakeTimers();
     const ports: Array<ReturnType<typeof createFakePort>> = [];
     chromeMock.runtime.connectNative.mockImplementation(() => {
       const port = createFakePort();
@@ -153,9 +204,11 @@ describe("NativeMessagingClient", () => {
     const client = new NativeMessagingClient();
     await client.connect();
     ports[0]?._emitDisconnect();
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(ports).toHaveLength(2);
 
     ports[0]?._emitDisconnect();
+    await vi.advanceTimersByTimeAsync(30_000);
     client.startRecording("meeting-1", "general");
 
     expect(ports[1]?.postMessage).toHaveBeenCalledWith({
@@ -241,7 +294,8 @@ describe("NativeMessagingClient", () => {
       expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(3);
     });
 
-    it("an ordinary disconnect (no lastError) still reconnects immediately, not with backoff", async () => {
+    it("an ordinary disconnect (no lastError) reports 'disconnected' and reconnects after a backoff", async () => {
+      vi.useFakeTimers();
       const ports: Array<ReturnType<typeof createFakePort>> = [];
       chromeMock.runtime.connectNative.mockImplementation(() => {
         const newPort = createFakePort();
@@ -257,7 +311,35 @@ describe("NativeMessagingClient", () => {
 
       expect(statuses).toContain("disconnected");
       expect(statuses).not.toContain("helper_not_found");
+      expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not hot-loop when the helper is installed but not running", async () => {
+      // The common broken state: Chrome finds the host manifest and spawns
+      // notetaker-nm-host, that shim can't reach the tray app's socket and
+      // exits(1). Chrome reports an ordinary disconnect, not "not found", so
+      // an immediate retry spawned a fresh OS process per disconnect forever.
+      vi.useFakeTimers();
+      const ports: Array<ReturnType<typeof createFakePort>> = [];
+      chromeMock.runtime.connectNative.mockImplementation(() => {
+        const newPort = createFakePort();
+        ports.push(newPort);
+        // The shim dies the moment it's spawned.
+        queueMicrotask(() => newPort._emitDisconnect());
+        return newPort;
+      });
+      const client = new NativeMessagingClient();
+      await client.connect();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      // A full minute of a helper that never comes up costs a handful of
+      // spawns, not thousands: 1s + 2s + 4s + 8s + 16s + 30s caps out well
+      // under ten within the window.
+      expect(chromeMock.runtime.connectNative.mock.calls.length).toBeLessThan(10);
     });
 
     it("reports connected once a real message arrives, and resets the backoff", async () => {
@@ -279,6 +361,7 @@ describe("NativeMessagingClient", () => {
     // model that here so a reconnect's new listener doesn't land on the same
     // array the first port's _emitDisconnect is iterating (that mismatch
     // caused an infinite reconnect loop the first time this test was written).
+    vi.useFakeTimers();
     const ports: Array<ReturnType<typeof createFakePort>> = [];
     chromeMock.runtime.connectNative.mockImplementation(() => {
       const newPort = createFakePort();
@@ -289,6 +372,7 @@ describe("NativeMessagingClient", () => {
     await client.connect();
 
     ports[0]?._emitDisconnect();
+    await vi.advanceTimersByTimeAsync(1_000);
 
     // A second connectNative call means the client attempted to reconnect.
     expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(2);
@@ -303,6 +387,22 @@ describe("NativeMessagingClient", () => {
     client.startRecording("meeting-42", "general");
 
     expect(port.postMessage).toHaveBeenCalledWith({ type: "start_recording", meetingId: "meeting-42", meetingMode: "general" });
+  });
+
+  it("carries a bounded display title to the helper", async () => {
+    const port = createFakePort();
+    chromeMock.runtime.connectNative.mockReturnValue(port);
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.startRecording("meeting-42", "general", "meet", { kind: "local_byok" }, ` ${"Roadmap ".repeat(40)} `);
+
+    expect(port.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "start_recording",
+      title: expect.stringMatching(/^Roadmap/),
+    }));
+    const message = port.postMessage.mock.calls.at(-1)?.[0] as { title?: string };
+    expect(message.title).toHaveLength(200);
   });
 
   it("pushes current settings down to the helper", async () => {
@@ -354,7 +454,7 @@ describe("NativeMessagingClient", () => {
 
     const preflight = client.getAudioPreflight();
     expect(port.postMessage).toHaveBeenCalledWith({ type: "audio_preflight" });
-    port._emitMessage({ type: "audio_status", platform: "linux", driver: "PipeWire", driverInstalled: true, microphone: "Mic", speaker: "Monitor", ready: true, guidance: "ready" });
+    port._emitMessage({ type: "audio_status", platform: "linux", driver: "PipeWire", driverInstalled: true, microphone: "Mic", speaker: "Monitor", ready: true, guidance: "ready", nativeLoopback: false, virtualDeviceFallback: true, permissionRequired: false });
     await expect(preflight).resolves.toMatchObject({ ready: true, driver: "PipeWire" });
 
     const probe = client.runAudioProbe();
@@ -376,6 +476,28 @@ describe("NativeMessagingClient", () => {
     const result = client.getAudioPreflight();
     await vi.advanceTimersByTimeAsync(8_000);
     await expect(result).resolves.toMatchObject({ ready: false });
+  });
+
+  it("sends flagged moments with stop only when there are some", async () => {
+    const ports: Array<ReturnType<typeof createFakePort>> = [];
+    chromeMock.runtime.connectNative.mockImplementation(() => {
+      const port = createFakePort();
+      ports.push(port);
+      return port;
+    });
+    const client = new NativeMessagingClient();
+    await client.connect();
+
+    client.stopRecording("plain");
+    client.stopRecording("flagged", [{ offsetMs: 125_000, note: "Pricing" }]);
+
+    const sent = ports[0]!.postMessage.mock.calls.map((call) => call[0]) as Array<Record<string, unknown>>;
+    expect(sent.find((message) => message.meetingId === "plain")).toEqual({ type: "stop_recording", meetingId: "plain" });
+    expect(sent.find((message) => message.meetingId === "flagged")).toEqual({
+      type: "stop_recording",
+      meetingId: "flagged",
+      flaggedMoments: [{ offsetMs: 125_000, note: "Pricing" }],
+    });
   });
 
   it("sends lifecycle commands and reconnects when an alarm asks it to", async () => {

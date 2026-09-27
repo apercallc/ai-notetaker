@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listMeetings, upsertMeeting, ValidationError } from "@/lib/meetings";
 import { getDefaultWorkspaceId } from "@/lib/workspaces";
+import { isLegacyIngestAvailable } from "@/lib/deploymentConfig";
 import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 
 const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
@@ -10,6 +11,7 @@ const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 
 export async function GET(request: NextRequest) {
   const requestId = requestIdFrom(request);
+  if (!isLegacyIngestAvailable()) return jsonError("not found", 404, requestId);
   const { searchParams } = request.nextUrl;
   const query = searchParams.get("query") ?? undefined;
   try {
@@ -34,6 +36,7 @@ function parseIntegerParam(value: string | null, name: string): number | undefin
 
 export async function POST(request: NextRequest) {
   const requestId = requestIdFrom(request);
+  if (!isLegacyIngestAvailable()) return jsonError("not found", 404, requestId);
   const contentLength = request.headers.get("content-length");
   if (contentLength && Number(contentLength) > MAX_REQUEST_BYTES) {
     return jsonError("request body is too large", 413, requestId);

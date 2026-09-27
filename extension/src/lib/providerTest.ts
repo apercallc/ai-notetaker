@@ -4,10 +4,10 @@
  * the user's own configured instance, not a third-party AI provider — see
  * docs/webapp-api.md and extension/CLAUDE.md.
  *
- * AI provider "test key" validation does NOT live here — the extension
- * never calls transcription/LLM provider APIs directly (extension/CLAUDE.md).
- * That's routed through the helper via `NativeMessagingClient.testProviderKey`,
- * per docs/native-messaging-protocol.md's `test_provider_key` message.
+ * Desktop-call AI provider "test key" validation does NOT live here — it is
+ * routed through `NativeMessagingClient.testProviderKey`. Meet's browser
+ * processing path is intentionally separate and calls its selected provider
+ * only after local IndexedDB persistence.
  */
 type Fetcher = typeof fetch;
 const HEALTH_CHECK_TIMEOUT_MS = 8_000;

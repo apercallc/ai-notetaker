@@ -20,7 +20,9 @@ async fn test_key_at(url: &str, key: &str) -> Result<(), ProviderError> {
     let client = provider_client();
     let response = client
         .get(url)
-        .query(&[("key", key)])
+        // Header auth, not a query param — the key must never land in
+        // proxies, server access logs, or process listings.
+        .header("x-goog-api-key", key)
         .send()
         .await
         .map_err(|e| ProviderError::Unreachable(e.to_string()))?;
@@ -82,7 +84,10 @@ impl SummarizationProvider for GeminiProvider {
         let response = self
             .client
             .post(&self.base_url)
-            .query(&[("key", &self.api_key)])
+            // Header auth, never a `key=` query parameter: URL query strings
+            // land in proxies, server access logs, and process listings, and
+            // every other provider here uses header auth.
+            .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()
             .await
@@ -132,14 +137,14 @@ fn parse_response(body: &Value) -> Result<Summary, ProviderError> {
 mod tests {
     use super::*;
     use serde_json::json;
-    use wiremock::matchers::{method, query_param};
+    use wiremock::matchers::{header, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_key_succeeds_on_2xx() {
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(query_param("key", "good-key"))
+            .and(header("x-goog-api-key", "good-key"))
             .respond_with(ResponseTemplate::new(200))
             .mount(&mock_server)
             .await;
@@ -177,10 +182,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sends_api_key_as_query_param_and_parses_success() {
+    async fn sends_api_key_as_header_and_parses_success() {
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(query_param("key", "test-key"))
+            .and(header("x-goog-api-key", "test-key"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "candidates": [ { "content": { "parts": [ { "text": "{\"summary\": \"mocked\", \"action_items\": []}" } ] } } ]
             })))

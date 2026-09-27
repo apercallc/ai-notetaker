@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 build = "build.rs"
 default-run = "notetaker-helper"
-description = "Self-hosted AI meeting notetaker tray helper and Native Messaging relay"
+description = "Local-first AI meeting notetaker tray helper and Native Messaging relay"
 
 [[bin]]
 name = "notetaker-helper"
@@ -19,6 +19,9 @@ path = "src/nm_host_main.rs"
 notetaker-core = { path = "../core" }
 notetaker-audio = { path = "../audio" }
 tokio.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -26,11 +29,27 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 chrono.workspace = true
-dirs = "5"
+dirs = "6"
 interprocess = { version = "2", features = ["tokio"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
+# Decodes the embedded tray-state PNGs into RGBA for tauri::image::Image.
+png = "0.17"
+
+# Free-disk queries (statvfs / GetDiskFreeSpaceExW) for the start-of-recording
+# check and the disk-full auto-stop. Both crates are already in Cargo.lock via
+# tauri/interprocess; they are named here only so this crate can call them.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+# Needed to hand interprocess an SDDL string for the named-pipe DACL.
+widestring = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -40,7 +59,7 @@ maintainer = "AI Notetaker contributors"
 copyright = "2026 AI Notetaker contributors"
 section = "sound"
 priority = "optional"
-depends = "libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2"
+depends = "libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2, pulseaudio-utils"
 assets = [
   ["target/release/notetaker-helper", "usr/bin/notetaker-helper", "755"],
   ["target/release/notetaker-nm-host", "usr/bin/notetaker-nm-host", "755"],

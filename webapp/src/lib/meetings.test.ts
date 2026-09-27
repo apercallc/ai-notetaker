@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterAll } from "vitest";
 import { prisma } from "./db";
+import { getObject, putObject } from "./objectStorage";
 import {
   upsertMeeting,
   listMeetings,
@@ -69,6 +70,33 @@ describe("upsertMeeting", () => {
     expect(detail?.actionItems[0].id).toEqual(expect.any(String));
   });
 
+  it("rejects a client meeting ID that belongs to another workspace", async () => {
+    const input = sampleMeeting();
+    await upsertMeeting(input, OTHER_WORKSPACE_ID);
+    await expect(upsertMeeting(input, WORKSPACE_ID)).rejects.toThrow("another workspace");
+    expect(await getMeeting(OTHER_WORKSPACE_ID, input.id)).not.toBeNull();
+  });
+
+  it("persists managed Meet metadata and the authenticated owner", async () => {
+    const ownerId = "managed-owner";
+    const input = sampleMeeting({ captureSource: "meet", processingMode: "managed" });
+    await upsertMeeting(input, WORKSPACE_ID, ownerId);
+    const row = await prisma.meeting.findUnique({ where: { id: input.id }, include: { transcript: true, actionItems: true } });
+    expect(row).toMatchObject({ userId: ownerId, workspaceId: WORKSPACE_ID, captureSource: "meet", processingMode: "managed" });
+    expect(row?.transcript.every((segment) => segment.userId === ownerId)).toBe(true);
+    expect(row?.actionItems.every((item) => item.userId === ownerId)).toBe(true);
+  });
+
+  it("does not erase a completed managed meeting when registration is replayed", async () => {
+    const input = sampleMeeting({ captureSource: "meet", processingMode: "managed" });
+    await upsertMeeting(input, WORKSPACE_ID, "managed-owner");
+    await upsertMeeting({ ...input, summary: "", transcript: [], actionItems: [], endedAt: "2026-09-21T16:00:00.000Z" }, WORKSPACE_ID, "managed-owner");
+    const detail = await getMeeting(WORKSPACE_ID, input.id);
+    expect(detail?.summary).toBe(input.summary);
+    expect(detail?.transcript).toHaveLength(input.transcript.length);
+    expect(detail?.actionItems).toHaveLength(input.actionItems.length);
+  });
+
   it("persists meeting modes and lets the action inbox update status and due dates", async () => {
     await upsertMeeting(
       sampleMeeting({
@@ -78,7 +106,7 @@ describe("upsertMeeting", () => {
       WORKSPACE_ID,
     );
 
-    const openItems = await listActionItems(WORKSPACE_ID, "open");
+    const { items: openItems } = await listActionItems(WORKSPACE_ID, { status: "open" });
     expect(openItems).toHaveLength(1);
     expect(openItems[0]?.id).toBe("action-1");
     expect(openItems[0]?.meeting.title).toBe("Weekly sync");
@@ -91,8 +119,8 @@ describe("upsertMeeting", () => {
     expect(detail?.mode).toBe("sales");
     expect(detail?.actionItems[0]).toMatchObject({ status: "done", dueAt: null });
     expect(detail?.actionItems[0].completedAt).toEqual(expect.any(String));
-    expect(await listActionItems(WORKSPACE_ID, "open")).toHaveLength(0);
-    expect(await listActionItems(WORKSPACE_ID, "done")).toHaveLength(1);
+    expect((await listActionItems(WORKSPACE_ID, { status: "open" })).items).toHaveLength(0);
+    expect((await listActionItems(WORKSPACE_ID, { status: "done" })).items).toHaveLength(1);
   });
 
   it("defaults the title when none is provided", async () => {
@@ -175,6 +203,32 @@ describe("upsertMeeting", () => {
 });
 
 describe("listMeetings", () => {
+  it("pages identical timestamps without skipping or repeating a meeting", async () => {
+    // Back-to-back syncs share a startedAt often enough for this to be real.
+    // Ordering by startedAt alone leaves the tie broken by whatever order
+    // Postgres returns, which need not agree between two paginated queries —
+    // so a meeting can land on two consecutive pages while another is never
+    // shown at all.
+    const sameInstant = "2026-09-21T15:00:00.000Z";
+    const ids = Array.from(
+      { length: 9 },
+      (_, index) => `44444444-4444-4444-4444-4444444444${String(index).padStart(2, "0")}`,
+    );
+    for (const id of ids) {
+      await upsertMeeting(sampleMeeting({ id, startedAt: sameInstant, endedAt: sameInstant }), WORKSPACE_ID);
+    }
+
+    const seen: string[] = [];
+    for (let offset = 0; offset < ids.length; offset += 3) {
+      const page = await listMeetings(WORKSPACE_ID, { limit: 3, offset });
+      seen.push(...page.meetings.map((meeting) => meeting.id));
+    }
+
+    expect(seen).toHaveLength(ids.length);
+    expect(new Set(seen).size).toBe(ids.length);
+    expect([...seen].sort()).toEqual([...ids].sort());
+  });
+
   it("lists meetings newest-first", async () => {
     await upsertMeeting(sampleMeeting({ id: "11111111-1111-1111-1111-111111111111", startedAt: "2026-09-20T10:00:00.000Z", endedAt: "2026-09-20T10:30:00.000Z" }), WORKSPACE_ID);
     await upsertMeeting(sampleMeeting({ id: "22222222-2222-2222-2222-222222222222", startedAt: "2026-09-21T10:00:00.000Z", endedAt: "2026-09-21T10:30:00.000Z" }), WORKSPACE_ID);
@@ -254,6 +308,29 @@ describe("deleteMeeting", () => {
   it("does not throw when deleting a meeting that doesn't exist", async () => {
     await expect(deleteMeeting(WORKSPACE_ID, "does-not-exist")).resolves.not.toThrow();
   });
+
+  it("removes managed recording objects when the meeting is deleted", async () => {
+    const input = sampleMeeting();
+    await upsertMeeting(input, WORKSPACE_ID);
+    const objectKey = `test-delete/${input.id}.chunk`;
+    await putObject(objectKey, new TextEncoder().encode("recording"));
+    await prisma.managedUpload.create({
+      data: {
+        workspaceId: WORKSPACE_ID,
+        meetingId: input.id,
+        idempotencyKey: `delete-test-${input.id}`,
+        totalChunks: 1,
+        totalBytes: 9,
+        status: "complete",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        chunks: { create: { chunkIndex: 0, byteLength: 9, checksum: "test", objectKey } },
+      },
+    });
+
+    await expect(getObject(objectKey)).resolves.toEqual(new TextEncoder().encode("recording"));
+    await deleteMeeting(WORKSPACE_ID, input.id);
+    await expect(getObject(objectKey)).rejects.toThrow();
+  });
 });
 
 describe("workspace isolation", () => {
@@ -276,7 +353,7 @@ describe("workspace isolation", () => {
 
   it("listActionItems only returns action items from meetings in the given workspace", async () => {
     await upsertMeeting(sampleMeeting(), WORKSPACE_ID);
-    expect(await listActionItems(OTHER_WORKSPACE_ID)).toHaveLength(0);
+    expect((await listActionItems(OTHER_WORKSPACE_ID)).items).toHaveLength(0);
   });
 
   it("updateActionItem does not update an action item in a different workspace", async () => {

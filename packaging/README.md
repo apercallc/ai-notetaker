@@ -15,3 +15,23 @@ package install script.
 The Chrome extension is deliberately not packaged here. Normal users install
 it from the Chrome Web Store; the release ZIP is only a fallback for managed
 or development installations.
+
+Unsigned development installation is documented in
+[`../docs/unsigned-install.md`](../docs/unsigned-install.md). The Homebrew
+template includes `no_quarantine` only for that development fallback; public
+Casks must be regenerated from a signed release manifest.
+
+## Publishing checklist
+
+The repository does not publish these files merely by committing a template.
+For a tagged release, the release workflow:
+
+1. builds the native helper on Linux, macOS, and Windows;
+2. uploads the installers and checksums to the GitHub Release;
+3. renders the pinned Cask, WinGet, and Chocolatey files when the Chrome Web
+   Store URL is configured; and
+4. leaves external registry submission to the release owner.
+
+Homebrew requires a tap, WinGet requires a reviewed pull request to
+`microsoft/winget-pkgs`, and Chocolatey requires an API key. The exact setup,
+secrets, and verification commands are in [`../release/README.md`](../release/README.md).

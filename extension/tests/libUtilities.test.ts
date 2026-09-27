@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { estimateMeetingCost } from "../src/lib/costEstimate";
 import { escapeHtml } from "../src/lib/html";
-import { detectInstallPlatform, getInstallPageUrl } from "../src/lib/install";
+import { detectInstallPlatform, getExtensionOnboardingUrl, getInstallPageUrl } from "../src/lib/install";
 import { testProviderKey } from "../src/lib/testProviderKey";
 
 describe("small deterministic extension utilities", () => {
@@ -17,12 +17,61 @@ describe("small deterministic extension utilities", () => {
     expect(escapeHtml(`<img src=x onerror="bad">`)).toContain("&lt;img");
   });
 
+  it("escapes quotes, so a value cannot break out of an HTML attribute", () => {
+    // Most call sites interpolate into a double-quoted attribute, and some of
+    // those values are LLM output (summarized action-item text) rather than
+    // anything the user typed — e.g.
+    // `aria-label="Mark action item ${escapeHtml(item.text)} complete"`.
+    // Escaping only the angle brackets let such a value close the attribute
+    // and hang new ones off the same tag.
+    const injected = `" style="background:url(https://evil.example)" data-x="`;
+    const escaped = escapeHtml(injected);
+    expect(escaped).not.toContain('"');
+    expect(escaped).toContain("&quot;");
+
+    const rendered = `<input value="${escaped}" />`;
+    const parsed = new DOMParser().parseFromString(rendered, "text/html");
+    const input = parsed.querySelector("input");
+    expect(input?.getAttribute("style")).toBeNull();
+    expect(input?.getAttribute("data-x")).toBeNull();
+    expect(input?.getAttribute("value")).toBe(injected);
+  });
+
+  it("escapes single quotes and ampersands without double-escaping", () => {
+    expect(escapeHtml("it's & more")).toBe("it&#39;s &amp; more");
+    expect(escapeHtml("")).toBe("");
+    expect(escapeHtml("plain text")).toBe("plain text");
+  });
+
   it("builds an install URL with detected platform and source", () => {
     expect(["macos", "windows", "linux", "unknown"]).toContain(detectInstallPlatform());
     const url = new URL(getInstallPageUrl("popup"));
     expect(url.origin).toBe("https://apercallc.github.io");
     expect(url.searchParams.get("source")).toBe("popup");
     expect(url.searchParams.get("platform")).toBeTruthy();
+    expect(url.searchParams.get("mode")).toBeNull();
+  });
+
+  it("keeps ordinary onboarding links on the Meet-first landing page", () => {
+    const url = new URL(getInstallPageUrl("onboarding"));
+    expect(url.searchParams.get("mode")).toBeNull();
+  });
+
+  it("marks only the explicit desktop installer link as desktop", () => {
+    const url = new URL(getInstallPageUrl("desktop"));
+    expect(url.searchParams.get("mode")).toBe("desktop");
+  });
+
+  it("builds internal setup links with an explicit Meet mode", () => {
+    const url = new URL(getExtensionOnboardingUrl("chrome-extension://stableid/"));
+    expect(url.pathname).toBe("/onboarding/onboarding.html");
+    expect(url.searchParams.get("mode")).toBe("meet");
+  });
+
+  it("allows only the deliberate desktop setup path to opt into desktop mode", () => {
+    const url = new URL(getExtensionOnboardingUrl("chrome-extension://stableid/", "desktop"));
+    expect(url.searchParams.get("mode")).toBe("desktop");
+    expect(url.searchParams.get("source")).toBe("desktop");
   });
 
   describe("testProviderKey", () => {

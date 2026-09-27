@@ -36,11 +36,15 @@ describe("createSession / getSessionUser / deleteSession", () => {
     expect(await getSessionUser(undefined)).toBeNull();
   });
 
-  it("returns null for an expired session", async () => {
+  it("returns null for an expired session, and reaps the row", async () => {
     const user = await makeUser();
     const session = await createSession(user.id);
     await prisma.session.update({ where: { id: session.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
     expect(await getSessionUser(session.id)).toBeNull();
+    // Nothing else deletes these, so an abandoned session used to live in
+    // the table forever.
+    expect(await prisma.session.count({ where: { id: session.id } })).toBe(0);
   });
 
   it("deleteSession makes the session unresolvable", async () => {

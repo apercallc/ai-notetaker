@@ -1,11 +1,10 @@
-# webapp/ — Optional Self-Hosted History App
+# webapp/ — Hosted and Self-Hosted History Service
 
-Next.js + Postgres, deployed by each user to their own Railway account via
-a one-click template. This package is **never operated by the project
-itself** — see `docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`
-(§3.5) for why: a centrally-hosted instance would reintroduce the hosting
-cost and data-liability problem the whole BYOK/no-subscription design
-exists to avoid.
+Next.js + Postgres. It supports both the managed multi-tenant service and a
+user-operated one-click self-hosted deployment. Managed hosting adds
+authenticated uploads, private object storage, processing jobs, usage, and
+billing; self-hosted deployments retain local/BYOK operation. See
+`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`.
 
 ## Conventions
 
@@ -13,24 +12,25 @@ exists to avoid.
   passwords, DB-backed sessions, an owner/member `WorkspaceMembership`
   model) — see
   `docs/superpowers/specs/2026-09-22-webapp-multi-user-auth-design.md`.
-  One deployment supports exactly one workspace/team; there is no
-  multi-workspace or invite-by-email flow, by design (YAGNI until asked).
+  Self-hosted deployments may remain single-workspace; managed hosting must
+  enforce tenant/workspace isolation for every browser, upload, job, object,
+  search, sharing, and billing operation.
   The `/api/*` ingestion contract (desktop helper sync) is completely
   separate and still uses the single deploy-time `AUTH_TOKEN` — never
   conflate the two auth mechanisms.
-- **The Railway "Deploy" template must stay one-click.** Any new required
+- **The self-hosted Railway "Deploy" template must stay one-click.** Any new required
   environment variable or manual setup step is a regression against the
   "simple, straightforward install" pillar — document it clearly in
   `docs/` if it's unavoidable, but prefer sane defaults over new required
   config.
-- **This app never calls transcription/LLM provider APIs.** It only stores
-  and serves finished notes that the extension/helper already produced —
-  keeping it a thin storage+display layer means it never needs the user's
-  AI provider keys, which reduces its blast radius if the deployment is
-  ever compromised.
-- **The deploy-time `AUTH_TOKEN` and per-user passwords, not the user's AI
-  API keys, are what secure this app.** Never design a flow where a
-  Deepgram/Claude/etc. key would need to reach the webapp.
+- **Provider execution is mode-dependent.** Self-hosted/BYOK deployments may
+  remain storage/display only. Managed deployments use server-side provider
+  adapters and workers with platform-owned credentials; provider keys never
+  reach browser bundles or meeting records.
+- **Sessions, workspace authorization, signed upload/object access, and
+  server-side provider secrets secure managed hosting.** The deploy-time
+  `AUTH_TOKEN` continues to secure self-hosted ingestion. Never design a flow
+  where a provider key reaches the browser or a meeting record.
 - **Every route requires authentication, including reads.** There is no
   "public by default" page or API route — a self-hosted instance sits on a
   public Railway URL, and an unauthenticated read path would expose a
