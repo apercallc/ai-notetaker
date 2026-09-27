@@ -443,9 +443,9 @@ impl ErrorCode {
 /// extension on first connection or browser-token recovery and stored by the
 /// extension for every subsequent `hello`.
 pub fn generate_pairing_token() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
+    use rand::RngExt;
+    let mut rng = rand::rng();
+    let bytes: [u8; 32] = rng.random();
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
