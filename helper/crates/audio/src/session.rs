@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 
 pub(crate) type FrameCallback = Box<dyn Fn(CapturedFrame) + Send + Sync>;
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) type ReadySender = oneshot::Sender<Result<(), String>>;
 
 pub(crate) struct CaptureSession {

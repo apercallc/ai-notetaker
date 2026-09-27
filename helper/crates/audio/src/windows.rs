@@ -10,9 +10,9 @@
 //! loopback is unavailable, routing a meeting app's output to CABLE Input means
 //! the user stops hearing the meeting through their real speakers unless
 //! something plays CABLE Output back out. Windows offers a per-recording-device
-//! "Listen to this device" toggle (in `Sound Settings > Recording > CABLE Output
-//! > Properties > Listen`) that accomplishes this, but toggling it
-//! programmatically needs direct WASAPI/IMMDevice/IAudioEndpointVolume COM calls
+//! "Listen to this device" toggle under:
+//! `Sound Settings > Recording > CABLE Output > Properties > Listen`.
+//! Toggling it programmatically needs direct WASAPI/IMMDevice/IAudioEndpointVolume COM calls
 //! beyond what `cpal` exposes. The fallback onboarding therefore keeps that
 //! manual step explicit instead of claiming automatic routing.
 

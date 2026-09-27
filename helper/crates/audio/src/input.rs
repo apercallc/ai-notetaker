@@ -5,22 +5,22 @@
 //! and every callback is downmixed to mono PCM16 through [`crate::convert`].
 
 use crate::convert::{samples_to_mono_pcm16, SampleToF32};
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::health::Backoff;
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::health::{CaptureHealthKind, HealthHub};
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::AudioDeviceInfo;
 use crate::{AudioError, CapturedFrame};
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use cpal::traits::HostTrait;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::time::{Duration, Instant};
 
 /// Called (from cpal's audio thread) when the stream reports an error.
@@ -111,7 +111,7 @@ pub(crate) fn build_input_stream(
 
 /// Finds an input device by id (its cpal name). An unknown id falls back to
 /// the system default with a warning instead of failing the whole recording.
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn find_input_device(requested: Option<&str>) -> Option<cpal::Device> {
     let host = cpal::default_host();
     if let Some(id) = requested {
@@ -130,14 +130,14 @@ pub(crate) fn find_input_device(requested: Option<&str>) -> Option<cpal::Device>
     host.default_input_device()
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn default_input_name() -> Option<String> {
     cpal::default_host()
         .default_input_device()
         .and_then(|device| device.name().ok())
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn list_input_devices() -> Vec<AudioDeviceInfo> {
     let host = cpal::default_host();
     let default = host
@@ -157,14 +157,14 @@ pub(crate) fn list_input_devices() -> Vec<AudioDeviceInfo> {
         .unwrap_or_default()
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 const DEFAULT_DEVICE_POLL: Duration = Duration::from_secs(2);
 
 /// Owns one cpal input stream on the capture-supervisor thread (a
 /// `cpal::Stream` is not `Send`) and keeps it alive: stream errors and
 /// default-device changes trigger a reopen, with health events and backoff.
 /// Used for the microphone and for virtual-cable speaker fallbacks.
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) struct InputSupervisor {
     channel: AudioChannel,
     /// A pinned device is never re-routed to follow the system default.
@@ -179,7 +179,7 @@ pub(crate) struct InputSupervisor {
     backoff: Backoff,
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 impl InputSupervisor {
     /// Opens the device. The first open must succeed (recording without a
     /// mic is a start failure); later failures are retried in [`Self::tick`].
