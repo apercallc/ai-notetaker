@@ -44,7 +44,7 @@ png = "0.17"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 # Needed to hand interprocess an SDDL string for the named-pipe DACL.
 widestring = "1"
 
