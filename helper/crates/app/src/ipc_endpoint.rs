@@ -10,13 +10,16 @@
 
 use interprocess::local_socket::Name;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 #[cfg(unix)]
 use interprocess::local_socket::{GenericFilePath, ToFsName};
 #[cfg(windows)]
 use interprocess::local_socket::{GenericNamespaced, ToNsName};
 
+#[cfg(unix)]
 pub const SOCKET_FILE: &str = "ai-notetaker.sock";
 
 /// `sockaddr_un.sun_path` is 108 bytes on Linux and 104 on macOS; stay under
@@ -24,6 +27,7 @@ pub const SOCKET_FILE: &str = "ai-notetaker.sock";
 #[cfg(unix)]
 const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
 
+#[cfg(unix)]
 pub fn socket_file(dir: &Path) -> PathBuf {
     dir.join(SOCKET_FILE)
 }
