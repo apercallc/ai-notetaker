@@ -111,8 +111,12 @@ jobs:
       - name: Prepare Swift runtime for macOS tests
         if: runner.os == 'macOS'
         run: |
-          swift_lib="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx"
-          test -f "$swift_lib/libswift_Concurrency.dylib"
+          swift_runtime="$(find "$(xcode-select -p)" -name libswift_Concurrency.dylib -type f -print -quit)"
+          if [ -z "$swift_runtime" ]; then
+            echo 'Could not locate libswift_Concurrency.dylib in the selected Xcode toolchain.' >&2
+            exit 1
+          fi
+          swift_lib="$(dirname "$swift_runtime")"
           cargo test --workspace --no-run
           cp "$swift_lib"/*.dylib target/debug/deps/
       - run: cargo test --workspace
