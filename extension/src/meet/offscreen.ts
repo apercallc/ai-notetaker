@@ -1,4 +1,6 @@
 import { isFromExtensionWorker } from "../lib/senderPolicy";
+import { getSettings } from "../lib/storage";
+import { DeepgramLiveTranscriber, type DeepgramLiveEvent } from "./deepgramLiveTranscriber";
 import { float32ToPcm16 } from "./meetCapture";
 import type { BrowserAudioChannel } from "../types";
 
@@ -24,11 +26,95 @@ let captureNodes: AudioWorkletNode[] = [];
 /** Sent with every chunk so a restarted worker can re-attach the capture to its tab. */
 let captureTabId: number | undefined;
 const pendingWrites = new Set<Promise<void>>();
+const pendingLiveMessages = new Set<Promise<void>>();
+const pendingLiveAudio = new Map<BrowserAudioChannel, Uint8Array[]>([["mic", []], ["speaker", []]]);
+const MAX_PENDING_CHUNKS_PER_CHANNEL = 8;
+let liveTranscriber: DeepgramLiveTranscriber | null = null;
+let captureGeneration = 0;
+let stoppingGeneration: number | null = null;
 
 /** DOMException (what getUserMedia rejects with) is not always an Error across realms. */
 function errorMessage(error: unknown): string {
   const message = (error as { message?: unknown } | null)?.message;
   return typeof message === "string" && message ? message : "Meet capture failed";
+}
+
+/**
+ * "Receiving end does not exist" and port-closed errors are transient here:
+ * the MV3 service worker can be killed and restarted between two audio
+ * chunks, and while it is down sendMessage rejects exactly this way. Losing
+ * the whole capture over one such blip — when every chunk is already
+ * durable-first in the worker once it comes back — is wrong; retry a few
+ * times with a short backoff and only give up once the worker stays
+ * unreachable for a while.
+ */
+function isTransientWorkerRestart(reason: unknown): boolean {
+  const message = errorMessage(reason);
+  return /receiving end does not exist|message port closed|The message port closed/i.test(message);
+}
+
+const CHUNK_SEND_ATTEMPTS = 4;
+const CHUNK_SEND_BACKOFF_MS = 250;
+
+/** Sends one chunk with bounded retries for transient worker-restart errors. */
+async function sendChunkWithRetry(payload: object): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = (await chrome.runtime.sendMessage(payload)) as { error?: string } | undefined;
+      if (response?.error) throw new Error(response.error);
+      return;
+    } catch (reason) {
+      if (attempt >= CHUNK_SEND_ATTEMPTS || !isTransientWorkerRestart(reason)) throw reason;
+      await new Promise((resolve) => setTimeout(resolve, CHUNK_SEND_BACKOFF_MS * attempt));
+    }
+  }
+}
+
+function reportLiveEvent(meetingId: string, generation: number, event: DeepgramLiveEvent): void {
+  if (generation !== captureGeneration && generation !== stoppingGeneration) return;
+  let message: object;
+  if (event.type === "status") {
+    message = { type: "MEET_LIVE_TRANSCRIPT_STATUS", meetingId, status: event.status };
+  } else {
+    const { type: _eventType, ...update } = event;
+    message = { type: "MEET_LIVE_TRANSCRIPT_UPDATE", meetingId, ...update };
+  }
+  const task = chrome.runtime.sendMessage(message).then(() => undefined).catch(() => undefined);
+  pendingLiveMessages.add(task);
+  void task.finally(() => pendingLiveMessages.delete(task));
+}
+
+async function startLiveTranscription(meetingId: string, generation: number): Promise<void> {
+  try {
+    const settings = await getSettings();
+    if (generation !== captureGeneration) return;
+    const apiKey = settings.apiKeys.deepgram?.trim() ?? "";
+    if (settings.processingMode.kind !== "local_byok" || settings.transcriptionProvider !== "deepgram" || !apiKey) {
+      reportLiveEvent(meetingId, generation, { type: "status", status: "not_supported" });
+      return;
+    }
+    const transcriber = new DeepgramLiveTranscriber({ onEvent: (event) => reportLiveEvent(meetingId, generation, event) });
+    liveTranscriber = transcriber;
+    const connected = transcriber.connect({ kind: "apiKey", token: apiKey });
+    for (const channel of ["mic", "speaker"] as const) {
+      const queue = pendingLiveAudio.get(channel);
+      for (const chunk of queue?.splice(0) ?? []) transcriber.send(channel, chunk);
+    }
+    await connected;
+  } catch {
+    if (generation === captureGeneration && !liveTranscriber) {
+      reportLiveEvent(meetingId, generation, { type: "status", status: "unavailable" });
+    }
+  }
+}
+
+function queueOrSendLiveAudio(channel: BrowserAudioChannel, pcm16: Uint8Array): void {
+  if (liveTranscriber) {
+    liveTranscriber.send(channel, pcm16);
+    return;
+  }
+  const queue = pendingLiveAudio.get(channel);
+  if (queue && queue.length < MAX_PENDING_CHUNKS_PER_CHANNEL) queue.push(pcm16.slice());
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -56,11 +142,19 @@ function flush(node: AudioWorkletNode): Promise<void> {
 }
 
 async function stop(): Promise<void> {
+  stoppingGeneration = captureGeneration;
+  captureGeneration += 1;
   const nodes = captureNodes;
   captureNodes = [];
   // Flush while the streams are still live; the resulting chunks go out before the STOP reply does.
   await Promise.all(nodes.map((node) => flush(node)));
   await Promise.allSettled([...pendingWrites]);
+  const transcriber = liveTranscriber;
+  await transcriber?.stop();
+  await Promise.allSettled([...pendingLiveMessages]);
+  if (liveTranscriber === transcriber) liveTranscriber = null;
+  for (const queue of pendingLiveAudio.values()) queue.splice(0);
+  stoppingGeneration = null;
   nodes.forEach((node) => {
     node.port.onmessage = null;
     node.disconnect();
@@ -83,15 +177,16 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
   node.port.onmessage = (event: MessageEvent) => {
     if (!(event.data instanceof ArrayBuffer)) return;
     const pcm16 = float32ToPcm16(new Float32Array(event.data));
-    const write: Promise<void> = chrome.runtime.sendMessage({
+    const write: Promise<void> = sendChunkWithRetry({
       type: "MEET_AUDIO_CHUNK",
       meetingId,
       channel,
       sampleRateHz: SAMPLE_RATE_HZ,
       pcm16Base64: toBase64(pcm16),
       ...(captureTabId === undefined ? {} : { tabId: captureTabId }),
-    }).then((response: { error?: string } | undefined) => {
-      if (response?.error) throw new Error(response.error);
+    }).then(() => {
+      // Provider audio leaves the extension only after the worker acknowledges its local durable write.
+      queueOrSendLiveAudio(channel, pcm16);
     }).catch(() => {
       void chrome.runtime.sendMessage({
         type: "MEET_CAPTURE_ERROR",
@@ -133,6 +228,7 @@ async function start(capturedStreamId: string, meetingId: string, tabId?: number
   streams = [speaker, mic];
   attachCapture(speaker, "speaker", meetingId);
   attachCapture(mic, "mic", meetingId);
+  void startLiveTranscription(meetingId, captureGeneration);
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

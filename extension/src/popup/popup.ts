@@ -5,6 +5,7 @@ import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode
 import { escapeHtml } from "../lib/html";
 import { getExtensionOnboardingUrl } from "../lib/install";
 import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
+import { takePendingMeetStart } from "../meet/pendingStart";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
@@ -13,6 +14,8 @@ let historyQuery = "";
 let desktopChosen = false;
 /** Why the last start did not begin; shown in place, since the popup has no other channel for it. */
 let startError = "";
+/** The Meet tab this popup most recently detected as active, kept for the pending-start handoff. */
+let lastActiveMeetTab: { id: number } | null = null;
 const MEET_HOME = "https://meet.google.com/";
 
 function onboardingUrl(): string {
@@ -248,7 +251,9 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]):
   if (helperStatus !== "connected") {
     statusEl.textContent = helperStatus === "incompatible"
       ? "The desktop helper needs an update. Open desktop setup to install the current version."
-      : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
+      : helperStatus === "needs_pairing"
+        ? "The helper is paired with a different browser. Open the helper's tray menu and choose 'Pair New Browser', then try again."
+        : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
     statusEl.className = "text-warning";
     if (checkButton) checkButton.disabled = true;
     if (probeButton) probeButton.disabled = true;
@@ -313,17 +318,52 @@ function modeChip(settings: Awaited<ReturnType<typeof getSettings>>): string {
   return `<p class="mode-chip" id="mode-chip"><span class="sr-only">Notes are written with: </span>${label}</p>`;
 }
 
+/**
+ * A remembered widget start is only honored when the popup opened on that
+ * same Meet tab while nothing is recording. A different tab (the person moved
+ * on), a live recording (someone started elsewhere — the shortcut), or a
+ * stale session entry must never trigger an auto-start.
+ */
+function isPendingStartCurrent(intent: { tabId: number }, state: BackgroundState): boolean {
+  if (state.activeMeeting) return false;
+  const tab = lastActiveMeetTab;
+  return tab?.id === intent.tabId;
+}
+
+async function resumePendingStart(intent: { tabId: number; meetingMode?: string; titleHint?: string }): Promise<void> {
+  try {
+    const response = await sendToBackground<{ meetingId?: string }>({
+      type: "START_RECORDING",
+      captureSource: "meet",
+      meetingMode: (intent.meetingMode ?? "general") as MeetingMode,
+      tabId: intent.tabId,
+      ...(intent.titleHint ? { titleHint: intent.titleHint } : {}),
+    });
+    if (!response?.meetingId) return;
+    await renderSafely();
+  } catch {
+    // The auto-start is a convenience; the popup's Start button remains.
+  }
+}
+
 /** The popup's idle view knows where the person is: on a Meet call, it is one button. */
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
   const meetings = await listMeetings(historyQuery ? undefined : 5, historyQuery || undefined);
   const meetTab = await activeMeetTab();
+  lastActiveMeetTab = meetTab && typeof meetTab.id === "number" ? { id: meetTab.id } : null;
   const onMeet = meetTab !== undefined;
   const desktop = !onMeet && (desktopChosen || helperStatus === "connected");
   const helperReady = helperStatus === "connected";
+  const autoRecordGuidance = settings.autoRecordOnMeetJoin
+    ? onMeet
+      ? "Auto-record on join is on. If Chrome blocks the first start, one toolbar click starts it—no second Start notes step."
+      : "Auto-record on join is on. Join a Google Meet call to start notes automatically; if Chrome blocks the first start, click Notetaker once on the call tab."
+    : "Auto-record on join is off. Start notes from the call widget or toolbar, or enable auto-record in Settings.";
   const controls = onMeet || desktop
     ? `
       <button class="primary record-toggle" id="start-recording"${desktop ? " disabled" : ""}>Start notes</button>
       ${modeChip(settings)}
+      ${onMeet ? `<p id="meet-auto-record-guidance" class="field-hint text-secondary">${autoRecordGuidance}</p>` : ""}
       <label class="meeting-mode-picker" for="meeting-mode">Notes style
         <select id="meeting-mode">${meetingModeOptions(settings.defaultMeetingMode)}</select>
       </label>
@@ -348,7 +388,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       <button class="primary record-toggle" id="open-meet">Open Google Meet</button>
       ${modeChip(settings)}
       <p id="start-error" class="start-error" role="alert"${startError ? "" : " hidden"}>${escapeHtml(startError)}</p>
-      <p class="field-hint text-secondary">Join a call, then click this icon on the Meet tab to start notes.</p>
+      <p id="meet-auto-record-guidance" class="field-hint text-secondary">${autoRecordGuidance}</p>
       <button type="button" class="text-link" id="use-desktop">Recording Zoom or Teams instead?</button>`;
   app.innerHTML = `
     ${renderHeader(true)}
@@ -467,6 +507,15 @@ async function render(): Promise<void> {
     await renderActiveRecording(state.activeMeeting.id, state.helperStatus);
   } else {
     await renderIdleState(state.helperStatus, settings);
+    // Chrome just granted this popup's click as the tab invocation — the one
+    // thing the in-call widget's click can never be. If the widget's start was
+    // blocked waiting for exactly this moment, finish what it started now,
+    // on this same click, instead of showing the person a Start button they
+    // already pressed once.
+    const intent = await takePendingMeetStart();
+    if (intent && isPendingStartCurrent(intent, state)) {
+      void resumePendingStart(intent);
+    }
   }
 
   if (state.recoverableMeeting) {

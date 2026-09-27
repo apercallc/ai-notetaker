@@ -58,9 +58,9 @@ export function isFromExtensionWorker(sender: SenderLike, context: Pick<SenderPo
 export function isMessageAllowed(type: UiToBackgroundMessage["type"], kind: SenderKind): boolean {
   switch (kind) {
     case "extension-page":
-      return type !== "MEET_AUDIO_CHUNK";
+      return type !== "MEET_AUDIO_CHUNK" && type !== "MEET_CAPTURE_ERROR" && type !== "MEET_LIVE_TRANSCRIPT_STATUS" && type !== "MEET_LIVE_TRANSCRIPT_UPDATE";
     case "offscreen":
-      return type === "MEET_AUDIO_CHUNK" || type === "MEET_CAPTURE_ERROR";
+      return type === "MEET_AUDIO_CHUNK" || type === "MEET_CAPTURE_ERROR" || type === "MEET_LIVE_TRANSCRIPT_STATUS" || type === "MEET_LIVE_TRANSCRIPT_UPDATE";
     case "meet-content-script":
       return CONTENT_SCRIPT_MESSAGES.has(type);
     default:

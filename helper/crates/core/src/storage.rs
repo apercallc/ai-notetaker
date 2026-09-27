@@ -231,6 +231,45 @@ impl MeetingStore {
         self.write_meta(&meta)
     }
 
+    /// Starts a recording without discarding recoverable state. The extension
+    /// re-uses meeting ids when retrying a start, and blindly recreating meta
+    /// reset the transcription cursors and summary options while the raw PCM
+    /// files stayed — re-transcribing audio that was already transcribed and
+    /// silently dropping flagged moments. When a meeting already exists its
+    /// meta is preserved (recording state resumed) and only the summary
+    /// options are refreshed, since the user just chose them for this run.
+    pub fn create_or_resume_meeting_with_options(
+        &self,
+        id: Uuid,
+        started_at: DateTime<Utc>,
+        mode: MeetingMode,
+        summary_options: SummaryOptions,
+    ) -> Result<(), StorageError> {
+        match self.load_meta(id) {
+            Ok(_) => self.update_summary_options(id, mode, summary_options),
+            Err(StorageError::NotFound(_)) => {
+                self.create_meeting_with_options(id, started_at, mode, summary_options)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Refreshes summary options (and mode) on an existing meeting under the
+    /// meeting lock, leaving every other meta field — cursors, rates, pending
+    /// flags, managed state — exactly as persisted.
+    fn update_summary_options(
+        &self,
+        id: Uuid,
+        mode: MeetingMode,
+        mut summary_options: SummaryOptions,
+    ) -> Result<(), StorageError> {
+        summary_options.mode = mode;
+        self.update_meta(id, move |meta| {
+            meta.summary_options = summary_options;
+            Ok(())
+        })
+    }
+
     /// Writes a brand-new meta document under the meeting's lock.
     fn write_meta(&self, meta: &MeetingMeta) -> Result<(), StorageError> {
         let lock = meeting_lock(meta.id);
@@ -369,6 +408,20 @@ impl MeetingStore {
         })
     }
 
+    /// Gives up on the pending summary after the retry budget is exhausted.
+    /// The meeting is marked stopped (a terminal, user-visible state) so it no
+    /// longer looks like work in flight; the raw audio and transcript stay
+    /// intact for a manual re-summarize.
+    pub fn clear_summary_pending(&self, id: Uuid) -> Result<(), StorageError> {
+        self.update_meta(id, |meta| {
+            meta.summary_pending = false;
+            if meta.state == MeetingState::Recording {
+                meta.state = MeetingState::Stopped;
+            }
+            Ok(())
+        })
+    }
+
     /// Marks a managed capture as requiring hosted upload/processing. This is
     /// written before capture begins so an unexpected shutdown cannot make a
     /// managed meeting indistinguishable from a completed local one.
@@ -486,6 +539,12 @@ impl MeetingStore {
     /// Appends a provider response in one read/write cycle. Provider results
     /// often contain several diarized segments; rewriting transcript.json for
     /// every segment made long meetings increasingly expensive on disk.
+    ///
+    /// An unreadable transcript.json is an error, never an empty transcript:
+    /// silently defaulting here would wipe the accumulated meeting transcript
+    /// and summarize a partial meeting with no warning. Propagate the read or
+    /// parse failure so the provider result that could not be merged stays in
+    /// the retry queue instead.
     pub fn append_transcript_segments(
         &self,
         id: Uuid,
@@ -496,7 +555,7 @@ impl MeetingStore {
         }
         let lock = meeting_lock(id);
         let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut segments = self.load_transcript(id).unwrap_or_default();
+        let mut segments = self.load_transcript(id)?;
         segments.extend_from_slice(new_segments);
         let path = self.meeting_dir(id).join("transcript.json");
         atomic_write(&path, &serde_json::to_vec_pretty(&segments)?)?;
