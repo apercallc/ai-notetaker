@@ -23,7 +23,8 @@ crates/
   core/    notetaker-core   — platform-agnostic: wire protocol, providers,
                                storage, retry queue, pipeline orchestration
   audio/   notetaker-audio  — AudioCapture trait + per-OS virtual-device
-                               backends (macOS/BlackHole, Windows/VB-CABLE,
+                               backends (macOS/ScreenCaptureKit + BlackHole,
+                               Windows/WASAPI + VB-CABLE,
                                Linux/PulseAudio)
   app/     notetaker-app    — two binaries: notetaker-helper (the
                                persistent tray app) and notetaker-nm-host
@@ -39,10 +40,15 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-As of this implementation pass: **96 Rust tests passing (89 in `core`, 6 in
-`audio`, and 1 fixture integration test), zero compiler warnings, zero clippy
-warnings**. Linux is verified locally; the helper CI matrix also compiles and
-tests the platform-gated macOS and Windows modules on their native runners.
+As of this implementation pass: **152 Rust tests passing (124 in `core`, 15
+in `audio` including the capability matrix, 11 in `app`, and 1 fixture
+integration test), zero compiler warnings, zero clippy warnings**. Linux is
+verified locally. The repository's three-OS CI matrix runs the same Rust gates
+and an unsigned Tauri bundle smoke build for each native target. CI pins the
+Tauri CLI 2.11.5, alongside the lockfile's Rust Tauri 2.11.6 release. This
+Linux host does not have the Apple or MinGW toolchains needed for local
+cross-target checks; signing, device permissions, and installer execution still
+require native runners.
 
 ## What's genuinely verified vs. what isn't (read this before trusting a "done" claim)
 
@@ -54,7 +60,8 @@ filesystem I/O via `tempfile`, no live credentials or hardware needed):
 - All 5 provider clients (Deepgram, Groq, Claude, Gemini, DeepSeek) —
   request shape, auth headers, success parsing, 401/403/429 error mapping.
 - Local storage (`core::storage`) — meeting lifecycle, dual-channel audio
-  file separation, transcript accumulation, crash-recovery scan.
+  file separation, bounded range reads for resumable managed uploads,
+  transcript accumulation, crash-recovery scan.
 - Retry queue (`core::resilience`) — exponential backoff math, persistence
   across reloads, durable PCM-range replay, and exhaustion handling.
 - Pipeline orchestration (`core::pipeline`) — audio-persisted-before-
@@ -79,13 +86,16 @@ probe and a short raw-audio recording have both been exercised.
   `notetaker-nm-host` process Chrome actually spawns, has not been
   exercised end-to-end.
 
-**Compiled by native CI runners but not runtime-verified** — this environment
-has no macOS/Windows device, driver, UAC, or meeting app:
+**Compiled by native CI runners but not runtime-verified** — this Linux
+environment has no macOS/Windows SDK toolchain, device, driver, UAC, or
+meeting app. The GitHub Actions matrix is the native compile gate:
 
-- `audio::macos` (BlackHole detection + capture) — compiled by the macOS job;
-  install and Multi-Output Device behavior still need a real Mac.
-- `audio::windows` (VB-CABLE detection + capture) — compiled by the Windows
-  job; installer/UAC/reboot and device behavior still need a real Windows PC.
+- `audio::macos` (ScreenCaptureKit system audio + BlackHole fallback) —
+  compiled by the macOS CI runner; permission prompts, native stream startup,
+  and fallback routing still need a real Mac.
+- `audio::windows` (WASAPI loopback + VB-CABLE fallback) — compiled by the
+  Windows CI runner; installer/UAC/reboot and device behavior still need a
+  real Windows PC.
 
 **Explicitly not implemented, flagged rather than faked:**
 
@@ -102,12 +112,11 @@ has no macOS/Windows device, driver, UAC, or meeting app:
   the visible vendor installer launch are wired in
   `audio::windows::install_if_missing`; this sandbox has no Windows target,
   UAC environment, or audio device to verify the native flow against.
-- **The macOS Multi-Output Device / Windows "Listen to this device" setup**
-  that lets the user keep hearing the meeting normally while we capture it
-  — needs platform APIs below what `cpal` exposes (CoreAudio aggregate
-  devices on macOS, WASAPI endpoint control on Windows). Documented as a
-  known gap in both `audio::macos` and `audio::windows` module docs.
-  Linux's `pactl module-loopback` equivalent *is* implemented.
+- **The macOS fallback Multi-Output Device / Windows "Listen to this device"
+  setup** that lets the user keep hearing the meeting normally while a
+  virtual fallback captures it still needs real-device validation. Native
+  ScreenCaptureKit/WASAPI paths do not require those routing changes. Linux's
+  `pactl module-loopback` equivalent *is* implemented.
 - **Tray icon UI** — wired through Tauri v2 with idle/recording status, recent
   note/folder opening, opt-in launch-at-login, and quit. The helper has no
   main window; Tauri owns the process main thread and the IPC server starts

@@ -1,80 +1,175 @@
+import { prisma } from "@/lib/db";
+import { normalizeEmail } from "@/lib/email";
+
 /**
- * Throttles repeated failed sign-in attempts.
+ * Abuse throttling kept in Postgres rather than process memory, so several
+ * web replicas share one budget and a redeploy cannot reset it.
  *
- * A self-hosted instance sits on a guessable public Railway URL, and until
- * now `login` would evaluate an unlimited number of password guesses — the
- * only cost to an attacker was one scrypt call each. scrypt makes a *stolen
- * hash* expensive to crack offline; it does nothing to stop an online
- * guessing loop against the live form.
+ * Every protected action checks several independent keys at once. A request
+ * is blocked as soon as ANY key is over budget:
  *
- * Deliberately in-process rather than a new table or a Redis dependency:
- * the Railway template is one long-lived Node server with one deployment,
- * and the project's hard constraint is that deploying stays one click with
- * no new required configuration. The trade-off is explicit — counters reset
- * on redeploy, and this would not hold across horizontally scaled replicas.
- * If this app ever runs more than one instance, this needs to move into
- * Postgres.
+ *   pair  (ip + email)  tight budget — stops one machine guessing one account
+ *   ip                  wide budget  — stops one machine spraying many accounts
+ *   email               loose budget — backstop when the attacker rotates IPs
+ *                        (or forges proxy headers); kept loose so an attacker
+ *                        cannot cheaply lock a victim out
  *
- * Keyed on the submitted email, not the client IP: the proxy chain in front
- * of a Railway deployment makes a claimed IP trivially spoofable via
- * `X-Forwarded-For`, so keying on it would let an attacker reset their own
- * budget at will *and* would let them lock a victim out by exhausting it.
+ * Instead of a hard lockout, delay escalates: once a key passes its free
+ * attempts the next attempt must wait `base * 2^n` (capped), measured from the
+ * last failure. A correct password clears the pair and email keys.
  */
 
-const MAX_FAILURES = 10;
-const WINDOW_MS = 15 * 60 * 1000;
-/** Bounds memory against an attacker cycling through invented addresses. */
-const MAX_TRACKED_KEYS = 10_000;
-
-type Attempts = { failures: number; firstFailureAt: number };
-
-const attemptsByKey = new Map<string, Attempts>();
-
-function normalize(email: string): string {
-  return email.trim().toLocaleLowerCase();
+export interface ThrottleRule {
+  key: string;
+  /** Attempts allowed before any delay applies. */
+  free: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  /** Counters that see no activity for this long start over. */
+  windowMs: number;
 }
 
-function prune(now: number): void {
-  for (const [key, attempts] of attemptsByKey) {
-    if (now - attempts.firstFailureAt >= WINDOW_MS) attemptsByKey.delete(key);
+export interface ThrottleStatus {
+  blocked: boolean;
+  retryAfterMs: number;
+}
+
+const MINUTE = 60_000;
+const CLEANUP_AGE_MS = 2 * 60 * MINUTE;
+
+export function delayFor(failures: number, rule: ThrottleRule): number {
+  if (failures <= rule.free) return 0;
+  const exponent = Math.min(failures - rule.free - 1, 30);
+  return Math.min(rule.baseDelayMs * 2 ** exponent, rule.maxDelayMs);
+}
+
+export async function throttleStatus(rules: ThrottleRule[], now: number = Date.now()): Promise<ThrottleStatus> {
+  if (rules.length === 0) return { blocked: false, retryAfterMs: 0 };
+  const rows = await prisma.loginThrottle.findMany({ where: { emailKey: { in: rules.map((rule) => rule.key) } } });
+  let retryAfterMs = 0;
+  for (const rule of rules) {
+    const row = rows.find((candidate) => candidate.emailKey === rule.key);
+    if (!row) continue;
+    const lastAt = row.updatedAt.getTime();
+    if (lastAt <= now - rule.windowMs) continue;
+    const delay = delayFor(row.failures, rule);
+    if (delay === 0) continue;
+    const remaining = lastAt + delay - now;
+    if (remaining > retryAfterMs) retryAfterMs = remaining;
+  }
+  return { blocked: retryAfterMs > 0, retryAfterMs };
+}
+
+/**
+ * Atomically counts one hit per rule. `ON CONFLICT` serializes concurrent
+ * replicas on the primary key so no increment is lost, and an idle counter
+ * restarts at 1 inside the same statement.
+ */
+export async function recordThrottleHit(rules: ThrottleRule[], now: number = Date.now()): Promise<void> {
+  const timestamp = new Date(now);
+  await prisma.loginThrottle.deleteMany({ where: { updatedAt: { lte: new Date(now - CLEANUP_AGE_MS) } } });
+  for (const rule of rules) {
+    const windowStart = new Date(now - rule.windowMs);
+    await prisma.$executeRaw`
+      INSERT INTO "LoginThrottle" ("emailKey", "failures", "firstFailureAt", "updatedAt")
+      VALUES (${rule.key}, 1, ${timestamp}, ${timestamp})
+      ON CONFLICT ("emailKey") DO UPDATE
+      SET "failures" = CASE WHEN "LoginThrottle"."updatedAt" <= ${windowStart} THEN 1 ELSE "LoginThrottle"."failures" + 1 END,
+          "firstFailureAt" = CASE WHEN "LoginThrottle"."updatedAt" <= ${windowStart} THEN ${timestamp} ELSE "LoginThrottle"."firstFailureAt" END,
+          "updatedAt" = ${timestamp}
+    `;
   }
 }
 
-/** True when this email has burned through its attempt budget. */
-export function isLoginThrottled(email: string, now: number = Date.now()): boolean {
-  const attempts = attemptsByKey.get(normalize(email));
-  if (!attempts) return false;
-  if (now - attempts.firstFailureAt >= WINDOW_MS) {
-    attemptsByKey.delete(normalize(email));
-    return false;
+export async function clearThrottleKeys(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  await prisma.loginThrottle.deleteMany({ where: { emailKey: { in: keys } } });
+}
+
+export function formatRetryAfter(retryAfterMs: number): string {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  if (seconds < 90) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+// ---------------------------------------------------------------- sign-in
+
+export interface ThrottleOptions {
+  ip?: string | null;
+  now?: number;
+}
+
+function loginRules(email: string, ip: string | null | undefined): ThrottleRule[] {
+  const normalized = normalizeEmail(email);
+  const rules: ThrottleRule[] = [
+    { key: `login:email:${normalized}`, free: 10, baseDelayMs: 30_000, maxDelayMs: 15 * MINUTE, windowMs: 30 * MINUTE },
+  ];
+  if (ip) {
+    rules.push(
+      { key: `login:pair:${ip}|${normalized}`, free: 5, baseDelayMs: 15_000, maxDelayMs: 15 * MINUTE, windowMs: 30 * MINUTE },
+      { key: `login:ip:${ip}`, free: 30, baseDelayMs: 30_000, maxDelayMs: 15 * MINUTE, windowMs: 30 * MINUTE },
+    );
   }
-  return attempts.failures >= MAX_FAILURES;
+  return rules;
 }
 
-export function recordLoginFailure(email: string, now: number = Date.now()): void {
-  const key = normalize(email);
-  const attempts = attemptsByKey.get(key);
-  if (!attempts || now - attempts.firstFailureAt >= WINDOW_MS) {
-    if (attemptsByKey.size >= MAX_TRACKED_KEYS) prune(now);
-    // Still full of live entries: an attacker is cycling addresses faster
-    // than they expire. Drop the oldest rather than growing without bound;
-    // losing one counter is better than exhausting the process's memory.
-    if (attemptsByKey.size >= MAX_TRACKED_KEYS) {
-      const oldest = attemptsByKey.keys().next();
-      if (!oldest.done) attemptsByKey.delete(oldest.value);
-    }
-    attemptsByKey.set(key, { failures: 1, firstFailureAt: now });
-    return;
-  }
-  attempts.failures += 1;
+export async function loginThrottleStatus(email: string, options: ThrottleOptions = {}): Promise<ThrottleStatus> {
+  return throttleStatus(loginRules(email, options.ip), options.now);
 }
 
-/** A correct password clears the budget immediately. */
-export function clearLoginFailures(email: string): void {
-  attemptsByKey.delete(normalize(email));
+/** True when this email/ip combination must wait before trying again. */
+export async function isLoginThrottled(email: string, options: ThrottleOptions = {}): Promise<boolean> {
+  return (await loginThrottleStatus(email, options)).blocked;
 }
 
-/** Test-only: the module-level map otherwise leaks state between cases. */
-export function resetLoginThrottleForTests(): void {
-  attemptsByKey.clear();
+export async function recordLoginFailure(email: string, options: ThrottleOptions = {}): Promise<void> {
+  await recordThrottleHit(loginRules(email, options.ip), options.now);
+}
+
+/** A correct password clears the pair and email budgets, never the shared IP one. */
+export async function clearLoginFailures(email: string, options: { ip?: string | null } = {}): Promise<void> {
+  const keys = loginRules(email, options.ip)
+    .map((rule) => rule.key)
+    .filter((key) => !key.startsWith("login:ip:"));
+  await clearThrottleKeys(keys);
+}
+
+// ---------------------------------------------------------------- sign-up
+
+function signupRules(ip: string | null | undefined): ThrottleRule[] {
+  const rules: ThrottleRule[] = [
+    // A whole deployment creating hundreds of workspaces an hour is abuse.
+    { key: "signup:global", free: 200, baseDelayMs: MINUTE, maxDelayMs: 30 * MINUTE, windowMs: 60 * MINUTE },
+  ];
+  if (ip) rules.push({ key: `signup:ip:${ip}`, free: 5, baseDelayMs: 2 * MINUTE, maxDelayMs: 60 * MINUTE, windowMs: 60 * MINUTE });
+  return rules;
+}
+
+export async function signupThrottleStatus(options: ThrottleOptions = {}): Promise<ThrottleStatus> {
+  return throttleStatus(signupRules(options.ip), options.now);
+}
+
+/** Counts every signup attempt, successful or not. */
+export async function recordSignupAttempt(options: ThrottleOptions = {}): Promise<void> {
+  await recordThrottleHit(signupRules(options.ip), options.now);
+}
+
+// ------------------------------------------- reset / verification emails
+
+function emailRequestRules(kind: string, email: string, ip: string | null | undefined): ThrottleRule[] {
+  const normalized = normalizeEmail(email);
+  const rules: ThrottleRule[] = [
+    { key: `${kind}:email:${normalized}`, free: 3, baseDelayMs: 5 * MINUTE, maxDelayMs: 60 * MINUTE, windowMs: 60 * MINUTE },
+  ];
+  if (ip) rules.push({ key: `${kind}:ip:${ip}`, free: 10, baseDelayMs: 5 * MINUTE, maxDelayMs: 60 * MINUTE, windowMs: 60 * MINUTE });
+  return rules;
+}
+
+export async function emailRequestStatus(kind: "reset" | "verify" | "invite", email: string, options: ThrottleOptions = {}): Promise<ThrottleStatus> {
+  return throttleStatus(emailRequestRules(kind, email, options.ip), options.now);
+}
+
+export async function recordEmailRequest(kind: "reset" | "verify" | "invite", email: string, options: ThrottleOptions = {}): Promise<void> {
+  await recordThrottleHit(emailRequestRules(kind, email, options.ip), options.now);
 }

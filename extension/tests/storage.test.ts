@@ -5,6 +5,7 @@ import {
   saveSettings,
   getPairingToken,
   savePairingToken,
+  clearPairingToken,
   listMeetings,
   saveMeeting,
   getMeeting,
@@ -12,6 +13,10 @@ import {
   getWebappSyncOutbox,
   queueWebappSync,
   removeWebappSyncOutbox,
+  getRemindedCalls,
+  saveRemindedCalls,
+  getWidgetPosition,
+  saveWidgetPosition,
 } from "../src/lib/storage";
 import { DEFAULT_SETTINGS, type MeetingRecord } from "../src/types";
 
@@ -55,6 +60,46 @@ describe("settings storage", () => {
     expect(settings.apiKeys.deepgram).toBe("legacy-key");
   });
 
+  it("falls back to local BYOK when a stored managed workspace identity is incomplete", async () => {
+    await chrome.storage.local.set({
+      "notetaker.settings": {
+        ...DEFAULT_SETTINGS,
+        processingMode: { kind: "managed", accountId: "acct", workspaceId: "   ", plan: "hosted_pro" },
+        managedService: {
+          baseUrl: "https://notes.example.com",
+          accessToken: "session",
+          accountId: "acct",
+          workspaceId: "   ",
+          plan: "hosted_pro",
+        },
+      },
+    });
+
+    await expect(getSettings()).resolves.toMatchObject({ processingMode: { kind: "local_byok" } });
+  });
+
+  it("round-trips hosted mode separately from the local BYOK mode", async () => {
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" },
+      managedService: {
+        baseUrl: "https://notes.example.com",
+        accessToken: "session-token",
+        accountId: "acct",
+        workspaceId: "ws",
+        plan: "hosted_pro",
+      },
+    });
+
+    await expect(getSettings()).resolves.toMatchObject({
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" },
+      managedService: { accessToken: "session-token", workspaceId: "ws" },
+    });
+
+    await saveSettings({ ...DEFAULT_SETTINGS, processingMode: { kind: "local_byok" }, managedService: null });
+    await expect(getSettings()).resolves.toMatchObject({ processingMode: { kind: "local_byok" }, managedService: null });
+  });
+
   it("never writes settings (or API keys) to chrome.storage.sync", async () => {
     await saveSettings({ ...DEFAULT_SETTINGS, apiKeys: { claude: "secret" } });
     expect(chromeMock.storage.sync.set).not.toHaveBeenCalled();
@@ -66,6 +111,7 @@ describe("settings storage", () => {
       chromeMock.runtime.lastError = { message: "storage quota exceeded" };
       callback?.();
       chromeMock.runtime.lastError = undefined;
+      return Promise.resolve();
     });
     await expect(saveSettings({ ...DEFAULT_SETTINGS })).rejects.toThrow("storage quota exceeded");
   });
@@ -79,6 +125,13 @@ describe("pairing token storage", () => {
   it("round-trips a saved pairing token", async () => {
     await savePairingToken("abc123");
     expect(await getPairingToken()).toBe("abc123");
+  });
+
+  it("clears only the local pairing token for profile recovery", async () => {
+    await savePairingToken("stale-token");
+    await clearPairingToken();
+
+    expect(await getPairingToken()).toBeNull();
   });
 });
 
@@ -183,5 +236,32 @@ describe("meeting storage", () => {
     await Promise.all([queueWebappSync(meeting), queueWebappSync(second)]);
 
     expect((await getWebappSyncOutbox()).map((item) => item.id)).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("widget position and reminded calls", () => {
+  it("remembers where the widget was dropped, rounded to whole pixels", async () => {
+    expect(await getWidgetPosition()).toBeNull();
+    await saveWidgetPosition({ x: 120.6, y: 88.2 });
+    expect(await getWidgetPosition()).toEqual({ x: 121, y: 88 });
+  });
+
+  it("refuses positions a page-side sender should never be able to store", async () => {
+    await saveWidgetPosition({ x: 10, y: 10 });
+    for (const bad of [{ x: Number.NaN, y: 1 }, { x: 1e9, y: 1 }, { x: "1", y: 1 }, null] as unknown[]) {
+      await saveWidgetPosition(bad as { x: number; y: number });
+    }
+    expect(await getWidgetPosition()).toEqual({ x: 10, y: 10 });
+  });
+
+  it("ignores a stored value that is not a position", async () => {
+    chromeMock.storage.local._dump()["notetaker.widget.position"] = { x: "left", y: 5 };
+    expect(await getWidgetPosition()).toBeNull();
+  });
+
+  it("round-trips reminded calls and treats a missing record as empty", async () => {
+    expect(await getRemindedCalls()).toEqual({});
+    await saveRemindedCalls({ a: { url: "https://meet.google.com/abc-defg-hij", at: 1 } });
+    expect(await getRemindedCalls()).toEqual({ a: { url: "https://meet.google.com/abc-defg-hij", at: 1 } });
   });
 });

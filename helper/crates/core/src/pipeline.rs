@@ -9,8 +9,8 @@
 
 use crate::native_messaging::{ActionItem, ErrorCode, HelperToExtension};
 use crate::providers::{
-    AudioChannel, AudioChunk, StreamingSession, SummarizationProvider, SummaryOptions,
-    TranscriptionProvider,
+    AudioChannel, AudioChunk, FlaggedMoment, StreamingSession, SummarizationProvider,
+    SummaryOptions, TranscriptionProvider,
 };
 use crate::resilience::RetryQueue;
 use crate::storage::{MeetingState, MeetingStore, MIC_FILE, SPEAKER_FILE};
@@ -103,7 +103,7 @@ impl Pipeline {
         &mut self,
         meeting_id: Uuid,
     ) -> Result<HelperToExtension, PipelineError> {
-        self.store.create_meeting_with_options(
+        self.store.create_or_resume_meeting_with_options(
             meeting_id,
             Utc::now(),
             self.summary_options.mode,
@@ -111,6 +111,23 @@ impl Pipeline {
         )?;
         self.accepting_audio = true;
         Ok(HelperToExtension::RecordingStarted { meeting_id })
+    }
+
+    /// Stops capture after durable audio has been written without invoking a
+    /// local provider. Managed mode uses this path: the app uploads the two
+    /// saved channel files to the hosted job service, which owns provider
+    /// execution and billing.
+    pub fn stop_capture_only(
+        &mut self,
+        meeting_id: Uuid,
+    ) -> Result<HelperToExtension, PipelineError> {
+        self.accepting_audio = false;
+        self.pending_mic = None;
+        self.pending_speaker = None;
+        self.mic_session = None;
+        self.speaker_session = None;
+        self.store.mark_stopped(meeting_id, Utc::now())?;
+        Ok(HelperToExtension::RecordingStopped { meeting_id })
     }
 
     /// Persists every callback frame immediately, then batches it for a
@@ -140,13 +157,40 @@ impl Pipeline {
         if let Err(e) = self.store.append_audio(meeting_id, channel_file, pcm16) {
             return vec![HelperToExtension::Error {
                 meeting_id: Some(meeting_id),
-                code: ErrorCode::DeviceNotFound,
+                code: e.error_code(),
                 message: format!("failed to persist audio to disk: {e}"),
             }];
         }
         let _ = self
             .store
             .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz);
+
+        self.handle_persisted_audio_chunk(meeting_id, channel, pcm16, sample_rate_hz, existing_len)
+            .await
+    }
+
+    /// Processes a frame that the caller has already persisted. The helper
+    /// app uses this split to keep the Native Messaging/audio ingress path
+    /// independent from provider latency: frames reach durable storage and
+    /// are queued before this method awaits any network call.
+    pub async fn handle_persisted_audio_chunk(
+        &mut self,
+        meeting_id: Uuid,
+        channel: AudioChannel,
+        pcm16: &[u8],
+        sample_rate_hz: u32,
+        existing_len: usize,
+    ) -> Vec<HelperToExtension> {
+        if !self.accepting_audio {
+            // The caller should drain the ingress queue before stopping, but
+            // keep this guard so a late callback cannot reopen a finalized
+            // meeting if a backend races shutdown.
+            return vec![];
+        }
+        let channel_file = match channel {
+            AudioChannel::Mic => MIC_FILE,
+            AudioChannel::Speaker => SPEAKER_FILE,
+        };
 
         if self.transcription_provider.is_streaming() {
             return self
@@ -234,6 +278,8 @@ impl Pipeline {
             ),
         };
 
+        let mut messages = Vec::new();
+
         if session.is_none() || session.as_ref().is_some_and(|s| s.is_closed()) {
             *session = None;
             gap_start.get_or_insert(existing_len);
@@ -250,9 +296,42 @@ impl Pipeline {
                     return vec![];
                 }
             }
+        } else if session
+            .as_ref()
+            .is_some_and(|s| s.sample_rate_hz() != 0 && s.sample_rate_hz() != sample_rate_hz)
+        {
+            // A mid-call device switch can change the sample rate (44.1k ↔
+            // 48k). An open session negotiated for the old rate would
+            // transcribe every following frame as garbage, so close it and
+            // reopen at the new rate. Audio is durable on disk; closing
+            // only ends the live stream, and the gap is backfilled below.
+            if let Some(mut old) = session.take() {
+                let trailing = old.close().await;
+                for (segment, utterance_id) in trailing {
+                    if segment.is_final {
+                        let _ = self
+                            .store
+                            .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
+                    }
+                    messages.push(HelperToExtension::TranscriptPartial {
+                        meeting_id,
+                        speaker: segment.speaker,
+                        text: segment.text,
+                        is_final: segment.is_final,
+                        utterance_id,
+                    });
+                }
+            }
+            gap_start.get_or_insert(existing_len);
+            match self
+                .transcription_provider
+                .open_streaming_session(channel, sample_rate_hz)
+                .await
+            {
+                Ok(new_session) => *session = Some(new_session),
+                Err(_) => return messages,
+            }
         }
-
-        let mut messages = Vec::new();
 
         let gap_start = match channel {
             AudioChannel::Mic => &mut self.mic_stream_gap_start,
@@ -417,7 +496,7 @@ impl Pipeline {
             Err(error) => {
                 return vec![HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("failed to persist transcription retry: {error}"),
                 }]
             }
@@ -449,7 +528,7 @@ impl Pipeline {
                         let _ = self.retry_queue.record_failure(retry_job_id, Utc::now());
                         messages.push(HelperToExtension::Error {
                             meeting_id: Some(meeting_id),
-                            code: ErrorCode::DeviceNotFound,
+                            code: ErrorCode::StorageError,
                             message: format!(
                                 "transcript could not be persisted; queued for retry: {error}"
                             ),
@@ -470,6 +549,19 @@ impl Pipeline {
                 }]
             }
         }
+    }
+
+    /// Remembers what the user flagged during the call (offset in ms, note).
+    /// Persisted, so it also applies to a summary that is retried later.
+    pub fn record_flagged_moments(
+        &mut self,
+        meeting_id: Uuid,
+        moments: &[FlaggedMoment],
+    ) -> Result<(), PipelineError> {
+        self.store
+            .mark_flagged_moments(meeting_id, moments, Utc::now())?;
+        self.summary_options = self.store.load_meta(meeting_id)?.summary_options;
+        Ok(())
     }
 
     pub async fn stop_recording(
@@ -531,7 +623,15 @@ impl Pipeline {
                 .saturating_mul(TRANSCRIPTION_BATCH_SECONDS);
             let mut offset = start;
             while offset < end {
-                let batch_end = (offset + batch_size.max(2)).min(end);
+                // Clamp the batch end to an even byte boundary: PCM16 samples
+                // are two bytes, and a crash can leave the final write short by
+                // one. Feeding an odd-length slice would hand the provider a
+                // misaligned final sample (garbage audio) — a trailing byte is
+                // not worth transcribing and is simply dropped.
+                let batch_end = (offset + batch_size.max(2)).min(end & !1usize);
+                if batch_end <= offset {
+                    break;
+                }
                 let pcm16 =
                     self.store
                         .read_audio_range(meeting_id, channel_file, offset, batch_end)?;
@@ -577,7 +677,7 @@ impl Pipeline {
             Err(error) => {
                 return vec![HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("could not reload transcript for summary: {error}"),
                 }]
             }
@@ -591,7 +691,7 @@ impl Pipeline {
                 if let Err(error) = self.store.write_summary(meeting_id, &summary) {
                     return vec![HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not persist summary: {error}"
                         ),
@@ -600,7 +700,7 @@ impl Pipeline {
                 if let Err(error) = self.store.mark_processed(meeting_id) {
                     return vec![HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not finalize meeting: {error}"
                         ),
@@ -682,7 +782,7 @@ impl Pipeline {
                         let _ = self.retry_queue.record_failure(job_id, now);
                         messages.push(HelperToExtension::Error {
                             meeting_id: Some(job.meeting_id),
-                            code: ErrorCode::DeviceNotFound,
+                            code: ErrorCode::StorageError,
                             message: format!("retry could not read saved audio: {error}"),
                         });
                         continue;
@@ -729,7 +829,7 @@ impl Pipeline {
                                 matches!(self.retry_queue.record_failure(job_id, now), Ok(Some(_)));
                             messages.push(HelperToExtension::Error {
                                 meeting_id: Some(job.meeting_id),
-                                code: ErrorCode::DeviceNotFound,
+                                code: ErrorCode::StorageError,
                                 message: format!(
                                     "transcript could not be persisted; queued for retry: {error}"
                                 ),
@@ -788,7 +888,7 @@ impl Pipeline {
             Err(error) => {
                 return Some(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("could not reload transcript after retry: {error}"),
                 });
             }
@@ -802,7 +902,7 @@ impl Pipeline {
                 if let Err(error) = self.store.write_summary(meeting_id, &summary) {
                     return Some(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not persist summary: {error}"
                         ),
@@ -811,7 +911,7 @@ impl Pipeline {
                 if let Err(error) = self.store.mark_processed(meeting_id) {
                     return Some(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!(
                             "summarization failed: could not finalize meeting: {error}"
                         ),
@@ -843,6 +943,14 @@ impl Pipeline {
 pub enum PipelineError {
     #[error("storage error: {0}")]
     Storage(#[from] crate::storage::StorageError),
+}
+
+impl PipelineError {
+    pub fn error_code(&self) -> ErrorCode {
+        match self {
+            PipelineError::Storage(error) => error.error_code(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -934,6 +1042,88 @@ mod tests {
         (dir, pipeline)
     }
 
+    struct CapturingSummarizer {
+        seen: Arc<std::sync::Mutex<Option<SummaryOptions>>>,
+    }
+
+    #[async_trait]
+    impl SummarizationProvider for CapturingSummarizer {
+        fn id(&self) -> SummarizationProviderId {
+            SummarizationProviderId::Claude
+        }
+        async fn summarize(
+            &self,
+            _transcript: &[TranscriptSegment],
+            options: &SummaryOptions,
+        ) -> Result<Summary, ProviderError> {
+            *self.seen.lock().unwrap() = Some(options.clone());
+            Ok(Summary {
+                summary: "captured".into(),
+                action_items: vec![],
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn flagged_moments_reach_the_summarizer_with_their_position_in_the_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(FakeTranscriber {
+                fail_times: Arc::new(AtomicUsize::new(0)),
+                return_empty: false,
+            }),
+            Box::new(CapturingSummarizer { seen: seen.clone() }),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2], 16000)
+            .await;
+
+        pipeline
+            .record_flagged_moments(
+                id,
+                &[
+                    FlaggedMoment {
+                        offset_ms: 0,
+                        note: "Kickoff".into(),
+                        position_percent: None,
+                    },
+                    FlaggedMoment {
+                        offset_ms: 5_000,
+                        note: String::new(),
+                        position_percent: Some(60),
+                    },
+                ],
+            )
+            .unwrap();
+        pipeline.stop_recording(id).await.unwrap();
+
+        let options = seen.lock().unwrap().clone().expect("summarizer ran");
+        assert_eq!(options.flagged_moments.len(), 2);
+        assert_eq!(options.flagged_moments[0].note, "Kickoff");
+        assert_eq!(options.flagged_moments[0].offset_ms, 0);
+        assert_eq!(options.flagged_moments[1].offset_ms, 5_000);
+        assert_eq!(options.flagged_moments[1].position_percent, Some(60));
+    }
+
+    #[tokio::test]
+    async fn a_meeting_stopped_without_flags_summarizes_exactly_as_before() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        let messages = pipeline.stop_recording(id).await.unwrap();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
+    }
+
     #[tokio::test]
     async fn start_recording_creates_meeting_and_emits_started() {
         let (_dir, mut pipeline) = build_pipeline(0);
@@ -1014,6 +1204,26 @@ mod tests {
             matches!(&messages[0], HelperToExtension::TranscriptPartial { speaker, .. } if speaker == "you")
         );
         // ...and the raw audio is genuinely on disk regardless.
+        let bytes = std::fs::read(pipeline.store.audio_path(id, MIC_FILE)).unwrap();
+        assert_eq!(bytes, vec![1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn an_already_persisted_chunk_is_not_written_twice_before_processing() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .store
+            .append_audio(id, MIC_FILE, &[1, 2, 3, 4])
+            .unwrap();
+
+        let messages = pipeline
+            .handle_persisted_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3, 4], 16_000, 0)
+            .await;
+        assert!(messages.is_empty(), "short frames stay buffered");
+
+        pipeline.flush_pending_audio(id).await;
         let bytes = std::fs::read(pipeline.store.audio_path(id, MIC_FILE)).unwrap();
         assert_eq!(bytes, vec![1, 2, 3, 4]);
     }

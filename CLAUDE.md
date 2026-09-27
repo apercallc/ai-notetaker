@@ -1,8 +1,9 @@
 # AI Notetaker — Project Guidance
 
-Open-source, self-hosted, no-subscription alternative to CRISP/Krisp-style
-AI meeting notetakers. Full architecture: see
-[`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md).
+Open-source, local-first, botless AI meeting notetaker with a free local BYOK
+mode and an optional managed paid AI service. Full target architecture: see
+[`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md).
+The 2026-09-21 document is the historical implementation baseline.
 Read it before making architectural changes — the decisions below exist for
 reasons documented there.
 
@@ -10,21 +11,27 @@ reasons documented there.
 
 These were deliberate resolutions to specific gaps — don't reintroduce them:
 
-- **No subscription, no centrally-hosted backend run by this project.**
-  Users bring their own AI API key(s) (BYOK) and, optionally, self-host the
-  history web app on their own Railway account. Never add billing or a
-  shared multi-tenant service operated by the project.
-- **The desktop helper owns the AI pipeline, not the Chrome extension.**
-  Manifest V3 service workers die after ~30s idle and cannot hold a
-  connection for a 45-minute meeting. The extension is a thin UI that
-  displays what the helper streams to it.
+- **Two supported execution modes.** Local BYOK remains free and requires no
+  account. Managed mode is a project-operated, multi-tenant service where
+  the project owns provider credentials, meters usage, and bills users.
+  Self-hosted deployment remains supported for users who want their own
+  storage and provider accounts.
+- **Capture ownership follows the source.** The Chrome extension owns
+  Google Meet tab capture: its offscreen document sends bounded mic/speaker
+  chunks to the service worker, which persists them in extension IndexedDB
+  before BYOK provider calls or Hosted AI uploads. The Rust/Tauri helper owns
+  long-running desktop-call capture and local resilience for Zoom, Teams,
+  Slack, and other apps. MV3 restarts are handled by rehydrating the active
+  Meet record and chunk sequence from IndexedDB; the helper remains mandatory
+  for desktop sources.
 - **Extension↔helper communication uses Native Messaging, not an open
   localhost WebSocket.** An open port is reachable by any webpage's
   JavaScript (cross-site WebSocket hijacking); Native Messaging is
   OS-enforced and allowlisted to this extension's ID.
-- **Don't build a custom virtual-audio driver.** Use existing open-source
-  ones: BlackHole (macOS), VB-Cable (Windows), a PulseAudio/PipeWire
-  null-sink module (Linux).
+- **Don't build a custom virtual-audio driver.** Prefer native OS loopback
+  capture: ScreenCaptureKit/native audio on macOS, WASAPI loopback on Windows,
+  and PipeWire/PulseAudio monitor sources on Linux. Keep BlackHole, VB-CABLE,
+  and null-sink routing as documented fallbacks.
 - **BlackHole and VB-Cable have different, verified redistribution terms.**
   Never bundle BlackHole's compiled installer (link out to Existential
   Audio's official download instead — their binary/branding are
@@ -36,7 +43,8 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
   this is what makes "you vs. everyone else" diarization free.
 - **Raw audio is always saved locally first**, independent of any API call
   succeeding, so a transcription/summarization failure never loses data.
-- **API keys live in `chrome.storage.local` only** — never `.sync`.
+- **Local BYOK keys live in protected local storage only** — never `.sync`.
+  Managed provider keys are server-side secrets and never reach the client.
 - **Helper is built on Tauri (Rust)**, not Electron — smaller install, one
   shared codebase across OSes, built-in updater.
 - **Extension `manifest.json` carries a committed, stable `key` field.**
@@ -80,13 +88,17 @@ the one for whichever package you're touching in addition to this file.
 ## Current status
 
 Core capture, provider pipeline, Native Messaging, extension helper-detection
-UX, CI, Tauri tray/packaging, and per-OS Native Messaging installer hooks are
-implemented and tracked in `TODO.md`. OS signing/notarization, the macOS
-post-copy registration step, live provider/meeting validation, and the
-remaining polish items are still open.
+UX, CI, Tauri tray/packaging, per-OS Native Messaging installer hooks, and the
+dual-mode managed processing contracts are implemented and tracked in
+`TODO.md`. The dual-mode migration is tracked in
+[`docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md`](docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md).
+Managed hosted processing, billing, and native loopback adapters have local
+tests and build gates; real deployment, provider, billing, browser, and native
+OS acceptance gates still remain before advertising hosted mode as released.
 
 ## Out of scope for now
 
-Mobile capture, multi-user/team features on the web app, non-Chrome browser
-ports. These are documented as future sub-projects in the architecture spec
-— don't build toward them prematurely (YAGNI).
+Mobile capture, cellular/PSTN interception, DRM/protected audio, and
+non-Chrome browser ports remain out of scope. Desktop/browser meeting and
+VoIP capture on macOS, Windows, and Linux is in scope. Team/workspace support
+is now in scope for managed hosting and must remain workspace-isolated.

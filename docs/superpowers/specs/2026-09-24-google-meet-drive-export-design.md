@@ -4,23 +4,32 @@
 
 Make Google Meet the low-friction browser path while keeping Slack Huddles,
 Zoom, and Microsoft Teams on the desktop-helper path. After a meeting is
-summarized, optionally create a readable Google Doc in `My Drive/ai-notetaker`
-without changing the local-first or BYOK architecture.
+summarized, optionally create a readable Google Doc in `My Drive/ai-notetaker`.
+Meet remains local-first and can finish with free browser-owned BYOK or with
+the authenticated managed service; Drive is downstream of either path.
+
+> **Current product contract:** this focused design predates the dual-mode
+> migration. Meet still owns browser capture and remains helperless, but the
+> persisted channels may now be processed locally with BYOK or uploaded to the
+> optional managed service after local durability is established.
 
 ## Decisions
 
-1. The extension may capture Google Meet media, but it never calls an AI
-   provider. A long-lived offscreen document owns `tabCapture` and microphone
-   streams; the helper remains the owner of raw-audio persistence,
-   transcription, summarization, retries, and crash recovery.
-2. Meet sends two independent PCM16 streams over the already authenticated
-   Native Messaging port: microphone and remote meeting audio. Chunks are
-   bounded below the 1 MiB Chrome Native Messaging limit and are rejected by
-   both endpoints when oversized or malformed.
+1. The extension may capture Google Meet media. A long-lived offscreen document
+   owns `tabCapture` and microphone streams; the extension persists raw audio
+   locally before direct local-BYOK provider calls or managed upload. The
+   helper remains the owner of desktop-call persistence, transcription,
+   summarization, retries, and crash recovery. A connected helper may receive
+   Meet chunks as an optimization, but it is not a Meet prerequisite.
+2. Meet persists two independent PCM16 streams in extension IndexedDB:
+   microphone and remote meeting audio. Chunks are bounded below the 1 MiB
+   Chrome Native Messaging limit when a helper handoff is used and are
+   rejected when oversized or malformed.
 3. `start_recording` gains an explicit `captureSource` (`desktop` or `meet`).
-   Desktop remains the default and keeps cpal/parec capture unchanged. Meet
-   starts the same helper pipeline without opening an OS capture device, then
-   accepts browser chunks until stop.
+   Desktop keeps the helper-owned cpal/parec/native-loopback pipeline. Meet
+   stays extension-owned: local BYOK processing happens in the browser, while
+   managed mode uploads only after local durability and registers the meeting
+   with the hosted workspace.
 4. Google Drive export is opt-in and uses a separate Google OAuth connection
    with the least-privilege `drive.file` scope. The existing Calendar token is
    never assumed to have Drive permission; the UI explicitly asks the user to
@@ -35,8 +44,11 @@ without changing the local-first or BYOK architecture.
 
 ## Boundaries
 
-- No project-operated backend, account, billing, telemetry, or upload proxy.
-- Secrets remain in `chrome.storage.local`.
+- The dual-mode product may use the project-operated managed backend for
+  authenticated hosted processing, usage, and billing. Local BYOK remains
+  account-free and does not require that backend.
+- Local secrets remain in `chrome.storage.local`; managed provider secrets
+  remain server-side and never enter extension storage or meeting records.
 - No TCP or localhost listener; the existing Native Messaging plus local
   Unix/named-pipe relay is the only extension/helper transport.
 - Mic and speaker remain separate all the way to raw files and providers.
@@ -48,11 +60,13 @@ without changing the local-first or BYOK architecture.
 ## Acceptance criteria
 
 - A Meet start creates a local meeting, establishes both stream tracks, and
-  sends separate mic/speaker chunks to the helper.
+  persists separate mic/speaker chunks in IndexedDB before processing. A
+  helper handoff is optional.
 - A malformed, oversized, or out-of-order browser chunk is rejected without
   crashing the helper or corrupting an existing recording.
-- Stopping Meet releases tracks, closes the offscreen document, and causes the
-  helper pipeline to flush and summarize exactly like desktop capture.
+- Stopping Meet releases tracks and closes the offscreen document. Browser-owned
+  BYOK or managed processing then flushes the durable chunks; a helper handoff,
+  when available, remains backward compatible with desktop processing.
 - Existing desktop start/stop wire messages and audio capture behavior remain
   backward compatible.
 - Connecting Drive creates or reuses the exact `ai-notetaker` folder and

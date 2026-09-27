@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getMeeting, deleteMeeting } from "@/lib/meetings";
 import { getDefaultWorkspaceId } from "@/lib/workspaces";
-import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
+import { isLegacyIngestAvailable } from "@/lib/deploymentConfig";
+import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = requestIdFrom(request);
+  if (!isLegacyIngestAvailable()) return jsonError("not found", 404, requestId);
   try {
     const { id } = await params;
     const workspaceId = await getDefaultWorkspaceId();
@@ -20,6 +22,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = requestIdFrom(request);
+  if (!isLegacyIngestAvailable()) return jsonError("not found", 404, requestId);
   try {
     const { id } = await params;
     const workspaceId = await getDefaultWorkspaceId();

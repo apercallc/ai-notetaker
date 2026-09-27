@@ -22,7 +22,7 @@ pub const BROWSER_AUDIO_SAMPLE_RATE_HZ: u32 = 48_000;
 /// Increment when the JSON wire contract changes incompatibly. The extension
 /// uses the helper's advertised value to show an upgrade path instead of
 /// failing later with an opaque recording error.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FramingError {
@@ -69,6 +69,9 @@ pub fn write_message<W: Write>(
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// Settings is intentionally kept as one wire message so a reconnect can
+// restore the complete processing configuration atomically.
+#[allow(clippy::large_enum_variant)]
 pub enum ExtensionToHelper {
     Hello {
         #[serde(rename = "pairingToken")]
@@ -88,14 +91,22 @@ pub enum ExtensionToHelper {
         custom_vocabulary: Vec<String>,
         #[serde(rename = "customSummaryInstructions", default)]
         custom_summary_instructions: Option<String>,
+        #[serde(rename = "processingMode", default)]
+        processing_mode: ProcessingMode,
+        #[serde(rename = "managedService", default)]
+        managed_service: Option<ManagedServiceConfig>,
     },
     StartRecording {
         #[serde(rename = "meetingId")]
         meeting_id: Uuid,
+        #[serde(default)]
+        title: Option<String>,
         #[serde(rename = "meetingMode", default)]
         meeting_mode: MeetingMode,
         #[serde(rename = "captureSource", default)]
         capture_source: CaptureSource,
+        #[serde(rename = "processingMode", default)]
+        processing_mode: ProcessingMode,
     },
     AudioChunk {
         #[serde(rename = "meetingId")]
@@ -109,6 +120,9 @@ pub enum ExtensionToHelper {
     StopRecording {
         #[serde(rename = "meetingId")]
         meeting_id: Uuid,
+        /// Moments the user flagged during the call; older extensions omit this.
+        #[serde(rename = "flaggedMoments", default)]
+        flagged_moments: Vec<FlaggedMomentWire>,
     },
     ResumeRecording {
         #[serde(rename = "meetingId")]
@@ -136,6 +150,49 @@ pub enum CaptureSource {
     #[default]
     Desktop,
     Meet,
+    DesktopLoopback,
+    DesktopVirtualDevice,
+    MeetTab,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessingMode {
+    #[default]
+    LocalByok,
+    Managed {
+        #[serde(rename = "accountId")]
+        account_id: String,
+        #[serde(rename = "workspaceId")]
+        workspace_id: String,
+        plan: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedServiceConfig {
+    #[serde(rename = "baseUrl")]
+    pub base_url: String,
+    #[serde(rename = "accessToken")]
+    pub access_token: String,
+    #[serde(rename = "accountId")]
+    pub account_id: String,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: String,
+    pub plan: String,
+}
+
+/// A flagged moment as the extension sends it at stop time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FlaggedMomentWire {
+    #[serde(rename = "offsetMs")]
+    pub offset_ms: u64,
+    #[serde(default)]
+    pub note: String,
+    /// How far through the call the flag was placed (0-100), measured by the
+    /// extension at the moment the user pressed stop.
+    #[serde(rename = "positionPercent", default)]
+    pub position_percent: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -237,6 +294,12 @@ pub enum HelperToExtension {
         speaker: Option<String>,
         ready: bool,
         guidance: String,
+        #[serde(rename = "nativeLoopback")]
+        native_loopback: bool,
+        #[serde(rename = "virtualDeviceFallback")]
+        virtual_device_fallback: bool,
+        #[serde(rename = "permissionRequired")]
+        permission_required: bool,
     },
     AudioProbeResult {
         #[serde(rename = "micFrames")]
@@ -246,6 +309,33 @@ pub enum HelperToExtension {
         passed: bool,
         message: String,
     },
+    ManagedJobStatus {
+        #[serde(rename = "meetingId")]
+        meeting_id: Uuid,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        status: String,
+        message: Option<String>,
+        summary: Option<String>,
+        #[serde(rename = "actionItems")]
+        action_items: Option<Vec<ActionItem>>,
+    },
+    CaptureCapabilities {
+        capabilities: CaptureCapabilitiesMessage,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaptureCapabilitiesMessage {
+    pub platform: String,
+    #[serde(rename = "nativeLoopback")]
+    pub native_loopback: bool,
+    pub microphone: bool,
+    #[serde(rename = "virtualDeviceFallback")]
+    pub virtual_device_fallback: bool,
+    #[serde(rename = "permissionRequired")]
+    pub permission_required: bool,
+    pub guidance: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -317,11 +407,41 @@ pub enum ErrorCode {
     ProviderUnreachable,
     DeviceNotFound,
     HelperNotPaired,
+    /// Sent by the Native Messaging relay itself (never by the helper) when
+    /// it could not reach, or auto-start, the persistent helper process.
+    HelperNotRunning,
+    /// A message the helper could not parse or does not understand.
+    ProtocolMismatch,
+    MicPermissionDenied,
+    ScreenPermissionDenied,
+    DiskFull,
+    StorageError,
+    CaptureLost,
+}
+
+impl ErrorCode {
+    /// The stable wire name (`snake_case`), for logs and tests.
+    pub fn as_wire_str(self) -> &'static str {
+        match self {
+            ErrorCode::ProviderAuthFailed => "provider_auth_failed",
+            ErrorCode::ProviderRateLimited => "provider_rate_limited",
+            ErrorCode::ProviderUnreachable => "provider_unreachable",
+            ErrorCode::DeviceNotFound => "device_not_found",
+            ErrorCode::HelperNotPaired => "helper_not_paired",
+            ErrorCode::HelperNotRunning => "helper_not_running",
+            ErrorCode::ProtocolMismatch => "protocol_mismatch",
+            ErrorCode::MicPermissionDenied => "mic_permission_denied",
+            ErrorCode::ScreenPermissionDenied => "screen_permission_denied",
+            ErrorCode::DiskFull => "disk_full",
+            ErrorCode::StorageError => "storage_error",
+            ErrorCode::CaptureLost => "capture_lost",
+        }
+    }
 }
 
 /// Generates a new pairing token. Per the protocol doc, this is sent to the
-/// extension exactly once (the "paired" message on first-ever connection)
-/// and stored by the extension for every subsequent `hello`.
+/// extension on first connection or browser-token recovery and stored by the
+/// extension for every subsequent `hello`.
 pub fn generate_pairing_token() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -333,6 +453,37 @@ pub fn generate_pairing_token() -> String {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn stop_recording_accepts_flagged_moments_and_older_extensions_that_omit_them() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let with_flags: ExtensionToHelper = serde_json::from_str(&format!(
+            r#"{{"type":"stop_recording","meetingId":"{id}","flaggedMoments":[{{"offsetMs":125000,"note":"Pricing","positionPercent":40}},{{"offsetMs":9}}]}}"#
+        ))
+        .unwrap();
+        match with_flags {
+            ExtensionToHelper::StopRecording {
+                flagged_moments, ..
+            } => {
+                assert_eq!(flagged_moments.len(), 2);
+                assert_eq!(flagged_moments[0].offset_ms, 125_000);
+                assert_eq!(flagged_moments[0].note, "Pricing");
+                assert_eq!(flagged_moments[0].position_percent, Some(40));
+                assert_eq!(flagged_moments[1].position_percent, None);
+                assert_eq!(flagged_moments[1].note, "");
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+
+        let legacy: ExtensionToHelper = serde_json::from_str(&format!(
+            r#"{{"type":"stop_recording","meetingId":"{id}"}}"#
+        ))
+        .unwrap();
+        assert!(matches!(
+            legacy,
+            ExtensionToHelper::StopRecording { flagged_moments, .. } if flagged_moments.is_empty()
+        ));
+    }
 
     #[test]
     fn round_trips_hello_message() {
@@ -368,6 +519,8 @@ mod tests {
             default_meeting_mode: MeetingMode::General,
             custom_vocabulary: vec![],
             custom_summary_instructions: None,
+            processing_mode: ProcessingMode::LocalByok,
+            managed_service: None,
         };
         let json = serde_json::to_vec(&msg).unwrap();
         let mut framed = Vec::new();
@@ -485,8 +638,10 @@ mod tests {
             decoded,
             ExtensionToHelper::StartRecording {
                 meeting_id: id,
+                title: None,
                 meeting_mode: MeetingMode::General,
                 capture_source: CaptureSource::Desktop,
+                processing_mode: ProcessingMode::LocalByok,
             }
         );
     }
@@ -517,5 +672,28 @@ mod tests {
             base64::engine::general_purpose::STANDARD
                 .encode(vec![0_u8; MAX_BROWSER_AUDIO_CHUNK_BYTES + 1]);
         assert!(decode_browser_audio_chunk(&too_large, 48_000).is_err());
+    }
+
+    #[test]
+    fn error_codes_keep_their_stable_wire_names() {
+        for code in [
+            ErrorCode::ProviderAuthFailed,
+            ErrorCode::ProviderRateLimited,
+            ErrorCode::ProviderUnreachable,
+            ErrorCode::DeviceNotFound,
+            ErrorCode::HelperNotPaired,
+            ErrorCode::HelperNotRunning,
+            ErrorCode::ProtocolMismatch,
+            ErrorCode::MicPermissionDenied,
+            ErrorCode::ScreenPermissionDenied,
+            ErrorCode::DiskFull,
+            ErrorCode::StorageError,
+            ErrorCode::CaptureLost,
+        ] {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::String(code.as_wire_str().to_string())
+            );
+        }
     }
 }

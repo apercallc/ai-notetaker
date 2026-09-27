@@ -4,7 +4,7 @@ cask "ai-notetaker" do
 
   url "__URL__", verified: "github.com/apercallc/ai-notetaker/"
   name "AI Notetaker"
-  desc "Local-first, self-hosted AI meeting notetaker"
+  desc "Botless meeting notes with free local BYOK or optional hosted AI"
   homepage "https://apercallc.github.io/ai-notetaker/"
 
   app "AI Notetaker.app"

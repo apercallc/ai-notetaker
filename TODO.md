@@ -1,14 +1,164 @@
-# AI Notetaker — Production Readiness TODO
+# AI Notetaker — Production Readiness and Product Migration TODO
 
-This tracks everything between the current state (architecture approved,
-the first implementation pass) and a production-ready v1.0. Organized by the sub-project
-roadmap in
-[`docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md`](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md),
-plus the cross-cutting work every sub-project depends on.
+This tracks the current implementation baseline, the approved Scribbl-like
+dual-mode migration, and the remaining production gates. The current target
+architecture is
+[`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md);
+the 2026-09-21 architecture is historical.
 
 Check items off as they land. If a decision here turns out wrong once
 you're building, update the spec doc first, then this file — don't let
-them drift apart.
+them drift apart. Scope is governed by the root `CLAUDE.md`: anything it lists
+as out of scope (mobile capture, cellular/PSTN, DRM audio, non-Chrome browser
+ports) lives under "Ideas" at the bottom, not in the roadmap.
+
+## Approved product migration (2026-09-24)
+
+Implementation plan:
+[`docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md`](docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md)
+
+- [x] Approve dual-mode product direction: free local BYOK plus paid hosted AI.
+- [x] Define botless Google Meet capture as a first-class recording source.
+- [x] Define native loopback capture for macOS, Windows, and Linux, with
+      existing virtual-audio fallbacks.
+- [x] Define hosted auth, workspace isolation, resumable uploads, private
+      object storage, workers, usage ledger, retention, sharing, and billing.
+- [x] Implement an owner-controlled managed retention policy with asynchronous
+      meeting, transcript, share, and private-audio deletion.
+- [x] Enable managed-hosting signup to provision isolated customer workspaces;
+      keep self-hosted bootstrap single-workspace and setup-token protected.
+- [x] Add managed deployment readiness diagnostics to `/api/health` without
+      exposing provider, worker, Stripe, or storage secrets.
+- [x] Implement mode-neutral capture/processing contracts and protocol v3.
+- [x] Implement the macOS ScreenCaptureKit system-audio adapter with
+      Screen Recording permission metadata and BlackHole fallback guidance.
+      Windows now uses a real WASAPI shared-mode loopback reader; physical
+      macOS, Windows, and Linux smoke tests remain.
+- [x] Implement managed upload/job APIs, durable object storage, and provider workers.
+- [x] Bound hosted Deepgram/Anthropic calls with cancellation, transient retry,
+      `Retry-After` handling, and fail-fast permanent provider errors.
+- [x] Add a token-protected `/api/v1/jobs/next` worker-polling endpoint with
+      database-side single-claim protection for horizontally scaled hosts.
+- [x] Add an S3-compatible private object-storage backend for multi-instance
+      hosting while retaining the persistent-volume fallback for self-hosted
+      Docker deployments; configuration and adapter tests are documented.
+- [x] Implement hosted billing, Stripe retry idempotency, and entitlement enforcement.
+- [x] Enforce managed upload checksums and streamed body limits; release failed
+      processing reservations so retries do not burn successful-operation quota.
+- [x] Reap expired managed upload rows and private chunk objects from the worker
+      heartbeat; expiry races cannot resurrect an abandoned upload, and a
+      storage-delete failure leaves the expired row retryable instead of
+      orphaning the private object.
+- [x] Implement expiring private meeting shares, revocation, and managed mic/speaker recording downloads.
+- [x] Connect the extension/helper to managed mode and the workspace library.
+- [x] Restrict managed API CORS to the fixed extension origin (or an explicit
+      controlled-fork origin) instead of wildcard bearer-authenticated access.
+- [x] Request a least-privilege optional Chrome host permission for the
+      user-selected hosted service origin during explicit Hosted AI sign-in;
+      local BYOK never requests that permission.
+- [x] Persist managed upload/job state in helper metadata and resume hosted
+      uploads or job polling after a helper restart.
+- [x] Retry transient managed upload failures automatically with bounded
+      exponential backoff; idempotent meeting/upload/chunk keys make retries
+      safe without duplicate hosted work.
+- [x] Register extension-owned Meet meetings in the authenticated managed
+      workspace before upload; preserve retry idempotency and reject
+      cross-workspace client-ID reuse.
+- [x] Make first-run onboarding Meet-first: choosing Google Meet stays in the
+      browser-owned capture path without a helper-download screen. Desktop-call
+      setup remains an explicit helper path, and Meet does not redirect to it
+      when the helper is absent.
+- [x] Keep ordinary onboarding links Meet-first; only the explicit desktop-call
+      choice opens the native-helper install section.
+- [x] Keep stale public install URLs and copied internal onboarding tabs
+      Meet-first; the public helper section requires `source=desktop`, while
+      internal helper onboarding also requires a short-lived explicit session
+      intent from the desktop-capture action.
+- [x] Keep the completed popup Meet-first even outside a Meet tab; do not show
+      or open desktop-helper setup until the user explicitly selects desktop
+      capture.
+- [x] Make extension updates migrate already-open onboarding tabs from the
+      helper-first legacy bundle to the canonical Meet-first URL. (Superseded
+      for fresh installs: the new flow auto-opens one-screen onboarding on
+      install; see `docs/getting-started.md`.)
+- [x] Link Hosted AI onboarding and Settings directly to the hosted
+      login/signup page after validating the configured HTTPS service URL; local
+      BYOK remains account-free.
+- [x] Preflight server-authoritative Hosted AI entitlements before recording;
+      inactive plans and exhausted quotas are shown before a meeting starts.
+- [x] Make Meet capture retryable when its tab closes, navigates, or its
+      offscreen audio pipeline reports an error; already-persisted audio stays
+      available for recovery.
+- [x] Make Meet teardown idempotent when the offscreen document or runtime
+      message fails, so a stale capture cannot block the next recording.
+- [x] Keep completed Meet notes complete when best-effort IndexedDB audio cleanup
+      fails; retained raw chunks remain available for later cleanup.
+- [x] Bound browser-owned BYOK provider requests with cancellation, transient
+      retry, bounded `Retry-After` handling, and fail-fast permanent errors;
+      durable Meet chunks remain available when all attempts fail.
+- [x] Resume extension-owned managed Meet processing records after an MV3
+      worker suspension when Hosted AI is still active; local chunks remain
+      durable. A fresh hosted sign-in now serializes a durable outbox drain for
+      interrupted and recoverable managed-error Meet records while excluding
+      local-BYOK meetings.
+- [x] Bind durable managed Meet and desktop-helper retries to their original
+      account/workspace identity; switching hosted workspaces fails closed
+      instead of moving an old recording into the new tenant.
+- [x] Add optional live transcript for extension-owned Meet recordings using
+      the user's local Deepgram key: mic and speaker remain separate, and each
+      audio chunk is persisted locally before it is sent over the streaming
+      connection. Transcript updates are stored locally; provider failure does
+      not stop capture.
+- [x] Explain the one-click Chrome capture gate accurately in onboarding and
+      the in-call widget; if Chrome blocks auto-start, one toolbar click hands
+      the pending recording directly to capture without a second Start action.
+- [ ] Enable live transcription for Hosted AI only after adding server-owned
+      real-time usage reservation/metering and a verified short-lived Deepgram
+      token flow; other providers continue to create transcripts after stop.
+- [ ] Complete real Chrome/Meet, provider, deployment, storage, and billing
+      acceptance evidence before advertising hosted mode.
+
+## Pre-launch decisions (product audit, 2026-09-24)
+
+Open product and release decisions found by the documentation and product
+coherence audit. Each needs an owner decision before public launch; none is
+decided yet.
+
+- [ ] (a) Make **Hosted** the primary onboarding call to action, with a
+      baked-in service URL (no URL to type) and a free trial, and move the
+      bring-your-own-keys path under a secondary **Use my own keys** option.
+      Today onboarding treats both modes as equals and Hosted needs a
+      user-entered service URL. Requires the trial/quota policy from the design
+      spec (section 6) to be affordable first.
+- [x] Implement a project-owned **server** Google OAuth client for Calendar and
+      Drive: per-user encrypted-at-rest connections, CSRF state + PKCE callback,
+      authenticated extension endpoints, and account connect/disconnect controls.
+      Google consent-screen verification plus a live credential/configuration
+      test remain release-owner work; legacy extension BYOK setup remains a
+      separate compatibility path until it is explicitly removed.
+- [ ] (c) Move `nativeMessaging`, `identity`, `alarms`, and the five AI provider
+      host permissions (Deepgram, Anthropic, Groq, Gemini, DeepSeek) to
+      optional permissions requested when the feature is first used, so the
+      install prompt for a Meet-only user is minimal.
+- [ ] (d) Replace the committed development extension ID in the Native
+      Messaging `allowed_origins` with the real Chrome Web Store extension ID
+      once the listing exists, and verify the committed manifest `key`
+      derives the published ID (or add both origins deliberately).
+- [ ] (e) Generate and protect the Tauri updater signing key and set the
+      updater endpoint so the automatic updater can be enabled (see also the
+      Sub-project 2 updater item).
+- [ ] (f) Capture real store screenshots on each OS (macOS, Windows, Linux) for
+      the Chrome Web Store listing, the install page, and the README; current
+      screenshots are rendered extension UI only.
+- [ ] (g) Decide the helper's launch-at-login default (currently off) and have
+      the installer or first launch register the Native Messaging manifests
+      automatically, including the macOS DMG post-copy step that today is
+      manual.
+
+The legacy checklist below records work already landed against the original
+local/BYOK architecture and remains as regression coverage while the
+migration lands. New work must use the migration plan rather than silently
+reintroducing its old assumptions.
 
 ## Workflow improvements (2026-09-21)
 
@@ -23,21 +173,40 @@ them drift apart.
       webapp updates remain authenticated and self-hosted.
 - [ ] Validate the audio probe and complete meeting workflow on real macOS,
       Windows, and Linux devices with each supported meeting app; local tests
-      cannot prove OS routing or provider behavior.
+      cannot prove OS routing or provider behavior. On 2026-09-24, the current
+      Linux host passed a real helper/Native Messaging protocol-v3 check and a
+      PipeWire/PulseAudio probe (42 microphone frames, 4 speaker frames);
+      macOS, Windows, and end-to-end provider/meeting checks remain open.
 
 ## Quality, error handling, and open-source operations (2026-09-21)
 
+- [x] Sentry error handling (2026-09-25): webapp server (`instrumentation-server.ts`
+      + `lib/observability.ts` capture on API 500s, Stripe webhook, managed job
+      runs), client (`instrumentation-client.ts` + error boundaries, CSP
+      connect-src extended only when a DSN is configured), and the managed
+      worker script — all strictly DSN-gated so self-hosted builds have zero
+      telemetry. Extension Hosted-AI mode reports bounded, deduplicated error
+      records to a new authenticated, rate-limited
+      `/api/v1/client-errors` endpoint; local BYOK never reports. Releases tag
+      from `RAILWAY_GIT_COMMIT_SHA`. The helper intentionally stays
+      local-logs-only (privacy boundary, documented in `docs/data-handling.md`).
+      Live Sentry DSN configuration on the managed deployment remains
+      release-owner work.
 - [x] Add reproducible coverage commands and CI artifacts for every surface;
       the current deterministic gates report 96.20% extension lines and
-      93.63% webapp lines, with 120 Rust tests green. Platform-native audio,
+      93.63% webapp lines, with 152 Rust tests, 382 extension tests, and 151
+      webapp tests green in the current full run. Platform-native audio,
       Tauri tray, Chrome entrypoints, and rendered pages remain separate
       smoke-test concerns rather than being counted as fake unit coverage.
 - [x] Expand unit and integration coverage for protocol validation, native
       messaging diagnostics, storage failures, retry recovery, webapp API
       limits, request-body streaming, and provider/webapp error responses.
+- [x] Preserve old helper metadata when managed upload fields are absent, and
+      persist the managed upload ID plus next-chunk cursor across helper restarts.
 - [x] Standardize webapp API error envelopes with safe generic 500 responses,
-      request correlation IDs, and server-rendered retry boundaries; malformed
-      action submissions now return user-visible recovery messages.
+      request correlation IDs (including proxy-level auth rejections), and
+      server-rendered retry boundaries; malformed action submissions now return
+      user-visible recovery messages.
 - [x] Remove normal-path helper storage `expect` calls, log fatal startup
       failures with context, and add tests for missing durable retry audio and
       pre-start audio callbacks.
@@ -45,7 +214,9 @@ them drift apart.
       CODEOWNERS, Dependabot configuration, and `docs/testing.md`.
 - [ ] Run real browser/Chrome Native Messaging flows and provider/audio tests
       on supported OSes; source/tests/builds cannot prove a live helper pairing,
-      virtual-device routing, or a real provider response.
+      virtual-device routing, or a real provider response. Linux Native
+      Messaging and native-loopback audio are now verified on the current host;
+      other OSes and live provider responses remain unverified.
 
 ## Distribution and installation architecture (2026-09-21)
 
@@ -76,6 +247,9 @@ only.
 - [x] Add `webapp/Dockerfile` and Docker Compose for the optional webapp and
       Postgres, with persistent storage, migrations, health checks, and
       authenticated token setup.
+- [x] Keep the release registry Compose file aligned with managed worker,
+      provider, billing, and S3 storage configuration instead of publishing an
+      image that silently runs in an incomplete hosted mode.
 - [x] Add helper/extension protocol compatibility and a user-facing install
       health state for helper missing, incompatible, driver missing, routing
       incomplete, and ready.
@@ -83,7 +257,13 @@ only.
       install/upgrade/uninstall, and Chrome Web Store/manual extension paths.
 - [x] Docker webapp acceptance smoke test passes: image build, migrations,
       health endpoint, unauthenticated rejection, and authenticated API access;
-      native OS and remote deployment proof remain release-owner work.
+      native OS and remote deployment proof remain release-owner work. The
+      current managed stack also verified a running worker and 401 managed
+      sign-in for unknown credentials; a separate self-hosted stack verified
+      managed sign-in fails closed with HTTP 404.
+- [x] Managed billing route smoke coverage accepts a signed Stripe webhook,
+      rejects invalid signatures, and ignores duplicate event delivery against
+      disposable Postgres; live Stripe test-mode delivery remains open.
 
 ## Hardening pass (2026-09-21)
 
@@ -136,9 +316,8 @@ only.
       constant-time.
 - [x] Webapp user + membership creation is transactional — a half-created
       user could neither sign in nor be cleaned up, and permanently blocked
-      bootstrap. Failed sign-ins are throttled per address (in-process; see
-      `src/lib/loginThrottle.ts` for the single-instance caveat), expired
-      sessions are reaped, meeting pagination has a tiebreaker, and the
+      bootstrap. Failed sign-ins are throttled per address in Postgres,
+      expired sessions are reaped, meeting pagination has a tiebreaker, and the
       action inbox is bounded.
 - [x] Team actions return expected failures instead of throwing them; Next
       masks a Server Action's thrown message in production, so "only the
@@ -146,9 +325,8 @@ only.
 - [x] Webapp CI runs the lint and typecheck gates that already existed as
       scripts but nothing invoked; `calendar.ts` is inside the extension
       coverage floor.
-- [ ] Move the login throttle into Postgres if this app is ever run with more
-      than one instance — the in-process counter does not hold across
-      replicas and resets on redeploy.
+- [x] Move the login throttle into Postgres so managed hosting shares the
+      failed-login budget across replicas and deploys.
 
 ---
 
@@ -168,12 +346,13 @@ note are the honest remaining gap, not an oversight.
 `notetaker-design-reviewer` passes on the extension and webapp UI, run
 after implementation rather than skipped.**
 
-*Guardrails finding — fixed:* the extension's "test API key" feature called
-Deepgram/Groq/Claude/Gemini/DeepSeek directly (`extension/src/lib/providerTest.ts`),
-bypassing the helper. Fixed by adding a `test_provider_key`/
-`provider_key_test_result` pair to the Native Messaging protocol — key
-validation now round-trips through the helper like everything else. Re-verified:
-zero references to any provider API domain remain anywhere in `extension/src/`.
+*Guardrails finding — fixed (historical; superseded):* under the 2026-09-21
+"pipeline lives in the helper" rule, the extension's "test API key" feature was
+moved to a `test_provider_key`/`provider_key_test_result` round-trip through the
+helper, and `extension/src/` had no provider API domains. The 2026-09-24
+design supersedes that rule for Google Meet: the extension owns Meet capture and
+its BYOK provider calls, so browser-side provider clients are now correct. The
+guardrails reviewer no longer enforces the old rule.
 
 *Design findings — fixed (high severity: a correctness bug and two AA
 accessibility failures):*
@@ -252,15 +431,18 @@ accessibility failures):*
 
 - [x] Scaffold Tauri project, shared Rust core + per-OS audio modules —
       Cargo workspace (`notetaker-core`, `notetaker-audio`, `notetaker-app`)
-- [ ] macOS: detect-if-missing + deep-link to Existential Audio's official
-      BlackHole download — compiled by the macOS CI job, but still needs
-      runtime validation on a real macOS install; module is at
-      `helper/crates/audio/src/macos.rs`
-- [x] Windows: release-only checksum-pinned staging of the base VB-CABLE
-      package plus visible administrator installer launch is wired; the
-      payload is intentionally not committed and Windows execution/reboot
-      behavior remains release-owner validation. See
-      `packaging/windows/` and `helper/crates/audio/src/windows.rs`.
+- [x] macOS: use native ScreenCaptureKit system-audio capture on macOS 13+
+      with Screen Recording permission metadata and retain detect-if-missing +
+      deep-link guidance for the official BlackHole fallback; module is at
+      `helper/crates/audio/src/macos.rs`. Physical runtime validation remains
+      in the OS smoke-test item above.
+- [x] Windows: default-output WASAPI shared-mode loopback capture is wired and
+      downmixes native float frames to the helper's PCM16 speaker channel;
+      release-only checksum-pinned staging of the base VB-CABLE package plus
+      visible administrator installer launch remains the explicit fallback.
+      The payload is intentionally not committed and Windows execution/reboot
+      behavior remains release-owner validation. See `packaging/windows/` and
+      `helper/crates/audio/src/windows.rs`.
 - [x] Linux: PulseAudio/PipeWire null-sink integration — cpal keeps the
       default microphone capture, while `parec -d notetaker_sink.monitor
       --raw --format=s16le --rate=48000 --channels=2` captures the speaker
@@ -322,9 +504,9 @@ accessibility failures):*
       stable `key` field verified to derive extension ID
       `jidooookkdbbbhkkdmcajnnnhhphodok`
 - [x] Native Messaging client — implements the full protocol, auto-reconnect
-      for MV3 service-worker teardown; tested with mocks. **Not verified**:
-      an actual live handshake against a real running helper process (no
-      real Chrome + helper pairing available in this sandbox)
+      for MV3 service-worker teardown, and stale-token recovery. Verified with
+      a live Chrome-for-Testing + rebuilt Linux helper pairing on 2026-09-24;
+      macOS/Windows installer and native-OS acceptance remain separate gates.
 - [x] Popup UI: start/stop, live transcript view
 - [x] Persistent recording indicator (respects `prefers-reduced-motion`)
 - [x] Settings page: API key entry, tier toggle, "test key" validation —
@@ -369,6 +551,9 @@ accessibility failures):*
       click-through deploy against a real Railway account and live Postgres
       addon, which spends real money and needs the release owner's own
       account — not something to trigger from this sandbox
+- [x] Add `webapp/railway-worker.json` and the `managed:worker` process for
+      the separate hosted worker service; live Railway deployment remains an
+      external acceptance gate.
 - [x] Design pass — reviewed independently by `notetaker-design-reviewer`
       post-implementation
 
@@ -386,7 +571,7 @@ accessibility failures):*
 
 ### Google Meet browser capture + Drive notes (2026-09-24)
 
-- [x] Native Messaging protocol v2 supports explicit `captureSource`, bounded
+- [x] Native Messaging protocol v3 supports explicit `captureSource`, bounded
       48 kHz PCM16 browser chunks, separate mic/speaker channels, and helper
       pipeline persistence before provider calls.
 - [x] Chrome/Chromium Meet capture uses an offscreen document, tab capture,
@@ -401,6 +586,47 @@ accessibility failures):*
 - [ ] Live Google Meet permission/audio proof and real Google OAuth/Drive
       export remain release-owner validation; mocked REST and local protocol
       tests are green.
+
+### In-Meet notes widget (2026-09-24, sub-project 1)
+
+Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
+
+- [x] Floating shadow-DOM widget on Meet call pages: one-click start/stop,
+      Recording pill with elapsed time, live transcript with Jump to latest,
+      flagged moments with optional notes, draggable and position-remembering,
+      helper/setup/consent states, "notes ready" card, Settings toggle.
+- [x] `Alt+Shift+R` toggles recording and `Alt+Shift+B` flags a moment; both
+      ignore non-Meet tabs.
+- [x] Fixed Meet capture: the tab stream id is now requested in the service
+      worker (offscreen pages have no `chrome.tabCapture`), and microphone
+      permission has a one-time grant page plus a pre-check.
+- [x] Toolbar starts discover the active Google Meet tab automatically while
+      content-script starts remain pinned to their own tab.
+- [x] Bookmarks stored on the meeting, shown in the meeting view with jump to
+      transcript, and included in Markdown/text exports and the Drive doc.
+- [x] Real-browser proof (real Chromium + real helper + local stand-in for
+      meet.google.com): capture refusal without invocation, real `Alt+Shift+R`
+      start, separate mic/speaker files, bookmark, stop, second start without a
+      new invocation, strict CSP + Trusted Types, alarm + notification.
+- [ ] Live proof on a real Google Meet call with real participants: widget
+      placement against Meet's layout and real audio end to end.
+- [ ] Click-through of a real desktop notification (needs a person).
+- [x] Calendar reminder (opt-out setting) and calendar-named call in the widget.
+- [x] Flagged moments passed to the summarizer (`stop_recording.flaggedMoments`,
+      backward compatible) and stored with the meeting.
+- [x] Chrome leaves suggested shortcuts unassigned in a fresh profile; the
+      widget and Settings read and adapt to the real bindings.
+- [x] Helper: with a failing or slow transcription provider, browser and
+      desktop audio frames are persisted before entering a per-meeting
+      provider queue; stopping drains that queue before finalization. The
+      split is covered by core regression tests, while live provider latency
+      remains a provider acceptance gate.
+- [x] Helper: after a reinstall or new Chrome profile, a missing browser token
+      triggers a fresh Native Messaging pairing; a stale non-empty token is
+      cleared by the extension before retrying. A real reinstall remains an
+      OS/package acceptance gate.
+- [ ] Sub-project 2 (smarter notes: structured summaries, chat with a meeting)
+      and sub-project 3 (Slack webhook, Notion, email recap).
 
 ---
 
@@ -421,7 +647,7 @@ accessibility failures):*
 - [x] Linux: package for common formats — Tauri `.deb` + AppImage targets and
       cargo-deb metadata are configured; `.rpm` remains out of this slice.
 - [x] Auto-launch-on-login option — tray menu action is opt-in and defaults
-      to off.
+      to off (default under review, see Pre-launch decisions).
 - [x] Uninstall path documented per OS, including removing the virtual audio
       device cleanly — see `docs/helper-packaging.md`; native-OS execution
       remains release-owner validation.
@@ -446,8 +672,9 @@ accessibility failures):*
       items; the webapp searches titles, summaries, and transcript text.
 - [x] Calendar integration — extension-only (metadata enrichment, not AI
       pipeline work). BYOK OAuth per user via chrome.identity.launchWebAuthFlow
-      + PKCE, not a project-owned OAuth client (avoids Google's consent-
-      screen verification requirement entirely). Best-effort: any failure
+      + PKCE, with a user-supplied OAuth client today (avoids Google's consent-
+      screen verification requirement; a project-owned client is under
+      consideration, see Pre-launch decisions). Best-effort: any failure
       falls back to today's default title with no attendees, never blocks
       a recording. See
       `docs/superpowers/specs/2026-09-22-calendar-integration-design.md`.
@@ -473,33 +700,16 @@ accessibility failures):*
 
 ---
 
-## Sub-project 4: Mobile capture
-
-Scope per the research findings in the architecture spec, §9 — cellular
-call recording is out (blocked by OS/store policy on both platforms). Real
-scope:
-
-- [ ] Android app using `AudioPlaybackCapture`/`MediaProjection` to capture
-      Zoom/Meet/Teams mobile app audio (genuinely feasible)
-- [ ] iOS app using a manual ReplayKit "record, then join your meeting"
-      flow (functional but not passive/background — set expectations in
-      the UI accordingly)
-- [ ] Decide sync path: does mobile write to the same local-first model, or
-      does it require the self-hosted webapp to bridge devices? (Local
-      storage on a phone doesn't have a "same machine" helper to talk to —
-      needs its own design pass before building)
-- [ ] Consent-law disclosure surfaced on mobile too
-
----
-
-## Sub-project 5: Polish / extras
+## Sub-project 5: Polish / extras (numbering kept; sub-project 4, mobile capture, is now under Ideas)
 
 - [x] Custom vocabulary support (bounded terms persisted in settings and sent
       to the helper prompt)
 - [x] Richer summarization templates (meeting modes plus bounded custom
       instructions for sales calls, standups, 1:1s, interviews, and custom
       templates)
-- [x] Cross-browser ports — Edge/Brave: helper now registers its Native
+- [x] Cross-browser ports (experimental only; non-Chrome browser ports are out
+      of scope for now per `CLAUDE.md`, so Edge/Brave/Firefox are unsupported
+      and Firefox is a temporary-add-on experiment) — Edge/Brave: helper now registers its Native
       Messaging host in both browsers' OS-specific locations (the actual
       gap; the extension code needed no changes). Firefox: real port —
       `browser_specific_settings.gecko.id`, `background.scripts`
@@ -536,8 +746,9 @@ scope:
 - [x] `SECURITY.md` with a responsible-disclosure process and explicit
       privacy boundaries
 - [x] Repository review confirms no telemetry/analytics calls to a
-      project-operated server; provider and optional user-owned webapp calls
-      remain the only outbound application paths
+      project-operated server. In local mode the provider calls and the optional
+      user-owned webapp remain the only outbound application paths; the managed
+      service is an explicit opt-in (Hosted sign-in) and not telemetry.
 - [x] `docs/data-handling.md` documents storage locations, outbound paths,
       and deletion behavior
 
@@ -547,8 +758,7 @@ scope:
       surface — now explicitly names one-party vs. two-party consent and
       states it is general information, not legal advice
       (`extension/src/onboarding/onboarding.ts`). Not a substitute for an
-      actual attorney review; mobile has no disclosure yet since sub-project
-      4 (mobile capture) hasn't started.
+      actual attorney review.
 - [x] License compliance check on bundled/wrapped drivers and AI provider
       SDKs — see `docs/third-party-licenses.md` (checked 2026-09-23): no
       vendor AI SDK is used anywhere (Deepgram/Claude/Groq/Gemini/DeepSeek
@@ -601,6 +811,11 @@ scope:
       findings intentionally left open — they need a live render, not a
       code fix: dense per-line transcript borders at 200+ segments, and
       real tray rendering in an OS menu bar.
+- [x] Follow-up extension polish pass (2026-09-24): removed a duplicate popup
+      live-region ID, added consistent focus and dark-mode form styling, made
+      onboarding progress screen-reader discoverable, and hardened narrow
+      meeting/action-item layouts. Focused extension gates pass; live Chrome,
+      helper, provider, and OS audio proof remain separate release-owner work.
 - [x] `notetaker-guardrails-reviewer` pass before every release (2026-09-23)
       — reviewed all 11 non-negotiable constraints across `extension/`,
       `helper/`, and `webapp/` as they stand on `main`. Zero violations
@@ -646,6 +861,87 @@ scope:
 
 ---
 
+## Ideas (out of scope for now)
+
+These are not on the roadmap. `CLAUDE.md` lists mobile capture, cellular/PSTN
+interception, DRM/protected audio, and non-Chrome browser ports as out of
+scope. They are kept here only so the thinking is not lost; do not schedule
+them without changing `CLAUDE.md` and the design spec first.
+
+- Mobile capture. Cellular call recording is blocked by OS and store policy on
+  both platforms, so any future scope would be limited to:
+  - an Android app using `AudioPlaybackCapture`/`MediaProjection` to capture
+    Zoom/Meet/Teams mobile app audio;
+  - an iOS app using a manual ReplayKit "record, then join your meeting" flow
+    (not passive or background);
+  - a sync design (mobile has no same-machine helper, so it would need its own
+    design pass), and consent-law disclosure surfaced on mobile.
+- Supported Firefox, Edge, or Brave builds, including Mozilla AMO signing and
+  Edge Add-ons listings.
+- Cellular/PSTN call interception and DRM/protected audio: not promised.
+
+## Pre-production audit (2026-09-25) — deferred items
+
+Meet automation settings (2026-09-25), all in Settings → Shortcuts and Meet
+widget. Auto-record is on by default (but still requires onboarding and
+recording-consent acknowledgement); attendee disclosure and auto-share are off;
+open-notes is on:
+
+- [x] Auto-record on joining a Google Meet call (`autoRecordOnMeetJoin`, on).
+      A tab landing on a call URL attempts a silent start; Chrome's invocation
+      gate on a first join saves the intent so the first toolbar click starts
+      recording on that single click. URL-based join detection only, one
+      attempt per call, re-armed when a tab joins a different call.
+- [x] Chrome's first-use `activeTab` gate now shows a brief, non-error
+      "One Chrome step" message in the in-call widget. It tells the user that
+      the toolbar click/assigned shortcut starts the pending recording; the
+      widget no longer offers a futile retry. Chrome still requires this
+      invocation and it cannot be bypassed by an extension.
+- [x] One-tap attendee disclosure notice (`meetDisclosureNotice`, off): while
+      recording, the widget shows a Copy button with a short chat-ready
+      notice. The user pastes and sends it themselves — Meet's DOM is never
+      scraped or driven. Added the `clipboardWrite` permission.
+- [x] Auto-share notes with attendees (`autoShareNotesWithAttendees`, off,
+      Hosted AI only): after notes complete, the extension creates an
+      expiring share link via a new authenticated workspace-scoped
+      `POST /api/v1/meetings/{id}/share` route and shows it on the notes
+      page. Nobody receives the link unless the user sends it.
+- [x] Open notes when ready (`openNotesWhenReady`, ON): the notes tab opens
+      automatically when notes complete (Meet and desktop paths); the
+      notification is skipped in that mode and remains the off-mode fallback.
+- [ ] Live browser-side transcription during Meet calls: the widget already
+      shows the live transcript when the desktop helper streams it, but
+      extension-owned Meet capture still transcribes only after stop. In-call
+      streaming Deepgram for the browser path remains open work.
+
+Fixed in this pass (see commits ca6aea1 helper, 1e9a3fa extension, 9abc589
+webapp): pairing hardening + tray re-pair flow, IPC subscriber-leak pruning,
+StopRecording/stop-pipeline non-blocking, retry-worker cap + backoff,
+cross-tenant upsertMeeting TOCTOU, checkout double-billing mutex, cookie
+Secure flag, managed Meet upload streaming (~700MB → bounded), recording_stopped
+listener, Meet capture state persistence + tab-close finalization, Gemini
+query-param key leak, recover even-byte clamp, empty-summary retry.
+
+Consciously deferred (why):
+
+- [ ] Extension `listMeetings` search loads full meeting records (summaries
+      included) to match a query, while popup/history only needs the list
+      view. Fixing this means splitting transcripts/summaries into separate
+      storage keys or adding a lightweight index — a storage schema
+      migration with a data-move path, too risky to land pre-launch.
+      Revisit with the planned history indexing work.
+- [ ] Webapp Dockerfile keeps `prisma` CLI in production dependencies:
+      `scripts/docker-entrypoint.mjs` runs `npx prisma migrate deploy` at
+      container start, so the CLI must ship. Revisit only if entrypoint
+      switches to a build-time migration step or a standalone engine.
+- [ ] Helper `stop_capture_only` (pipeline.rs) drops mic/speaker streaming
+      sessions without `close()` — audit lead from the delegation sweep,
+      not re-verified against the current code after the pipeline rework;
+      sessions drop when the process exits, but an explicit close would
+      flush provider buffers cleanly. Verify on the next pipeline pass.
+
+---
+
 ## How to use this file
 
 - Pick items top-down within sub-project 1 before touching later
@@ -654,4 +950,6 @@ scope:
 - When a section's items are all checked, do a design + guardrails review
   pass before calling that sub-project done, not just at the very end.
 - If scope changes (a gap turns out bigger or smaller than expected),
-  update the architecture spec first, then reflect the change here.
+  update the current design spec
+  (`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`)
+  first, then reflect the change here.

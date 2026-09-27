@@ -8,7 +8,7 @@
  * helper (which owns the pipeline) is the source of truth for in-progress
  * recording state, not this client's in-memory state.
  */
-import { getPairingToken, savePairingToken } from "./storage";
+import { clearPairingToken, getPairingToken, savePairingToken } from "./storage";
 import {
   isIncomingMessage,
   type IncomingMessage,
@@ -16,8 +16,10 @@ import {
   type AudioStatus,
   type BrowserAudioChannel,
   type CaptureSource,
+  type FlaggedMomentWire,
   type MeetingMode,
   type NotetakerSettings,
+  type ProcessingMode,
   type ProviderKind,
 } from "../types";
 
@@ -50,7 +52,13 @@ type IncomingMessageType = IncomingMessage["type"];
  * actionable "install the helper" state instead of silently retrying
  * forever.
  */
-export type HelperConnectionStatus = "connecting" | "connected" | "helper_not_found" | "disconnected" | "incompatible";
+export type HelperConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "helper_not_found"
+  | "disconnected"
+  | "needs_pairing"
+  | "incompatible";
 
 export class NativeMessagingClient {
   private port: chrome.runtime.Port | null = null;
@@ -59,6 +67,7 @@ export class NativeMessagingClient {
   private statusListeners: Set<Listener<HelperConnectionStatus>> = new Set();
   private currentStatus: HelperConnectionStatus | null = null;
   private reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
+  private reconnectTimerId: ReturnType<typeof setTimeout> | undefined;
 
   connect(): Promise<void> {
     if (this.connectPromise) return this.connectPromise;
@@ -173,12 +182,31 @@ export class NativeMessagingClient {
     }
     // Short delays (and non-Chrome test harnesses / older Chromium variants
     // with no chrome.alarms) use a plain timer, which chrome.alarms would
-    // otherwise round up to its 30s floor.
-    setTimeout(() => void this.connect(), delay);
+    // otherwise round up to its 30s floor. Track the id so cancelReconnect
+    // can stop it (a rejection must not be retried).
+    this.reconnectTimerId = setTimeout(() => {
+      this.reconnectTimerId = undefined;
+      void this.connect();
+    }, delay);
   }
 
   retryFromAlarm(): void {
     void this.connect();
+  }
+
+  /**
+   * Stops any scheduled reconnect — used when the helper has rejected the
+   * pairing handshake: retrying a deliberate rejection would hot-loop a
+   * fresh OS process per attempt. Recovery is user-gesture-driven (the
+   * helper tray's "Pair New Browser" item), after which connect() can be
+   * called again — connect() resets the backoff on success via handleMessage.
+   */
+  private cancelReconnect(): void {
+    if (chrome.alarms?.clear) void chrome.alarms.clear(HELPER_RETRY_ALARM);
+    if (this.reconnectTimerId !== undefined) {
+      clearTimeout(this.reconnectTimerId);
+      this.reconnectTimerId = undefined;
+    }
   }
 
   private handleMessage(raw: unknown): void {
@@ -190,6 +218,20 @@ export class NativeMessagingClient {
     this.setStatus("connected");
     if (raw.type === "paired") {
       void savePairingToken(raw.pairingToken);
+    }
+    if (raw.type === "error" && raw.code === "helper_not_paired") {
+      // The helper refuses to re-mint its token for a browser that lost its
+      // copy — that is the security model (a rogue same-user process must
+      // not be able to pair by presenting null). Recovering requires a user
+      // gesture in the helper's tray menu, so stop the reconnect loop here
+      // instead of hot-retrying a rejection. Clear the stale browser copy so
+      // a manual retry (after the user picks "Pair New Browser" in the tray,
+      // which deletes the helper-side token) pairs cleanly via the
+      // first-ever-pairing branch.
+      void clearPairingToken();
+      this.setStatus("needs_pairing");
+      this.cancelReconnect();
+      return;
     }
     const handlers = this.listeners.get(raw.type);
     if (!handlers) return;
@@ -218,7 +260,7 @@ export class NativeMessagingClient {
     this.port.postMessage(message);
   }
 
-  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions">): void {
+  pushSettings(settings: Pick<NotetakerSettings, "transcriptionProvider" | "summarizationProvider" | "apiKeys" | "webapp" | "defaultMeetingMode" | "customVocabulary" | "customSummaryInstructions"> & Partial<Pick<NotetakerSettings, "processingMode" | "managedService">>): void {
     // State sync, not a one-shot command. The helper holds settings in
     // memory only for its process lifetime and the controller re-pushes
     // whenever the connection is (re)established, so dropping the push
@@ -226,24 +268,30 @@ export class NativeMessagingClient {
     // throw, which would reject init() and wedge GET_STATE exactly in the
     // helper-missing case this client reports via onStatusChange.
     if (!this.port) return;
+    const modeFields = settings.processingMode || settings.managedService
+      ? { processingMode: settings.processingMode ?? { kind: "local_byok" }, managedService: settings.managedService ?? null }
+      : {};
     this.send({
       type: "settings",
       transcriptionProvider: settings.transcriptionProvider,
       summarizationProvider: settings.summarizationProvider,
       apiKeys: settings.apiKeys,
       webapp: settings.webapp,
+      ...modeFields,
       defaultMeetingMode: settings.defaultMeetingMode,
       customVocabulary: settings.customVocabulary,
       customSummaryInstructions: settings.customSummaryInstructions,
     });
   }
 
-  startRecording(meetingId: string, meetingMode: MeetingMode, captureSource: CaptureSource = "desktop"): void {
+  startRecording(meetingId: string, meetingMode: MeetingMode, captureSource: CaptureSource = "desktop", processingMode: ProcessingMode = { kind: "local_byok" }, title?: string): void {
     this.send({
       type: "start_recording",
       meetingId,
       meetingMode,
-      ...(captureSource === "meet" ? { captureSource } : {}),
+      ...(title?.trim() ? { title: title.trim().slice(0, 200) } : {}),
+      ...(captureSource !== "desktop" ? { captureSource } : {}),
+      ...(processingMode.kind !== "local_byok" ? { processingMode } : {}),
     });
   }
 
@@ -268,8 +316,10 @@ export class NativeMessagingClient {
     });
   }
 
-  stopRecording(meetingId: string): void {
-    this.send({ type: "stop_recording", meetingId });
+  stopRecording(meetingId: string, flaggedMoments: FlaggedMomentWire[] = []): void {
+    // The field is omitted when empty, so a helper that predates it sees the
+    // same message as before.
+    this.send({ type: "stop_recording", meetingId, ...(flaggedMoments.length > 0 ? { flaggedMoments } : {}) });
   }
 
   resumeRecording(meetingId: string): void {
@@ -296,6 +346,9 @@ export class NativeMessagingClient {
         speaker: null,
         ready: false,
         guidance: "The helper did not respond. Install and start it, then check audio again.",
+        nativeLoopback: false,
+        virtualDeviceFallback: false,
+        permissionRequired: false,
       };
       const handler = (message: Extract<IncomingMessage, { type: "audio_status" }>): void => {
         settle(message);
@@ -350,10 +403,9 @@ export class NativeMessagingClient {
   }
 
   /**
-   * Routes "test this key" through the helper instead of calling the
-   * provider's API directly from the extension — see extension/CLAUDE.md
-   * ("Do not call transcription/LLM provider APIs directly from the
-   * extension") and docs/native-messaging-protocol.md. Resolves via a
+   * Routes desktop-call "test this key" through the helper. The browser-owned
+   * Meet path uses its own direct provider pipeline after IndexedDB
+   * persistence. Resolves via a
    * one-shot listener correlated on `provider` (the settings page only
    * ever has one test in flight per provider), with a timeout so a lost
    * reply (e.g. helper not running) doesn't hang the UI forever.

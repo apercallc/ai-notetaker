@@ -12,6 +12,9 @@ const entryPoints = [
   "src/meeting/meeting.ts",
   "src/actions/actions.ts",
   "src/meet/offscreen.ts",
+  "src/meet/captureWorklet.ts",
+  "src/meet/microphone.ts",
+  "src/content/meetWidget.ts",
 ];
 
 const buildOptions = {
@@ -23,6 +26,8 @@ const buildOptions = {
   target: "chrome116",
   sourcemap: true,
   logLevel: "info",
+  // The content script inlines its stylesheet into a closed shadow root.
+  loader: { ".css": "text" },
 };
 
 async function copyStatic() {
@@ -34,6 +39,8 @@ async function copyStatic() {
     await cp(`src/${page}/${page}.css`, `dist/${page}/${page}.css`);
   }
   await cp("src/meet/offscreen.html", "dist/meet/offscreen.html");
+  await cp("src/meet/microphone.html", "dist/meet/microphone.html");
+  await cp("src/meet/microphone.css", "dist/meet/microphone.css");
   await cp("src/shared/theme.css", "dist/shared/theme.css");
 }
 

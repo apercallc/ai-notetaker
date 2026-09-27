@@ -9,7 +9,7 @@
     <licenseUrl>https://github.com/apercallc/ai-notetaker/blob/main/LICENSE</licenseUrl>
     <projectUrl>https://apercallc.github.io/ai-notetaker/</projectUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <description>Local-first, self-hosted AI meeting notetaker. The native installer includes only the permitted base VB-CABLE package and keeps VB-Audio attribution and donation information visible.</description>
+    <description>Botless meeting notes with free local BYOK or optional hosted AI. The native installer includes only the permitted base VB-CABLE package and keeps VB-Audio attribution and donation information visible.</description>
     <tags>meeting transcription ai notetaker audio</tags>
   </metadata>
   <files>

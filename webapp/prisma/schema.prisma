@@ -1,10 +1,9 @@
 // AI Notetaker webapp schema.
 //
-// Every model carries userId/workspaceId from day one even though v1 auth
-// is a single shared deploy-time token with no real multi-user concept yet.
-// This is deliberate forward-compatibility (see architecture spec §3.5, §7)
-// so that team/workspace sharing later doesn't require a schema migration.
-// v1 always writes/reads with userId = "local" (see src/lib/constants.ts).
+// Legacy ingestion models retain userId/workspaceId while browser UI auth uses
+// real per-user sessions and workspace memberships. The deploy-time
+// AUTH_TOKEN remains the separate trusted ingestion contract for self-hosted
+// helper/API clients.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,13 +23,20 @@ model Meeting {
   startedAt   DateTime
   endedAt     DateTime
   summary     String    @db.Text
+  captureSource String  @default("desktop")
+  processingMode String @default("local_byok")
+  recordingObjectKey String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   transcript  TranscriptSegment[]
   actionItems ActionItem[]
+  uploads     ManagedUpload[]
+  processingJobs ProcessingJob[]
+  shareTokens MeetingShareToken[]
 
   @@index([userId, startedAt])
+  @@index([workspaceId, startedAt])
 }
 
 model TranscriptSegment {
@@ -73,18 +79,54 @@ model User {
   email        String   @unique
   passwordHash String
   createdAt    DateTime @default(now())
+  // Null until the mailbox is proven (verification link, password reset,
+  // invite acceptance) or vouched for by an operator/owner who provisioned it.
+  emailVerifiedAt DateTime?
+  // Set when an owner issues a temporary password; cleared by the next
+  // successful password change.
+  mustChangePassword Boolean @default(false)
+  // Recorded at self-service signup: explicit ToS / recording-consent tick.
+  termsAcceptedAt DateTime?
+  termsVersion    String?
 
   memberships WorkspaceMembership[]
   sessions    Session[]
+  apiTokens   ApiToken[]
+  authTokens  AuthToken[]
+  googleOAuthConnection GoogleOAuthConnection?
+}
+
+// Project-owned Google OAuth is person-scoped, not workspace-scoped. Tokens
+// are AES-256-GCM ciphertexts; plaintext credentials never enter Prisma.
+model GoogleOAuthConnection {
+  id                     String   @id @default(uuid())
+  userId                 String   @unique
+  accountEmail           String?
+  accessTokenCiphertext  String   @db.Text
+  refreshTokenCiphertext String   @db.Text
+  expiresAt              DateTime
+  scopes                 String   @db.Text
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }
 
 model Workspace {
   id        String   @id @default(uuid())
   name      String
   isDefault Boolean  @default(false)
+  retentionDays Int?
   createdAt DateTime @default(now())
 
   memberships WorkspaceMembership[]
+  uploads ManagedUpload[]
+  processingJobs ProcessingJob[]
+  usageEntries UsageLedgerEntry[]
+  subscription WorkspaceSubscription?
+  shareTokens MeetingShareToken[]
 
   // Exactly one workspace has isDefault = true — the ingestion target for
   // every meeting synced via the AUTH_TOKEN Bearer contract, and the
@@ -104,6 +146,7 @@ model WorkspaceMembership {
 
   @@unique([userId, workspaceId])
   @@index([workspaceId])
+  @@index([userId, createdAt])
 }
 
 model Session {
@@ -111,9 +154,187 @@ model Session {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+  userAgent String?
+  ip        String?
+  // Workspace chosen with the workspace switcher; validated against
+  // membership on every request, so a stale value can never grant access.
+  activeWorkspaceId String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+model ManagedUpload {
+  id             String   @id @default(uuid())
+  workspaceId    String
+  meetingId      String
+  idempotencyKey String
+  totalChunks    Int
+  totalBytes     Int
+  status         String   @default("created")
+  objectKey      String?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+  completedAt    DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  chunks    UploadChunk[]
+  jobs      ProcessingJob[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, meetingId])
+}
+
+model UploadChunk {
+  id        String   @id @default(uuid())
+  uploadId  String
+  chunkIndex Int
+  channel   String   @default("speaker")
+  byteLength Int
+  checksum  String
+  objectKey String
+  createdAt DateTime @default(now())
+
+  upload ManagedUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@unique([uploadId, chunkIndex])
+}
+
+model ProcessingJob {
+  id             String   @id @default(uuid())
+  workspaceId    String
+  meetingId      String
+  uploadId       String
+  idempotencyKey String
+  status         String   @default("queued")
+  errorMessage   String?  @db.Text
+  providerCostMicros Int  @default(0)
+  createdAt      DateTime @default(now())
+  startedAt      DateTime?
+  leaseToken     String?
+  completedAt    DateTime?
+  updatedAt      DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  upload    ManagedUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, createdAt])
+}
+
+model UsageLedgerEntry {
+  id             String   @id @default(uuid())
+  workspaceId    String
+  periodStart    DateTime
+  kind           String
+  units          Int
+  idempotencyKey String
+  releasedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, periodStart, kind])
+}
+
+model WorkspaceSubscription {
+  id                   String   @id @default(uuid())
+  workspaceId          String   @unique
+  stripeCustomerId     String?  @unique
+  stripeSubscriptionId String?  @unique
+  plan                 String   @default("local")
+  status               String   @default("inactive")
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  graceEndsAt           DateTime?
+  lastBillingEventCreatedAt Int?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model MeetingShareToken {
+  id          String   @id @default(uuid())
+  workspaceId String
+  meetingId   String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, meetingId])
+}
+
+model BillingEvent {
+  id          String   @id
+  type        String
+  eventCreatedAt Int?
+  processedAt DateTime @default(now())
+}
+
+// Shared failed-login budget for managed hosting. Keeping this in Postgres
+// makes the throttle effective across web replicas and survives a deploy.
+model LoginThrottle {
+  emailKey       String   @id
+  failures       Int      @default(0)
+  firstFailureAt DateTime
+  updatedAt      DateTime @updatedAt
+
+  @@index([firstFailureAt])
+}
+
+// Bearer credential for the browser extension / managed clients. Only the
+// SHA-256 of the secret is stored, so a database leak does not yield usable
+// tokens. Expiry is sliding (renewed while in use) and every token is
+// individually revocable from /account.
+model ApiToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  scope      String    @default("managed")
+  label      String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Single-use, expiring, hashed tokens emailed (or handed to an owner) for
+// email verification, password reset and workspace invitations. `email` is
+// the normalized target address; `workspaceId` is intentionally not a
+// relation so this table stays independent of the tenant models.
+model AuthToken {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique
+  purpose     String
+  userId      String?
+  email       String
+  workspaceId String?
+  role        String?
+  invitedById String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@index([workspaceId, purpose])
   @@index([expiresAt])
 }

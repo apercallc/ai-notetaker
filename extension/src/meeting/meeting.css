@@ -7,8 +7,94 @@ body {
   padding: var(--space-5) var(--space-3);
 }
 
-h1 {
-  margin-bottom: 0;
+.title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.title-row h1 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.title-row button {
+  padding: var(--space-1) var(--space-2);
+}
+
+.rename-input {
+  flex: 1;
+  min-width: 12rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.note-actions .test-result {
+  margin: 0;
+}
+
+.undo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.undo-bar[hidden] {
+  display: none;
+}
+
+#app.pending-delete section {
+  opacity: 0.55;
+}
+
+.meeting-error {
+  text-align: left;
+  padding: 0;
+  margin: 0 0 var(--space-2);
+}
+
+.summary-section h3 {
+  font-size: 0.9375rem;
+  margin: var(--space-3) 0 var(--space-1);
+}
+
+.summary-section:first-child h3 {
+  margin-top: 0;
+}
+
+.summary-section p {
+  margin: 0 0 var(--space-2);
+}
+
+.summary-section ul {
+  margin: 0 0 var(--space-2);
+  padding-left: 1.25rem;
+}
+
+.summary-section li {
+  margin-bottom: var(--space-1);
+}
+
+.summary-plain {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
 }
 
 .meeting-meta {
@@ -42,14 +128,20 @@ section h2 {
   gap: var(--space-2);
 }
 
+.action-item > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .action-item.done > span {
   color: var(--color-text-secondary);
   text-decoration: line-through;
 }
 
-.action-due {
+input.action-due {
   margin-left: auto;
   font: inherit;
+  width: 9rem;
 }
 
 .action-items li {
@@ -86,7 +178,73 @@ section h2 {
     max-width: none;
   }
 
-  .toolbar {
+  .toolbar,
+  .note-actions,
+  .undo-bar,
+  #rename-title {
     display: none;
+  }
+}
+
+.moments {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.moment {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  border-color: transparent;
+  margin-bottom: var(--space-1);
+}
+
+.moment:hover {
+  border-color: var(--color-border);
+}
+
+.moment:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.moment-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.transcript-line-highlight {
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.transcript-line:focus {
+  outline: none;
+}
+
+.transcript-line.transcript-line-highlight:focus {
+  outline: 2px solid var(--color-accent);
+}
+
+@media (max-width: 520px) {
+  #app {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .action-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  input.action-due {
+    margin-left: 1.5rem;
   }
 }

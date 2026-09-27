@@ -1,7 +1,15 @@
 # Webapp Multi-User Auth & Workspace Sharing Design
 
 Date: 2026-09-22
-Status: Approved, implementation in progress
+Status: Historical design record — implemented and superseded by the
+2026-09-24 Scribbl dual-mode product design.
+
+> The current contract adds project-operated managed hosting, hosted billing,
+> usage limits, and worker-owned provider calls to this per-user/session and
+> workspace foundation. See
+> [`2026-09-24-scribbl-dual-mode-product-design.md`](2026-09-24-scribbl-dual-mode-product-design.md)
+> and [`docs/hosted-deployment.md`](../../hosted-deployment.md) before making
+> new product decisions.
 
 ## Problem
 
