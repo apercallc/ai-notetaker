@@ -2,8 +2,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $OutputDirectory,
 
-    [Parameter(Mandatory = $true)]
-    [string] $ExpectedSha256
+    # SHA-256 of VB-Audio's official VBCABLE_Driver_Pack45.zip, verified
+    # 2026-09-27. Update this when deliberately adopting a new vendor package.
+    [string] $ExpectedSha256 = 'b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb'
 )
 
 $ErrorActionPreference = 'Stop'

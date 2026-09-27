@@ -108,26 +108,21 @@ jobs:
           workspaces: helper
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Configure Swift runtime for macOS tests
+      - name: Prepare Swift runtime for macOS tests
         if: runner.os == 'macOS'
         run: |
           swift_lib="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx"
           test -f "$swift_lib/libswift_Concurrency.dylib"
-          echo "DYLD_LIBRARY_PATH=$swift_lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          cargo test --workspace --no-run
+          cp "$swift_lib"/*.dylib target/debug/deps/
       - run: cargo test --workspace
       - name: Stage pinned base VB-CABLE payload
         if: runner.os == 'Windows'
         working-directory: .
-        env:
-          VB_CABLE_SHA256: ${{ vars.VB_CABLE_SHA256 }}
         shell: pwsh
         run: |
-          if (-not $env:VB_CABLE_SHA256) {
-            throw 'Set the repository variable VB_CABLE_SHA256 before building a Windows release.'
-          }
           ./packaging/windows/fetch-vb-cable.ps1 `
-            -OutputDirectory "$env:GITHUB_WORKSPACE/helper/crates/app/resources/windows/vb-cable" `
-            -ExpectedSha256 $env:VB_CABLE_SHA256
+            -OutputDirectory "$env:GITHUB_WORKSPACE/helper/crates/app/resources/windows/vb-cable"
       - name: Build native bundles
         working-directory: helper/crates/app
         env:
