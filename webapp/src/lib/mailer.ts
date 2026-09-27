@@ -80,7 +80,7 @@ function resendSender(apiKey: string, from: string): EmailSender {
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ from, to: [clean(message.to)], subject: clean(message.subject), text: message.text }),
+        body: JSON.stringify({ from: clean(from), to: [clean(message.to)], subject: clean(message.subject), text: message.text }),
         signal: AbortSignal.timeout(15_000),
       });
       if (!response.ok) throw new Error(`Resend rejected the message (HTTP ${response.status})`);

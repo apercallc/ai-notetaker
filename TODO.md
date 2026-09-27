@@ -136,10 +136,11 @@ decided yet.
       Google consent-screen verification plus a live credential/configuration
       test remain release-owner work; legacy extension BYOK setup remains a
       separate compatibility path until it is explicitly removed.
-- [ ] (c) Move `nativeMessaging`, `identity`, `alarms`, and the five AI provider
+- [x] (c) Move `nativeMessaging`, `identity`, `alarms`, and the five AI provider
       host permissions (Deepgram, Anthropic, Groq, Gemini, DeepSeek) to
       optional permissions requested when the feature is first used, so the
-      install prompt for a Meet-only user is minimal.
+      install prompt for a Meet-only user is minimal. Denials have recovery
+      guidance; calendar reminder retries fall back to an in-session timer.
 - [ ] (d) Replace the committed development extension ID in the Native
       Messaging `allowed_origins` with the real Chrome Web Store extension ID
       once the listing exists, and verify the committed manifest `key`
@@ -193,11 +194,15 @@ reintroducing its old assumptions.
       Live Sentry DSN configuration on the managed deployment remains
       release-owner work.
 - [x] Add reproducible coverage commands and CI artifacts for every surface;
-      the current deterministic gates report 96.20% extension lines and
-      93.63% webapp lines, with 152 Rust tests, 382 extension tests, and 151
-      webapp tests green in the current full run. Platform-native audio,
-      Tauri tray, Chrome entrypoints, and rendered pages remain separate
-      smoke-test concerns rather than being counted as fake unit coverage.
+      platform-native audio, Tauri tray, Chrome entrypoints, and rendered pages
+      remain separate smoke-test concerns rather than being counted as fake
+      unit coverage.
+- [x] Raise webapp coverage to its CI thresholds (90% statements, functions,
+      and lines; 80% branches). On 2026-09-27 the PostgreSQL-backed run passed
+      all 306 tests at 90.22% statements, 83.69% branches, 93.72% functions,
+      and 93.93% lines; account, Google integration, billing, managed jobs,
+      auth-email, session, observability, and managed meeting route paths are
+      covered. Remaining per-file coverage gaps are tracked by the CI report.
 - [x] Expand unit and integration coverage for protocol validation, native
       messaging diagnostics, storage failures, retry recovery, webapp API
       limits, request-body streaming, and provider/webapp error responses.
@@ -244,6 +249,33 @@ only.
 - [x] Release workflow now uploads versioned native artifacts, a generated
       checksum manifest, and the optional webapp image to GitHub Releases and
       GHCR. External Homebrew/WinGet/Chocolatey publication remains owner work.
+
+## Live release gates (audit, 2026-09-27)
+
+- [ ] Restore the production API hostname: Railway reports that
+      `ai-notetaker.apercallc.com` requires a CNAME to
+      `rgkzqax9.up.railway.app`; public DNS currently returns NXDOMAIN, so the
+      deployed `/api/health` endpoint cannot be verified at that hostname.
+- [ ] Finish managed-hosting configuration before enabling customer signups:
+      production currently has only the web and Postgres services (no worker),
+      and Railway is missing `MANAGED_WORKER_TOKEN`, S3 bucket credentials,
+      managed Deepgram/Anthropic keys, and Stripe secret, webhook, and price
+      variables. The application fails managed signup closed until readiness
+      checks pass. Configure secrets in Railway and verify `managedReady:true`
+      plus a real worker processing an uploaded recording.
+- [ ] Re-run cross-platform helper CI with readable macOS and Windows logs.
+      The latest recorded run failed both platform Clippy jobs, while Linux
+      helper fmt, Clippy, and tests pass locally; existing GitHub logs expired,
+      so the cause is not yet known. Do not waive the platform jobs without
+      actionable diagnostics.
+- [ ] Complete production acceptance with live Chrome/Meet, Google OAuth and
+      Drive, providers, managed upload/worker/storage, Stripe billing, and
+      health checks after configuration; local tests/builds do not prove those
+      account- and deployment-backed flows.
+- [ ] Publish signed native installers and the Chrome Web Store listing,
+      replace the development extension ID in Native Messaging origins, and
+      capture real store screenshots. `release/manifest.json` remains marked
+      unpublished with no release artifacts or store URL.
 - [x] Add `webapp/Dockerfile` and Docker Compose for the optional webapp and
       Postgres, with persistent storage, migrations, health checks, and
       authenticated token setup.

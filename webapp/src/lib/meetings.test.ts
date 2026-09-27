@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeEach, afterAll, vi } from "vitest";
 import { prisma } from "./db";
 import { getObject, putObject } from "./objectStorage";
 import {
@@ -8,6 +8,7 @@ import {
   deleteMeeting,
   listActionItems,
   updateActionItem,
+  renameMeeting,
   ValidationError,
 } from "./meetings";
 import type { CreateMeetingRequest } from "./types";
@@ -200,6 +201,20 @@ describe("upsertMeeting", () => {
       upsertMeeting(sampleMeeting({ actionItems: [{ text: "Follow up", owner: 42 as unknown as string }] }), WORKSPACE_ID),
     ).rejects.toThrow(ValidationError);
   });
+
+  it("re-keys an action item id already owned by another meeting", async () => {
+    await upsertMeeting(sampleMeeting({ actionItems: [{ id: "globally-owned-action", text: "Original task" }] }), WORKSPACE_ID);
+    const next = sampleMeeting({
+      id: "22222222-2222-2222-2222-222222222222",
+      actionItems: [{ id: "globally-owned-action", text: "A different task" }],
+    });
+    await upsertMeeting(next, WORKSPACE_ID);
+
+    const meetings = await prisma.meeting.findMany({ include: { actionItems: true }, orderBy: { id: "asc" } });
+    expect(meetings[0]?.actionItems[0]?.id).toBe("globally-owned-action");
+    expect(meetings[1]?.actionItems[0]?.id).not.toBe("globally-owned-action");
+    expect(meetings[1]?.actionItems[0]?.text).toBe("A different task");
+  });
 });
 
 describe("listMeetings", () => {
@@ -260,6 +275,12 @@ describe("listMeetings", () => {
     const actionSearch = await listMeetings(WORKSPACE_ID, { query: "send api keys" });
     expect(actionSearch.meetings).toHaveLength(1);
     expect(actionSearch.meetings[0].title).toBe("Roadmap planning");
+
+    const transcriptSearch = await listMeetings(WORKSPACE_ID, { query: "blocked on the api" });
+    expect(transcriptSearch.meetings[0]?.match?.source).toBe("transcript");
+
+    const titleSearch = await listMeetings(WORKSPACE_ID, { query: "1:1 with Sam" });
+    expect(titleSearch.meetings[0]?.match).toBeNull();
   });
 
   it("paginates with limit/offset", async () => {
@@ -284,6 +305,16 @@ describe("listMeetings", () => {
 
   it("rejects an offset that would force an unbounded deep scan", async () => {
     await expect(listMeetings(WORKSPACE_ID, { offset: 100_001 })).rejects.toThrow(ValidationError);
+  });
+
+  it("validates search and pagination boundaries and clamps safe limits", async () => {
+    await expect(listMeetings(WORKSPACE_ID, { query: "x".repeat(201) })).rejects.toThrow("query must be");
+    await expect(listMeetings(WORKSPACE_ID, { limit: -1 })).rejects.toThrow("limit must be");
+    await expect(listMeetings(WORKSPACE_ID, { limit: 1.5 })).rejects.toThrow("limit must be");
+    await expect(listMeetings(WORKSPACE_ID, { offset: -1 })).rejects.toThrow("offset must be");
+    await expect(listMeetings(WORKSPACE_ID, { offset: 1.5 })).rejects.toThrow("offset must be");
+    const page = await listMeetings(WORKSPACE_ID, { limit: 500 });
+    expect(page.meetings).toHaveLength(0);
   });
 });
 
@@ -330,6 +361,35 @@ describe("deleteMeeting", () => {
     await expect(getObject(objectKey)).resolves.toEqual(new TextEncoder().encode("recording"));
     await deleteMeeting(WORKSPACE_ID, input.id);
     await expect(getObject(objectKey)).rejects.toThrow();
+  });
+
+  it("completes the database deletion and logs invalid recording object keys for repair", async () => {
+    const input = sampleMeeting();
+    await upsertMeeting(input, WORKSPACE_ID);
+    await prisma.meeting.update({ where: { id: input.id }, data: { recordingObjectKey: "../unsafe-object-key" } });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await deleteMeeting(WORKSPACE_ID, input.id);
+      expect(await getMeeting(WORKSPACE_ID, input.id)).toBeNull();
+      expect(errorLog).toHaveBeenCalledWith("meeting object cleanup failed", expect.objectContaining({ failedObjects: 1 }));
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+});
+
+describe("renameMeeting and action-item validation", () => {
+  it("trims valid meeting names, enforces name and id validation, and reports missing records", async () => {
+    const input = sampleMeeting();
+    await upsertMeeting(input, WORKSPACE_ID);
+    expect(await renameMeeting(WORKSPACE_ID, input.id, "  Roadmap review  ")).toBe(true);
+    expect((await getMeeting(WORKSPACE_ID, input.id))?.title).toBe("Roadmap review");
+    expect(await renameMeeting(OTHER_WORKSPACE_ID, input.id, "Hidden")).toBe(false);
+    await expect(renameMeeting(WORKSPACE_ID, input.id, "  ")).rejects.toThrow("title is required");
+    await expect(renameMeeting(WORKSPACE_ID, input.id, "x".repeat(201))).rejects.toThrow("title must be");
+    await expect(updateActionItem(WORKSPACE_ID, "", { status: "open" })).rejects.toThrow("action item id is invalid");
+    await expect(updateActionItem(WORKSPACE_ID, "x".repeat(129), { status: "open" })).rejects.toThrow("action item id is invalid");
+    await expect(updateActionItem(WORKSPACE_ID, "absent", { dueAt: "not-a-date" })).rejects.toThrow("dueAt must be");
   });
 });
 
