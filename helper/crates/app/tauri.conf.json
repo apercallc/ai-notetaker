@@ -36,8 +36,8 @@
       "infoPlist": "Info.plist",
       "entitlements": "Entitlements.plist",
       "files": {
-        "scripts/macos/install-native-messaging.sh": "Resources/scripts/install-native-messaging.sh",
-        "scripts/macos/uninstall-native-messaging.sh": "Resources/scripts/uninstall-native-messaging.sh"
+        "Resources/scripts/install-native-messaging.sh": "scripts/macos/install-native-messaging.sh",
+        "Resources/scripts/uninstall-native-messaging.sh": "scripts/macos/uninstall-native-messaging.sh"
       }
     },
     "windows": {
