@@ -258,7 +258,7 @@ only.
       deployed `/api/health` endpoint cannot be verified at that hostname.
 - [ ] Finish managed-hosting configuration before enabling customer signups:
       production currently has only the web and Postgres services (no worker),
-      and Railway is missing `MANAGED_WORKER_TOKEN`, S3 bucket credentials,
+      and Railway is missing `MANAGED_WORKER_TOKEN`, S3 bucket configuration,
       managed Deepgram/Anthropic keys, and Stripe secret, webhook, and price
       variables. The application fails managed signup closed until readiness
       checks pass. Configure secrets in Railway and verify `managedReady:true`
