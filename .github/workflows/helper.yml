@@ -77,7 +77,7 @@ jobs:
             echo "Could not locate libswift_Concurrency.dylib under $swift_root." >&2
             exit 1
           fi
-          lipo -verify_arch "$(uname -m)" "$swift_runtime"
+          lipo "$swift_runtime" -verify_arch "$(uname -m)"
           swift_lib="$(dirname "$swift_runtime")"
           cargo test --workspace --no-run
           cp "$swift_lib"/*.dylib target/debug/deps/
