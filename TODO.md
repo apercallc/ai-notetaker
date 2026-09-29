@@ -286,10 +286,9 @@ remains native; Docker is for the optional history webapp only.
       The application fails managed signup closed until readiness checks pass.
       Configure required production values and a real worker, then verify
       `managedReady:true` and a completed upload.
-- [ ] Run cross-platform helper CI on the current uncommitted candidate. The
-      latest GitHub helper matrix on the committed baseline passed for Linux,
-      macOS, and Windows; local fmt, Clippy, and tests also pass. Those results
-      do not include the current dirty helper changes.
+- [ ] Run cross-platform helper CI on the exact release candidate. The latest
+      recorded GitHub helper matrix passed for Linux, macOS, and Windows; repeat
+      it against the tagged candidate before publishing native artifacts.
 - [ ] Complete production acceptance with live Chrome/Meet, Google OAuth and
       Drive, providers, managed upload/worker/storage, Stripe billing, and
       health checks after configuration; local tests/builds do not prove those
@@ -1031,6 +1030,15 @@ Consciously deferred (why):
 - [ ] Run the full cross-platform, live-provider, signed-in managed service,
       browser install, and native audio acceptance checks; these need real
       accounts/devices and a published release.
+- [x] Fix Hosted AI account creation links to select the signup tab and keep
+      managed request timeouts active through response-body parsing and retry.
+- [x] Bound pending and retained managed audio per workspace under a shared
+      database lock; reject chunk retries that exceed declared upload bytes.
+- [x] Remove production inline-script CSP permission by using per-request
+      nonces; redact client, server, and worker telemetry to safe labels and
+      source locations only.
+- [x] Require a valid extension install channel and macOS, Windows, and Linux
+      artifacts before a release manifest can be marked published.
 
 ---
 

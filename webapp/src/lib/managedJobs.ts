@@ -13,6 +13,19 @@ export const MAX_UPLOAD_BYTES = 1_900_000_000;
 export const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
 export const MAX_METADATA_BYTES = 64 * 1024;
 export const MANAGED_UPLOAD_TTL_MS = 24 * 60 * 60 * 1_000;
+/** Bound simultaneous upload reservations across every member of a workspace. */
+export const MAX_PENDING_MANAGED_UPLOADS = 5;
+/** Declared bytes reserved by unfinished uploads in one workspace (about 1.86 GiB). */
+export const MAX_PENDING_MANAGED_UPLOAD_BYTES = 2_000_000_000;
+/** Total completed and reserved audio retained for one workspace (about 4.66 GiB). */
+export const MAX_RETAINED_MANAGED_AUDIO_BYTES = 5_000_000_000;
+
+export class ManagedUploadQuotaError extends ManagedValidationError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManagedUploadQuotaError";
+  }
+}
 
 function isExpired(upload: { status: string; expiresAt: Date }, now = Date.now()): boolean {
   return upload.status !== "complete" && upload.expiresAt.getTime() <= now;
@@ -128,16 +141,67 @@ export async function createManagedUpload(
 
   let created;
   try {
-    created = await prisma.managedUpload.create({
-      data: {
-        workspaceId,
-        meetingId: input.meetingId,
-        totalChunks: input.totalChunks,
-        totalBytes: input.totalBytes,
-        idempotencyKey: input.idempotencyKey,
-        expiresAt: new Date(Date.now() + MANAGED_UPLOAD_TTL_MS),
-      },
-      include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
+    created = await prisma.$transaction(async (tx) => {
+      // Lock the existing workspace row while checking and reserving capacity.
+      // This serializes distinct manifest creations across app replicas without
+      // adding a quota table or relying on a racy count-then-insert sequence.
+      const workspaces = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "Workspace" WHERE "id" = ${workspaceId} FOR UPDATE
+      `;
+      if (workspaces.length !== 1) throw new ManagedValidationError("workspace not found");
+
+      // Another request with this key may have won while this request waited
+      // for the workspace lock. Preserve idempotency and avoid double reserve.
+      const concurrent = await tx.managedUpload.findUnique({
+        where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey: input.idempotencyKey } },
+        include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
+      });
+      if (concurrent) {
+        if (
+          concurrent.meetingId !== input.meetingId ||
+          concurrent.totalChunks !== input.totalChunks ||
+          concurrent.totalBytes !== input.totalBytes
+        ) throw new ManagedValidationError("idempotency key conflicts with an existing upload");
+        if (isExpired(concurrent)) throw new ManagedValidationError("expired upload cleanup is still in progress; retry shortly");
+        return concurrent;
+      }
+
+      // Expired rows stay in the reservation total until cleanup removes their
+      // objects and row. A failed object deletion therefore fails closed rather
+      // than allowing repeated abandoned sessions to accumulate unmetered data.
+      const pending = await tx.managedUpload.aggregate({
+        where: { workspaceId, status: { in: ["created", "uploading", "expired"] } },
+        _count: { _all: true },
+        _sum: { totalBytes: true },
+      });
+      const retained = await tx.managedUpload.aggregate({
+        where: { workspaceId, status: { in: ["created", "uploading", "expired", "complete"] } },
+        _sum: { totalBytes: true },
+      });
+      const pendingCount = pending._count._all;
+      const pendingBytes = pending._sum.totalBytes ?? 0;
+      const retainedBytes = retained._sum.totalBytes ?? 0;
+      if (pendingCount >= MAX_PENDING_MANAGED_UPLOADS) {
+        throw new ManagedUploadQuotaError("workspace has too many pending uploads; finish or retry cleanup before starting another");
+      }
+      if (pendingBytes + input.totalBytes > MAX_PENDING_MANAGED_UPLOAD_BYTES) {
+        throw new ManagedUploadQuotaError("workspace pending upload storage limit exceeded; finish or retry cleanup before starting another");
+      }
+      if (retainedBytes + input.totalBytes > MAX_RETAINED_MANAGED_AUDIO_BYTES) {
+        throw new ManagedUploadQuotaError("workspace retained audio storage limit exceeded; delete retained meetings or wait for retention cleanup");
+      }
+
+      return tx.managedUpload.create({
+        data: {
+          workspaceId,
+          meetingId: input.meetingId,
+          totalChunks: input.totalChunks,
+          totalBytes: input.totalBytes,
+          idempotencyKey: input.idempotencyKey,
+          expiresAt: new Date(Date.now() + MANAGED_UPLOAD_TTL_MS),
+        },
+        include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
+      });
     });
   } catch (error) {
     // Two concurrent createManagedUpload calls with the same idempotency key
@@ -150,6 +214,9 @@ export async function createManagedUpload(
       include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
     });
     if (!winner) throw error;
+    if (winner.meetingId !== input.meetingId || winner.totalChunks !== input.totalChunks || winner.totalBytes !== input.totalBytes) {
+      throw new ManagedValidationError("idempotency key conflicts with an existing upload");
+    }
     created = winner;
   }
   return {

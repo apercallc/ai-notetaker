@@ -17,7 +17,9 @@ test("the checked-in release manifest is valid and intentionally unpublished", (
 test("published metadata cannot omit native artifacts", () => {
   const published = structuredClone(manifest);
   published.status = "published";
-  assert.match(validateManifest(published).join("\n"), /published manifests must contain artifacts/);
+  const errors = validateManifest(published).join("\n");
+  assert.match(errors, /published manifests must contain artifacts/);
+  assert.match(errors, /extension fallback ZIP/);
 });
 
 test("a mismatched extension ID is rejected", () => {
@@ -35,6 +37,33 @@ test("published artifacts require a concrete format and architecture", () => {
   const errors = validateManifest(published).join("\n");
   assert.match(errors, /architecture is invalid/);
   assert.match(errors, /format is invalid/);
+});
+
+test("published manifests need a supported extension install channel and platform artifacts", () => {
+  const published = structuredClone(manifest);
+  published.status = "published";
+  published.artifacts = [
+    { platform: "macos", architecture: "arm64", format: "dmg", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.dmg", sha256: "a".repeat(64), signatureStatus: "unsigned" },
+    { platform: "windows", architecture: "x86_64", format: "nsis", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.exe", sha256: "b".repeat(64), signatureStatus: "unsigned" },
+  ];
+  const errors = validateManifest(published).join("\n");
+  assert.match(errors, /Chrome Web Store URL or extension fallback ZIP URL/);
+  assert.match(errors, /linux deb artifact/);
+});
+
+test("only Chrome Web Store detail URLs and release ZIP fallback URLs are accepted", () => {
+  const published = structuredClone(manifest);
+  published.status = "published";
+  published.extension.chromeWebStoreUrl = "https://example.com/detail/not-the-store";
+  published.extension.fallbackZipUrl = "https://example.com/ai-notetaker-extension-v0.1.0.zip";
+  published.artifacts = [
+    { platform: "macos", architecture: "arm64", format: "dmg", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.dmg", sha256: "a".repeat(64), signatureStatus: "unsigned" },
+    { platform: "windows", architecture: "x86_64", format: "nsis", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.exe", sha256: "b".repeat(64), signatureStatus: "unsigned" },
+    { platform: "linux", architecture: "x86_64", format: "deb", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.deb", sha256: "c".repeat(64), signatureStatus: "unsigned" },
+  ];
+  const errors = validateManifest(published).join("\n");
+  assert.match(errors, /Chrome Web Store detail URL/);
+  assert.match(errors, /GitHub release extension ZIP URL/);
 });
 
 test("release metadata is generated from direct unsigned native assets", () => {

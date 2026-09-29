@@ -17,7 +17,7 @@ import type { ManagedServiceConfig } from "../types";
 const REPORT_TIMEOUT_MS = 8_000;
 /** One in-flight/dedup window per key: a retry loop must not spam the service. */
 const DEDUP_WINDOW_MS = 5 * 60_000;
-const MAX_STACK_CHARS = 4_000;
+const SAFE_ERROR_NAMES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "AbortError", "NotAllowedError", "NotFoundError", "NetworkError"]);
 
 const recentReports = new Map<string, number>();
 
@@ -41,9 +41,9 @@ interface ReportOptions {
   fetchImpl?: typeof fetch;
 }
 
-function stackOf(error: unknown): string | undefined {
-  const stack = error instanceof Error ? error.stack ?? error.message : String(error);
-  return stack.slice(0, MAX_STACK_CHARS) || undefined;
+function safeErrorClass(error: unknown): string {
+  const name = error instanceof Error ? error.name : "Error";
+  return SAFE_ERROR_NAMES.has(name) ? name : "Error";
 }
 
 /**
@@ -53,9 +53,12 @@ function stackOf(error: unknown): string | undefined {
  */
 export function reportManagedError(config: ManagedServiceConfig | null | undefined, error: unknown, options: ReportOptions): void {
   if (!config) return;
-  const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
-  if (!message) return;
-  const key = options.key ?? `${options.surface}:${message}`;
+  // Provider messages and stacks frequently contain prompts, transcript
+  // excerpts, signed URLs, or credentials. Keep those values local; only send
+  // a stable failure label and built-in error class to the managed service.
+  const errorClass = safeErrorClass(error);
+  const message = `${options.surface} operation failed`;
+  const key = options.key ?? `${options.surface}:${errorClass}`;
   const now = Date.now();
   const last = recentReports.get(key) ?? 0;
   if (now - last < DEDUP_WINDOW_MS) return;
@@ -79,9 +82,10 @@ export function reportManagedError(config: ManagedServiceConfig | null | undefin
     body: JSON.stringify({
       message,
       surface: options.surface,
-      ...(stackOf(error) ? { stack: stackOf(error) } : {}),
-      ...(options.meetingId ? { meetingId: options.meetingId } : {}),
-      ...(options.extensionVersion ? { extensionVersion: options.extensionVersion } : {}),
+      errorClass,
+      ...(options.extensionVersion && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(options.extensionVersion)
+        ? { extensionVersion: options.extensionVersion }
+        : {}),
     }),
     signal: controller.signal,
   })

@@ -37,7 +37,7 @@ export async function PUT(request: Request, context: { params: Promise<{ uploadI
     const objectKey = chunkObjectKey(session.workspaceId, uploadId, chunkIndex, checksum);
     await putObject(objectKey, bytes);
     try {
-      await prisma.$transaction(async (tx) => {
+      const inserted = await prisma.$transaction(async (tx) => {
         // Expiry cleanup and chunk writes serialize on the upload row. A
         // cleanup pass that wins this race leaves the upload expired instead
         // of allowing a stale request to resurrect it as "uploading".
@@ -46,8 +46,31 @@ export async function PUT(request: Request, context: { params: Promise<{ uploadI
           data: { status: "uploading" },
         });
         if (writable.count !== 1) throw new ManagedValidationError("upload session expired; start the upload again");
+        // Recheck after acquiring the upload-row lock. A parallel retry may
+        // have committed since the earlier optimistic read above.
+        const concurrent = await tx.uploadChunk.findUnique({ where: { uploadId_chunkIndex: { uploadId, chunkIndex } } });
+        if (concurrent) {
+          if (concurrent.checksum !== checksum || concurrent.byteLength !== bytes.byteLength || concurrent.channel !== channel) {
+            throw new ManagedValidationError("chunk conflicts with an existing retry");
+          }
+          return false;
+        }
+        // The upload-row update above is the per-upload serialization point:
+        // concurrent chunk requests lock the same row before summing, so they
+        // cannot each observe spare manifest capacity and exceed it together.
+        const stored = await tx.uploadChunk.aggregate({
+          where: { uploadId },
+          _sum: { byteLength: true },
+        });
+        if ((stored._sum.byteLength ?? 0) + bytes.byteLength > upload.totalBytes) {
+          throw new ManagedValidationError("uploaded chunks exceed the declared upload byte limit");
+        }
         await tx.uploadChunk.create({ data: { uploadId, chunkIndex, channel, byteLength: bytes.byteLength, checksum, objectKey } });
+        return true;
       });
+      if (!inserted) {
+        return NextResponse.json({ uploadId, chunkIndex, checksum, byteLength: bytes.byteLength, replayed: true }, { headers: { "x-request-id": requestId } });
+      }
     } catch (error) {
       // The object was written before the transaction; if the row never
       // committed (expiry race, transient DB error), no record points at the

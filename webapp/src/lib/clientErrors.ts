@@ -10,9 +10,8 @@ import { createSlidingWindowLimiter } from "./lookupThrottle";
  * with the reporting surface.
  */
 
-const MAX_MESSAGE_CHARS = 500;
-const MAX_STACK_CHARS = 4_000;
 const ALLOWED_SURFACES = new Set(["meet_capture", "managed_upload", "managed_job", "popup", "widget", "settings", "onboarding", "meeting_view", "background"]);
+const ALLOWED_ERROR_CLASSES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "AbortError", "NotAllowedError", "NotFoundError", "NetworkError"]);
 
 /** Generous per-user ceiling: a broken loop must not become a DoS on Sentry. */
 export const clientErrorLimiter = createSlidingWindowLimiter({ limit: 20, windowMs: 60_000 });
@@ -20,8 +19,7 @@ export const clientErrorLimiter = createSlidingWindowLimiter({ limit: 20, window
 export interface ClientErrorReport {
   message: string;
   surface: string;
-  stack?: string;
-  meetingId?: string;
+  errorClass?: string;
   extensionVersion?: string;
 }
 
@@ -31,18 +29,20 @@ function boundedString(value: unknown, max: number): string | undefined {
 }
 
 export function parseClientErrorReport(body: Record<string, unknown>): { ok: true; report: ClientErrorReport } | { ok: false; error: string } {
-  const message = boundedString(body.message, MAX_MESSAGE_CHARS);
-  if (!message) return { ok: false, error: "message is required" };
   const surface = boundedString(body.surface, 40);
   if (!surface || !ALLOWED_SURFACES.has(surface)) return { ok: false, error: "surface is not recognized" };
+  // Never relay a caller-provided message, stack, meeting ID, or other
+  // free-form value to telemetry. These often contain provider responses,
+  // user prompts, transcript snippets, signed URLs, or tokens.
+  const errorClass = boundedString(body.errorClass, 40);
+  const extensionVersion = boundedString(body.extensionVersion, 40);
   return {
     ok: true,
     report: {
-      message,
+      message: `${surface} operation failed`,
       surface,
-      ...(boundedString(body.stack, MAX_STACK_CHARS) ? { stack: boundedString(body.stack, MAX_STACK_CHARS) } : {}),
-      ...(boundedString(body.meetingId, 128) ? { meetingId: boundedString(body.meetingId, 128) } : {}),
-      ...(boundedString(body.extensionVersion, 40) ? { extensionVersion: boundedString(body.extensionVersion, 40) } : {}),
+      ...(errorClass && ALLOWED_ERROR_CLASSES.has(errorClass) ? { errorClass } : {}),
+      ...(extensionVersion && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(extensionVersion) ? { extensionVersion } : {}),
     },
   };
 }
@@ -53,12 +53,8 @@ export function recordClientError(session: { userId: string; workspaceId: string
   const { report } = parsed;
   captureWarning(`extension error: ${report.message}`, {
     clientSurface: report.surface,
-    meetingId: report.meetingId,
+    errorClass: report.errorClass,
     extensionVersion: report.extensionVersion,
-    // The stack is diagnostic, not user content; keep it out of the tagged
-    // summary but attach it so the Sentry event groups by real stack frames.
-    stack: report.stack,
-    workspaceId: session.workspaceId,
   });
   return { ok: true };
 }

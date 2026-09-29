@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { randomBytes } from "node:crypto";
 import { isAuthorizedBearer } from "./lib/auth";
 import { isLegacyIngestAvailable } from "./lib/deploymentConfig";
 import { isValidWorkerToken } from "./lib/secureCompare";
@@ -32,6 +33,49 @@ import { getSessionUser } from "./lib/sessions";
  *   database.
  */
 const WORKER_RUN_PATH = /^\/api\/v1\/jobs\/[^/]+\/run$/;
+
+function sentryOrigin(): string | undefined {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN?.trim();
+  if (!dsn) return undefined;
+  try {
+    return new URL(dsn).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+export function contentSecurityPolicy(nonce: string, development = process.env.NODE_ENV !== "production"): string {
+  const sentry = sentryOrigin();
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
+    // Inline style attributes are currently used by React components. Script
+    // execution is nonce-only in production; style elements also accept the
+    // request nonce so generated Next.js styles remain compatible.
+    `style-src 'self' 'unsafe-inline' 'nonce-${nonce}'`,
+    `img-src 'self' data: blob:${sentry ? ` ${sentry}` : ""}`,
+    "font-src 'self' data:",
+    "media-src 'self' blob:",
+    `connect-src 'self'${sentry ? ` ${sentry}` : ""}${development ? " ws: wss:" : ""}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self' https://checkout.stripe.com https://billing.stripe.com",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
+function nextPage(request: NextRequest): NextResponse {
+  const nonce = randomBytes(18).toString("base64");
+  const policy = contentSecurityPolicy(nonce);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  // Next extracts the nonce from the forwarded request CSP and adds it to
+  // framework and inline scripts during dynamic rendering.
+  requestHeaders.set("Content-Security-Policy", policy);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set("Content-Security-Policy", policy);
+  return response;
+}
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
@@ -89,14 +133,14 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
 
   if (pathname === "/login") {
-    return NextResponse.next();
+    return nextPage(request);
   }
 
   // Share links are bearer capabilities themselves. The page validates the
   // hashed, expiring token; requiring a browser session here would defeat the
   // purpose of sharing a meeting with someone outside the workspace.
   if (pathname.startsWith("/share/")) {
-    return NextResponse.next();
+    return nextPage(request);
   }
 
   const sessionId = request.cookies.get("session")?.value;
@@ -107,7 +151,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return nextPage(request);
 }
 
 export const config = {

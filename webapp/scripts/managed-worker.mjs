@@ -3,6 +3,33 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_POLL_MS = 5_000;
 const DEFAULT_ERROR_BACKOFF_MS = 10_000;
 const MAX_BACKOFF_MS = 60_000;
+const SAFE_ERROR_CLASSES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "AbortError", "ManagedWorkerRequestError"]);
+const SAFE_WORKER_PHASES = new Set(["poll", "fatal"]);
+
+function safeWorkerSentryEvent(event) {
+  const tags = {};
+  const allowedTags = ["workerPhase", "errorClass", "httpStatus"];
+  for (const key of allowedTags) {
+    const value = event.tags?.[key];
+    if (typeof value !== "string") continue;
+    if (key === "workerPhase" && SAFE_WORKER_PHASES.has(value)) tags[key] = value;
+    else if (key === "errorClass" && SAFE_ERROR_CLASSES.has(value)) tags[key] = value;
+    else if (key === "httpStatus" && /^\d{3}$/.test(value) && Number(value) >= 100 && Number(value) <= 599) tags[key] = value;
+  }
+  return {
+    ...(event.event_id ? { event_id: event.event_id } : {}),
+    ...(event.timestamp ? { timestamp: event.timestamp } : {}),
+    ...(event.platform ? { platform: event.platform } : {}),
+    ...(event.level ? { level: event.level } : {}),
+    ...(event.environment ? { environment: event.environment } : {}),
+    ...(event.release ? { release: event.release } : {}),
+    ...(Object.keys(tags).length ? { tags } : {}),
+    ...(event.exception?.values?.length
+      ? { exception: { values: event.exception.values.map((item) => ({ type: SAFE_ERROR_CLASSES.has(item.type) ? item.type : "Error", value: "Managed worker failure" })) } }
+      : {}),
+    ...(event.message ? { message: "Managed worker failure" } : {}),
+  };
+}
 
 // Sentry (DSN-gated): the worker is the process that turns uploaded audio
 // into notes, so its crashes and provider failures are the highest-signal
@@ -15,6 +42,8 @@ if (process.env.SENTRY_DSN?.trim()) {
       dsn: process.env.SENTRY_DSN.trim(),
       environment: process.env.SENTRY_ENVIRONMENT?.trim() || "managed-worker",
       ...(process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ? { release: process.env.RAILWAY_GIT_COMMIT_SHA.trim() } : {}),
+      beforeSend: safeWorkerSentryEvent,
+      beforeBreadcrumb: () => null,
     });
     sentry = Sentry;
   } catch {
@@ -22,10 +51,22 @@ if (process.env.SENTRY_DSN?.trim()) {
   }
 }
 
-function reportWorkerError(error, context = {}) {
+export function reportWorkerError(error, context = {}) {
   if (!sentry) return;
   try {
-    sentry.captureException(error, { extra: context });
+    const rawName = error instanceof Error ? error.name : "Error";
+    const errorClass = SAFE_ERROR_CLASSES.has(rawName) ? rawName : "Error";
+    const workerPhase = SAFE_WORKER_PHASES.has(context.phase) ? context.phase : undefined;
+    const status = error instanceof ManagedWorkerRequestError ? error.status : undefined;
+    const httpStatus = Number.isInteger(status) && status >= 100 && status <= 599 ? String(status) : undefined;
+    const tags = {
+      ...(workerPhase ? { workerPhase } : {}),
+      errorClass,
+      ...(httpStatus ? { httpStatus } : {}),
+    };
+    // Do not hand Sentry the original error or context: messages and stacks
+    // can contain provider payloads, server response bodies, URLs, or secrets.
+    sentry.captureException({ name: errorClass, message: workerPhase ? `Managed worker ${workerPhase} failure` : "Managed worker failure" }, { tags });
   } catch {
     // never on the failure path
   }

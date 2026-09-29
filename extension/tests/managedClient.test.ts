@@ -7,7 +7,7 @@ function response(body: unknown, status = 200): Response {
 
 describe("managedClient", () => {
   it("builds a safe hosted signup URL", () => {
-    expect(managedSignupUrl("https://notes.example.com/")).toBe("https://notes.example.com/login?mode=signup");
+    expect(managedSignupUrl("https://notes.example.com/")).toBe("https://notes.example.com/login?tab=signup");
     expect(() => managedSignupUrl("http://notes.example.com")).toThrow("HTTPS");
   });
 
@@ -76,6 +76,58 @@ describe("managedClient", () => {
     await expect(getManagedEntitlements(config, unauthorized)).rejects.toThrow("managed session required");
     expect(unauthorized).toHaveBeenCalledTimes(1);
   }, 10_000);
+
+  it("keeps the request timeout active while parsing the response body and retries timed-out bodies", async () => {
+    vi.useFakeTimers();
+    try {
+      const config = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" };
+      const fetchImpl = vi.fn<typeof fetch>()
+        .mockImplementationOnce((_input, init) => Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: () => new Promise((_resolve, reject) => {
+            const signal = init?.signal;
+            if (!signal) throw new Error("expected an abort signal");
+            signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+          }),
+        } as Response))
+        .mockResolvedValueOnce(response({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }));
+
+      const request = getManagedEntitlements(config, fetchImpl);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(request).resolves.toMatchObject({ canProcess: true });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries response body stream failures and clears the failed attempt timeout before backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      const config = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" };
+      const firstResponse = {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: vi.fn().mockRejectedValue(new TypeError("response stream failed")),
+      } as unknown as Response;
+      const fetchImpl = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(firstResponse)
+        .mockResolvedValueOnce(response({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }));
+
+      const request = getManagedEntitlements(config, fetchImpl);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(request).resolves.toMatchObject({ canProcess: true });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("does not send hosted credentials when the origin permission is denied", async () => {
     const request = vi.fn().mockResolvedValue(false);

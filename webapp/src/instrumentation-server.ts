@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { redactSentryEvent } from "./lib/observability";
 
 if (process.env.SENTRY_DSN?.trim()) {
   Sentry.init({
@@ -10,6 +11,8 @@ if (process.env.SENTRY_DSN?.trim()) {
     ...(process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ? { release: process.env.RAILWAY_GIT_COMMIT_SHA.trim() } : {}),
     sampleRate: Number(process.env.SENTRY_SAMPLE_RATE) > 0 ? Math.min(Number(process.env.SENTRY_SAMPLE_RATE), 1) : 1,
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE) >= 0 ? Math.min(Number(process.env.SENTRY_TRACES_SAMPLE_RATE), 1) : 0,
+    beforeSend: redactSentryEvent,
+    beforeBreadcrumb: () => null,
     // Sessions replay is intentionally absent: meeting notes and transcripts
     // render in the DOM and must never be recorded.
   });

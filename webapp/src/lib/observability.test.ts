@@ -18,7 +18,7 @@ vi.mock("@sentry/nextjs", () => ({
   setTag: sentry.setTag,
 }));
 
-import { captureServerError, captureWarning, sentryEnabled, sentryRelease, setCaptureContext } from "./observability";
+import { captureServerError, captureWarning, redactSentryEvent, sentryEnabled, sentryRelease, setCaptureContext } from "./observability";
 
 const prior = {
   dsn: process.env.SENTRY_DSN,
@@ -83,5 +83,22 @@ describe("server observability", () => {
     expect(sentryRelease()).toBe("abc123");
     process.env.RAILWAY_GIT_COMMIT_SHA = "  ";
     expect(sentryRelease()).toBeUndefined();
+  });
+
+  it("redacts free-form Sentry payloads while retaining safe exception locations", () => {
+    const clean = redactSentryEvent({
+      message: "provider returned private transcript and api-key=secret",
+      user: { id: "private-user", email: "person@example.test" },
+      request: { url: "https://example.test/?token=secret", data: "private request body", headers: { Authorization: "Bearer secret" } },
+      extra: { transcript: "private transcript", apiKey: "secret" },
+      contexts: { user: { email: "person@example.test" } },
+      breadcrumbs: [{ message: "private breadcrumb" }],
+      tags: { clientSurface: "managed_upload", workspaceId: "private-workspace", errorClass: "TypeError" },
+      exception: { values: [{ type: "TypeError", value: "private provider payload", stacktrace: { frames: [{ filename: "app.js", function: "run", lineno: 42, vars: { token: "secret" }, context_line: "private text" }] } }] },
+    });
+    expect(JSON.stringify(clean)).not.toMatch(/private|secret|person@example/);
+    expect(clean.tags).toEqual({ clientSurface: "managed_upload", errorClass: "TypeError" });
+    expect(clean.exception?.values?.[0]).toMatchObject({ type: "TypeError", value: "[redacted error details]" });
+    expect(clean.exception?.values?.[0].stacktrace?.frames?.[0]).toMatchObject({ filename: "app.js", function: "run", lineno: 42 });
   });
 });

@@ -17,6 +17,9 @@ import {
   enqueueManagedJob,
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_CHUNKS,
+  MAX_PENDING_MANAGED_UPLOADS,
+  MAX_PENDING_MANAGED_UPLOAD_BYTES,
+  MAX_RETAINED_MANAGED_AUDIO_BYTES,
 } from "./managedJobs";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
 import { chunkObjectKey, getObject, putObject } from "./objectStorage";
@@ -128,6 +131,117 @@ describe("managed upload contracts", () => {
 
     expect(await getUpload(OTHER_WORKSPACE_ID, upload.id)).toBeNull();
     await expect(completeManagedUpload(OTHER_WORKSPACE_ID, upload.id)).rejects.toThrow(ManagedValidationError);
+  });
+
+  it("reserves bounded workspace-wide pending upload count and bytes", async () => {
+    const manifests = await Promise.all(Array.from({ length: MAX_PENDING_MANAGED_UPLOADS }, async (_, index) => {
+      const meetingId = await createMeeting(WORKSPACE_ID);
+      return createManagedUpload(WORKSPACE_ID, {
+        meetingId,
+        totalChunks: 1,
+        totalBytes: 1,
+        idempotencyKey: `pending-count-${index}-${meetingId}`,
+      });
+    }));
+    expect(manifests).toHaveLength(MAX_PENDING_MANAGED_UPLOADS);
+    const extraMeeting = await createMeeting(WORKSPACE_ID);
+    await expect(createManagedUpload(WORKSPACE_ID, {
+      meetingId: extraMeeting,
+      totalChunks: 1,
+      totalBytes: 1,
+      idempotencyKey: `pending-count-extra-${extraMeeting}`,
+    })).rejects.toThrow("too many pending uploads");
+
+    // A completed upload no longer consumes pending capacity.
+    await prisma.uploadChunk.create({ data: {
+      uploadId: manifests[0].id, chunkIndex: 0, channel: "mic", byteLength: 1,
+      checksum: "capacity-release", objectKey: "capacity-release",
+    } });
+    await completeManagedUpload(WORKSPACE_ID, manifests[0].id);
+    const afterCompleteMeeting = await createMeeting(WORKSPACE_ID);
+    await expect(createManagedUpload(WORKSPACE_ID, {
+      meetingId: afterCompleteMeeting,
+      totalChunks: 1,
+      totalBytes: 1,
+      idempotencyKey: `pending-count-after-complete-${afterCompleteMeeting}`,
+    })).resolves.toMatchObject({ status: "created" });
+
+    await prisma.managedUpload.deleteMany({ where: { workspaceId: WORKSPACE_ID, status: { not: "complete" } } });
+    const largeMeeting = await createMeeting(WORKSPACE_ID);
+    await createManagedUpload(WORKSPACE_ID, {
+      meetingId: largeMeeting,
+      totalChunks: 1,
+      totalBytes: 1_100_000_000,
+      idempotencyKey: `pending-bytes-large-${largeMeeting}`,
+    });
+    const overflowMeeting = await createMeeting(WORKSPACE_ID);
+    await expect(createManagedUpload(WORKSPACE_ID, {
+      meetingId: overflowMeeting,
+      totalChunks: 1,
+      totalBytes: MAX_PENDING_MANAGED_UPLOAD_BYTES - 1_100_000_000 + 1,
+      idempotencyKey: `pending-bytes-overflow-${overflowMeeting}`,
+    })).rejects.toThrow("pending upload storage limit exceeded");
+  });
+
+  it("does not oversubscribe pending workspace capacity under concurrent starts", async () => {
+    const meetings = await Promise.all(Array.from({ length: MAX_PENDING_MANAGED_UPLOADS + 1 }, () => createMeeting(WORKSPACE_ID)));
+    const results = await Promise.allSettled(meetings.map((meetingId, index) => createManagedUpload(WORKSPACE_ID, {
+      meetingId,
+      totalChunks: 1,
+      totalBytes: 1,
+      idempotencyKey: `concurrent-cap-${index}-${meetingId}`,
+    })));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(MAX_PENDING_MANAGED_UPLOADS);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(await prisma.managedUpload.count({ where: { workspaceId: WORKSPACE_ID, status: "created" } }))
+      .toBe(MAX_PENDING_MANAGED_UPLOADS);
+  });
+
+  it("counts completed recordings toward retained capacity until workspace retention deletes them", async () => {
+    const completedBytes = 1_900_000_000;
+    const oldEndedAt = new Date("2026-09-20T15:30:00.000Z");
+    const completedMeetingIds: string[] = [];
+    await prisma.workspace.update({ where: { id: WORKSPACE_ID }, data: { retentionDays: 1 } });
+
+    for (let index = 0; index < 2; index += 1) {
+      const meetingId = await createMeeting(WORKSPACE_ID);
+      completedMeetingIds.push(meetingId);
+      await prisma.meeting.update({ where: { id: meetingId }, data: { endedAt: oldEndedAt } });
+      const upload = await createManagedUpload(WORKSPACE_ID, {
+        meetingId,
+        totalChunks: 1,
+        totalBytes: completedBytes,
+        idempotencyKey: `retained-cap-${index}-${meetingId}`,
+      });
+      await prisma.uploadChunk.create({ data: {
+        uploadId: upload.id,
+        chunkIndex: 0,
+        channel: "mic",
+        byteLength: completedBytes,
+        checksum: `retained-cap-${index}`,
+        objectKey: `retained-cap/${WORKSPACE_ID}/${index}`,
+      } });
+      await completeManagedUpload(WORKSPACE_ID, upload.id);
+    }
+
+    expect(completedBytes * 2).toBeLessThan(MAX_RETAINED_MANAGED_AUDIO_BYTES);
+    expect(completedBytes * 2 + 1_300_000_001).toBeGreaterThan(MAX_RETAINED_MANAGED_AUDIO_BYTES);
+    const newMeeting = await createMeeting(WORKSPACE_ID);
+    await prisma.meeting.update({ where: { id: newMeeting }, data: { endedAt: new Date("2026-09-29T15:00:00.000Z") } });
+    const newManifest = {
+      meetingId: newMeeting,
+      totalChunks: 1,
+      totalBytes: 1_300_000_001,
+      idempotencyKey: `retained-cap-after-cleanup-${newMeeting}`,
+    };
+    await expect(createManagedUpload(WORKSPACE_ID, newManifest)).rejects.toThrow("retained audio storage limit exceeded");
+
+    // The retention cleanup removes the meeting, its completed upload rows,
+    // and their chunks, which releases both recorded and manifest-reserved bytes.
+    await expect(expireManagedMeetings(new Date("2026-09-29T15:30:00.000Z"))).resolves.toBeGreaterThanOrEqual(2);
+    expect(await prisma.meeting.count({ where: { id: { in: completedMeetingIds } } })).toBe(0);
+    expect(await prisma.managedUpload.count({ where: { meetingId: { in: completedMeetingIds } } })).toBe(0);
+    await expect(createManagedUpload(WORKSPACE_ID, newManifest)).resolves.toMatchObject({ status: "created" });
   });
 
   it("requires every declared chunk and is safe to complete twice", async () => {

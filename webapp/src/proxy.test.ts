@@ -6,7 +6,7 @@ const getSessionUser = vi.fn();
 vi.mock("./lib/sessions", () => ({ getSessionUser }));
 vi.mock("./lib/auth", () => ({ isAuthorizedBearer: vi.fn(() => false) }));
 
-const { proxy } = await import("./proxy");
+const { contentSecurityPolicy, proxy } = await import("./proxy");
 
 function request(path: string, init: { method?: string; headers?: HeadersInit; body?: BodyInit | null } = {}): NextRequest {
   return new NextRequest(`https://notes.example.test${path}`, init);
@@ -62,6 +62,25 @@ describe("managed API proxy boundaries", () => {
     const response = await proxy(request("/api/v1/jobs/next", { method: "POST", headers: { "x-worker-token": "worker-secret" } }));
     expect(response.status).toBe(200);
     expect(getSessionUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("page content security policy", () => {
+  it("forwards a unique nonce to Next.js and omits unsafe-inline from production scripts", async () => {
+    getSessionUser.mockResolvedValue({ userId: "user-1" });
+    const first = await proxy(request("/"));
+    const second = await proxy(request("/"));
+    const policy = first.headers.get("content-security-policy") ?? "";
+    const nonce = first.headers.get("x-middleware-request-x-nonce");
+    const productionPolicy = contentSecurityPolicy("test-nonce", false);
+    expect(nonce).toBeTruthy();
+    expect(policy).toContain(`'nonce-${nonce}'`);
+    expect(policy).toContain("'strict-dynamic'");
+    expect(policy).not.toMatch(/script-src[^;]*unsafe-inline/);
+    expect(productionPolicy).not.toMatch(/script-src[^;]*unsafe-inline/);
+    expect(productionPolicy).not.toContain("unsafe-eval");
+    expect(second.headers.get("x-middleware-request-x-nonce")).not.toBe(nonce);
+    expect(second.headers.get("content-security-policy")).not.toBe(policy);
   });
 });
 

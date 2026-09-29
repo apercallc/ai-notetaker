@@ -19,18 +19,70 @@ export function validateManifest(manifest) {
   add(Number.isInteger(manifest.protocol?.minimumSupported) && manifest.protocol.minimumSupported >= 1, "protocol.minimumSupported must be a positive integer");
   add(manifest.protocol?.minimumSupported <= manifest.protocol?.version, "minimumSupported cannot exceed protocol.version");
   add(Array.isArray(manifest.artifacts), "artifacts must be an array");
+  const artifacts = Array.isArray(manifest.artifacts) ? manifest.artifacts : [];
 
-  for (const [index, artifact] of (manifest.artifacts ?? []).entries()) {
-    add(["macos", "windows", "linux"].includes(artifact.platform), `artifacts[${index}].platform is invalid`);
-    add(["arm64", "x86_64", "universal", "amd64"].includes(artifact.architecture), `artifacts[${index}].architecture is invalid`);
-    add(["dmg", "pkg", "msi", "nsis", "deb", "appimage"].includes(artifact.format), `artifacts[${index}].format is invalid`);
-    add(typeof artifact.url === "string" && /^https:\/\//.test(artifact.url), `artifacts[${index}].url must be HTTPS`);
-    add(typeof artifact.sha256 === "string" && /^[a-f0-9]{64}$/.test(artifact.sha256), `artifacts[${index}].sha256 must be a lowercase SHA-256`);
-    add(["unsigned", "signed", "notarized", "signed_and_notarized"].includes(artifact.signatureStatus), `artifacts[${index}].signatureStatus is invalid`);
+  const validHttpsUrl = (value) => {
+    if (typeof value !== "string") return false;
+    try {
+      return new URL(value).protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
+
+  const storeUrl = manifest.extension?.chromeWebStoreUrl;
+  if (storeUrl !== null && storeUrl !== undefined) {
+    let validStoreUrl = false;
+    try {
+      const parsed = new URL(storeUrl);
+      validStoreUrl = parsed.protocol === "https:" &&
+        ["chromewebstore.google.com", "chrome.google.com"].includes(parsed.hostname) &&
+        parsed.pathname.includes("/detail/");
+    } catch {
+      validStoreUrl = false;
+    }
+    add(validStoreUrl, "extension.chromeWebStoreUrl must be a Chrome Web Store detail URL");
+  }
+
+  const fallbackUrl = manifest.extension?.fallbackZipUrl;
+  if (fallbackUrl !== null && fallbackUrl !== undefined) {
+    let validFallbackUrl = false;
+    try {
+      const parsed = new URL(fallbackUrl);
+      validFallbackUrl = parsed.protocol === "https:" &&
+        parsed.hostname === "github.com" &&
+        parsed.pathname.includes("/releases/download/") &&
+        /ai-notetaker-extension-.+\.zip$/u.test(decodeURIComponent(parsed.pathname));
+    } catch {
+      validFallbackUrl = false;
+    }
+    add(validFallbackUrl, "extension.fallbackZipUrl must be an HTTPS GitHub release extension ZIP URL");
+  }
+
+  for (const [index, artifact] of artifacts.entries()) {
+    const entry = artifact && typeof artifact === "object" ? artifact : {};
+    add(["macos", "windows", "linux"].includes(entry.platform), `artifacts[${index}].platform is invalid`);
+    add(["arm64", "x86_64", "universal", "amd64"].includes(entry.architecture), `artifacts[${index}].architecture is invalid`);
+    add(["dmg", "pkg", "msi", "nsis", "deb", "appimage"].includes(entry.format), `artifacts[${index}].format is invalid`);
+    add(validHttpsUrl(entry.url), `artifacts[${index}].url must be HTTPS`);
+    add(typeof entry.sha256 === "string" && /^[a-f0-9]{64}$/.test(entry.sha256), `artifacts[${index}].sha256 must be a lowercase SHA-256`);
+    add(["unsigned", "signed", "notarized", "signed_and_notarized"].includes(entry.signatureStatus), `artifacts[${index}].signatureStatus is invalid`);
   }
 
   if (manifest.status === "published") {
-    add(manifest.artifacts.length > 0, "published manifests must contain artifacts");
+    add(artifacts.length > 0, "published manifests must contain artifacts");
+    add(Boolean(storeUrl || fallbackUrl), "published manifests must contain a Chrome Web Store URL or extension fallback ZIP URL");
+    const expected = [
+      ["macos", "dmg"],
+      ["windows", "nsis"],
+      ["linux", "deb"],
+    ];
+    for (const [platform, format] of expected) {
+      add(
+        artifacts.some((artifact) => artifact?.platform === platform && artifact?.format === format),
+        `published manifests must contain a ${platform} ${format} artifact`,
+      );
+    }
   }
 
   add(manifest.docker?.scope === "history-webapp-only", "docker scope must remain history-webapp-only");

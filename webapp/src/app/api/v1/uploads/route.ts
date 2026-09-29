@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
+import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
-import { createManagedUpload, ManagedValidationError, readManagedJson } from "@/lib/managedJobs";
+import { createManagedUpload, ManagedUploadQuotaError, ManagedValidationError, readManagedJson } from "@/lib/managedJobs";
 
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
@@ -29,6 +29,7 @@ export async function POST(request: Request) {
       { status: 201, headers: { "x-request-id": requestId } },
     );
   } catch (error) {
+    if (error instanceof ManagedUploadQuotaError) return jsonError(error.message, 429, requestId);
     return apiErrorResponse(error, { requestId });
   }
 }

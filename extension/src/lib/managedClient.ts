@@ -77,7 +77,7 @@ function serviceUrl(baseUrl: string): string {
 /** Open the hosted service's account-creation page without accepting an
  * arbitrary non-HTTPS destination from onboarding input. */
 export function managedSignupUrl(baseUrl: string): string {
-  return `${serviceUrl(baseUrl)}/login?mode=signup`;
+  return `${serviceUrl(baseUrl)}/login?tab=signup`;
 }
 
 /** Builds the billing page link only after applying the same HTTPS/origin
@@ -116,7 +116,10 @@ async function requestJson(
   for (let attempt = 0; attempt < REQUEST_MAX_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    let response: Response;
+    let response: Response | undefined;
+    let body: Record<string, unknown> = {};
+    let requestError: unknown;
+    let requestFailed = false;
     try {
       response = await fetchImpl(`${serviceUrl(config.baseUrl)}${path}`, {
         ...init,
@@ -128,14 +131,33 @@ async function requestJson(
         },
         signal: controller.signal,
       });
+      try {
+        const parsed: unknown = await response.json();
+        body = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? parsed as Record<string, unknown>
+          : {};
+      } catch (error) {
+        // Preserve the existing empty-body behavior for malformed JSON, but
+        // treat body-stream failures and aborts as transport failures so the
+        // whole request can be retried. In particular, do not return success
+        // after the timeout aborts a response whose headers already arrived.
+        if (controller.signal.aborted || !(error instanceof SyntaxError)) throw error;
+        body = {};
+      }
     } catch (error) {
+      requestFailed = true;
+      requestError = error;
+    } finally {
+      // Keep the request deadline active until the body is fully consumed.
+      // This also covers fetch errors, body parse errors, and normal returns.
       clearTimeout(timer);
-      if (attempt === REQUEST_MAX_ATTEMPTS - 1) throw error;
+    }
+    if (requestFailed) {
+      if (attempt === REQUEST_MAX_ATTEMPTS - 1) throw requestError;
       await waitForRetry(retryDelayMs(attempt));
       continue;
     }
-    clearTimeout(timer);
-    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response) throw new Error("Managed service request failed");
     if (response.ok) return body;
     if (!retryableStatus(response.status) || attempt === REQUEST_MAX_ATTEMPTS - 1) {
       throw new Error(typeof body.error === "string" ? body.error : `Managed service request failed (${response.status})`);

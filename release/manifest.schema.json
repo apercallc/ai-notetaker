@@ -4,6 +4,28 @@
   "title": "AI Notetaker release manifest",
   "type": "object",
   "required": ["schemaVersion", "product", "version", "status", "extension", "protocol", "artifacts", "docker"],
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "published" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "extension": {
+            "anyOf": [
+              { "required": ["chromeWebStoreUrl"], "properties": { "chromeWebStoreUrl": { "type": "string", "format": "uri", "pattern": "^https://(chromewebstore\\.google\\.com|chrome\\.google\\.com)/.*?/detail/" } } },
+              { "required": ["fallbackZipUrl"], "properties": { "fallbackZipUrl": { "type": "string", "format": "uri", "pattern": "^https://github\\.com/.*/releases/download/.*/ai-notetaker-extension-.+\\.zip$" } } }
+            ]
+          },
+          "artifacts": {
+            "allOf": [
+              { "contains": { "properties": { "platform": { "const": "macos" }, "format": { "const": "dmg" } }, "required": ["platform", "format"] } },
+              { "contains": { "properties": { "platform": { "const": "windows" }, "format": { "const": "nsis" } }, "required": ["platform", "format"] } },
+              { "contains": { "properties": { "platform": { "const": "linux" }, "format": { "const": "deb" } }, "required": ["platform", "format"] } }
+            ]
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schemaVersion": { "const": 1 },
     "product": { "const": "ai-notetaker" },

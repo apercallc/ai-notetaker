@@ -1,6 +1,7 @@
 "use client";
 
 import * as Sentry from "@sentry/nextjs";
+import { redactSentryEvent } from "./lib/observability";
 
 // Client SDK init. Gated on the build-time DSN: self-hosted builds set no
 // NEXT_PUBLIC_SENTRY_DSN, so this file compiles to a no-op and the browser
@@ -10,5 +11,7 @@ if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
     dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
     environment: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT || "managed",
     sampleRate: 1,
+    beforeSend: redactSentryEvent,
+    beforeBreadcrumb: () => null,
   });
 }

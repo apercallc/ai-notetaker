@@ -115,6 +115,35 @@ describe("managed upload routes", () => {
     expect(await response.json()).toMatchObject({ accountId: USER_ID, workspaceId: WORKSPACE_ID, plan: "local", role: "owner" });
   });
 
+  it("returns a retryable quota response when the workspace pending upload budget is full", async () => {
+    const sessionId = await createPrincipal(USER_ID, "upload-quota@example.com", WORKSPACE_ID);
+    for (let index = 0; index < 5; index += 1) {
+      const meetingId = randomUUID();
+      await prisma.meeting.create({ data: {
+        id: meetingId, userId: USER_ID, workspaceId: WORKSPACE_ID,
+        title: `Pending upload ${index}`, startedAt: new Date("2026-09-24T15:00:00.000Z"),
+        endedAt: new Date("2026-09-24T15:30:00.000Z"), summary: "",
+      } });
+      const response = await createUpload(new Request("http://localhost/api/v1/uploads", {
+        method: "POST", headers: auth(sessionId),
+        body: JSON.stringify({ meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `pending-${index}-${meetingId}` }),
+      }));
+      expect(response.status).toBe(201);
+    }
+    const meetingId = randomUUID();
+    await prisma.meeting.create({ data: {
+      id: meetingId, userId: USER_ID, workspaceId: WORKSPACE_ID,
+      title: "Over quota", startedAt: new Date("2026-09-24T15:00:00.000Z"),
+      endedAt: new Date("2026-09-24T15:30:00.000Z"), summary: "",
+    } });
+    const rejected = await createUpload(new Request("http://localhost/api/v1/uploads", {
+      method: "POST", headers: auth(sessionId),
+      body: JSON.stringify({ meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `over-quota-${meetingId}` }),
+    }));
+    expect(rejected.status).toBe(429);
+    expect(await rejected.json()).toMatchObject({ error: "workspace has too many pending uploads; finish or retry cleanup before starting another" });
+  });
+
   it("applies the shared database login throttle to extension/API sign-in", async () => {
     const email = "throttled-api-login@example.com";
     await prisma.loginThrottle.create({
@@ -355,6 +384,33 @@ describe("managed upload routes", () => {
       { params: Promise.resolve({ jobId: jobBody.jobId }) },
     );
     expect(visibleJob.status).toBe(200);
+
+    const boundedMeetingId = randomUUID();
+    await prisma.meeting.create({ data: {
+      id: boundedMeetingId, userId: USER_ID, workspaceId: WORKSPACE_ID,
+      title: "Bounded upload meeting", startedAt: new Date("2026-09-24T15:00:00.000Z"),
+      endedAt: new Date("2026-09-24T15:30:00.000Z"), summary: "",
+    } });
+    const boundedManifest = { meetingId: boundedMeetingId, totalChunks: 2, totalBytes: 4, idempotencyKey: `bounded-${boundedMeetingId}` };
+    const boundedCreate = await createUpload(new Request("http://localhost/api/v1/uploads", {
+      method: "POST", headers: auth(sessionId), body: JSON.stringify(boundedManifest),
+    }));
+    const boundedUploadId = ((await boundedCreate.json()) as { uploadId: string }).uploadId;
+    const firstPart = new Uint8Array([1, 2, 3, 4]);
+    const extraPart = new Uint8Array([5]);
+    const sendChunk = (bytes: Uint8Array, index: number) => putChunk(new Request("http://localhost/api/v1/uploads/chunk", {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${sessionId}`,
+        "x-audio-channel": "mic",
+        "x-chunk-sha256": createHash("sha256").update(bytes).digest("hex"),
+      },
+      body: Buffer.from(bytes),
+    }), chunkContextFor(boundedUploadId, index));
+    expect((await sendChunk(firstPart, 0)).status).toBe(201);
+    const overflow = await sendChunk(extraPart, 1);
+    expect(overflow.status).toBe(400);
+    expect(await prisma.uploadChunk.count({ where: { uploadId: boundedUploadId } })).toBe(1);
   });
 
   it("rejects writes to an expired upload and permits a same-key restart", async () => {
