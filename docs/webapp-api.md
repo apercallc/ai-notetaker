@@ -38,14 +38,15 @@ readiness diagnostics:
   "ok": true,
   "mode": "managed",
   "managedReady": true,
-  "objectStorage": "s3"
+  "objectStorage": "r2"
 }
 ```
 
-`managedReady: false` means one or more required worker, provider, Stripe, or
-application-URL settings are missing. It never includes secret values. The
-filesystem object backend is valid for local or single-node deployments;
-multi-instance managed production should report `objectStorage: "s3"`.
+`managedReady: false` means one or more required worker, provider, Stripe,
+application URL, or Cloudflare R2 settings are missing. It never includes
+secret values. The filesystem object backend is valid for local or single-node
+self-hosted deployments; managed production should report
+`objectStorage: "r2"`.
 
 Managed `/api/v1/*` requests from the extension are CORS-allowed only for the
 fixed Chrome extension origin (`chrome-extension://jidooookkdbbbhkkdmcajnnnhhphodok`)

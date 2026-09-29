@@ -5,36 +5,50 @@ import path from "node:path";
 
 const MAX_OBJECT_KEY_LENGTH = 300;
 
-interface S3Backend {
+interface ObjectBackend {
   client: S3Client;
   bucket: string;
   prefix: string;
+  provider: "r2" | "s3";
 }
 
-let cachedS3: { fingerprint: string; backend: S3Backend } | null = null;
+let cachedObjectBackend: { fingerprint: string; backend: ObjectBackend } | null = null;
 
 function storageRoot(): string {
   return process.env.OBJECT_STORAGE_DIR ?? path.join(process.cwd(), ".data", "objects");
 }
 
 /**
- * Hosted deployments should use a private S3-compatible bucket so uploads do
- * not depend on one web process's ephemeral filesystem. Leaving S3_BUCKET
- * unset intentionally keeps the simple persistent-volume backend for local
- * Docker/self-hosted installs.
+ * Managed audio lives in a private Cloudflare R2 bucket. R2 speaks the S3 API,
+ * so the existing AWS SDK keeps the worker and web process on one storage
+ * path. Legacy S3 variables remain supported for self-hosted installations.
+ * With neither configured, local installs keep their filesystem backend.
  */
-function s3Backend(): S3Backend | null {
-  const bucket = process.env.S3_BUCKET?.trim();
+function objectBackend(): ObjectBackend | null {
+  const r2Bucket = process.env.R2_BUCKET?.trim();
+  const legacyBucket = process.env.S3_BUCKET?.trim();
+  const provider: ObjectBackend["provider"] = r2Bucket ? "r2" : "s3";
+  const bucket = r2Bucket || legacyBucket;
   if (!bucket) return null;
 
-  const region = process.env.S3_REGION?.trim() || process.env.AWS_REGION?.trim() || "auto";
-  const endpoint = process.env.S3_ENDPOINT?.trim() || "";
-  const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim();
-  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
-  const prefix = (process.env.S3_PREFIX?.trim() || "").replace(/^\/+|\/+$/g, "");
-  const fingerprint = JSON.stringify({ bucket, region, endpoint, accessKeyId, secretAccessKey, forcePathStyle, prefix });
-  if (cachedS3?.fingerprint === fingerprint) return cachedS3.backend;
+  const region = provider === "r2"
+    ? "auto"
+    : process.env.S3_REGION?.trim() || process.env.AWS_REGION?.trim() || "auto";
+  const endpoint = provider === "r2"
+    ? process.env.R2_ENDPOINT?.trim() || (process.env.R2_ACCOUNT_ID?.trim()
+      ? `https://${process.env.R2_ACCOUNT_ID.trim()}.r2.cloudflarestorage.com`
+      : "")
+    : process.env.S3_ENDPOINT?.trim() || "";
+  const accessKeyId = (provider === "r2" ? process.env.R2_ACCESS_KEY_ID : process.env.S3_ACCESS_KEY_ID)?.trim();
+  const secretAccessKey = (provider === "r2" ? process.env.R2_SECRET_ACCESS_KEY : process.env.S3_SECRET_ACCESS_KEY)?.trim();
+  // R2's documented S3 endpoint uses the bucket as the virtual-host prefix.
+  const forcePathStyle = provider === "r2" ? false : process.env.S3_FORCE_PATH_STYLE === "true";
+  const prefix = ((provider === "r2" ? process.env.R2_PREFIX : process.env.S3_PREFIX)?.trim() || "").replace(/^\/+|\/+$/g, "");
+  if (provider === "r2" && (!endpoint || !accessKeyId || !secretAccessKey)) {
+    throw new Error("Cloudflare R2 requires an account endpoint and server-side API credentials");
+  }
+  const fingerprint = JSON.stringify({ provider, bucket, region, endpoint, accessKeyId, secretAccessKey, forcePathStyle, prefix });
+  if (cachedObjectBackend?.fingerprint === fingerprint) return cachedObjectBackend.backend;
 
   const client = new S3Client({
     region,
@@ -42,8 +56,8 @@ function s3Backend(): S3Backend | null {
     forcePathStyle,
     ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
   });
-  const backend = { client, bucket, prefix };
-  cachedS3 = { fingerprint, backend };
+  const backend: ObjectBackend = { client, bucket, prefix, provider };
+  cachedObjectBackend = { fingerprint, backend };
   return backend;
 }
 
@@ -54,7 +68,7 @@ function safeKey(key: string): string {
   return key.replace(/[^a-zA-Z0-9/_-]/g, "_");
 }
 
-function backendKey(backend: S3Backend, key: string): string {
+function backendKey(backend: ObjectBackend, key: string): string {
   return backend.prefix ? `${backend.prefix}/${key}` : key;
 }
 
@@ -65,7 +79,7 @@ export function chunkObjectKey(workspaceId: string, uploadId: string, index: num
 
 export async function putObject(key: string, bytes: Uint8Array): Promise<void> {
   const normalized = safeKey(key);
-  const backend = s3Backend();
+  const backend = objectBackend();
   if (backend) {
     await backend.client.send(new PutObjectCommand({
       Bucket: backend.bucket,
@@ -83,7 +97,7 @@ export async function putObject(key: string, bytes: Uint8Array): Promise<void> {
 
 export async function deleteObject(key: string): Promise<void> {
   const normalized = safeKey(key);
-  const backend = s3Backend();
+  const backend = objectBackend();
   if (backend) {
     await backend.client.send(new DeleteObjectCommand({
       Bucket: backend.bucket,
@@ -96,7 +110,7 @@ export async function deleteObject(key: string): Promise<void> {
 
 export async function getObject(key: string): Promise<Uint8Array> {
   const normalized = safeKey(key);
-  const backend = s3Backend();
+  const backend = objectBackend();
   if (backend) {
     const response = await backend.client.send(new GetObjectCommand({
       Bucket: backend.bucket,

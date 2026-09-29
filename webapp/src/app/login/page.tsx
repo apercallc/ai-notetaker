@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import Image from "next/image";
 import { cookies, headers } from "next/headers";
 import { prisma } from "@/lib/db";
 import { safeNextPath } from "@/lib/navigation";
@@ -162,7 +161,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     return (
       <div className="container">
         <form className="login-form" action={bootstrap}>
-          <h1 className="brand-heading"><Image src="/ai-notetaker-mark.svg" width={48} height={48} alt="" aria-hidden="true" />AI Notetaker</h1>
+          <h1 className="brand-heading"><span className="brand-mark" aria-hidden="true" />AI Notetaker</h1>
           <p className="muted-copy">
             Create the first account for this instance. You&apos;ll be its workspace owner.
           </p>
@@ -191,7 +190,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <div className="container">
       <div className="login-form">
-        <h1 className="brand-heading"><Image src="/ai-notetaker-mark.svg" width={48} height={48} alt="" aria-hidden="true" />AI Notetaker</h1>
+        <h1 className="brand-heading"><span className="brand-mark" aria-hidden="true" />AI Notetaker</h1>
 
         {showTabs && managedHosting && (
           <nav className="filter-links" aria-label="Account">

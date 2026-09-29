@@ -9,10 +9,11 @@ before uploading it.
 ## Required services
 
 - Next.js webapp with a persistent Postgres database.
-- A private S3-compatible object bucket for managed audio chunks. Set
-  `S3_BUCKET`, `S3_REGION`, and server-side credentials; set `S3_ENDPOINT` for
-  R2, MinIO, or another compatible provider and `S3_FORCE_PATH_STYLE=true` when
-  that provider requires path-style requests.
+- A private Cloudflare R2 bucket for all managed audio chunks. Set
+  `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and
+  `R2_SECRET_ACCESS_KEY` on the webapp service. The credentials must have
+  Object Read & Write access to the private bucket. `R2_ENDPOINT` is optional
+  and only needed for a jurisdiction-specific endpoint.
 - A durable managed worker. The source and registry Compose files ship a
   first-party worker under the `managed` profile; start it with
   `docker compose --profile managed up -d --build`. It polls
@@ -30,12 +31,16 @@ before uploading it.
   The webapp service runs migrations before serving, and the worker starts
   polling after the webapp health check is available.
 - The released registry Compose file passes the same worker, provider, billing,
-  and S3 variables as the source Compose file; do not assume the image alone
+  and R2 variables as the source Compose file; do not assume the image alone
   carries deployment secrets.
 - Deepgram and Anthropic server-side keys, plus Stripe secret/webhook/price
   configuration when paid plans are enabled.
 
-The filesystem object backend remains available when `S3_BUCKET` is unset. It
+The filesystem object backend remains available for local or self-hosted
+deployments when no bucket is configured. Existing self-hosted `S3_*` settings
+remain supported. Managed production requires Cloudflare R2 and does not fall
+back to local disk. The storage layer applies equally to audio chunks uploaded
+from meetings and recordings streamed back to workspace members. It
 is suitable for a single-node self-hosted or Docker deployment with the
 `ai-notetaker-objects` volume; it is not a substitute for a shared bucket in a
 multi-instance hosted deployment.
@@ -61,7 +66,8 @@ web replicas and survives a deployment.
 
 ## First deployment checklist
 
-1. Provision Postgres and the private object bucket.
+1. Provision Postgres and a private Cloudflare R2 bucket, then create an R2 API
+   token scoped to that bucket with Object Read & Write permissions.
 2. Configure the environment variables and deploy the webapp plus the managed
    worker profile. With Compose, run
    `docker compose --profile managed up -d`; the entrypoint applies migrations

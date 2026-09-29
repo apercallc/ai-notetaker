@@ -54,9 +54,10 @@ Implementation plan:
       `Retry-After` handling, and fail-fast permanent provider errors.
 - [x] Add a token-protected `/api/v1/jobs/next` worker-polling endpoint with
       database-side single-claim protection for horizontally scaled hosts.
-- [x] Add an S3-compatible private object-storage backend for multi-instance
-      hosting while retaining the persistent-volume fallback for self-hosted
-      Docker deployments; configuration and adapter tests are documented.
+- [x] Store all managed uploaded audio through the private Cloudflare R2
+      backend using the R2 S3 API, while retaining S3 compatibility for
+      existing self-hosted installs and the filesystem fallback for local
+      Docker; configuration and adapter tests are documented.
 - [x] Implement hosted billing, Stripe retry idempotency, and entitlement enforcement.
 - [x] Enforce managed upload checksums and streamed body limits; release failed
       processing reservations so retries do not burn successful-operation quota.
@@ -278,14 +279,19 @@ remains native; Docker is for the optional history webapp only.
       CNAME and Railway ownership TXT records propagated, TLS became valid,
       and `https://ai-notetaker.apercallc.com/api/health` returned `ok:true`.
 - [ ] Finish managed-hosting configuration before enabling customer signups:
-      Railway now has a `managed-worker` service and private audio bucket, with
-      the worker token and S3 references configured; its production deployment
-      succeeded. Completed managed upload acceptance is not yet verified.
+      Railway now has a `managed-worker` service and a private legacy audio
+      bucket; the worker token and bucket settings are configured and the
+      production deployment succeeded. Cloudflare R2 credentials are not yet
+      configured, so managed readiness must remain closed until the R2 bucket
+      is provisioned and the audio storage setting is switched. Completed
+      managed upload acceptance is not yet verified.
       Managed signup remains closed
       until `MANAGED_DEEPGRAM_API_KEY`, `MANAGED_ANTHROPIC_API_KEY`,
       `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, both Stripe price IDs, and
-      a valid `APP_URL` are present. Then verify `managedReady:true` and a
-      completed upload.
+      a valid `APP_URL` are present alongside `R2_ACCOUNT_ID`, `R2_BUCKET`,
+      `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. Then verify
+      `managedReady:true` and a completed upload without losing any existing
+      audio objects.
 - [ ] Run cross-platform helper CI on the exact release candidate. The latest
       recorded GitHub helper matrix passed for Linux, macOS, and Windows; repeat
       it against the tagged candidate before publishing native artifacts.
@@ -302,7 +308,7 @@ remains native; Docker is for the optional history webapp only.
       Postgres, with persistent storage, migrations, health checks, and
       authenticated token setup.
 - [x] Keep the release registry Compose file aligned with managed worker,
-      provider, billing, and S3 storage configuration instead of publishing an
+      provider, billing, and Cloudflare R2 configuration instead of publishing an
       image that silently runs in an incomplete hosted mode.
 - [x] Add helper/extension protocol compatibility and a user-facing install
       health state for helper missing, incompatible, driver missing, routing

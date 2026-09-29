@@ -7,7 +7,7 @@
 export interface ManagedConfigurationStatus {
   enabled: boolean;
   ready: boolean;
-  objectStorage: "s3" | "filesystem";
+  objectStorage: "r2" | "s3" | "filesystem";
   missing: string[];
 }
 
@@ -28,17 +28,25 @@ function validAppUrl(value: string | undefined): boolean {
   }
 }
 
+function objectStorage(env: DeploymentEnv): "r2" | "s3" | "filesystem" {
+  if (hasValue(env, "R2_BUCKET")) return "r2";
+  return hasValue(env, "S3_BUCKET") ? "s3" : "filesystem";
+}
+
 export function managedConfigurationStatus(env: DeploymentEnv = process.env): ManagedConfigurationStatus {
   const enabled = env.MANAGED_HOSTING === "true";
   if (!enabled) {
-    return { enabled: false, ready: true, objectStorage: hasValue(env, "S3_BUCKET") ? "s3" : "filesystem", missing: [] };
+    return { enabled: false, ready: true, objectStorage: objectStorage(env), missing: [] };
   }
 
   const missing = [
     "MANAGED_WORKER_TOKEN",
     // Uploaded audio must survive a redeploy and be readable by the separate
     // worker service, so managed mode cannot fall back to a local directory.
-    "S3_BUCKET",
+    "R2_BUCKET",
+    ...(hasValue(env, "R2_ENDPOINT") || hasValue(env, "R2_ACCOUNT_ID") ? [] : ["R2_ACCOUNT_ID"]),
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
     "MANAGED_DEEPGRAM_API_KEY",
     "MANAGED_ANTHROPIC_API_KEY",
     "STRIPE_SECRET_KEY",
@@ -51,7 +59,7 @@ export function managedConfigurationStatus(env: DeploymentEnv = process.env): Ma
   return {
     enabled: true,
     ready: missing.length === 0,
-    objectStorage: hasValue(env, "S3_BUCKET") ? "s3" : "filesystem",
+    objectStorage: objectStorage(env),
     missing,
   };
 }

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const sent: Array<{ kind: string; input: Record<string, unknown> }> = [];
+const clients: Array<Record<string, unknown>> = [];
 
 vi.mock("@aws-sdk/client-s3", () => ({
   S3Client: class {
-    constructor(public readonly config: Record<string, unknown>) {}
+    constructor(public readonly config: Record<string, unknown>) { clients.push(config); }
 
     async send(command: { kind: string; input: Record<string, unknown> }) {
       sent.push(command);
@@ -40,6 +41,15 @@ const originalS3 = {
   prefix: process.env.S3_PREFIX,
 };
 
+const originalR2 = {
+  accountId: process.env.R2_ACCOUNT_ID,
+  bucket: process.env.R2_BUCKET,
+  endpoint: process.env.R2_ENDPOINT,
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  prefix: process.env.R2_PREFIX,
+};
+
 function restoreS3Env(): void {
   const values: Record<string, string | undefined> = {
     S3_BUCKET: originalS3.bucket,
@@ -56,13 +66,30 @@ function restoreS3Env(): void {
   }
 }
 
+function restoreR2Env(): void {
+  const values: Record<string, string | undefined> = {
+    R2_ACCOUNT_ID: originalR2.accountId,
+    R2_BUCKET: originalR2.bucket,
+    R2_ENDPOINT: originalR2.endpoint,
+    R2_ACCESS_KEY_ID: originalR2.accessKeyId,
+    R2_SECRET_ACCESS_KEY: originalR2.secretAccessKey,
+    R2_PREFIX: originalR2.prefix,
+  };
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
 describe("object storage backends", () => {
   afterEach(() => {
     sent.length = 0;
+    clients.length = 0;
     restoreS3Env();
+    restoreR2Env();
   });
 
-  it("uses the configured private S3-compatible bucket for writes, reads, and deletes", async () => {
+  it("uses the configured private legacy S3 bucket for writes, reads, and deletes", async () => {
     process.env.S3_BUCKET = "private-meetings";
     process.env.S3_REGION = "us-east-1";
     process.env.S3_ENDPOINT = "https://objects.example.test";
@@ -79,6 +106,38 @@ describe("object storage backends", () => {
     expect(sent[0]?.input).toMatchObject({ Bucket: "private-meetings", Key: "tenant-data/uploads/workspace/upload/0_chunk", ContentLength: 2 });
     expect(sent[1]?.input).toMatchObject({ Bucket: "private-meetings", Key: "tenant-data/uploads/workspace/upload/0_chunk" });
     expect(sent[2]?.input).toMatchObject({ Bucket: "private-meetings", Key: "tenant-data/uploads/workspace/upload/0_chunk" });
+  });
+
+  it("stores managed audio in the configured private Cloudflare R2 bucket", async () => {
+    process.env.R2_ACCOUNT_ID = "account-id";
+    process.env.R2_BUCKET = "private-audio";
+    process.env.R2_ACCESS_KEY_ID = "r2-access";
+    process.env.R2_SECRET_ACCESS_KEY = "r2-secret";
+    process.env.R2_PREFIX = "tenant-audio";
+    delete process.env.R2_ENDPOINT;
+
+    await putObject("uploads/workspace/upload/0.chunk", new Uint8Array([1, 2]));
+    await expect(getObject("uploads/workspace/upload/0.chunk")).resolves.toEqual(new Uint8Array([7, 8, 9]));
+    await deleteObject("uploads/workspace/upload/0.chunk");
+
+    expect(clients[0]).toMatchObject({
+      region: "auto",
+      endpoint: "https://account-id.r2.cloudflarestorage.com",
+      forcePathStyle: false,
+      credentials: { accessKeyId: "r2-access", secretAccessKey: "r2-secret" },
+    });
+    expect(sent[0]?.input).toMatchObject({ Bucket: "private-audio", Key: "tenant-audio/uploads/workspace/upload/0_chunk" });
+    expect(sent.map(({ kind }) => kind)).toEqual(["put", "get", "delete"]);
+  });
+
+  it("fails closed when an R2 bucket is set without private API credentials", async () => {
+    process.env.R2_BUCKET = "private-audio";
+    delete process.env.R2_ACCOUNT_ID;
+    delete process.env.R2_ENDPOINT;
+    delete process.env.R2_ACCESS_KEY_ID;
+    delete process.env.R2_SECRET_ACCESS_KEY;
+
+    await expect(putObject("uploads/workspace/upload/0.chunk", new Uint8Array([1]))).rejects.toThrow("Cloudflare R2 requires");
   });
 
   it("rejects traversal-like object keys before touching storage", async () => {

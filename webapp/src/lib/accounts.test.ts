@@ -22,7 +22,10 @@ const context = { ip: "198.51.100.222", userAgent: "accounts-test", protocol: "h
 function managedSignupEnvironment(): void {
   process.env.MANAGED_HOSTING = "true";
   process.env.MANAGED_WORKER_TOKEN = "worker-token";
-  process.env.S3_BUCKET = "test-audio";
+  process.env.R2_ACCOUNT_ID = "test-account";
+  process.env.R2_BUCKET = "test-audio";
+  process.env.R2_ACCESS_KEY_ID = "test-access";
+  process.env.R2_SECRET_ACCESS_KEY = "test-secret";
   process.env.MANAGED_DEEPGRAM_API_KEY = "test-deepgram";
   process.env.MANAGED_ANTHROPIC_API_KEY = "test-anthropic";
   process.env.STRIPE_SECRET_KEY = "test-stripe";

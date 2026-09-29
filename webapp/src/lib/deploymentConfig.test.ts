@@ -13,6 +13,10 @@ import {
 const completeManagedEnv = {
   MANAGED_HOSTING: "true",
   APP_URL: "https://notes.example.com",
+  R2_ACCOUNT_ID: "account-id",
+  R2_BUCKET: "private-meetings",
+  R2_ACCESS_KEY_ID: "r2-access-key",
+  R2_SECRET_ACCESS_KEY: "r2-secret-key",
   MANAGED_WORKER_TOKEN: "worker-token",
   MANAGED_DEEPGRAM_API_KEY: "deepgram-key",
   MANAGED_ANTHROPIC_API_KEY: "anthropic-key",
@@ -41,26 +45,39 @@ describe("managed deployment configuration", () => {
     expect(status.missing).not.toContain("notes.example.com");
   });
 
-  it("accepts a complete HTTPS managed deployment and reports the storage mode", () => {
-    expect(managedConfigurationStatus({ ...completeManagedEnv, S3_BUCKET: "private-meetings" })).toEqual({
+  it("accepts a complete HTTPS managed deployment and reports R2 storage", () => {
+    expect(managedConfigurationStatus(completeManagedEnv)).toEqual({
       enabled: true,
       ready: true,
-      objectStorage: "s3",
+      objectStorage: "r2",
       missing: [],
     });
   });
 
   it("allows localhost HTTP for disposable local managed stacks", () => {
-    expect(managedConfigurationStatus({ ...completeManagedEnv, S3_BUCKET: "private-meetings", APP_URL: "http://localhost:3000" }).ready).toBe(true);
+    expect(managedConfigurationStatus({ ...completeManagedEnv, APP_URL: "http://localhost:3000" }).ready).toBe(true);
     expect(managedConfigurationStatus({ ...completeManagedEnv, APP_URL: "http://public.example.com" }).missing).toContain("APP_URL");
   });
 });
 
 describe("managed URL configuration", () => {
-  it("requires S3 storage before a managed deployment is ready", () => {
-    const status = managedConfigurationStatus({ ...completeManagedEnv });
+  it("requires R2 storage and credentials before a managed deployment is ready", () => {
+    const status = managedConfigurationStatus({
+      MANAGED_HOSTING: "true",
+      APP_URL: "https://notes.example.com",
+      MANAGED_WORKER_TOKEN: "worker-token",
+      MANAGED_DEEPGRAM_API_KEY: "deepgram-key",
+      MANAGED_ANTHROPIC_API_KEY: "anthropic-key",
+      STRIPE_SECRET_KEY: "stripe-secret",
+      STRIPE_WEBHOOK_SECRET: "stripe-webhook",
+      STRIPE_PRICE_HOSTED_PRO: "price-pro",
+      STRIPE_PRICE_HOSTED_TEAM: "price-team",
+    });
     expect(status.ready).toBe(false);
-    expect(status.missing).toContain("S3_BUCKET");
+    expect(status.missing).toContain("R2_BUCKET");
+    expect(status.missing).toContain("R2_ACCOUNT_ID");
+    expect(status.missing).toContain("R2_ACCESS_KEY_ID");
+    expect(status.missing).toContain("R2_SECRET_ACCESS_KEY");
   });
 
   it("fails fast when managed mode has no valid APP_URL", () => {
@@ -87,7 +104,7 @@ describe("managed URL configuration", () => {
   it("allows signup only when the deployment is self-hosted or fully ready", () => {
     expect(isSignupAllowed({ MANAGED_HOSTING: "false" })).toBe(true);
     expect(isSignupAllowed({ MANAGED_HOSTING: "true", APP_URL: "https://notes.example.com" })).toBe(false);
-    expect(isSignupAllowed({ ...completeManagedEnv, S3_BUCKET: "private-meetings" })).toBe(true);
+    expect(isSignupAllowed(completeManagedEnv)).toBe(true);
   });
 
   it("keeps the legacy AUTH_TOKEN ingest API off in managed mode unless explicitly enabled", () => {

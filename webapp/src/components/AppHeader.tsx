@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/login/actions";
 
@@ -32,7 +31,7 @@ export function AppHeader({ role, managed }: { role: "owner" | "member"; managed
     <header className="app-header">
       <div className="app-header-inner">
         <Link href="/meetings" className="brand">
-          <Image src="/ai-notetaker-mark.svg" width={48} height={48} alt="" aria-hidden="true" />
+          <span className="brand-mark" aria-hidden="true" />
           <span>AI Notetaker</span>
         </Link>
         <nav aria-label="Main" className="app-nav">
