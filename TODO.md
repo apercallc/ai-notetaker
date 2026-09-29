@@ -274,12 +274,9 @@ remains native; Docker is for the optional history webapp only.
 
 ## Live release gates (audit, 2026-09-27; rechecked 2026-09-29)
 
-- [ ] Finish production API hostname verification: the Hostinger CNAME for
-      `ai-notetaker.apercallc.com` now points to `rgkzqax9.up.railway.app` and
-      Railway reports DNS propagated. The required `_railway-verify.ai-notetaker`
-      TXT record is also present and propagated; Railway is still validating
-      ownership. Verify HTTPS and `/api/health` once certificate issuance
-      completes.
+- [x] Restore and verify the production API hostname (2026-09-29): Hostinger
+      CNAME and Railway ownership TXT records propagated, TLS became valid,
+      and `https://ai-notetaker.apercallc.com/api/health` returned `ok:true`.
 - [ ] Finish managed-hosting configuration before enabling customer signups:
       Railway now has a `managed-worker` service and private audio bucket, with
       the worker token and S3 references configured; its production deployment
