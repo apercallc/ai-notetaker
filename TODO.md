@@ -282,8 +282,9 @@ remains native; Docker is for the optional history webapp only.
       completes.
 - [ ] Finish managed-hosting configuration before enabling customer signups:
       Railway now has a `managed-worker` service and private audio bucket, with
-      the worker token and S3 references configured. Worker deployment and
-      upload acceptance are not yet verified. Managed signup remains closed
+      the worker token and S3 references configured; its production deployment
+      succeeded. Completed managed upload acceptance is not yet verified.
+      Managed signup remains closed
       until `MANAGED_DEEPGRAM_API_KEY`, `MANAGED_ANTHROPIC_API_KEY`,
       `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, both Stripe price IDs, and
       a valid `APP_URL` are present. Then verify `managedReady:true` and a
