@@ -321,6 +321,8 @@ remains native; Docker is for the optional history webapp only.
       current managed stack also verified a running worker and 401 managed
       sign-in for unknown credentials; a separate self-hosted stack verified
       managed sign-in fails closed with HTTP 404.
+- [x] Copy the webapp's public assets into the final Docker image after the
+      live sign-in check exposed a production logo 404.
 - [x] Managed billing route smoke coverage accepts a signed Stripe webhook,
       rejects invalid signatures, and ignores duplicate event delivery against
       disposable Postgres; live Stripe test-mode delivery remains open.
