@@ -251,6 +251,10 @@ remains native; Docker is for the optional history webapp only.
       illustrative use-case cards rather than fabricated testimonials.
 - [x] Add downloadable SVG infographics for the capture workflow and example
       role-based use cases.
+- [x] Expand the public site into a complete product and contributor journey:
+      responsive marketing page, explicit pre-launch Hosted AI status, privacy
+      notice, terms, SEO/social metadata, SoftwareApplication and FAQ schema,
+      sitemap, robots policy, and concise `llms.txt` product facts.
 - [x] Remove Homebrew, WinGet, and Chocolatey from release generation and
       end-user setup instructions; update by downloading the newer GitHub
       release artifact.

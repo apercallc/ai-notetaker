@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">AI Notetaker — private meeting notes, on your terms</title>
+  <desc id="desc">Open-source, local-first, botless AI meeting notes. Google Meet in Chrome. Desktop calls with a native helper.</desc>
+  <rect width="1200" height="630" fill="#183d2f"/>
+  <path d="M760-20 1220 245M740 70l460 265M720 160l460 265M700 250l460 265M680 340l460 265M860-20 600 430M960-20 700 430M1060-20 800 430M1160-20 900 430" fill="none" stroke="#d3ed78" stroke-opacity=".12" stroke-width="2"/>
+  <rect x="82" y="76" width="48" height="48" rx="13" fill="#d3ed78"/>
+  <path d="M99 87h15l10 10v19H99a4 4 0 0 1-4-4V91a4 4 0 0 1 4-4Z" fill="#183d2f"/>
+  <path d="M114 87v9h10M101 104h2v7h-2zm5-4h2v12h-2zm5 2h2v10h-2z" fill="#d3ed78"/>
+  <text x="148" y="108" fill="#fffef9" font-family="Arial,sans-serif" font-size="29" font-weight="700">AI Notetaker</text>
+  <text x="82" y="260" fill="#d3ed78" font-family="monospace" font-size="18" font-weight="700" letter-spacing="3">OPEN SOURCE · LOCAL FIRST · BOTLESS</text>
+  <text x="78" y="365" fill="#fffef9" font-family="Georgia,serif" font-size="87" letter-spacing="-5">Be there for the</text>
+  <text x="78" y="462" fill="#d3ed78" font-family="Georgia,serif" font-size="91" font-style="italic" letter-spacing="-5">conversation.</text>
+  <text x="84" y="544" fill="#d4e0d8" font-family="Arial,sans-serif" font-size="24">Private AI meeting notes for Google Meet and desktop calls.</text>
+  <circle cx="1048" cy="132" r="7" fill="#ee835c"/><circle cx="1048" cy="132" r="20" fill="none" stroke="#ee835c" stroke-opacity=".35" stroke-width="2"/>
+  <rect x="859" y="375" width="277" height="162" rx="5" fill="#fffef9" transform="rotate(3 859 375)"/>
+  <text x="893" y="427" fill="#668057" font-family="monospace" font-size="13" font-weight="700" letter-spacing="2">MEETING NOTE / SAMPLE</text>
+  <path d="M893 450h181m-181 11h222" stroke="#d6d8cb" stroke-width="3"/>
+  <text x="893" y="496" fill="#18231d" font-family="Georgia,serif" font-size="24">A clear next step.</text>
+  <rect x="893" y="510" width="186" height="13" rx="2" fill="#d3ed78"/>
+</svg>

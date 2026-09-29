@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://apercallc.github.io/ai-notetaker/sitemap.xml
