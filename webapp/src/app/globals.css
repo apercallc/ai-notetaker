@@ -810,7 +810,6 @@ button,
   flex: 0 0 auto;
   width: 31px;
   height: 31px;
-  background: center / contain no-repeat url("/ai-notetaker-mark.svg");
 }
 
 .brand-heading .brand-mark {
