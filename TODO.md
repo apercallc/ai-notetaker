@@ -274,18 +274,20 @@ remains native; Docker is for the optional history webapp only.
 
 ## Live release gates (audit, 2026-09-27; rechecked 2026-09-29)
 
-- [ ] Restore the production API hostname: Railway currently reports that
-      `ai-notetaker.apercallc.com` requires a CNAME to
-      `rgkzqax9.up.railway.app`; the record is unset and certificate ownership
-      is still validating, so `/api/health` cannot be reached at that hostname.
+- [ ] Finish production API hostname verification: the Hostinger CNAME for
+      `ai-notetaker.apercallc.com` now points to `rgkzqax9.up.railway.app` and
+      Railway reports DNS propagated. The required `_railway-verify.ai-notetaker`
+      TXT record is also present and propagated; Railway is still validating
+      ownership. Verify HTTPS and `/api/health` once certificate issuance
+      completes.
 - [ ] Finish managed-hosting configuration before enabling customer signups:
-      production currently has only the web and Postgres services (no worker),
-      and Railway is missing `MANAGED_WORKER_TOKEN`, `S3_BUCKET`,
-      `MANAGED_DEEPGRAM_API_KEY`, `MANAGED_ANTHROPIC_API_KEY`,
-      `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and both Stripe price IDs.
-      The application fails managed signup closed until readiness checks pass.
-      Configure required production values and a real worker, then verify
-      `managedReady:true` and a completed upload.
+      Railway now has a `managed-worker` service and private audio bucket, with
+      the worker token and S3 references configured. Worker deployment and
+      upload acceptance are not yet verified. Managed signup remains closed
+      until `MANAGED_DEEPGRAM_API_KEY`, `MANAGED_ANTHROPIC_API_KEY`,
+      `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, both Stripe price IDs, and
+      a valid `APP_URL` are present. Then verify `managedReady:true` and a
+      completed upload.
 - [ ] Run cross-platform helper CI on the exact release candidate. The latest
       recorded GitHub helper matrix passed for Linux, macOS, and Windows; repeat
       it against the tagged candidate before publishing native artifacts.
