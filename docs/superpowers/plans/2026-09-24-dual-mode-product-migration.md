@@ -4,7 +4,7 @@
 
 **Goal:** Migrate AI Notetaker to a botless, searchable meeting product with free local BYOK execution and a paid hosted AI execution mode across Google Meet, macOS, Windows, and Linux.
 
-**Architecture:** Keep Native Messaging secure and make capture source and processing mode explicit. Google Meet is an extension-owned browser path with IndexedDB-first chunks and direct local/managed processing; desktop-call Local BYOK continues to call providers from the helper, while managed mode uploads durable local recording chunks to an authenticated multi-tenant service whose workers own provider calls, usage, storage, and billing.
+**Architecture:** Keep Native Messaging secure and make capture source and processing mode explicit. Google Meet is an extension-owned browser path with IndexedDB-first chunks and direct local/managed processing; desktop-call Local BYOK continues to call providers from the helper, while managed mode uploads locally durable recording chunks to private temporary staging for authenticated multi-tenant worker processing, usage, and billing. The hosted library retains text notes only.
 
 **Tech Stack:** TypeScript/Vitest/Manifest V3, Rust/Tauri/Cargo, Next.js/Prisma/Postgres, object storage, a durable queue/worker runtime, Stripe webhooks, Chrome tab/offscreen capture, macOS ScreenCaptureKit, Windows WASAPI, and PipeWire/PulseAudio adapters.
 
@@ -17,6 +17,7 @@
 - Mic and system/remote audio remain separate durable streams.
 - Local BYOK requires no account; managed mode never exposes platform provider keys to the client.
 - Hosted data is workspace-scoped, private by default, deletable, retention-controlled, and served through authenticated routes.
+- Managed audio staging is never meeting history: delete after successful processing and expire failed/abandoned uploads within 24 hours; do not expose hosted playback, download, or audio sharing.
 - The committed extension manifest `key` and both helper binaries remain unchanged.
 - Cellular/PSTN and DRM/protected audio are outside the product promise.
 - Every changed surface gets focused tests plus the relevant release-floor command.
@@ -217,9 +218,10 @@
       legacy owner-controlled sync surface.
 - [x] Add a bounded three-day payment-failure grace window tied to the Stripe
       billing period, with fail-closed entitlement tests after expiry.
-- [x] Add an owner-controlled managed retention policy; the worker deletes
-      expired meetings, transcripts, shares, and private recording objects
-      without touching active processing jobs.
+- [x] Add an owner-controlled managed note-retention policy; the worker deletes
+      expired meetings, transcripts, and shares without touching active jobs.
+      Managed audio uses separate short-lived staging and is not part of the
+      retention policy.
 - [x] Make Stripe subscription event application ordering-aware and preserve
       the paid plan during payment-failure state; add regression coverage.
 - [x] Implement Stripe webhook authority and keep API keys/secrets server-side.

@@ -21,7 +21,7 @@ export function RetentionPolicyForm({ retentionDays }: { retentionDays: number |
           <option value="90">90 days</option>
           <option value="365">365 days</option>
         </select>
-        <p className="muted-copy">Hosted audio, transcripts, summaries, and private shares are removed together. This applies to managed workspaces only.</p>
+        <p className="muted-copy">This applies to hosted transcripts, summaries, action items, and private shares. Audio is temporary processing data and is deleted after success or by the 24-hour cleanup.</p>
         <button type="submit" className="button button-secondary" disabled={pending} aria-busy={pending}>
           {pending ? "Saving…" : "Save retention policy"}
         </button>

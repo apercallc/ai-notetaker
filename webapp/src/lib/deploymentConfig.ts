@@ -39,14 +39,16 @@ export function managedConfigurationStatus(env: DeploymentEnv = process.env): Ma
     return { enabled: false, ready: true, objectStorage: objectStorage(env), missing: [] };
   }
 
+  const storageMissing = objectStorage(env) === "r2"
+    ? ["R2_BUCKET", ...(hasValue(env, "R2_ENDPOINT") || hasValue(env, "R2_ACCOUNT_ID") ? [] : ["R2_ACCOUNT_ID"]), "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]
+    : objectStorage(env) === "s3"
+      ? ["S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
+      : ["S3_BUCKET or R2_BUCKET"];
   const missing = [
     "MANAGED_WORKER_TOKEN",
-    // Uploaded audio must survive a redeploy and be readable by the separate
-    // worker service, so managed mode cannot fall back to a local directory.
-    "R2_BUCKET",
-    ...(hasValue(env, "R2_ENDPOINT") || hasValue(env, "R2_ACCOUNT_ID") ? [] : ["R2_ACCOUNT_ID"]),
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
+    // A shared private bucket is temporary staging for jobs running on the
+    // separate worker service. Audio is deleted after processing/expiry.
+    ...storageMissing,
     "MANAGED_DEEPGRAM_API_KEY",
     "MANAGED_ANTHROPIC_API_KEY",
     "STRIPE_SECRET_KEY",

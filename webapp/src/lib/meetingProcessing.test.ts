@@ -16,7 +16,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.MANAGED_WORKER_TOKEN;
   managedHostingEnabled.mockReturnValue(true);
-  findFirst.mockResolvedValue({ id: "job-1", uploadId: "upload-1", idempotencyKey: "meeting-1", status: "error" });
+  findFirst.mockResolvedValue({
+    id: "job-1",
+    uploadId: "upload-1",
+    idempotencyKey: "meeting-1",
+    status: "error",
+    upload: { status: "complete", expiresAt: new Date(Date.now() + 60_000) },
+  });
   enqueueManagedJob.mockResolvedValue({ id: "job-2" });
   runManagedJob.mockResolvedValue(undefined);
 });
@@ -34,6 +40,21 @@ describe("retry failed hosted meeting processing", () => {
     expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({ ok: true });
     findFirst.mockResolvedValueOnce({ status: "complete" });
     expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({ ok: false, error: "This meeting was already processed." });
+    expect(enqueueManagedJob).not.toHaveBeenCalled();
+  });
+
+  it("directs the user to retry locally after temporary audio staging expires", async () => {
+    findFirst.mockResolvedValueOnce({
+      id: "job-1",
+      uploadId: "upload-1",
+      idempotencyKey: "meeting-1",
+      status: "error",
+      upload: { status: "expired", expiresAt: new Date(Date.now() - 1) },
+    });
+    expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({
+      ok: false,
+      error: "The temporary upload expired. Retry from the extension or desktop helper while its local recording is still available.",
+    });
     expect(enqueueManagedJob).not.toHaveBeenCalled();
   });
 

@@ -13,8 +13,11 @@ workspace with two execution modes:
    call transcription/LLM providers directly with keys supplied by the user.
 2. **Managed AI (paid):** the same clients authenticate to a project-operated
    hosted service. The client still saves raw audio locally first, then
-   uploads encrypted recording data. Hosted workers use platform-owned AI
-   credentials, meter usage, enforce plan limits, and bill the account.
+   uploads encrypted recording data for processing. Hosted workers use
+   platform-owned AI credentials, meter usage, enforce plan limits, and bill
+   the account. Server-side audio is temporary processing input, not saved
+   meeting history; completed audio is deleted and unfinished uploads expire
+   after 24 hours.
 
 The managed service is an additional deployment topology, not a replacement
 for the open-source local/self-hosted path. The existing self-hosted webapp
@@ -23,7 +26,8 @@ remains useful for users who want their own storage and BYOK execution.
 The product goal is a simple setup: install once, detect a Google
 Meet tab automatically, record without a bot joining the call, and finish
 with a recording, transcript, summary, action items, searchable history, and
-sharing/export controls.
+sharing/export controls. The durable recording stays on the user's device;
+the hosted library stores meeting notes and text only.
 
 ## 2. Scope and explicit boundaries
 
@@ -41,7 +45,8 @@ sharing/export controls.
 - Hosted accounts, workspaces, usage metering, retention, deletion, and
   Stripe-backed paid plans.
 - Searchable meeting library, transcript search, summaries, action items,
-  sharing, Google Docs/Drive export, and recording downloads.
+  sharing, and Google Docs/Drive export. Managed recordings are not played,
+  downloaded, or shared from the hosted library.
 
 ### Not promised
 
@@ -130,7 +135,8 @@ The pipeline stages are shared:
    upload/job request.
 4. Stream partial transcript state to the extension when available.
 5. Finalize transcript, summary, and action items.
-6. Sync completed metadata and recording according to the selected mode.
+6. Sync completed text notes according to the selected mode; raw audio stays
+   local after transient managed processing.
 
 Managed mode uses short-lived upload credentials or authenticated chunk
 endpoints, idempotency keys per meeting/chunk, resumable uploads, and a job
@@ -145,8 +151,10 @@ The hosted topology adds these deployable components:
 - **Postgres:** tenants, memberships, meetings, transcript segments, action
   items, usage ledger, subscriptions, upload manifests, job state, and audit
   events. Every tenant-owned row carries a workspace boundary.
-- **Object storage:** encrypted raw audio/video and export artifacts with
-  private-by-default keys and signed, expiring download URLs.
+- **Object storage:** private temporary audio staging for in-flight managed
+  jobs only. Delete staged objects as soon as processing commits successfully;
+  enforce a 24-hour maximum expiry for abandoned or failed uploads. Never
+  expose staged audio through a meeting page, export, or share link.
 - **Workers/queue:** transcription, summarization, title/action extraction,
   retention cleanup, and failed-job retries. Jobs are idempotent and scoped
   to a workspace.
@@ -167,15 +175,19 @@ contract.
 - Managed uploads use TLS, authenticated sessions, workspace authorization,
   idempotency, size/type limits, and malware/content safety checks appropriate
   to the deployment.
+- Managed audio is encrypted in private temporary staging only so asynchronous
+  workers can process it. Remove it after successful processing; failed work
+  may be retried from staging for at most 24 hours. A worker cleanup heartbeat
+  and bucket lifecycle expiry remove abandoned objects. Audio is never part of
+  meeting retention, exports, playback, or sharing.
 - Provider secrets are server-side secret-manager values in managed mode and
   local protected storage in BYOK mode. They are never sent to the webapp
   browser bundle or persisted in meeting records.
-- Raw recordings are private by default. Sharing creates a revocable,
-  expiring capability scoped to one meeting; it does not make the library
-  public.
+- Sharing creates a revocable, expiring capability scoped to meeting text;
+  it never exposes raw audio or the workspace library.
 - Users can delete a meeting locally, remotely, or everywhere, and can set a
-  retention policy. Deletion marks the job/objects first, then removes them
-  asynchronously with a visible status.
+  retention policy for hosted notes. Audio staging has its own short maximum
+  lifetime and is deleted independently of note retention.
 - Hosted logs contain workspace-safe IDs and failure categories, not audio,
   transcript bodies, provider keys, or bearer tokens.
 - Consent state is recorded per meeting as user acknowledgement and displayed

@@ -3,7 +3,8 @@
 AI Notetaker is local-first and supports both self-hosted BYOK operation and an
 optional managed hosted-AI service. Local mode does not send meeting data to
 the project. Managed mode sends encrypted, authenticated recording chunks to
-the user's selected hosted workspace for processing and billing.
+private temporary staging for processing and billing. The hosted library keeps
+meeting text, not the recording.
 
 ## Where data lives
 
@@ -12,7 +13,7 @@ the user's selected hosted workspace for processing and billing.
 | Provider API keys | Chrome extension `chrome.storage.local` in local mode; server secrets in managed mode | Local mode sends keys only to the selected provider; managed mode never sends provider keys to the extension |
 | Google Drive OAuth tokens | Chrome extension `chrome.storage.local` | Google receives them during OAuth/API calls; the project never sees them |
 | Native Messaging pairing token | Chrome extension `chrome.storage.local` and the local helper's private data directory | Never leaves the device; it is used only across the local extension/helper channel |
-| Raw mic/speaker PCM | Meet: extension IndexedDB; desktop calls: helper app-data directory under `ai-notetaker` | Local mode sends audio to the selected provider; managed mode uploads authenticated chunks to the hosted workspace |
+| Raw mic/speaker PCM | Meet: extension IndexedDB; desktop calls: helper app-data directory under `ai-notetaker` | Local mode sends audio to the selected provider; managed mode uploads authenticated chunks to private processing staging, which is deleted on success or expires within 24 hours |
 | Transcript and summary | Helper/extension local storage, optionally the user's own webapp/Postgres, managed workspace, or Google Drive Doc | Notes leave the device only through the selected local provider, managed workspace, optional webapp sync, or Drive export |
 | Retry queues | Meet: extension IndexedDB until processing succeeds; desktop calls: helper app-data directory | Never sent; they reference local audio ranges or resumable upload state |
 | Helper status/control | Native Messaging plus a local Unix socket/named pipe | Never to a project-operated server |
@@ -35,10 +36,12 @@ then remove its
 directory is permanent; export or copy data first when it must be retained.
 
 Delete synced notes from the user's own webapp through its meeting detail
-route or API. Managed users can delete hosted meetings, including uploaded
-recording objects; expiring share links can be revoked independently. Removing
-the extension does not automatically delete provider account data or a
-separately deployed webapp/managed workspace database.
+route or API. Managed users can delete hosted meetings and their text notes;
+temporary audio is removed after successful processing and is not playable,
+downloadable, or shareable from the hosted service. Expiring share links can
+be revoked independently. Removing the extension does not automatically
+delete provider account data or a separately deployed webapp/managed workspace
+database.
 
 This is product documentation, not legal advice. Recording and provider data
 retention obligations vary by jurisdiction and provider terms.

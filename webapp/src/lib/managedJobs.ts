@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { reserveMeetingProcessing } from "./usageLedger";
+import { releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
 import { ValidationError } from "./meetings";
 import { deleteObject, getObject } from "./objectStorage";
 import { deleteMeeting } from "./meetings";
@@ -13,12 +13,10 @@ export const MAX_UPLOAD_BYTES = 1_900_000_000;
 export const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
 export const MAX_METADATA_BYTES = 64 * 1024;
 export const MANAGED_UPLOAD_TTL_MS = 24 * 60 * 60 * 1_000;
-/** Bound simultaneous upload reservations across every member of a workspace. */
+/** Bound audio staging reservations across every member of a workspace. */
 export const MAX_PENDING_MANAGED_UPLOADS = 5;
-/** Declared bytes reserved by unfinished uploads in one workspace (about 1.86 GiB). */
+/** Bytes reserved by temporary managed uploads in one workspace (about 1.86 GiB). */
 export const MAX_PENDING_MANAGED_UPLOAD_BYTES = 2_000_000_000;
-/** Total completed and reserved audio retained for one workspace (about 4.66 GiB). */
-export const MAX_RETAINED_MANAGED_AUDIO_BYTES = 5_000_000_000;
 
 export class ManagedUploadQuotaError extends ManagedValidationError {
   constructor(message: string) {
@@ -28,7 +26,7 @@ export class ManagedUploadQuotaError extends ManagedValidationError {
 }
 
 function isExpired(upload: { status: string; expiresAt: Date }, now = Date.now()): boolean {
-  return upload.status !== "complete" && upload.expiresAt.getTime() <= now;
+  return upload.status === "expired" || upload.expiresAt.getTime() <= now;
 }
 
 /**
@@ -115,7 +113,7 @@ export async function createManagedUpload(
       // Remove an abandoned session so a later retry can start a fresh upload
       // without requiring the user to clear local helper state manually.
       await prisma.managedUpload.updateMany({
-        where: { id: existing.id, status: { not: "complete" }, expiresAt: { lte: new Date() } },
+        where: { id: existing.id, status: { not: "expired" }, expiresAt: { lte: new Date() } },
         data: { status: "expired" },
       });
       const expired = await prisma.managedUpload.findUnique({
@@ -166,31 +164,28 @@ export async function createManagedUpload(
         return concurrent;
       }
 
-      // Expired rows stay in the reservation total until cleanup removes their
-      // objects and row. A failed object deletion therefore fails closed rather
-      // than allowing repeated abandoned sessions to accumulate unmetered data.
+      // Count every manifest that can still have staged bytes, including a
+      // completed job whose storage deletion failed. Cleanup errors therefore
+      // fail closed instead of allowing staged audio to accumulate unmetered.
       const pending = await tx.managedUpload.aggregate({
-        where: { workspaceId, status: { in: ["created", "uploading", "expired"] } },
+        where: {
+          workspaceId,
+          OR: [
+            { status: { in: ["created", "uploading", "expired"] } },
+            { chunks: { some: {} } },
+          ],
+        },
         _count: { _all: true },
-        _sum: { totalBytes: true },
-      });
-      const retained = await tx.managedUpload.aggregate({
-        where: { workspaceId, status: { in: ["created", "uploading", "expired", "complete"] } },
         _sum: { totalBytes: true },
       });
       const pendingCount = pending._count._all;
       const pendingBytes = pending._sum.totalBytes ?? 0;
-      const retainedBytes = retained._sum.totalBytes ?? 0;
       if (pendingCount >= MAX_PENDING_MANAGED_UPLOADS) {
-        throw new ManagedUploadQuotaError("workspace has too many pending uploads; finish or retry cleanup before starting another");
+        throw new ManagedUploadQuotaError("workspace has too much temporary audio processing in progress; wait for a job or cleanup to finish before starting another");
       }
       if (pendingBytes + input.totalBytes > MAX_PENDING_MANAGED_UPLOAD_BYTES) {
-        throw new ManagedUploadQuotaError("workspace pending upload storage limit exceeded; finish or retry cleanup before starting another");
+        throw new ManagedUploadQuotaError("workspace temporary audio staging limit exceeded; wait for a job or cleanup to finish before starting another");
       }
-      if (retainedBytes + input.totalBytes > MAX_RETAINED_MANAGED_AUDIO_BYTES) {
-        throw new ManagedUploadQuotaError("workspace retained audio storage limit exceeded; delete retained meetings or wait for retention cleanup");
-      }
-
       return tx.managedUpload.create({
         data: {
           workspaceId,
@@ -229,7 +224,7 @@ export async function getUpload(workspaceId: string, uploadId: string) {
   const upload = await prisma.managedUpload.findFirst({ where: { id: uploadId, workspaceId }, include: { chunks: true } });
   if (!upload || !isExpired(upload)) return upload;
   await prisma.managedUpload.updateMany({
-    where: { id: upload.id, status: { not: "complete" }, expiresAt: { lte: new Date() } },
+      where: { id: upload.id, status: { not: "expired" }, expiresAt: { lte: new Date() } },
     data: { status: "expired" },
   });
   return { ...upload, status: "expired" };
@@ -246,44 +241,119 @@ export async function completeManagedUpload(workspaceId: string, uploadId: strin
 }
 
 /**
- * Reap abandoned upload sessions without deleting a live or completed
- * recording. The database status is claimed first so concurrent workers do
- * not both treat the same session as active; object rows are removed before
- * the upload row, and a storage failure leaves the expired row available for
- * the next cleanup pass.
+ * Removes staged recording bytes while keeping the upload/job manifest needed
+ * for status and billing history. Object rows are removed only after every
+ * corresponding object has been deleted; a storage error therefore leaves a
+ * retryable cleanup record for the next worker heartbeat.
+ */
+export async function deleteManagedUploadAudio(uploadId: string): Promise<boolean> {
+  const chunks = await prisma.uploadChunk.findMany({ where: { uploadId }, select: { id: true, objectKey: true } });
+  if (chunks.length === 0) return true;
+  const results = await Promise.allSettled(chunks.map((chunk) => deleteObject(chunk.objectKey)));
+  const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failures.length > 0) {
+    console.error("managed temporary audio cleanup failed", {
+      uploadId,
+      failures: failures.length,
+      firstError: failures[0]?.reason instanceof Error ? failures[0].reason.message : String(failures[0]?.reason),
+    });
+    return false;
+  }
+  await prisma.uploadChunk.deleteMany({ where: { uploadId, id: { in: chunks.map((chunk) => chunk.id) } } });
+  return true;
+}
+
+/**
+ * Managed audio is staging data, never meeting history. Successful jobs are
+ * purged immediately. Abandoned/failed uploads remain available for retry
+ * only until their fixed 24-hour expiry; stale jobs are failed before cleanup.
  */
 export async function expireManagedUploads(now = new Date()): Promise<number> {
-  const candidates = await prisma.managedUpload.findMany({
-    where: { status: { not: "complete" }, expiresAt: { lte: now } },
-    select: { id: true },
+  const uploads = await prisma.managedUpload.findMany({
+    where: {
+      OR: [
+        { jobs: { some: { status: "complete" } }, chunks: { some: {} } },
+        { expiresAt: { lte: now }, status: { not: "expired" } },
+        { expiresAt: { lte: now }, status: "expired", chunks: { some: {} } },
+      ],
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      status: true,
+      expiresAt: true,
+      jobs: { select: { id: true, status: true, startedAt: true, idempotencyKey: true } },
+    },
   });
-  if (candidates.length === 0) return 0;
+  let cleaned = 0;
+  const staleBefore = new Date(now.getTime() - 15 * 60 * 1_000);
+  for (const upload of uploads) {
+    const successful = upload.jobs.some((job) => job.status === "complete");
+    const activeJobs = upload.jobs.filter((job) =>
+      job.status === "queued" || (job.status === "processing" && (!job.startedAt || job.startedAt > staleBefore)),
+    );
+    if (!successful && upload.expiresAt > now && activeJobs.length > 0) continue;
 
-  const ids = candidates.map((upload) => upload.id);
-  await prisma.managedUpload.updateMany({
-    where: { id: { in: ids }, status: { not: "complete" }, expiresAt: { lte: now } },
-    data: { status: "expired" },
-  });
-  const expired = await prisma.managedUpload.findMany({
-    where: { id: { in: ids }, status: "expired" },
-    select: { id: true, chunks: { select: { objectKey: true } } },
-  });
+    if (!successful && upload.expiresAt <= now) {
+      const staleJobs = upload.jobs.filter((job) => job.status === "queued" || job.status === "processing");
+      for (const job of staleJobs) {
+        const failed = await prisma.processingJob.updateMany({
+          where: { id: job.id, status: { in: ["queued", "processing"] } },
+          data: {
+            status: "error",
+            errorMessage: "Temporary audio expired after 24 hours. Retry from the app while the local recording is still available.",
+            completedAt: now,
+            leaseToken: null,
+          },
+        });
+        if (failed.count > 0) {
+          await releaseMeetingProcessing(upload.workspaceId, job.idempotencyKey).catch((error: unknown) => {
+            console.error("managed expired upload usage release failed", {
+              uploadId: upload.id,
+              jobId: job.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+        }
+      }
+    }
 
-  const removable: string[] = [];
-  for (const upload of expired) {
-    const results = await Promise.allSettled(upload.chunks.map((chunk) => deleteObject(chunk.objectKey)));
-    if (results.every((result) => result.status === "fulfilled")) removable.push(upload.id);
-    else {
-      console.error("managed upload expiry cleanup failed", {
-        uploadId: upload.id,
-        failures: results.filter((result) => result.status === "rejected").length,
+    if (!(await deleteManagedUploadAudio(upload.id))) continue;
+    if (successful) {
+      cleaned += 1;
+      continue;
+    }
+    await prisma.managedUpload.updateMany({ where: { id: upload.id, status: { not: "expired" } }, data: { status: "expired" } });
+    if (upload.jobs.length === 0) {
+      await prisma.managedUpload.deleteMany({ where: { id: upload.id, status: "expired" } });
+    }
+    cleaned += 1;
+  }
+
+  // Remove audio written by the earlier durable-recording implementation as
+  // part of the same managed-worker sweep. The field remains in Prisma only
+  // so existing rows can be cleaned safely during rollout.
+  const legacyRecordings = await prisma.meeting.findMany({
+    where: { processingMode: "managed", recordingObjectKey: { not: null } },
+    select: { id: true, recordingObjectKey: true },
+  });
+  for (const meeting of legacyRecordings) {
+    if (!meeting.recordingObjectKey) continue;
+    try {
+      await deleteObject(meeting.recordingObjectKey);
+      await prisma.meeting.updateMany({
+        where: { id: meeting.id, recordingObjectKey: meeting.recordingObjectKey },
+        data: { recordingObjectKey: null },
+      });
+      cleaned += 1;
+    } catch (error) {
+      console.error("legacy managed recording cleanup failed", {
+        meetingId: meeting.id,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }
-  if (removable.length > 0) {
-    await prisma.managedUpload.deleteMany({ where: { id: { in: removable }, status: "expired" } });
-  }
-  return removable.length;
+  return cleaned;
 }
 
 /** Delete managed meeting history according to each workspace's policy. */
@@ -341,35 +411,10 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
   }
 }
 
-export type ManagedRecordingChannel = "mic" | "speaker";
-
-export async function readManagedRecording(
-  workspaceId: string,
-  meetingId: string,
-  channel: ManagedRecordingChannel,
-): Promise<{ title: string; bytes: Uint8Array } | null> {
-  const upload = await prisma.managedUpload.findFirst({
-    where: { workspaceId, meetingId, status: "complete" },
-    orderBy: { createdAt: "desc" },
-    include: { meeting: { select: { title: true } }, chunks: { where: { channel }, orderBy: { chunkIndex: "asc" } } },
-  });
-  if (!upload || upload.chunks.length === 0) return null;
-
-  const parts = await Promise.all(upload.chunks.map((chunk) => getObject(chunk.objectKey)));
-  const bytes = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
-  let offset = 0;
-  for (const part of parts) {
-    bytes.set(part, offset);
-    offset += part.byteLength;
-  }
-  return { title: upload.meeting.title, bytes };
-}
-
 /**
  * Yields the given stored objects one at a time, in order. At most one chunk
- * (MAX_CHUNK_BYTES) is held in memory, so a recording of up to
- * MAX_UPLOAD_BYTES can be forwarded to a provider or a browser without
- * materializing it.
+ * (MAX_CHUNK_BYTES) is held in memory, so staged audio can be forwarded to a
+ * provider without materializing the full recording.
  */
 export async function* readChunksSequentially(objectKeys: Iterable<string>): AsyncGenerator<Uint8Array, void, undefined> {
   for (const key of objectKeys) {
@@ -389,39 +434,4 @@ export function chunksToReadableStream(chunks: AsyncIterator<Uint8Array>): Reada
       await chunks.return?.();
     },
   });
-}
-
-export interface ManagedRecordingStream {
-  title: string;
-  /** Total PCM bytes across the channel's chunks, known before any object is read. */
-  totalBytes: number;
-  /** Sequential async iterator over the channel's chunks in order. */
-  chunks: AsyncGenerator<Uint8Array, void, undefined>;
-  /** The same chunks as a ReadableStream, ready to pass to `new Response(stream)`. */
-  stream(): ReadableStream<Uint8Array>;
-}
-
-/**
- * Streaming counterpart of readManagedRecording for the recording download
- * route: write a WAV header from `totalBytes`, then stream `chunks`. Scoped to
- * the caller's workspace exactly like readManagedRecording.
- */
-export async function openManagedRecording(
-  workspaceId: string,
-  meetingId: string,
-  channel: ManagedRecordingChannel,
-): Promise<ManagedRecordingStream | null> {
-  const upload = await prisma.managedUpload.findFirst({
-    where: { workspaceId, meetingId, status: "complete" },
-    orderBy: { createdAt: "desc" },
-    include: { meeting: { select: { title: true } }, chunks: { where: { channel }, orderBy: { chunkIndex: "asc" } } },
-  });
-  if (!upload || upload.chunks.length === 0) return null;
-  const chunks = readChunksSequentially(upload.chunks.map((chunk) => chunk.objectKey));
-  return {
-    title: upload.meeting.title,
-    totalBytes: upload.chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
-    chunks,
-    stream: () => chunksToReadableStream(chunks),
-  };
 }

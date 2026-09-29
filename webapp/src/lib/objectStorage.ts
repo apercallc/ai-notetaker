@@ -19,9 +19,9 @@ function storageRoot(): string {
 }
 
 /**
- * Managed audio lives in a private Cloudflare R2 bucket. R2 speaks the S3 API,
- * so the existing AWS SDK keeps the worker and web process on one storage
- * path. Legacy S3 variables remain supported for self-hosted installations.
+ * Managed audio is private, temporary processing staging; workers delete it
+ * after success and the expiry sweep removes abandoned/failed uploads.
+ * Cloudflare R2 is supported through its S3 API, as are existing S3 buckets.
  * With neither configured, local installs keep their filesystem backend.
  */
 function objectBackend(): ObjectBackend | null {

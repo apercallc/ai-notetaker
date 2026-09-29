@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "./db";
 import { releaseMeetingProcessing } from "./usageLedger";
-import { chunksToReadableStream, expireManagedMeetings, expireManagedUploads, readChunksSequentially } from "./managedJobs";
+import { chunksToReadableStream, deleteManagedUploadAudio, expireManagedMeetings, expireManagedUploads, readChunksSequentially } from "./managedJobs";
 
 export class ManagedWorkerError extends Error {}
 
@@ -515,6 +515,15 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
       if (summary?.actionItems.length) {
         await tx.actionItem.createMany({ data: summary.actionItems.map((item) => ({ meetingId: job.meetingId, userId: job.meeting.userId, text: item.text, owner: item.owner ?? null, dueAt: item.dueAt ?? null })) });
       }
+    });
+    // The hosted library keeps text notes only. Remove the staged recording as
+    // soon as the provider result and transcript have committed successfully.
+    await deleteManagedUploadAudio(job.uploadId).catch((error: unknown) => {
+      console.error("completed managed job audio cleanup failed", {
+        jobId: job.id,
+        workspaceId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
     if (!hasSpeech) {
       // A recording with no speech produced nothing of value, so it does not

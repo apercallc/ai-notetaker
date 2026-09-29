@@ -181,7 +181,7 @@ function renderError(ctx: TemplateContext): string {
 
 function startingCopy(state: WidgetState | null): string {
   return state?.processingKind === "managed"
-    ? "Audio is saved on this device first. When you stop, it is uploaded to Hosted AI to write your notes."
+    ? "Audio is saved on this device first, then uploaded to Hosted AI. The service deletes its temporary copy when your notes are ready."
     : "Audio is saved on this device first. When you stop, it is sent to your transcription and summary providers, using your own API keys, to write your notes.";
 }
 

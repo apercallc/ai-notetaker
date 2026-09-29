@@ -64,8 +64,6 @@ export interface MeetingDetailResponse {
   endedAt: string;
   summary: string;
   mode: MeetingMode;
-  recordingAvailable: boolean;
-  recordingChannels: ("mic" | "speaker")[];
   transcript: { speaker: string; text: string; timestamp: string }[];
   actionItems: {
     id: string;

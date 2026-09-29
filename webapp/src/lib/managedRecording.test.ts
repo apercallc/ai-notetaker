@@ -2,7 +2,6 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "./db";
 import { deleteMeeting, upsertMeeting } from "./meetings";
 import { chunkObjectKey, deleteObject, getObject, putObject } from "./objectStorage";
-import { readManagedRecording } from "./managedJobs";
 
 const WORKSPACE_ID = "77777777-0000-0000-0000-000000000007";
 const MEETING_ID = "88888888-0000-0000-0000-000000000008";
@@ -54,16 +53,7 @@ describe("managed recording object keys", () => {
     expect(first).not.toBe(chunkObjectKey("workspace", "upload", 1, "checksum"));
   });
 
-  it("reads only the requested workspace meeting channel", async () => {
-    await expect(readManagedRecording(WORKSPACE_ID, MEETING_ID, "mic")).resolves.toEqual({
-      title: "Recording fixture",
-      bytes: new Uint8Array([1, 2, 3, 4]),
-    });
-    await expect(readManagedRecording(WORKSPACE_ID, MEETING_ID, "speaker")).resolves.toBeNull();
-    await expect(readManagedRecording("aaaaaaaa-0000-0000-0000-000000000010", MEETING_ID, "mic")).resolves.toBeNull();
-  });
-
-  it("deletes the meeting rows and every managed audio object", async () => {
+  it("deletes meeting rows and any remaining temporary managed audio object", async () => {
     await deleteMeeting(WORKSPACE_ID, MEETING_ID);
 
     await expect(prisma.meeting.findUnique({ where: { id: MEETING_ID } })).resolves.toBeNull();

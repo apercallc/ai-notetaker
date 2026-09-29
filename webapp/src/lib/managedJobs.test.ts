@@ -4,13 +4,12 @@ import { prisma } from "./db";
 import {
   completeManagedUpload,
   createManagedUpload,
+  deleteManagedUploadAudio,
   expireManagedMeetings,
   expireManagedUploads,
   getUpload,
   MANAGED_UPLOAD_TTL_MS,
   ManagedValidationError,
-  chunksToReadableStream,
-  openManagedRecording,
   readChunksSequentially,
   readManagedBytes,
   readManagedJson,
@@ -19,7 +18,6 @@ import {
   MAX_UPLOAD_CHUNKS,
   MAX_PENDING_MANAGED_UPLOADS,
   MAX_PENDING_MANAGED_UPLOAD_BYTES,
-  MAX_RETAINED_MANAGED_AUDIO_BYTES,
 } from "./managedJobs";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
 import { chunkObjectKey, getObject, putObject } from "./objectStorage";
@@ -150,14 +148,16 @@ describe("managed upload contracts", () => {
       totalChunks: 1,
       totalBytes: 1,
       idempotencyKey: `pending-count-extra-${extraMeeting}`,
-    })).rejects.toThrow("too many pending uploads");
+    })).rejects.toThrow("too much temporary audio processing in progress");
 
-    // A completed upload no longer consumes pending capacity.
+    // Once staged bytes have been purged, the completed note manifest no
+    // longer consumes temporary audio capacity.
     await prisma.uploadChunk.create({ data: {
       uploadId: manifests[0].id, chunkIndex: 0, channel: "mic", byteLength: 1,
       checksum: "capacity-release", objectKey: "capacity-release",
     } });
     await completeManagedUpload(WORKSPACE_ID, manifests[0].id);
+    await prisma.uploadChunk.deleteMany({ where: { uploadId: manifests[0].id } });
     const afterCompleteMeeting = await createMeeting(WORKSPACE_ID);
     await expect(createManagedUpload(WORKSPACE_ID, {
       meetingId: afterCompleteMeeting,
@@ -180,7 +180,7 @@ describe("managed upload contracts", () => {
       totalChunks: 1,
       totalBytes: MAX_PENDING_MANAGED_UPLOAD_BYTES - 1_100_000_000 + 1,
       idempotencyKey: `pending-bytes-overflow-${overflowMeeting}`,
-    })).rejects.toThrow("pending upload storage limit exceeded");
+    })).rejects.toThrow("temporary audio staging limit exceeded");
   });
 
   it("does not oversubscribe pending workspace capacity under concurrent starts", async () => {
@@ -197,7 +197,7 @@ describe("managed upload contracts", () => {
       .toBe(MAX_PENDING_MANAGED_UPLOADS);
   });
 
-  it("counts completed recordings toward retained capacity until workspace retention deletes them", async () => {
+  it("does not reserve completed audio as long-term workspace storage", async () => {
     const completedBytes = 1_900_000_000;
     const oldEndedAt = new Date("2026-09-20T15:30:00.000Z");
     const completedMeetingIds: string[] = [];
@@ -222,10 +222,9 @@ describe("managed upload contracts", () => {
         objectKey: `retained-cap/${WORKSPACE_ID}/${index}`,
       } });
       await completeManagedUpload(WORKSPACE_ID, upload.id);
+      await prisma.uploadChunk.deleteMany({ where: { uploadId: upload.id } });
     }
 
-    expect(completedBytes * 2).toBeLessThan(MAX_RETAINED_MANAGED_AUDIO_BYTES);
-    expect(completedBytes * 2 + 1_300_000_001).toBeGreaterThan(MAX_RETAINED_MANAGED_AUDIO_BYTES);
     const newMeeting = await createMeeting(WORKSPACE_ID);
     await prisma.meeting.update({ where: { id: newMeeting }, data: { endedAt: new Date("2026-09-29T15:00:00.000Z") } });
     const newManifest = {
@@ -234,10 +233,9 @@ describe("managed upload contracts", () => {
       totalBytes: 1_300_000_001,
       idempotencyKey: `retained-cap-after-cleanup-${newMeeting}`,
     };
-    await expect(createManagedUpload(WORKSPACE_ID, newManifest)).rejects.toThrow("retained audio storage limit exceeded");
+    await expect(createManagedUpload(WORKSPACE_ID, newManifest)).resolves.toMatchObject({ status: "created" });
 
-    // The retention cleanup removes the meeting, its completed upload rows,
-    // and their chunks, which releases both recorded and manifest-reserved bytes.
+    // Meeting-history retention remains independent from audio staging.
     await expect(expireManagedMeetings(new Date("2026-09-29T15:30:00.000Z"))).resolves.toBeGreaterThanOrEqual(2);
     expect(await prisma.meeting.count({ where: { id: { in: completedMeetingIds } } })).toBe(0);
     expect(await prisma.managedUpload.count({ where: { meetingId: { in: completedMeetingIds } } })).toBe(0);
@@ -307,6 +305,57 @@ describe("managed upload contracts", () => {
     await expect(getObject(objectKey)).rejects.toThrow();
   });
 
+  it("purges audio after success but preserves its workspace job manifest", async () => {
+    const meetingId = await createMeeting(WORKSPACE_ID);
+    const upload = await createManagedUpload(WORKSPACE_ID, {
+      meetingId,
+      totalChunks: 1,
+      totalBytes: 2,
+      idempotencyKey: `processed-${meetingId}`,
+    });
+    const objectKey = chunkObjectKey(WORKSPACE_ID, upload.id, 0, "processed-audio");
+    await putObject(objectKey, new Uint8Array([7, 8]));
+    await prisma.uploadChunk.create({
+      data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 2, checksum: "processed-audio", objectKey },
+    });
+    await completeManagedUpload(WORKSPACE_ID, upload.id);
+    const job = await prisma.processingJob.create({
+      data: { workspaceId: WORKSPACE_ID, meetingId, uploadId: upload.id, idempotencyKey: `job-${meetingId}`, status: "complete" },
+    });
+
+    await expect(deleteManagedUploadAudio(upload.id)).resolves.toBe(true);
+    await expect(getObject(objectKey)).rejects.toThrow();
+    expect(await prisma.uploadChunk.count({ where: { uploadId: upload.id } })).toBe(0);
+    expect(await prisma.processingJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "complete" });
+    expect(await prisma.managedUpload.findUnique({ where: { id: upload.id } })).toMatchObject({ status: "complete" });
+  });
+
+  it("expires failed-job audio after 24 hours while keeping the text meeting and job record", async () => {
+    const meetingId = await createMeeting(WORKSPACE_ID);
+    const upload = await createManagedUpload(WORKSPACE_ID, {
+      meetingId,
+      totalChunks: 1,
+      totalBytes: 2,
+      idempotencyKey: `failed-expiry-${meetingId}`,
+    });
+    const objectKey = chunkObjectKey(WORKSPACE_ID, upload.id, 0, "failed-audio");
+    await putObject(objectKey, new Uint8Array([1, 2]));
+    await prisma.uploadChunk.create({
+      data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 2, checksum: "failed-audio", objectKey },
+    });
+    await prisma.managedUpload.update({ where: { id: upload.id }, data: { status: "complete", expiresAt: new Date(Date.now() - 1) } });
+    const job = await prisma.processingJob.create({
+      data: { workspaceId: WORKSPACE_ID, meetingId, uploadId: upload.id, idempotencyKey: `failed-job-${meetingId}`, status: "error" },
+    });
+
+    await expect(expireManagedUploads()).resolves.toBe(1);
+    await expect(getObject(objectKey)).rejects.toThrow();
+    expect(await prisma.uploadChunk.count({ where: { uploadId: upload.id } })).toBe(0);
+    expect(await prisma.managedUpload.findUnique({ where: { id: upload.id } })).toMatchObject({ status: "expired" });
+    expect(await prisma.processingJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "error" });
+    expect(await prisma.meeting.findUnique({ where: { id: meetingId } })).not.toBeNull();
+  });
+
   it("retains expired uploads when object deletion fails and retries them on the next cleanup pass", async () => {
     const meetingId = await createMeeting(WORKSPACE_ID);
     const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `bad-cleanup-${meetingId}` });
@@ -317,7 +366,7 @@ describe("managed upload contracts", () => {
       .rejects.toThrow("expired upload cleanup is still in progress");
     await expect(expireManagedUploads()).resolves.toBe(0);
     expect(await prisma.managedUpload.findUnique({ where: { id: upload.id } })).toMatchObject({ status: "expired" });
-    expect(log).toHaveBeenCalledWith("managed upload expiry cleanup failed", expect.objectContaining({ uploadId: upload.id, failures: 1 }));
+    expect(log).toHaveBeenCalledWith("managed temporary audio cleanup failed", expect.objectContaining({ uploadId: upload.id, failures: 1 }));
     log.mockRestore();
   });
 
@@ -455,36 +504,7 @@ describe("managed processing job queue", () => {
   });
 });
 
-describe("streaming recording reads", () => {
-  async function createStreamedRecording(workspaceId: string): Promise<string> {
-    const meetingId = await createMeeting(workspaceId);
-    const uploadId = randomUUID();
-    const keys = [0, 1].map((index) => `uploads/${workspaceId}/${uploadId}/${index}-stream.chunk`);
-    await putObject(keys[0], new Uint8Array([1, 2, 3, 4]));
-    await putObject(keys[1], new Uint8Array([5, 6]));
-    await prisma.managedUpload.create({
-      data: {
-        id: uploadId,
-        workspaceId,
-        meetingId,
-        idempotencyKey: `stream-${meetingId}`,
-        totalChunks: 3,
-        totalBytes: 8,
-        status: "complete",
-        expiresAt: new Date("2026-12-31T00:00:00.000Z"),
-        completedAt: new Date(),
-        chunks: {
-          create: [
-            { chunkIndex: 0, channel: "mic", byteLength: 4, checksum: "stream-0", objectKey: keys[0] },
-            { chunkIndex: 1, channel: "mic", byteLength: 2, checksum: "stream-1", objectKey: keys[1] },
-            { chunkIndex: 2, channel: "speaker", byteLength: 2, checksum: "stream-2", objectKey: `${uploadId}-speaker` },
-          ],
-        },
-      },
-    });
-    return meetingId;
-  }
-
+describe("temporary audio streaming", () => {
   it("yields stored objects one at a time, in order", async () => {
     const keys = ["stream-a", "stream-b"];
     await putObject("stream-a", new Uint8Array([10, 11]));
@@ -492,38 +512,5 @@ describe("streaming recording reads", () => {
     const parts: Uint8Array[] = [];
     for await (const part of readChunksSequentially(keys)) parts.push(part);
     expect(parts.map((part) => Array.from(part))).toEqual([[10, 11], [12]]);
-  });
-
-  it("streams a recording chunk by chunk without loading it into memory", async () => {
-    const meetingId = await createStreamedRecording(WORKSPACE_ID);
-    const recording = await openManagedRecording(WORKSPACE_ID, meetingId, "mic");
-    expect(recording).toMatchObject({ title: "Managed test meeting", totalBytes: 6 });
-
-    const parts: Uint8Array[] = [];
-    for await (const part of recording!.chunks) parts.push(part);
-    const bytes = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
-    let offset = 0;
-    for (const part of parts) {
-      bytes.set(part, offset);
-      offset += part.byteLength;
-    }
-    expect(Array.from(bytes)).toEqual([1, 2, 3, 4, 5, 6]);
-
-    // Another workspace can never open this recording.
-    await expect(openManagedRecording(OTHER_WORKSPACE_ID, meetingId, "mic")).resolves.toBeNull();
-    // No completed upload for the meeting at all.
-    await expect(openManagedRecording(WORKSPACE_ID, randomUUID(), "mic")).resolves.toBeNull();
-  });
-
-  it("wraps the chunks as a ReadableStream response body and supports cancellation", async () => {
-    const meetingId = await createStreamedRecording(WORKSPACE_ID);
-    const response = new Response((await openManagedRecording(WORKSPACE_ID, meetingId, "mic"))!.stream());
-    expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([1, 2, 3, 4, 5, 6]);
-
-    const stream = chunksToReadableStream(readChunksSequentially(["stream-a", "stream-b"]));
-    const reader = stream.getReader();
-    expect(Array.from((await reader.read()).value!)).toEqual([10, 11]);
-    await reader.cancel();
-    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
   });
 });

@@ -141,7 +141,7 @@ describe("managed upload routes", () => {
       body: JSON.stringify({ meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `over-quota-${meetingId}` }),
     }));
     expect(rejected.status).toBe(429);
-    expect(await rejected.json()).toMatchObject({ error: "workspace has too many pending uploads; finish or retry cleanup before starting another" });
+    expect(await rejected.json()).toMatchObject({ error: "workspace has too much temporary audio processing in progress; wait for a job or cleanup to finish before starting another" });
   });
 
   it("applies the shared database login throttle to extension/API sign-in", async () => {

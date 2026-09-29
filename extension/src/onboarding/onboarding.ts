@@ -221,10 +221,10 @@ function renderManagedSection(): string {
   const managed = settings.processingMode.kind === "managed" && settings.managedService;
   if (managed) {
     return `<div class="callout"><strong>Hosted AI is connected.</strong><p class="text-secondary">Workspace ${escapeHtml(managed.workspaceId)} · plan ${escapeHtml(managed.plan)}</p></div>
-      <p class="text-secondary">Your recording is still saved on this device first, then uploaded when you stop.</p>`;
+      <p class="text-secondary">Audio is saved on this device first, then uploaded for processing. The service deletes it when notes are ready; failed uploads are cleared by the 24-hour cleanup. Your transcript and notes are saved to this workspace.</p>`;
   }
   return `
-    <p class="text-secondary">Hosted AI writes your notes on the service, so you do not need provider keys. Your recording is saved on this device first, then uploaded when you stop.</p>
+    <p class="text-secondary">Hosted AI writes your notes on the service, so you do not need provider keys. Audio is saved on this device first, then uploaded for processing. The service deletes it when notes are ready; failed uploads are cleared by the 24-hour cleanup. Your transcript and notes are saved to this workspace.</p>
     <div class="field"><label for="onboarding-managed-url">Hosted service URL</label><input type="url" id="onboarding-managed-url" placeholder="https://notes.example.com" autocomplete="url" value="${escapeHtml(managedDraft.url)}" /></div>
     <div class="field"><label for="onboarding-managed-email">Account email</label><input type="email" id="onboarding-managed-email" autocomplete="username" value="${escapeHtml(managedDraft.email)}" /></div>
     <div class="field"><label for="onboarding-managed-password">Account password</label><input type="password" id="onboarding-managed-password" autocomplete="current-password" /></div>

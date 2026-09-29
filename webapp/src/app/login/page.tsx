@@ -100,9 +100,11 @@ function Consent() {
       <details className="muted-copy">
         <summary>What am I agreeing to?</summary>
         <p>
-          Your meeting audio, transcripts and summaries are stored in your workspace and processed by AI providers to
-          produce notes. Only members of your workspace can see them; you can export or delete everything at any time
-          from Account. You are responsible for lawful use, including consent to record other participants.
+          Your audio is saved on your device first, uploaded to private temporary staging, and sent to our transcription
+          and AI providers to produce notes. Our service deletes its audio after processing succeeds; the worker clears
+          failed or abandoned uploads at the 24-hour expiry. Your transcript, summary, and action items are saved in
+          your workspace under its retention policy; only workspace members can see them. Provider handling follows
+          each provider&apos;s terms. You are responsible for lawful use, including consent to record others.
         </p>
       </details>
     </div>

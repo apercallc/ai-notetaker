@@ -340,7 +340,7 @@ describe("deleteMeeting", () => {
     await expect(deleteMeeting(WORKSPACE_ID, "does-not-exist")).resolves.not.toThrow();
   });
 
-  it("removes managed recording objects when the meeting is deleted", async () => {
+  it("removes any remaining temporary audio objects when the meeting is deleted", async () => {
     const input = sampleMeeting();
     await upsertMeeting(input, WORKSPACE_ID);
     const objectKey = `test-delete/${input.id}.chunk`;

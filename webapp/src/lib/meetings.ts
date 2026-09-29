@@ -392,7 +392,6 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     include: {
       transcript: { orderBy: { order: "asc" } },
       actionItems: true,
-      uploads: { where: { status: "complete" }, select: { chunks: { select: { channel: true } } } },
       processingJobs: LATEST_JOB,
     },
   });
@@ -406,8 +405,6 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     summary: row.summary,
     mode: row.mode as MeetingMode,
     processing: toProcessingState(row.processingJobs),
-    recordingAvailable: Boolean(row.recordingObjectKey) || row.uploads.some((upload) => upload.chunks.length > 0),
-    recordingChannels: [...new Set(row.uploads.flatMap((upload) => upload.chunks.map((chunk) => chunk.channel)).filter((channel): channel is "mic" | "speaker" => channel === "mic" || channel === "speaker"))],
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,

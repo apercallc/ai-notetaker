@@ -50,7 +50,7 @@ Add `--profile managed` to both commands when running hosted processing.
 
 The entrypoint applies pending Prisma migrations before the server starts.
 Back up the Postgres volume before upgrades. The registry Compose file passes
-the managed worker, provider, Stripe, and Cloudflare R2 variables from `.env`;
+the managed worker, provider, Stripe, and private temporary-storage variables from `.env`;
 leave managed variables blank for a local/BYOK-only deployment.
 
 Managed API CORS is restricted to the fixed Chrome extension origin by
@@ -108,8 +108,8 @@ the Postgres volume and all stored meeting history.
 3. Set `AUTH_TOKEN` — a long random string. Generate one with `openssl rand
    -hex 32`. This is the token for self-hosted extension sync.
 4. For project-operated multi-tenant hosting, also set `MANAGED_HOSTING=true`
-   and configure the managed worker/provider, private Cloudflare R2 object
-   storage, and Stripe secrets from `.env.example`; hosted visitors can then
+   and configure the managed worker/provider, private R2 or S3-compatible
+   temporary audio staging, and Stripe secrets from `.env.example`; hosted visitors can then
    create isolated workspaces from `/login`. Leave it `false` for the
    one-workspace self-hosted flow. See
    [`docs/hosted-deployment.md`](../docs/hosted-deployment.md) for the
@@ -195,8 +195,8 @@ parallel would let one file's cleanup race another's assertions.
   mode the worker calls the configured Deepgram/Anthropic providers using
   server-side secrets after an authenticated, checksummed upload. Provider
   requests have bounded cancellation and transient retry behavior. Managed
-  audio uploads use a private Cloudflare R2 bucket; legacy `S3_*` settings stay
-  supported for existing self-hosted installs. Single-node self-hosted/Docker
+  audio uploads use private temporary R2 or S3-compatible staging and are
+  deleted after processing or within 24 hours. Single-node self-hosted/Docker
   deployments can use the local filesystem backend.
 - The authenticated `/actions` page is a cross-meeting action-item inbox. It
   supports open/completed filtering, completion toggles, and due dates, while
@@ -222,6 +222,6 @@ Not verified in this build (needs a real deploy to confirm):
   fresh Postgres addon wasn't exercised here.
 - Behavior under real concurrent multi-request load (all testing here was
   single-session, sequential).
-- A live Cloudflare R2 bucket has not been exercised in this workspace; set
-  `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and
-  `R2_SECRET_ACCESS_KEY` before enabling managed hosting.
+- A live R2 bucket has not been exercised in this workspace; managed mode can
+  use either R2 or an existing private S3-compatible bucket for temporary
+  processing staging.

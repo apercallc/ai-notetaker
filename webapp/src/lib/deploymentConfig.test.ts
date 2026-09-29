@@ -61,10 +61,13 @@ describe("managed deployment configuration", () => {
 });
 
 describe("managed URL configuration", () => {
-  it("requires R2 storage and credentials before a managed deployment is ready", () => {
+  it("accepts existing private S3 staging without requiring R2", () => {
     const status = managedConfigurationStatus({
       MANAGED_HOSTING: "true",
       APP_URL: "https://notes.example.com",
+      S3_BUCKET: "private-temporary-audio",
+      S3_ACCESS_KEY_ID: "s3-access-key",
+      S3_SECRET_ACCESS_KEY: "s3-secret-key",
       MANAGED_WORKER_TOKEN: "worker-token",
       MANAGED_DEEPGRAM_API_KEY: "deepgram-key",
       MANAGED_ANTHROPIC_API_KEY: "anthropic-key",
@@ -73,11 +76,13 @@ describe("managed URL configuration", () => {
       STRIPE_PRICE_HOSTED_PRO: "price-pro",
       STRIPE_PRICE_HOSTED_TEAM: "price-team",
     });
+    expect(status).toEqual({ enabled: true, ready: true, objectStorage: "s3", missing: [] });
+  });
+
+  it("requires a private shared bucket for temporary managed audio staging", () => {
+    const status = managedConfigurationStatus({ ...completeManagedEnv, R2_BUCKET: "", S3_BUCKET: "" });
     expect(status.ready).toBe(false);
-    expect(status.missing).toContain("R2_BUCKET");
-    expect(status.missing).toContain("R2_ACCOUNT_ID");
-    expect(status.missing).toContain("R2_ACCESS_KEY_ID");
-    expect(status.missing).toContain("R2_SECRET_ACCESS_KEY");
+    expect(status.missing).toContain("S3_BUCKET or R2_BUCKET");
   });
 
   it("fails fast when managed mode has no valid APP_URL", () => {

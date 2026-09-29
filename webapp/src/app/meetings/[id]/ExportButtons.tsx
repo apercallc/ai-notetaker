@@ -74,12 +74,6 @@ export function ExportButtons({ meeting }: { meeting: MeetingDetailResponse }) {
       <button type="button" className="button button-secondary" onClick={() => window.print()}>
         Print / Save PDF
       </button>
-      {meeting.recordingAvailable && meeting.recordingChannels.includes("mic") && (
-        <a className="button button-secondary" href={`/meetings/${encodeURIComponent(meeting.id)}/recording?channel=mic&download=1`}>Download mic WAV</a>
-      )}
-      {meeting.recordingAvailable && meeting.recordingChannels.includes("speaker") && (
-        <a className="button button-secondary" href={`/meetings/${encodeURIComponent(meeting.id)}/recording?channel=speaker&download=1`}>Download speaker WAV</a>
-      )}
     </div>
   );
 }

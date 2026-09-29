@@ -38,15 +38,16 @@ readiness diagnostics:
   "ok": true,
   "mode": "managed",
   "managedReady": true,
-  "objectStorage": "r2"
+  "objectStorage": "s3"
 }
 ```
 
 `managedReady: false` means one or more required worker, provider, Stripe,
-application URL, or Cloudflare R2 settings are missing. It never includes
-secret values. The filesystem object backend is valid for local or single-node
-self-hosted deployments; managed production should report
-`objectStorage: "r2"`.
+application URL, or shared private R2/S3 staging settings are missing. It never
+includes secret values. The filesystem object backend is valid for local or
+single-node self-hosted deployments; managed production must report `r2` or
+`s3`. Audio objects are deleted after successful processing or expire within
+24 hours; hosted meeting APIs expose text notes, not recordings.
 
 Managed `/api/v1/*` requests from the extension are CORS-allowed only for the
 fixed Chrome extension origin (`chrome-extension://jidooookkdbbbhkkdmcajnnnhhphodok`)
@@ -101,9 +102,8 @@ The authenticated browser meeting page can create expiring, workspace-scoped
 share capabilities. Share links are served at `/share/:token`; the token is
 stored only as a SHA-256 hash, and the read-only page exposes meeting notes
 without requiring the recipient to have an account. The owner/workspace can
-revoke a link before its expiry. Managed meetings also expose separate
-authenticated mic and speaker WAV downloads at
-`/meetings/:meetingId/recording?channel=mic|speaker`.
+revoke a link before its expiry. Share links contain notes only and never
+expose the temporary audio used during processing.
 
 ### `POST /api/meetings`
 

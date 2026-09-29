@@ -22,11 +22,20 @@ export async function retryMeetingProcessing(workspaceId: string, meetingId: str
   const job = await prisma.processingJob.findFirst({
     where: { workspaceId, meetingId },
     orderBy: { createdAt: "desc" },
-    select: { id: true, uploadId: true, idempotencyKey: true, status: true },
+    select: {
+      id: true,
+      uploadId: true,
+      idempotencyKey: true,
+      status: true,
+      upload: { select: { status: true, expiresAt: true } },
+    },
   });
   if (!job) return { ok: false, error: "There's no hosted processing to retry for this meeting." };
   if (job.status === "queued" || job.status === "processing") return { ok: true };
   if (job.status !== "error") return { ok: false, error: "This meeting was already processed." };
+  if (job.upload.status === "expired" || job.upload.expiresAt.getTime() <= Date.now()) {
+    return { ok: false, error: "The temporary upload expired. Retry from the extension or desktop helper while its local recording is still available." };
+  }
 
   try {
     const revived = await enqueueManagedJob(workspaceId, meetingId, job.uploadId, job.idempotencyKey);

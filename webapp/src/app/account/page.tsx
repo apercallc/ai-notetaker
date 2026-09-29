@@ -105,10 +105,11 @@ export default async function AccountPage({
 
       <h2 className="section-title">Privacy</h2>
       <p className="muted-copy">
-        Workspace members can access your notes; shared links grant access until revoked or expired. Audio recordings are kept while the meeting
-        history is{" "}
+        Workspace members can access your notes; shared links grant access until revoked or expired. Hosted AI uses uploaded audio only for processing:
+        it is deleted after successful processing; the worker clears failed or abandoned uploads at the 24-hour expiry. Audio is not available in the hosted library.
+        Meeting notes and transcripts are{" "}
         {workspace.retentionDays === null
-          ? "retained indefinitely; export or delete below to control that yourself."
+          ? "retained until you delete them or the workspace."
           : `limited to ${workspace.retentionDays} day${workspace.retentionDays === 1 ? "" : "s"} by your retention policy.`}{" "}
         Deleting a meeting or the workspace removes it permanently.
       </p>

@@ -6,7 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { enqueueManagedJob } from "./managedJobs";
 import { prisma } from "./db";
 import { getEntitlements } from "./usageLedger";
-import { putObject } from "./objectStorage";
+import { getObject, putObject } from "./objectStorage";
 import {
   DEFAULT_MANAGED_SUMMARY_MODEL,
   MANAGED_JOB_LEASE_MS,
@@ -269,13 +269,14 @@ describe("managed worker pipeline", () => {
   let storageDir: string;
   let workspaceId: string;
   let meetingId: string;
+  let uploadId: string;
   let jobId: string;
   const saved: Record<string, string | undefined> = {};
 
   async function setup(options: { title?: string; channels?: ("mic" | "speaker")[] } = {}) {
     workspaceId = randomUUID();
     meetingId = randomUUID();
-    const uploadId = randomUUID();
+    uploadId = randomUUID();
     storageDir = await mkdtemp(path.join(os.tmpdir(), "ai-notetaker-managed-pipeline-"));
     for (const name of ["OBJECT_STORAGE_DIR", "MANAGED_DEEPGRAM_API_KEY", "MANAGED_ANTHROPIC_API_KEY", "MANAGED_SUMMARY_MODEL"]) saved[name] = process.env[name];
     process.env.OBJECT_STORAGE_DIR = storageDir;
@@ -376,6 +377,9 @@ describe("managed worker pipeline", () => {
     // 129s of audio across both channels + 1000 input / 200 output tokens.
     expect(job.providerCostMicros).toBeGreaterThan(2_000 + 2_000);
     expect((await getEntitlements(workspaceId)).used).toBe(1);
+    expect(await prisma.uploadChunk.count({ where: { uploadId } })).toBe(0);
+    await expect(getObject(`uploads/${workspaceId}/${uploadId}/0-pipeline-mic.chunk`)).rejects.toThrow();
+    await expect(getObject(`uploads/${workspaceId}/${uploadId}/1-pipeline-speaker.chunk`)).rejects.toThrow();
   });
 
   it("keeps a title the user chose", async () => {

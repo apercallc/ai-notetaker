@@ -15,7 +15,6 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { CopyButton } from "@/components/CopyButton";
 import { LocalTime } from "@/components/LocalTime";
 import { ProcessingBadge, failureReason } from "@/components/ProcessingBadge";
-import { RecordingPlayer } from "@/components/RecordingPlayer";
 import { RetryProcessing } from "@/components/RetryProcessing";
 import { DeleteButton } from "./DeleteButton";
 import { ExportButtons } from "./ExportButtons";
@@ -44,7 +43,6 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   const mode = modeLabel(meeting.mode);
   const processing = meeting.processing;
   const inFlight = processing?.status === "processing";
-  const hasRecording = meeting.recordingChannels.length > 0;
 
   return (
     <div className="container">
@@ -111,13 +109,6 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
               />
             ))}
           </ul>
-        </section>
-      )}
-
-      {hasRecording && (
-        <section aria-labelledby="recording-heading">
-          <h2 id="recording-heading" className="section-title">Recording</h2>
-          <RecordingPlayer meetingId={meeting.id} channels={meeting.recordingChannels} />
         </section>
       )}
 

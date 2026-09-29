@@ -99,7 +99,7 @@ describe("bootstrap", () => {
 describe("managed signup", () => {
   it("creates a separate tenant owner when managed hosting is enabled", async () => {
     process.env.MANAGED_HOSTING = "true";
-    for (const name of ["R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MANAGED_WORKER_TOKEN", "MANAGED_DEEPGRAM_API_KEY", "MANAGED_ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_HOSTED_PRO", "STRIPE_PRICE_HOSTED_TEAM"]) vi.stubEnv(name, "test-only");
+    for (const name of ["S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "MANAGED_WORKER_TOKEN", "MANAGED_DEEPGRAM_API_KEY", "MANAGED_ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_HOSTED_PRO", "STRIPE_PRICE_HOSTED_TEAM"]) vi.stubEnv(name, "test-only");
     vi.stubEnv("APP_URL", "http://localhost:3000");
     vi.stubEnv("ALLOW_UNVERIFIED_SIGNUP", "true");
     await expect(

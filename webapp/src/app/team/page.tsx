@@ -71,7 +71,7 @@ export default async function TeamPage() {
         <>
           <h2 className="section-title">Hosted retention</h2>
           <p className="muted-copy">
-            Set how long managed meeting history should remain on the hosted service. The worker applies this policy asynchronously.
+            Set how long hosted meeting notes and transcripts remain. Uploaded audio is temporary processing data and is deleted after success or at its 24-hour expiry.
           </p>
           <RetentionPolicyForm retentionDays={workspace.retentionDays} />
         </>

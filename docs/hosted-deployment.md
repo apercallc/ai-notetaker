@@ -2,18 +2,19 @@
 
 This runbook is for the optional project-operated managed service. Free local
 BYOK remains the default and does not require an account or this deployment.
-The hosted service owns provider credentials, usage limits, private meeting
-objects, processing jobs, and billing; the helper still saves raw audio locally
-before uploading it.
+The hosted service owns provider credentials, usage limits, meeting notes,
+processing jobs, and billing; the helper still saves raw audio locally before
+uploading it for processing. Hosted audio is temporary staging only.
 
 ## Required services
 
 - Next.js webapp with a persistent Postgres database.
-- A private Cloudflare R2 bucket for all managed audio chunks. Set
-  `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and
-  `R2_SECRET_ACCESS_KEY` on the webapp service. The credentials must have
-  Object Read & Write access to the private bucket. `R2_ENDPOINT` is optional
-  and only needed for a jurisdiction-specific endpoint.
+- A shared private S3-compatible bucket for short-lived managed audio staging.
+  Cloudflare R2 and existing S3 buckets are supported. Configure either the
+  `R2_*` variables or `S3_*` variables on both webapp and worker. Grant only
+  object read/write/delete access; do not enable public access or versioning.
+  Workers delete audio immediately after successful processing and cleanup
+  expires failed/abandoned uploads after 24 hours.
 - A durable managed worker. The source and registry Compose files ship a
   first-party worker under the `managed` profile; start it with
   `docker compose --profile managed up -d --build`. It polls
@@ -31,19 +32,19 @@ before uploading it.
   The webapp service runs migrations before serving, and the worker starts
   polling after the webapp health check is available.
 - The released registry Compose file passes the same worker, provider, billing,
-  and R2 variables as the source Compose file; do not assume the image alone
+  and private temporary-storage variables as the source Compose file; do not assume the image alone
   carries deployment secrets.
 - Deepgram and Anthropic server-side keys, plus Stripe secret/webhook/price
   configuration when paid plans are enabled.
 
 The filesystem object backend remains available for local or self-hosted
-deployments when no bucket is configured. Existing self-hosted `S3_*` settings
-remain supported. Managed production requires Cloudflare R2 and does not fall
-back to local disk. The storage layer applies equally to audio chunks uploaded
-from meetings and recordings streamed back to workspace members. It
-is suitable for a single-node self-hosted or Docker deployment with the
-`ai-notetaker-objects` volume; it is not a substitute for a shared bucket in a
-multi-instance hosted deployment.
+deployments when no bucket is configured. Managed production requires a shared
+private R2 or S3 bucket and does not fall back to local disk. Bucket contents
+are processing staging, never hosted recordings: successful jobs purge audio
+immediately, and the worker expires failed/abandoned audio within 24 hours.
+The filesystem backend is suitable for a single-node self-hosted or Docker
+deployment with the `ai-notetaker-objects` volume; it is not a substitute for
+a shared bucket in a multi-instance hosted deployment.
 
 ## Environment and security
 
@@ -53,9 +54,10 @@ Start from `webapp/.env.example`. Generate long random values for
 controlled fork changes the manifest key. The managed API allows CORS only
 from that origin (and same-origin browser requests), never `*`. Never put
 provider or Stripe secrets in extension settings, browser bundles, meeting
-records, or client-visible configuration. Keep the bucket private and grant
-the webapp only object read/write/delete permissions for its configured
-prefix.
+records, or client-visible configuration. Keep the bucket private, disable
+versioning, and grant the webapp/worker only object read/write/delete
+permissions for its configured prefix. Do not back up or replicate temporary
+recording objects.
 
 The managed API uses the per-user session returned by `/api/v1/auth/login`.
 The legacy `/api/*` sync API remains `AUTH_TOKEN`-protected for self-hosted
@@ -66,8 +68,8 @@ web replicas and survives a deployment.
 
 ## First deployment checklist
 
-1. Provision Postgres and a private Cloudflare R2 bucket, then create an R2 API
-   token scoped to that bucket with Object Read & Write permissions.
+1. Provision Postgres and a shared private R2 or S3-compatible bucket scoped to
+   short-lived processing objects.
 2. Configure the environment variables and deploy the webapp plus the managed
    worker profile. With Compose, run
    `docker compose --profile managed up -d`; the entrypoint applies migrations
@@ -79,23 +81,27 @@ web replicas and survives a deployment.
    is incomplete and must not be treated as a release-ready service.
 4. Create a managed account, sign in through the extension, and verify the
    returned workspace ID is unique to that account.
-5. Set the workspace retention policy from Team settings and verify the worker
-   removes an expired meeting, its shares, and private recording objects.
+5. Set the workspace note-retention policy from Team settings and verify the
+   worker removes expired notes and shares. Audio must be purged after job
+   success and after the 24-hour staging window, independent of note retention.
 6. Upload a short two-channel fixture; verify checksums, the 24-hour abandoned
    upload expiry/restart behavior, job completion,
-   transcript/summary persistence, separate mic/speaker recording reads, and
-   bounded provider retry behavior for transient failures.
+   transcript/summary persistence, successful audio-object deletion, abandoned
+   upload cleanup, and bounded provider retry behavior for transient failures.
 7. Exercise Stripe test checkout, portal, webhook replay, cancellation, and
    payment-failure grace expiry before enabling paid production prices.
 8. Delete the meeting and verify the database rows and every private object
-   are removed. Review logs for orphan cleanup failures.
+   are removed. Any leftover temporary object is also deleted. Review logs for
+   orphan cleanup failures.
 9. Run the OS/browser acceptance checklist in `TODO.md` and record real
    Chrome/Meet, Native Messaging, microphone, loopback, and provider evidence
    separately from unit/build output.
 
 ## Operations
 
-- Back up Postgres and configure object-bucket lifecycle/retention rules.
+- Back up Postgres. Keep audio staging out of backups and ensure the worker
+  cleanup loop remains healthy; configure an object lifecycle expiry as a
+  second deletion safeguard where the provider supports it.
 - Monitor queued/error processing jobs, provider failures, usage reservations,
   webhook failures, and object cleanup failures. The managed worker poll also
   reaps expired upload rows and private chunk objects. Do not log transcripts,
