@@ -11,8 +11,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 concurrency:
   group: release-build-${{ github.ref }}
@@ -22,10 +21,13 @@ jobs:
   metadata:
     name: Validate release metadata
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -52,10 +54,13 @@ jobs:
     defaults:
       run:
         working-directory: extension
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -66,11 +71,11 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Package extension fallback ZIP
-        run: zip -r "../ai-notetaker-extension-${GITHUB_SHA}.zip" dist
+        run: zip -r "../ai-notetaker-extension-${GITHUB_REF_NAME}.zip" dist
       - uses: actions/upload-artifact@v7
         with:
-          name: extension-${{ github.sha }}
-          path: ai-notetaker-extension-${{ github.sha }}.zip
+          name: extension-${{ github.ref_name }}
+          path: ai-notetaker-extension-${{ github.ref_name }}.zip
 
   helper:
     name: Build helper (${{ matrix.os }})
@@ -80,24 +85,27 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            bundle: deb,appimage
+            bundle: deb
           - os: macos-latest
             bundle: dmg
+            target: aarch64-apple-darwin
           - os: windows-latest
-            bundle: msi,nsis
+            bundle: nsis
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: helper
-    env:
-      WINDOWS_SIGNING_CONFIGURED: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: ${{ matrix.target || '' }}
       - name: Install Linux Tauri and audio dev headers
         if: runner.os == 'Linux'
         run: |
@@ -131,54 +139,24 @@ jobs:
             -OutputDirectory "$env:GITHUB_WORKSPACE/helper/crates/app/resources/windows/vb-cable"
       - name: Build native bundles
         working-directory: helper/crates/app
-        env:
-          # macOS: Tauri's bundler signs and notarizes automatically once these
-          # are set (https://tauri.app/distribute/sign/macos/) — it decodes
-          # APPLE_CERTIFICATE (base64 .p12) into a temporary keychain itself.
-          # No-op on Linux/Windows and a no-op unsigned build on macOS when the
-          # release owner has not yet supplied these repository secrets.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx --yes @tauri-apps/cli@2.11.5 build --bundles ${{ matrix.bundle }}
-      - name: Authenticode-sign Windows bundles
-        # Post-build signtool pass rather than a tauri.conf.json certificateThumbprint,
-        # so it works from a secret-supplied .pfx without a pre-imported machine cert
-        # store entry. Skips cleanly (unsigned build, unchanged from today) until the
-        # release owner supplies these repository secrets.
-        if: runner.os == 'Windows' && env.WINDOWS_SIGNING_CONFIGURED == 'true'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          $pfxPath = Join-Path $env:RUNNER_TEMP "ai-notetaker-signing.pfx"
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $signtool = (Get-ChildItem -Path "C:/Program Files (x86)/Windows Kits/10/bin" -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1).FullName
-          $targets = Get-ChildItem -Path "target/release/bundle" -Recurse -Include *.msi, *.exe
-          foreach ($target in $targets) {
-            & $signtool sign /f $pfxPath /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 `
-              /tr http://timestamp.digicert.com /td sha256 $target.FullName
-            if ($LASTEXITCODE -ne 0) { throw "signtool failed on $($target.FullName)" }
-          }
-          Remove-Item $pfxPath
+        run: npx --yes @tauri-apps/cli@2.11.5 build --no-sign ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundle }}
       - uses: actions/upload-artifact@v7
         with:
-          name: helper-${{ matrix.os }}-${{ github.sha }}
-          path: helper/target/release/bundle
+          name: helper-${{ matrix.os }}-${{ github.ref_name }}
+          path: helper/target/**/bundle
 
   webapp-image:
     name: Build webapp image
     needs: metadata
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GitHub Container Registry
         if: startsWith(github.ref, 'refs/tags/v')
@@ -213,6 +191,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -244,6 +223,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -258,7 +238,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: helper-macos-latest-${{ github.ref_name }}
-          path: release-assets/helper-macos
+          path: release-assets/helper-macos-arm64
       - uses: actions/download-artifact@v8
         with:
           name: helper-windows-latest-${{ github.ref_name }}
@@ -267,15 +247,10 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           CHROME_WEB_STORE_URL: ${{ vars.CHROME_WEB_STORE_URL }}
-          RELEASE_SIGNING_CONFIRMED: ${{ vars.RELEASE_SIGNING_CONFIRMED }}
         run: |
           node scripts/generate-release-manifest.mjs release/manifest.json release-assets release-assets/release-manifest.json
           node scripts/validate-release-manifest.mjs release-assets/release-manifest.json
-          mkdir -p release-assets/packages
-          if grep -q '"status": "published"' release-assets/release-manifest.json; then
-            node scripts/render-release-packages.mjs release-assets/release-manifest.json release-assets/packages
-          fi
-          find release-assets -mindepth 2 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name '*.json' -o -name '*.rb' -o -name '*.yaml' -o -name '*.nuspec' -o -name 'chocolateyinstall.ps1' \) -not -path '*/packages/*/tools/*' -exec cp {} release-assets/ \;
+          find release-assets -mindepth 2 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name '*.json' \) -exec cp {} release-assets/ \;
           cp release-assets/release-manifest.json release-assets/manifest.json
           cp webapp/docker-compose.registry.yml webapp/.env.docker.example release-assets/
           (cd release-assets && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name 'manifest.json' -o -name 'docker-compose.registry.yml' -o -name '.env.docker.example' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
@@ -287,8 +262,7 @@ jobs:
           assets=(release-assets/SHA256SUMS release-assets/manifest.json \
             release-assets/*.dmg release-assets/*.pkg release-assets/*.msi \
             release-assets/*.exe release-assets/*.deb release-assets/*.AppImage \
-            release-assets/*.zip release-assets/*.rb release-assets/*.yaml \
-            release-assets/*.nuspec release-assets/chocolateyinstall.ps1 \
+            release-assets/*.zip \
             release-assets/docker-compose.registry.yml release-assets/.env.docker.example)
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${assets[@]}"

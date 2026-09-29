@@ -15,6 +15,19 @@ header.app-header {
   margin-bottom: var(--space-3);
 }
 
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.brand-lockup img {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+}
+
 header.app-header h1 {
   font-size: 0.9375rem;
   margin: 0;

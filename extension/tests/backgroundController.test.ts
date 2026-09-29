@@ -86,6 +86,58 @@ describe("BackgroundController", () => {
     expect(await getMeeting(id)).toMatchObject({ status: "complete", title: "Planning", summary: "Notes", transcript: [expect.objectContaining({ offsetMs: 123 })], endedAt: expect.any(String) });
   });
 
+  it("keeps a local Meet recording local if Settings switches to Hosted AI before stop", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    const chunks = (async function* () { yield { channel: "mic" as const, sequence: 0, bytes: new Uint8Array([1, 2]) }; })();
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockReturnValue(chunks);
+    const process = vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockResolvedValue({ transcript: [], summary: "Local notes", actionItems: [] });
+    const upload = vi.spyOn(managedClient, "uploadManagedMeeting");
+    const share = vi.spyOn(managedClient, "createManagedMeetingShare");
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
+    const id = await controller.startRecording("general", "meet");
+
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" },
+      managedService,
+      autoShareNotesWithAttendees: true,
+    });
+    await controller.stopRecording(id);
+
+    expect(process).toHaveBeenCalledWith(expect.objectContaining({ processingMode: { kind: "local_byok" }, managedService: null }), "general", chunks, expect.any(Function), { startedAt: expect.any(String) });
+    expect(upload).not.toHaveBeenCalled();
+    expect(share).not.toHaveBeenCalled();
+    await expect(getMeeting(id)).resolves.toMatchObject({ status: "complete", summary: "Local notes", processingMode: { kind: "local_byok" } });
+  });
+
+  it("does not process a Hosted Meet locally after switching to BYOK before stop", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    const process = vi.spyOn(browserProcessing, "processBrowserMeetRecording");
+    const upload = vi.spyOn(managedClient, "uploadManagedMeeting");
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const managedSettings = {
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      processingMode: { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const,
+      managedService,
+    };
+    await controller.init();
+    await controller.saveSettings(managedSettings);
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }), { status: 200 })));
+    const id = await controller.startRecording("general", "meet");
+
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
+    await controller.stopRecording(id);
+
+    expect(process).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    await expect(getMeeting(id)).resolves.toMatchObject({ status: "error", processingMode: { kind: "managed" }, errorMessage: expect.stringContaining("started with Hosted AI") });
+  });
+
   it("acknowledges a Meet chunk only after its durable write finishes", async () => {
     let finish!: () => void;
     vi.spyOn(browserStorage, "appendBrowserMeetChunk").mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));

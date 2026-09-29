@@ -5,10 +5,55 @@ import { applyStripeEvent, verifyStripeSignature } from "@/lib/billing";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { captureServerError } from "@/lib/observability";
 
+const MAX_STRIPE_WEBHOOK_BYTES = 1_048_576;
+type BoundedPayload = { ok: true; payload: string } | { ok: false; status: 400 | 413; error: string };
+
+async function readBoundedPayload(request: Request): Promise<BoundedPayload> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && /^\d+$/u.test(contentLength) && Number(contentLength) > MAX_STRIPE_WEBHOOK_BYTES) {
+    return { ok: false, status: 413, error: "webhook payload too large" };
+  }
+  if (!request.body) return { ok: true, payload: "" };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_STRIPE_WEBHOOK_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { ok: false, status: 413, error: "webhook payload too large" };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return { ok: true, payload: new TextDecoder("utf-8", { fatal: true }).decode(bytes) };
+  } catch {
+    return { ok: false, status: 400, error: "invalid payload encoding" };
+  }
+}
+
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
   if (!managedHostingEnabled()) return NextResponse.json({ error: "managed hosting is disabled", requestId }, { status: 404, headers: { "x-request-id": requestId } });
-  const payload = await request.text();
+  const body = await readBoundedPayload(request);
+  if (!body.ok) {
+    return NextResponse.json({ error: body.error, requestId }, { status: body.status, headers: { "x-request-id": requestId } });
+  }
+  const payload = body.payload;
   if (!verifyStripeSignature(payload, request.headers.get("stripe-signature"))) {
     return NextResponse.json({ error: "invalid signature", requestId }, { status: 400, headers: { "x-request-id": requestId } });
   }

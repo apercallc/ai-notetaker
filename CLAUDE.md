@@ -2,7 +2,7 @@
 
 Open-source, local-first, botless AI meeting notetaker with a free local BYOK
 mode and an optional managed paid AI service. Full target architecture: see
-[`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md).
+[`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-dual-mode-product-design.md).
 The 2026-09-21 document is the historical implementation baseline.
 Read it before making architectural changes — the decisions below exist for
 reasons documented there.
@@ -91,7 +91,7 @@ Core capture, provider pipeline, Native Messaging, extension helper-detection
 UX, CI, Tauri tray/packaging, per-OS Native Messaging installer hooks, and the
 dual-mode managed processing contracts are implemented and tracked in
 `TODO.md`. The dual-mode migration is tracked in
-[`docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md`](docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md).
+[`docs/superpowers/plans/2026-09-24-dual-mode-product-migration.md`](docs/superpowers/plans/2026-09-24-dual-mode-product-migration.md).
 Managed hosted processing, billing, and native loopback adapters have local
 tests and build gates; real deployment, provider, billing, browser, and native
 OS acceptance gates still remain before advertising hosted mode as released.

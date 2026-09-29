@@ -170,6 +170,13 @@ fn try_initialize<R: Runtime>(
     let open_folder =
         MenuItem::with_id(app, "open-folder", "Open Notes Folder", true, None::<&str>)?;
     let open_logs = MenuItem::with_id(app, "open-logs", "Open Logs", true, None::<&str>)?;
+    let check_updates = MenuItem::with_id(
+        app,
+        "check-updates",
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
     let pair_browser =
         MenuItem::with_id(app, "pair-browser", "Pair New Browser…", true, None::<&str>)?;
     let launch_at_login = MenuItem::with_id(
@@ -196,6 +203,7 @@ fn try_initialize<R: Runtime>(
             &open_latest,
             &open_folder,
             &open_logs,
+            &check_updates,
             &pair_browser,
             &launch_at_login,
             &quit,
@@ -203,7 +211,7 @@ fn try_initialize<R: Runtime>(
     )?;
 
     let logs_dir = crate::logging::log_dir(&data_dir);
-    let tray = TrayIconBuilder::with_id(TRAY_ID)
+    let tray = TrayIconBuilder::<R>::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip("AI Notetaker — Idle")
@@ -216,6 +224,13 @@ fn try_initialize<R: Runtime>(
             }
             "open-logs" => {
                 let _ = open_with_default_app(&logs_dir);
+            }
+            "check-updates" => {
+                let app = app.clone();
+                let data_dir = data_dir.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::update_check::check_now(&app, &data_dir).await;
+                });
             }
             "pair-browser" => {
                 // User-gesture re-pairing. The IPC layer cannot tell a fresh
@@ -325,4 +340,13 @@ fn open_with_default_app(path: &Path) -> std::io::Result<()> {
             .spawn()?;
     }
     Ok(())
+}
+
+/// Opens the project's fixed official GitHub Releases page after the user
+/// explicitly accepts an update prompt.
+pub fn open_release_page() {
+    const RELEASES_URL: &str = "https://github.com/apercallc/ai-notetaker/releases/latest";
+    if let Err(error) = open_with_default_app(Path::new(RELEASES_URL)) {
+        tracing::warn!(%error, "could not open the official release page");
+    }
 }

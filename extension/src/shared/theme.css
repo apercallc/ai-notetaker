@@ -16,7 +16,8 @@
   --color-text: #1d1d1f;
   --color-text-secondary: #6e6e73;
   --color-border: #d2d2d7;
-  --color-accent: #0071e3;
+  --color-accent: #176c4b;
+  --color-action: #176c4b;
   --color-accent-text: #ffffff;
   /* #ff3b30 (Apple's systemRed) reads as ~3.55:1 against white — below the
      4.5:1 AA minimum for normal-size text, whether it's used as the
@@ -58,7 +59,8 @@
     --color-text: #f5f5f7;
     --color-text-secondary: #98989d;
     --color-border: #38383a;
-    --color-accent: #0a84ff;
+    --color-accent: #78dba4;
+    --color-action: #176c4b;
     --color-accent-text: #ffffff;
     /* #ff453a passes fine as plain text against this dark background
        (~5:1) but fails as a solid-fill button with white text on it
@@ -99,9 +101,12 @@ button {
   font-family: inherit;
   font-size: inherit;
   cursor: pointer;
-  border-radius: var(--radius);
+  min-height: 40px;
+  line-height: 1.25;
+  border-radius: 12px;
   border: 1px solid transparent;
   padding: var(--space-2) var(--space-3);
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
 
 button.primary:hover:not(:disabled),
@@ -127,9 +132,15 @@ a {
 }
 
 button.primary {
-  background: var(--color-accent);
+  background: var(--color-action);
   color: var(--color-accent-text);
   font-weight: 600;
+  box-shadow: 0 2px 6px #176c4b2b;
+}
+
+button.primary:active:not(:disabled),
+button.secondary:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 button.secondary {
@@ -212,6 +223,10 @@ textarea::placeholder {
   button,
   a {
     transition: none;
+  }
+
+  button:active:not(:disabled) {
+    transform: none;
   }
 
   .recording-indicator::before {
@@ -316,7 +331,7 @@ textarea::placeholder {
 }
 
 .tier-toggle button.active {
-  background: var(--color-accent);
+  background: var(--color-action);
   color: var(--color-accent-text);
 }
 

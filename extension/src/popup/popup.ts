@@ -63,7 +63,7 @@ const SETTINGS_ICON_SVG = `
 function renderHeader(showSettings: boolean): string {
   return `
     <header class="app-header">
-      <h1 tabindex="-1" data-view-heading>AI Notetaker</h1>
+      <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><h1 tabindex="-1" data-view-heading>AI Notetaker</h1></div>
       ${showSettings ? `<button class="icon-button" id="open-settings" aria-label="Open settings">${SETTINGS_ICON_SVG}</button>` : ""}
     </header>
   `;

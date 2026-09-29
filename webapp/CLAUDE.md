@@ -4,7 +4,7 @@ Next.js + Postgres. It supports both the managed multi-tenant service and a
 user-operated one-click self-hosted deployment. Managed hosting adds
 authenticated uploads, private object storage, processing jobs, usage, and
 billing; self-hosted deployments retain local/BYOK operation. See
-`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`.
+`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`.
 
 ## Conventions
 

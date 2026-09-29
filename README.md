@@ -12,13 +12,12 @@ providers and usage billing for you.
   <img src="docs/screenshots/recording-ready.png" alt="AI Notetaker popup with audio ready and a Start notes button" width="360" />
 </p>
 
-> **Status:** there is no public release yet. The Chrome Web Store listing,
-> signed installers, and package-manager submissions still need release-owner
-> credentials and external review, and hosted mode is not yet advertised as
-> released. Anything below labeled "when released" describes the planned
-> channel; today you run AI Notetaker from source. See the
-> [code-signing policy](docs/code-signing-policy.md) and
-> [unsigned-install guide](docs/unsigned-install.md).
+> **Status:** desktop installers are planned as direct GitHub Release
+> downloads for Apple silicon Mac, Windows 64-bit, and Debian/Ubuntu Linux
+> 64-bit. The first installers will be unsigned, with checksums and clear
+> first-open instructions. Chrome Web Store publication and hosted-mode
+> production acceptance are separate gates. See the
+> [native download trust policy](docs/code-signing-policy.md).
 
 ## Quickstart: Google Meet in 60 seconds
 
@@ -88,26 +87,19 @@ allowlists this ID.
 
 ## Desktop calls: install the helper
 
-Only needed for Zoom, Teams, Slack, and other desktop apps. When a release is
-published, use the package manager for your OS:
+Only needed for Zoom, Teams, Slack, and other desktop apps. Download the
+installer for your platform from the [AI Notetaker install
+page](https://apercallc.github.io/ai-notetaker/) or the [latest GitHub
+release](https://github.com/apercallc/ai-notetaker/releases/latest). See the
+[getting-started guide](docs/getting-started.md#1-install-the-helper) for
+unsigned-install prompts and Native Messaging setup.
 
-```sh
-# macOS (when released)
-brew install --cask ai-notetaker
+Launch **AI Notetaker** once so its tray process is running. The helper checks
+for a newer stable release daily and asks before opening its download page.
+You download and install the update yourself; **Check for Updates…** is also
+available in the tray menu.
 
-# Windows PowerShell (when released)
-winget install AI.Notetaker
-# or: choco install ai-notetaker
-
-# Linux (when released): download the .deb from the release page, then
-sudo apt install ./AI-Notetaker_<version>_amd64.deb
-```
-
-Launch **AI Notetaker** once so its tray process is running. Upgrade with the
-same channel you installed from (`brew upgrade --cask ai-notetaker`,
-`winget upgrade AI.Notetaker`, or `choco upgrade ai-notetaker`).
-
-Until a release exists, follow the contributor
+For source builds, follow the contributor
 [source-build path](docs/getting-started.md#build-from-source). Running
 `cargo build` alone does not make Chrome find the helper. Audio setup for each
 OS and app is in
@@ -197,7 +189,7 @@ Package-specific notes live in [`extension/README.md`](extension/README.md),
 Coverage commands and the distinction between deterministic tests and real
 OS/browser/provider validation are in [`docs/testing.md`](docs/testing.md).
 The target architecture is
-[`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md);
+[`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-dual-mode-product-design.md);
 the [2026-09-21 architecture](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md)
 is the historical baseline.
 

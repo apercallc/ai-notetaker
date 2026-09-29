@@ -19,8 +19,8 @@ function walk(directory) {
   });
 }
 
-function architectureFor(fileName, platform) {
-  const name = fileName.toLowerCase();
+function architectureFor(filePath, platform) {
+  const name = filePath.toLowerCase();
   if (name.includes("arm64") || name.includes("aarch64")) return "arm64";
   if (name.includes("x86_64") || name.includes("x64") || name.includes("amd64")) return "x86_64";
   return platform === "macos" ? "universal" : "x86_64";
@@ -43,7 +43,6 @@ export function generateReleaseManifest(baseManifest, {
   repository,
   tag,
   chromeWebStoreUrl = null,
-  signingConfirmed = false,
 }) {
   const versionTag = tag.replace(/^v/u, "");
   if (versionTag !== baseManifest.version) {
@@ -61,19 +60,19 @@ export function generateReleaseManifest(baseManifest, {
     const fileName = path.basename(filePath);
     return [{
       platform,
-      architecture: architectureFor(fileName, platform),
+      architecture: architectureFor(relativePath, platform),
       format,
       url: `${releaseBaseUrl}/${encodeURIComponent(fileName)}`,
       sha256: sha256(filePath),
-      // The build proves integrity here. Signing/notarization is recorded by
-      // the release owner only after the native platform checks are complete.
-      signatureStatus: "checksummed",
+      // SHA-256 detects transfer corruption; unsigned artifacts do not
+      // authenticate the publisher.
+      signatureStatus: "unsigned",
     }];
   });
 
-  const extensionFile = files.find((filePath) => path.basename(filePath) === `ai-notetaker-extension-${tag}.zip`);
+  const extensionFile = files.find((filePath) => /^ai-notetaker-extension-.+\.zip$/u.test(path.basename(filePath)));
   const manifest = structuredClone(baseManifest);
-  manifest.status = chromeWebStoreUrl && signingConfirmed ? "published" : "unpublished";
+  manifest.status = artifacts.length > 0 ? "published" : "unpublished";
   manifest.extension.chromeWebStoreUrl = chromeWebStoreUrl;
   manifest.extension.fallbackZipUrl = extensionFile
     ? `${releaseBaseUrl}/${encodeURIComponent(path.basename(extensionFile))}`
@@ -92,7 +91,6 @@ if (process.argv[1] && process.argv[1].endsWith("generate-release-manifest.mjs")
     repository,
     tag,
     chromeWebStoreUrl: process.env.CHROME_WEB_STORE_URL || null,
-    signingConfirmed: process.env.RELEASE_SIGNING_CONFIRMED === "true",
   });
   fs.writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`Generated ${outputPath} with ${manifest.artifacts.length} native artifacts (${manifest.status})`);

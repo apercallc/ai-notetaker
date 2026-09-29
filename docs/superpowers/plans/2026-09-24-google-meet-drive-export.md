@@ -2,7 +2,7 @@
 
 > **Historical plan notice:** The “no hosted backend, subscription, or
 > billing” constraint below was superseded on 2026-09-24. Use
-> [`2026-09-24-scribbl-dual-mode-product-migration.md`](2026-09-24-scribbl-dual-mode-product-migration.md)
+> [`2026-09-24-dual-mode-product-migration.md`](2026-09-24-dual-mode-product-migration.md)
 > for current work. The Meet and Drive details remain useful as implementation
 > history and compatibility requirements.
 

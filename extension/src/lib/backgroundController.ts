@@ -460,9 +460,15 @@ export class BackgroundController {
     if (pending) await pending.catch(() => undefined);
     try {
       if (!this.settings) throw new Error("Meet settings are not loaded");
-      if (this.settings.processingMode.kind === "managed") {
-        const managed = this.settings.managedService;
-        if (!managed) throw new Error("Hosted AI is not connected. Sign in again before processing this Meet recording.");
+      // The mode is part of the recording's durable identity. Settings may
+      // change while a call is in progress or before a retry; never let that
+      // silently change where the saved audio is sent.
+      const processingMode = meeting.processingMode ?? { kind: "local_byok" as const };
+      if (processingMode.kind === "managed") {
+        const managed = this.settings.processingMode.kind === "managed" ? this.settings.managedService : null;
+        if (!managed) {
+          throw new Error("This recording was started with Hosted AI. Switch back to its Hosted AI account to process it; saved audio is not uploaded in another mode.");
+        }
         if (!managedMeetingMatchesService(meeting, managed)) {
           throw new Error("This Meet recording belongs to a different hosted workspace. Sign in to that workspace before retrying.");
         }
@@ -515,7 +521,12 @@ export class BackgroundController {
         }
         throw new Error("Hosted processing did not finish within 3 minutes; the saved audio can be retried from the meeting details.");
       }
-      const result = await processBrowserMeetRecording(this.settings, meeting.mode ?? "general", streamBrowserMeetChunks(meetingId), this.fetchImpl, { startedAt: meeting.startedAt });
+      const localSettings: NotetakerSettings = {
+        ...this.settings,
+        processingMode: { kind: "local_byok" },
+        managedService: null,
+      };
+      const result = await processBrowserMeetRecording(localSettings, meeting.mode ?? "general", streamBrowserMeetChunks(meetingId), this.fetchImpl, { startedAt: meeting.startedAt });
       const completed = await updateMeeting(meetingId, (current) => ({
         ...current,
         status: "complete",
@@ -536,8 +547,13 @@ export class BackgroundController {
       // Hosted-mode critical failure: the user's recording produced no notes.
       // Report for diagnosis (no-op in local BYOK mode), then persist the
       // recoverable state exactly as before.
+      const managedService = meeting.processingMode?.kind === "managed" &&
+        this.settings?.processingMode.kind === "managed" &&
+        managedMeetingMatchesService(meeting, this.settings.managedService)
+        ? this.settings.managedService
+        : null;
       reportManagedError(
-        this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null,
+        managedService,
         error,
         { surface: meeting.processingMode?.kind === "managed" ? "managed_job" : "meet_capture", meetingId },
       );
@@ -567,8 +583,11 @@ export class BackgroundController {
    * demote a completed meeting.
    */
   private async onNotesComplete(meetingId: string, completed: MeetingRecord): Promise<void> {
-    if (this.settings?.autoShareNotesWithAttendees && !completed.attendeeShare) {
-      const managed = this.settings.processingMode.kind === "managed" ? this.settings.managedService : null;
+    const canShareManagedMeeting = completed.processingMode?.kind === "managed" &&
+      this.settings?.processingMode.kind === "managed" &&
+      managedMeetingMatchesService(completed, this.settings.managedService);
+    if (canShareManagedMeeting && this.settings?.autoShareNotesWithAttendees && !completed.attendeeShare) {
+      const managed = this.settings.managedService;
       if (managed) {
         try {
           const share = await createManagedMeetingShare(managed, meetingId, this.fetchImpl);

@@ -1,7 +1,7 @@
 # AI Notetaker — Distribution and Installation Architecture
 
 Date: 2026-09-21
-Status: Implemented architecture; native release-owner proof remains open
+Status: Superseded by [the direct-download distribution decision](2026-09-28-direct-download-distribution.md)
 
 ## Decision summary
 

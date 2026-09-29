@@ -3,129 +3,190 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Start AI Notetaker</title>
+  <meta name="description" content="Private, botless meeting notes for Google Meet, Zoom, Teams, and Slack. Start free with your own AI keys.">
+  <meta name="theme-color" content="#f7f8f4">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <title>AI Notetaker — leave meetings with a clear next step</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; --bg: #f6f7fb; --card: #fff; --ink: #172033; --muted: #5c667a; --accent: #5b4bdb; --border: #dfe3ee; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #121522; --card: #1d2230; --ink: #f4f6ff; --muted: #b7bfd3; --border: #353d52; } }
-    body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; }
-    main { max-width: 760px; margin: 0 auto; padding: 48px 20px 72px; }
-    h1 { font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.05; margin-bottom: 12px; }
-    h2 { margin-top: 0; }
-    .lede { color: var(--muted); font-size: 1.12rem; max-width: 62ch; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-top: 20px; }
-    .platforms { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-    .platform { border: 2px solid var(--border); border-radius: 12px; padding: 16px; }
-    .platform.selected { border-color: var(--accent); }
-    code { display: block; overflow-x: auto; background: color-mix(in srgb, var(--ink) 10%, transparent); border-radius: 8px; padding: 10px; margin: 10px 0; }
-    a { color: var(--accent); font-weight: 650; }
-    button, select { font: inherit; }
-    button { cursor: pointer; border: 0; border-radius: 8px; padding: 10px 14px; background: var(--accent); color: white; font-weight: 650; }
-    .muted { color: var(--muted); }
-    .warning { border-left: 4px solid #d68a00; padding-left: 14px; }
+    :root { color-scheme: light; --ink:#18241e; --muted:#57665e; --paper:#f7f8f4; --card:#fff; --line:#dce4dc; --green:#176c4b; --mint:#d9f3e7; --orange:#f3b76d; --blue:#dfeafa; font:16px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--paper); color:var(--ink); } a { color:inherit; } button,select { font:inherit; }
+    .wrap { width:min(1120px,calc(100% - 40px)); margin:auto; } .topbar { display:flex; align-items:center; justify-content:space-between; padding:20px 0; gap:20px; } .brand { display:flex; align-items:center; gap:10px; font-weight:780; text-decoration:none; letter-spacing:-.03em; } .brand img { display:block; width:36px; height:36px; }
+    nav { display:flex; gap:24px; align-items:center; font-size:.92rem; } nav a { text-decoration:none; color:var(--muted); } nav a:hover { color:var(--green); }
+    .button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:48px; padding:0 20px; border:1px solid transparent; border-radius:13px; background:var(--green); color:white; font-weight:720; text-decoration:none; box-shadow:0 5px 14px #176c4b20; cursor:pointer; } .button:hover { background:#10573c; } .button:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible { outline:3px solid #85cba3; outline-offset:3px; } .button.secondary { background:white; color:var(--ink); border-color:var(--line); box-shadow:none; } .button.small { min-height:40px; padding:0 15px; }
+    .hero { display:grid; grid-template-columns:1.05fr .95fr; gap:44px; align-items:center; padding:72px 0 78px; } .eyebrow { color:var(--green); font-size:.78rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; } h1 { max-width:660px; font-size:clamp(2.8rem,6vw,5.1rem); line-height:.99; letter-spacing:-.065em; margin:14px 0 22px; } .hero p { max-width:570px; color:var(--muted); font-size:1.15rem; } .actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:28px; } .fineprint { font-size:.83rem!important; margin-top:13px; }
+    .visual { min-height:385px; background:#e5f1e8; border-radius:30px; position:relative; padding:30px; overflow:hidden; } .visual:before,.visual:after { content:""; position:absolute; border-radius:50%; background:#f2bc77; opacity:.7; } .visual:before { width:110px;height:110px;top:-30px;right:30px; } .visual:after { width:70px;height:70px;bottom:-10px;left:-10px;background:#94c9e8; } .note { position:relative; z-index:1; max-width:370px; margin:28px auto; background:#fff; border:1px solid #d7e3d9; border-radius:18px; padding:23px; box-shadow:0 20px 45px #233d2b18; transform:rotate(-2deg); } .note-head { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:15px; } .live { font-size:.72rem; font-weight:750; color:#ac392f; background:#fae9e5; padding:4px 8px; border-radius:99px; } .note h3 { margin:0; font-size:1.06rem; } .note p { font-size:.88rem; margin:8px 0; color:var(--muted); } .task { background:#edf7ef; border-radius:10px; padding:10px 12px; font-size:.84rem; margin-top:15px; }
+    .trust { border-block:1px solid var(--line); padding:19px 0; color:var(--muted); font-size:.9rem; } .trust-row { display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; } .trust strong { color:var(--ink); }
+    section { padding:78px 0; } .section-head { max-width:700px; margin-bottom:32px; } h2 { font-size:clamp(2rem,4vw,3.1rem); letter-spacing:-.05em; line-height:1.05; margin:10px 0 14px; } .section-head p { color:var(--muted); font-size:1.06rem; margin:0; }
+    .steps,.usecases,.downloads { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; } .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:24px; } .number { display:grid; place-items:center; width:38px;height:38px;border-radius:12px;background:var(--mint);color:var(--green);font-weight:800; } .card h3 { margin:19px 0 8px; letter-spacing:-.025em; } .card p { color:var(--muted); margin:0; }
+    .how { background:#eef3ee; } .split { display:grid; grid-template-columns:.9fr 1.1fr; gap:46px; align-items:center; } .pill-list { display:grid; gap:12px; } .pill { display:flex; gap:13px; align-items:flex-start; background:white; border:1px solid var(--line); border-radius:14px; padding:16px; } .tick { color:var(--green); font-weight:900; } .pill b { display:block; } .pill span:last-child { color:var(--muted); font-size:.91rem; }
+    .download { background:var(--ink); color:white; border-radius:28px; padding:38px; display:grid; grid-template-columns:.8fr 1.2fr; gap:38px; align-items:center; } .download .eyebrow { color:#a9e3c5; } .download h2 { margin-bottom:12px; } .download p { color:#c5d0c9; } .download-box { border:1px solid #53645a; border-radius:18px; padding:22px; background:#22332a; } .download-box label { display:block; color:#d9e5dc; font-size:.88rem; margin-bottom:8px; } select { width:100%; padding:12px; border-radius:9px; border:1px solid #6a7b70; background:#17241d; color:white; } .artifact { margin-top:15px; } .artifact .button { width:100%; background:#a9e3c5; color:#153d2b; box-shadow:none; } .artifact .button:hover { background:#c5f0d9; } .artifact small { display:block; color:#d0dbd3; margin-top:10px; overflow-wrap:anywhere; } .artifact code { color:#e0eee4; font-size:.78rem; } .warning { color:#f5d8a9!important; font-size:.86rem; margin:10px 0 0; } .platform-steps { color:#d0dbd3!important; font-size:.88rem; margin:13px 0 0; }
+    .quote { border-left:4px solid var(--orange); padding-left:14px; color:var(--muted); font-size:.88rem; margin-top:20px; }
+    .downloads .card { display:flex; flex-direction:column; align-items:flex-start; } .downloads .preview { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:12px; margin:17px 0; background:#f7f8f4; } .downloads .button { margin-top:auto; padding-top:12px; }
+    .faq { display:grid; grid-template-columns:1fr 1fr; gap:14px; } details { padding:20px; border:1px solid var(--line); background:white; border-radius:14px; } summary { cursor:pointer; font-weight:720; } details p { color:var(--muted); margin-bottom:0; }
+    footer { border-top:1px solid var(--line); padding:27px 0 42px; color:var(--muted); font-size:.88rem; } .foot { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; } .foot a { margin-left:16px; }
+    @media(max-width:760px) { .topbar { align-items:flex-start; flex-wrap:wrap; } nav { width:100%; justify-content:flex-start; flex-wrap:wrap; gap:8px 16px; } nav a:not(.button) { display:flex; align-items:center; min-height:44px; } .hero,.split,.download { grid-template-columns:1fr; } .hero { padding:50px 0; gap:30px; } .visual { min-height:330px; padding:16px; } .steps,.usecases,.downloads,.faq { grid-template-columns:1fr; } .download { padding:27px; } section { padding:58px 0; } }
+    @media(prefers-reduced-motion:no-preference) { .button { transition:background .18s ease,transform .18s ease; } .button:hover { transform:translateY(-1px); } }
+    /* The site stays dependency-free at runtime; the decorative icon files
+       below are vendored from the open-source Lucide set (see icons/LICENSE). */
+    body { background:radial-gradient(ellipse at 78% 12%,#e7f2e8 0,transparent 33rem),var(--paper); }
+    .topbar { position:sticky; top:0; z-index:5; width:100%; padding-inline:max(20px,calc((100% - 1120px)/2)); background:#f7f8f4eF; border-bottom:1px solid #dce4dcaa; backdrop-filter:blur(14px); }
+    .hero { padding-top:80px; }
+    .visual { background:linear-gradient(145deg,#e0f1e6,#d6e9df 62%,#e7f0e3); box-shadow:inset 0 1px #ffffffb0; }
+    .visual:before { background:#f2bc77; box-shadow:0 0 0 22px #f2bc7726,0 0 0 46px #f2bc7718; }
+    .visual:after { background:#94c9e8; box-shadow:0 0 0 18px #94c9e82b; }
+    .card { box-shadow:0 8px 28px #26392b08; transition:transform .2s ease,box-shadow .2s ease; }
+    .card:hover { transform:translateY(-3px); box-shadow:0 16px 34px #26392b12; }
+    .card-icon { display:block; width:30px; height:30px; margin:5px 0 4px; }
+    .number { display:inline-grid; vertical-align:middle; margin-right:8px; }
+    .download { box-shadow:0 28px 70px #1a2a201e; }
+    .download-box { box-shadow:inset 0 1px #ffffff10; }
+    .trust { background:#ffffff70; }
+    .faq details { transition:border-color .18s ease,box-shadow .18s ease; }
+    .faq details[open] { border-color:#9fc8ae; box-shadow:0 8px 24px #26392b0b; }
+    @media(max-width:760px) { .topbar { padding-block:14px; } .hero { padding-top:48px; } }
+    @media(prefers-reduced-motion:reduce) { .button,.card,.faq details { transition:none!important; } .button:hover,.card:hover { transform:none; } }
   </style>
 </head>
 <body>
-  <main>
-    <p class="muted">AI Notetaker</p>
-    <h1>Start taking notes without a meeting bot.</h1>
-    <p class="lede">Take Google Meet notes in Chrome with your own API keys (free) or optional Hosted AI (paid). For Zoom, Teams, Slack, and other desktop calls, add the desktop helper.</p>
+  <header class="wrap topbar">
+    <a class="brand" href="#top" aria-label="AI Notetaker home"><img src="icons/ai-notetaker-mark.svg" alt="" aria-hidden="true"> AI Notetaker</a>
+    <nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#who-its-for">Who it helps</a><a href="#downloads">Free guides</a><a class="button small" href="#get-started">Get started</a></nav>
+  </header>
+  <main id="top">
+    <div class="wrap hero">
+      <div><span class="eyebrow">Botless meeting notes</span><h1>Leave the meeting. Keep the next step.</h1><p>AI Notetaker turns conversations into searchable notes, decisions, and follow-ups. Start with Google Meet in Chrome, or add the free desktop helper for Zoom, Teams, and Slack.</p><div class="actions"><a id="hero-extension" class="button" href="https://github.com/apercallc/ai-notetaker/blob/main/README.md#install-the-extension">Google Meet setup guide</a><a class="button secondary" href="#get-started">Get desktop capture</a></div><p class="fineprint" id="extension-note">Free to use with your own AI provider keys. No meeting bot joins your call. Your recordings are saved locally first.</p></div>
+      <div class="visual" aria-label="Illustration of sample meeting notes with a decision and a follow-up task"><article class="note"><div class="note-head"><h3>Sample · Product sync</h3><span class="live">EXAMPLE</span></div><p><strong>Decision</strong> · Ship the smaller onboarding update first.</p><p><strong>Discussion</strong> · Keep the first-run flow focused on one clear action.</p><div class="task">☑ Follow up · Design team to share revised screens by Thursday</div></article></div>
+    </div>
+    <div class="trust"><div class="wrap trust-row"><span><strong>Google Meet</strong> · Chrome extension</span><span><strong>Zoom, Teams, Slack</strong> · desktop helper</span><span><strong>Free mode</strong> · use your own AI keys</span><span><strong>Your audio</strong> · stored locally first</span></div></div>
 
-    <section class="card" aria-labelledby="start">
-      <h2 id="start">1. Start with Google Meet</h2>
-      <p>Install the Chrome extension, finish setup, then open a Meet call and choose <strong>Start notes</strong> from the extension. Using your own API keys requires no desktop helper or account.</p>
-      <p id="extension-links">Checking the current release…</p>
-    </section>
+    <section class="wrap" id="how-it-works"><div class="section-head"><span class="eyebrow">Simple by design</span><h2>From conversation to something you can act on.</h2><p>Keep your attention on the people in the room. AI Notetaker takes care of the record and the follow-through.</p></div><div class="steps">
+      <article class="card"><img class="card-icon" src="icons/clipboard-check.svg" alt=""><span class="number">1</span><h3>Start notes</h3><p>Use the Chrome extension on Google Meet. For calls in Zoom, Teams, or Slack, open the desktop helper and choose Start notes.</p></article>
+      <article class="card"><img class="card-icon" src="icons/audio-lines.svg" alt=""><span class="number">2</span><h3>Stay in the conversation</h3><p>Your mic and meeting audio stay on separate tracks. No bot appears in the participant list, and you can flag a moment to revisit.</p></article>
+      <article class="card"><img class="card-icon" src="icons/list-checks.svg" alt=""><span class="number">3</span><h3>Leave with a next step</h3><p>Review the transcript, concise summary, decisions, and action items. Keep notes on your device or sync them to a server you choose.</p></article>
+    </div></section>
 
-    <section class="card" aria-labelledby="choose-os">
-      <h2 id="choose-os">2. Add desktop-call capture (optional)</h2>
-      <p class="muted">Choose this path only if you want to record Zoom, Teams, Slack, or another desktop call. The helper captures your microphone and system audio locally.</p>
-      <label for="platform">Detected platform</label>
-      <select id="platform">
-        <option value="macos">macOS</option>
-        <option value="windows">Windows</option>
-        <option value="linux">Linux</option>
-        <option value="unknown">Other / choose manually</option>
-      </select>
-      <div id="instructions" class="platforms" style="margin-top: 16px"></div>
-    </section>
+    <section class="how" id="who-its-for"><div class="wrap split"><div class="section-head"><span class="eyebrow">Useful after the call</span><h2>Less catching up. More moving forward.</h2><p>Different roles need different details. Notes are there when you need to check what was decided or who owns the next step.</p><p class="quote">These are example workflows, not customer testimonials. We’ll add real stories only with permission from the people who share them.</p></div><div class="usecases">
+      <article class="card"><h3>For project leads</h3><p>Find the decision, owner, and due date without replaying the whole conversation.</p></article>
+      <article class="card"><h3>For recruiters</h3><p>Stay present with candidates, then review key details and follow-ups after the interview.</p></article>
+      <article class="card"><h3>For consultants</h3><p>Keep client conversations organized and make the next agreed action easy to find.</p></article>
+    </div></div></section>
 
-    <section class="card" aria-labelledby="docker">
-      <h2 id="docker">Optional: self-host history with Docker</h2>
-      <p>Use Docker Compose for the authenticated webapp and Postgres. It never receives your provider keys and cannot replace the desktop helper.</p>
-      <div id="docker-install">Checking the current release…</div>
-      <p><a href="https://github.com/apercallc/ai-notetaker/blob/main/webapp/README.md#deploy-with-the-prebuilt-container-image">Read the Docker deployment guide</a></p>
-    </section>
+    <section class="wrap"><div class="section-head"><span class="eyebrow">Your setup, your call</span><h2>Start free with your own AI keys.</h2></div><div class="steps">
+      <article class="card"><img class="card-icon" src="icons/shield-check.svg" alt=""><h3>Use your own keys · free</h3><p>No account required. Add a transcription provider key and a summarization provider key. They stay on your device and go directly to those providers.</p></article>
+      <article class="card"><h3>Hosted AI · planned</h3><p>The optional paid service is not available yet while deployment, provider, and billing checks are completed. If launched, provider credentials will stay on the server.</p></article>
+      <article class="card"><h3>Self-host your history</h3><p>Optional. Run the notes library on infrastructure you control. It is separate from the desktop capture helper.</p></article>
+    </div></section>
 
-    <p class="muted warning">Audio drivers are only needed for desktop-call capture. macOS users install BlackHole from Existential Audio when the helper selects that fallback; Windows uses base VB-CABLE when native loopback is unavailable; Linux uses the helper's PulseAudio/PipeWire modules.</p>
+    <section class="wrap" id="get-started"><div class="download"><div><span class="eyebrow">Choose your platform</span><h2>Get the app for your computer.</h2><p>Google Meet works with the Chrome extension alone. Download the desktop helper only for meetings in Zoom, Teams, Slack, and other desktop apps.</p><p>Downloads come from the latest GitHub release. Each file includes a SHA-256 checksum.</p></div><div class="download-box"><label for="platform">Your computer</label><select id="platform"><option value="macos">Mac with Apple silicon (M1 or later)</option><option value="windows">Windows 64-bit</option><option value="linux">Linux 64-bit · Debian/Ubuntu</option></select><div class="artifact" id="artifact" aria-live="polite"><p>Checking the latest release…</p></div><p class="warning" id="trust-note">Release files are unsigned. Your operating system may show a first-open warning.</p><p class="platform-steps" id="platform-steps">Choose your platform to see the install steps.</p></div></div></section>
+
+    <section class="wrap" id="downloads"><div class="section-head"><span class="eyebrow">Take it with you</span><h2>Share the simple version.</h2><p>Download a one-page visual guide, print it, or send it to someone who wants to understand the workflow at a glance.</p></div><div class="downloads">
+      <article class="card"><span class="number">01</span><h3>How it works</h3><p>A visual path from choosing a meeting to reviewing the notes and next steps.</p><img class="preview" src="downloads/how-ai-notetaker-works.svg" alt="Three-step infographic: choose the call, stay in the moment, leave with a plan"><a class="button secondary" href="downloads/how-ai-notetaker-works.svg" download>Download infographic</a></article>
+      <article class="card"><span class="number">02</span><h3>Who it helps</h3><p>Example workflows for project leads, recruiters, and consultants. Clearly marked as examples.</p><img class="preview" src="downloads/meeting-notes-workflows.svg" alt="Illustrated example workflows for project leads, recruiters, and consultants"><a class="button secondary" href="downloads/meeting-notes-workflows.svg" download>Download infographic</a></article>
+      <article class="card"><span class="number">03</span><h3>Getting started</h3><p>Plain-language setup steps, platform warnings, and audio tips for the desktop helper.</p><a class="button secondary" href="https://github.com/apercallc/ai-notetaker/blob/main/docs/getting-started.md">Read the setup guide</a></article>
+    </div></section>
+
+    <section class="how"><div class="wrap"><div class="section-head"><span class="eyebrow">Good to know</span><h2>Clear answers before you install.</h2></div><div class="faq">
+      <details><summary>Do I need the desktop helper for Google Meet?</summary><p>No. Google Meet capture runs in the Chrome extension. Install the helper only for calls happening in desktop apps such as Zoom, Teams, or Slack.</p></details>
+      <details><summary>Why does my computer show an install warning?</summary><p>To keep downloads free, current desktop releases are not signed with paid platform certificates. The Mac may block the first open; Windows may show SmartScreen. The platform download card gives the steps. Check the release checksum before installing.</p></details>
+      <details><summary>How do desktop app updates work?</summary><p>The helper checks GitHub once a day and asks before opening the official release page. You download and install the new version yourself; the helper never installs updates in the background.</p></details>
+      <details><summary>Will I need an audio driver?</summary><p>Usually not. Current macOS and Windows capture system audio directly, and Linux uses its PulseAudio/PipeWire audio session. A fallback is shown only when the native route is unavailable.</p></details>
+      <details><summary>Should I tell people I’m taking notes?</summary><p>Yes. Get permission from everyone you record where local law or workplace policy requires it. AI Notetaker shows a consent reminder during setup; that does not replace your responsibility to get consent.</p></details>
+      <details><summary>Are these real customer stories?</summary><p>No. The role cards and sample notes describe example ways people might use meeting notes. They are not reviews or endorsements.</p></details>
+    </div></div></section>
   </main>
+  <footer><div class="wrap foot"><span>AI Notetaker · Open source and local first.</span><span><a href="https://github.com/apercallc/ai-notetaker">GitHub</a><a href="https://github.com/apercallc/ai-notetaker/releases/latest">All releases</a><a href="https://github.com/apercallc/ai-notetaker/blob/main/LICENSE">License</a></span></div></footer>
   <script>
     const releases = 'https://github.com/apercallc/ai-notetaker/releases/latest';
-    const manifestUrl = 'https://github.com/apercallc/ai-notetaker/releases/latest/download/manifest.json';
-    const platform = document.querySelector('#platform');
-    const instructions = document.querySelector('#instructions');
-    const extensionLinks = document.querySelector('#extension-links');
-    const dockerInstall = document.querySelector('#docker-install');
+    const manifestUrl = `${releases}/download/manifest.json`;
+    const platformSelect = document.querySelector('#platform');
+    const artifactBox = document.querySelector('#artifact');
+    const platformSteps = document.querySelector('#platform-steps');
+    const extensionButton = document.querySelector('#hero-extension');
+    const extensionNote = document.querySelector('#extension-note');
     const detected = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
-    const params = new URLSearchParams(location.search);
-    // Only an explicit desktop-install link may promote the optional helper
-    // path. Older extension builds and copied URLs may retain mode=desktop;
-    // treating that flag as sufficient would send ordinary Meet users back to
-    // the helper installer after an update.
-    const desktopMode = params.get('mode') === 'desktop' && params.get('source') === 'desktop';
-    const hinted = params.get('platform');
-    if (desktopMode) {
-      document.title = 'Install AI Notetaker desktop capture';
-      document.querySelector('#start').textContent = 'Google Meet is ready without the helper';
-      document.querySelector('#choose-os').textContent = 'Install desktop-call capture';
-      document.querySelector('#choose-os').scrollIntoView({ block: 'start' });
+    const platformAliases = { macos: ['arm64', 'universal'], windows: ['x86_64'], linux: ['x86_64', 'amd64'] };
+    platformSelect.value = detected.includes('mac') ? 'macos' : detected.includes('win') ? 'windows' : detected.includes('linux') ? 'linux' : 'macos';
+    let manifest = null;
+    function safeReleaseUrl(value) {
+      try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && url.hostname === 'github.com' && url.pathname.startsWith('/apercallc/ai-notetaker/releases/download/') ? url.href : null;
+      } catch { return null; }
     }
-    platform.value = ['macos', 'windows', 'linux', 'unknown'].includes(hinted) ? hinted : detected.includes('mac') ? 'macos' : detected.includes('win') ? 'windows' : detected.includes('linux') ? 'linux' : 'unknown';
-    const content = {
-      macos: ['macOS', 'Download the signed DMG from the latest release or install the Homebrew Cask.', 'brew install --cask ai-notetaker', 'BlackHole is linked to the official Existential Audio installer and is never bundled.'],
-      windows: ['Windows', 'When released, download the signed installer or use WinGet/Chocolatey.', 'winget install --id AI.Notetaker --exact', 'The native installer may install only base VB-CABLE and keeps VB-Audio attribution visible.'],
-      linux: ['Linux', 'Download the Debian package; use AppImage when your distribution does not use apt.', '', 'Keep your normal audio output selected. The helper captures its PulseAudio/PipeWire monitor; null-sink routing is a fallback.'],
-      unknown: ['your OS', 'Use the latest release page and choose the native artifact for your system.', '', 'The supported desktop targets are macOS, Windows, and Linux.']
-    };
-    let releaseManifest = null;
-    function render() {
-      const [name, description, command, driver] = content[platform.value];
-      const published = releaseManifest?.status === 'published';
-      const installCommand = published ? command : '';
-      const releaseMessage = published
-        ? `<a href="${releases}">View release artifacts</a>`
-        : '<p class="warning">A signed release and package-manager installation are not confirmed yet. Check the release page for available artifacts.</p><a href="' + releases + '">View releases</a>';
-      instructions.innerHTML = `<article class="platform selected"><h3>${name}</h3><p>${description}</p>${installCommand ? `<code>${installCommand}</code>` : ''}<p class="muted">${driver}</p>${releaseMessage}</article>`;
+    function safeStoreUrl(value) {
+      try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && ['chromewebstore.google.com', 'chrome.google.com'].includes(url.hostname) ? url.href : null;
+      } catch { return null; }
     }
-    platform.addEventListener('change', render);
-    render();
-
-    fetch(`${manifestUrl}?t=${Date.now()}`, { cache: 'no-store' })
-      .then((response) => response.ok ? response.json() : null)
-      .then((manifest) => {
-        releaseManifest = manifest;
-        if (manifest?.status === 'published' && manifest.extension?.chromeWebStoreUrl) {
-          extensionLinks.innerHTML = `<a href="${manifest.extension.chromeWebStoreUrl}">Install from the Chrome Web Store</a>`;
-        } else if (manifest?.extension?.fallbackZipUrl) {
-          extensionLinks.innerHTML = `<a href="${manifest.extension.fallbackZipUrl}">Download the extension fallback ZIP</a> <span class="muted">(load it from chrome://extensions with Developer mode)</span>`;
-        } else {
-          extensionLinks.textContent = 'The extension listing and release fallback will appear here when published.';
-        }
-        if (manifest?.version) {
-          dockerInstall.innerHTML = `<code>mkdir ai-notetaker-webapp &amp;&amp; cd ai-notetaker-webapp
-curl -fsSLo docker-compose.registry.yml https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/docker-compose.registry.yml
-curl -fsSLo .env.docker.example https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/.env.docker.example
-cp .env.docker.example .env
-docker compose -f docker-compose.registry.yml --env-file .env pull
-docker compose -f docker-compose.registry.yml --env-file .env up -d</code><p>Release tags publish <code>ghcr.io/apercallc/ai-notetaker-webapp:${manifest.version}</code> and <code>:latest</code>. Set <code>AI_NOTETAKER_WEBAPP_IMAGE</code> for a Docker Hub mirror.</p>`;
-        } else {
-          dockerInstall.innerHTML = '<p class="warning">The prebuilt webapp image will appear after the first release. Until then, use the local Compose build in the repository.</p>';
-        }
-        render();
-      })
-      .catch(() => {
-        extensionLinks.textContent = 'Release metadata is temporarily unavailable; use the repository release page.';
-        dockerInstall.textContent = 'Release metadata is temporarily unavailable; use the local Compose build from the repository.';
-      });
+    function matchingArtifact(platform) {
+      const preferredFormat = { macos: 'dmg', windows: 'nsis', linux: 'deb' }[platform];
+      return manifest?.artifacts?.find((item) => item.platform === platform && platformAliases[platform]?.includes(item.architecture) && item.format === preferredFormat);
+    }
+    function renderArtifact() {
+      const platform = platformSelect.value;
+      platformSteps.textContent = platform === 'macos'
+        ? 'Open the DMG and move AI Notetaker to Applications. On first launch, Control-click the app, choose Open, then confirm Open. This per-app step is needed because the build is not Apple-notarized.'
+        : platform === 'windows'
+          ? 'Run the downloaded installer. If SmartScreen appears, check the file came from this release and review its SHA-256; then choose More info → Run anyway. Never turn SmartScreen off globally.'
+          : 'Open the downloaded .deb with your Software Install app and choose Install. Or use: sudo apt install ./<downloaded-file>.deb. The package registers Chrome Native Messaging for your account.';
+      const item = matchingArtifact(platform);
+      if (!item) {
+        const message = document.createElement('p');
+        message.textContent = 'This download is not in the latest release yet.';
+        const link = document.createElement('a');
+        link.className = 'button secondary';
+        link.href = releases;
+        link.textContent = 'Check GitHub Releases';
+        const detail = document.createElement('small');
+        detail.textContent = 'We publish Apple silicon Mac, Windows 64-bit, and Linux 64-bit builds as each target is ready.';
+        artifactBox.replaceChildren(message, link, detail);
+        return;
+      }
+      const url = safeReleaseUrl(item.url);
+      if (!url || !/^[a-f0-9]{64}$/u.test(item.sha256 ?? '')) {
+        const message = document.createElement('p');
+        message.textContent = 'The release metadata for this download is invalid.';
+        artifactBox.replaceChildren(message);
+        return;
+      }
+      const label = platform === 'macos' ? 'Download for Apple silicon' : platform === 'windows' ? 'Download for Windows 64-bit' : 'Download for Linux 64-bit (.deb)';
+      const download = document.createElement('a');
+      download.className = 'button';
+      download.href = url;
+      download.textContent = `${label} · ${String(item.format).toUpperCase()}`;
+      const details = document.createElement('small');
+      details.append(`Version ${String(manifest.version)} · SHA-256 `);
+      const checksum = document.createElement('code');
+      checksum.textContent = item.sha256;
+      details.append(checksum, document.createElement('br'));
+      const releaseNotes = document.createElement('a');
+      releaseNotes.href = releases;
+      releaseNotes.textContent = 'View release notes and checksums';
+      details.append(releaseNotes);
+      artifactBox.replaceChildren(download, details);
+    }
+    platformSelect.addEventListener('change', renderArtifact);
+    fetch(`${manifestUrl}?t=${Date.now()}`, { cache: 'no-store' }).then((response) => response.ok ? response.json() : null).then((data) => {
+      manifest = data;
+      const storeUrl = safeStoreUrl(data?.extension?.chromeWebStoreUrl);
+      const zipUrl = safeReleaseUrl(data?.extension?.fallbackZipUrl);
+      if (storeUrl) { extensionButton.href = storeUrl; extensionButton.textContent = 'Add to Chrome'; }
+      else if (zipUrl) {
+        extensionButton.href = zipUrl;
+        extensionButton.textContent = 'Download extension ZIP';
+        extensionNote.textContent = 'No account needed for your own keys. The extension ZIP is a manual install: unzip it, then choose Load unpacked at chrome://extensions and select the dist folder.';
+      }
+      renderArtifact();
+    }).catch(() => {
+      const message = document.createElement('p');
+      message.textContent = 'We could not load the latest release list.';
+      const link = document.createElement('a');
+      link.className = 'button secondary';
+      link.href = releases;
+      link.textContent = 'Open GitHub Releases';
+      artifactBox.replaceChildren(message, link);
+    });
   </script>
 </body>
 </html>

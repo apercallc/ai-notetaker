@@ -63,6 +63,7 @@ function render(outcome: Outcome | "asking"): void {
     },
   }[outcome];
   app.innerHTML = `
+    <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div>
     <h1 tabindex="-1" id="heading">${escapeHtml(copy.title)}</h1>
     <p role="status">${copy.body}</p>
     ${copy.action ? `<div><button type="button" class="primary" id="retry">Try again</button></div>` : ""}

@@ -3,7 +3,7 @@
   "$id": "https://apercallc.github.io/ai-notetaker/release/manifest.schema.json",
   "title": "AI Notetaker release manifest",
   "type": "object",
-  "required": ["schemaVersion", "product", "version", "status", "extension", "protocol", "artifacts", "packageManagers", "docker"],
+  "required": ["schemaVersion", "product", "version", "status", "extension", "protocol", "artifacts", "docker"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "product": { "const": "ai-notetaker" },
@@ -40,20 +40,10 @@
           "format": { "enum": ["dmg", "pkg", "msi", "nsis", "deb", "appimage"] },
           "url": { "type": "string", "format": "uri" },
           "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-          "signatureStatus": { "enum": ["signed", "notarized", "signed_and_notarized", "checksummed"] }
+          "signatureStatus": { "enum": ["unsigned", "signed", "notarized", "signed_and_notarized"] }
         },
         "additionalProperties": false
       }
-    },
-    "packageManagers": {
-      "type": "object",
-      "required": ["homebrew", "winget", "chocolatey"],
-      "properties": {
-        "homebrew": { "$ref": "#/$defs/packageManager" },
-        "winget": { "$ref": "#/$defs/packageManager" },
-        "chocolatey": { "$ref": "#/$defs/packageManager" }
-      },
-      "additionalProperties": false
     },
     "docker": {
       "type": "object",
@@ -61,17 +51,6 @@
       "properties": {
         "composeFile": { "type": "string" },
         "scope": { "const": "history-webapp-only" }
-      },
-      "additionalProperties": false
-    }
-  },
-  "$defs": {
-    "packageManager": {
-      "type": "object",
-      "required": ["installCommand", "updateCommand"],
-      "properties": {
-        "installCommand": { "type": "string", "minLength": 1 },
-        "updateCommand": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     }

@@ -15,8 +15,10 @@
   --line: #3c4043;
   --text: #e8eaed;
   --muted: #a0a6ad;
-  --accent: #8ab4f8;
-  --accent-ink: #041e49;
+  --accent: #82dba8;
+  --accent-ink: #103e2a;
+  --action: #176c4b;
+  --action-ink: #ffffff;
   --danger: #c5221f;
   --warn: #fdd663;
   --recording: #f28b82;
@@ -46,6 +48,7 @@
 
 .nt button {
   cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
 
 .nt :focus-visible {
@@ -185,11 +188,11 @@
 }
 
 .pill-start {
-  height: 32px;
+  min-height: 34px;
   padding: 0 14px;
   margin: 0 2px;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--action);
+  color: var(--action-ink);
   border: 0;
   border-radius: 999px;
   font-weight: 600;
@@ -294,7 +297,7 @@ input[type="text"]::placeholder {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 16px;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -302,8 +305,8 @@ input[type="text"]::placeholder {
 }
 
 .btn.primary {
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--action);
+  color: var(--action-ink);
 }
 
 .btn.primary:hover:not(:disabled) {

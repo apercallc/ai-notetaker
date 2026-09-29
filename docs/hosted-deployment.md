@@ -97,4 +97,6 @@ web replicas and survives a deployment.
 - Rotate worker/provider/Stripe credentials through the deployment secret
   manager, then restart workers so the new values are loaded.
 - Do not call the service released until the real provider, billing, storage,
-  deployment, signing, browser, and native-OS gates are complete.
+  deployment, browser, and native-OS gates are complete. Desktop artifact
+  signing is intentionally not a release prerequisite in the current budget
+  plan; see the native download trust policy.

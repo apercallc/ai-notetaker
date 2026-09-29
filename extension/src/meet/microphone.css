@@ -9,6 +9,20 @@ body {
   gap: var(--space-3);
 }
 
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: var(--space-1);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.brand-lockup img {
+  width: 28px;
+  height: 28px;
+}
+
 h1 {
   margin: 0;
   font-size: 1.25rem;

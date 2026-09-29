@@ -4,7 +4,7 @@ Date: 2026-09-21
 Status: Historical baseline — superseded on 2026-09-24
 
 > The current product direction is documented in
-> [`2026-09-24-scribbl-dual-mode-product-design.md`](2026-09-24-scribbl-dual-mode-product-design.md).
+> [`2026-09-24-dual-mode-product-design.md`](2026-09-24-dual-mode-product-design.md).
 > This file remains as the decision record for the original local/BYOK
 > implementation and must not be used as the current product contract.
 

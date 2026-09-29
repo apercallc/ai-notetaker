@@ -1,4 +1,4 @@
-# Scribbl-like Dual-Mode Product Migration Implementation Plan
+# AI Notetaker Dual-Mode Product Migration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript/Vitest/Manifest V3, Rust/Tauri/Cargo, Next.js/Prisma/Postgres, object storage, a durable queue/worker runtime, Stripe webhooks, Chrome tab/offscreen capture, macOS ScreenCaptureKit, Windows WASAPI, and PipeWire/PulseAudio adapters.
 
-**Spec:** `docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`
 
 ## Global Constraints
 
@@ -34,8 +34,8 @@
 ### Task 1: Replace stale product contracts with the dual-mode spec
 
 **Files:**
-- Create: `docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`
-- Create: `docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md`
+- Create: `docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`
+- Create: `docs/superpowers/plans/2026-09-24-dual-mode-product-migration.md`
 - Modify: `CLAUDE.md`
 - Modify: `extension/CLAUDE.md`
 - Modify: `helper/CLAUDE.md`

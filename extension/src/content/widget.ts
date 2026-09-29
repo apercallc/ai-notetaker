@@ -6,7 +6,7 @@ import { createStopConfirm, STOP_CONFIRM_LABEL, STOP_LABEL, type StopConfirmOpti
 import { CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "../meet/hints";
 import { speakerLabel, type MeetingMode, type Speaker } from "../types";
 import { canStart, deriveView, formatElapsed, type WidgetUi, type WidgetView } from "./widgetModel";
-import { ICONS, errorMessage, readyKey, renderPanel, renderPill, type TemplateContext } from "./widgetTemplates";
+import { ICONS, PILL_LABELS, errorMessage, readyKey, renderPanel, renderPill, type TemplateContext } from "./widgetTemplates";
 
 export interface WidgetDeps {
   /** Sends a message to the background worker; rejects if the extension context is gone. */
@@ -447,7 +447,12 @@ export class MeetWidget {
   private setExpanded(expanded: boolean): void {
     this.expanded = expanded;
     this.root.dataset.expanded = String(expanded);
-    this.root.querySelector("#toggle")?.setAttribute("aria-expanded", String(expanded));
+    const toggle = this.root.querySelector("#toggle");
+    toggle?.setAttribute("aria-expanded", String(expanded));
+    toggle?.setAttribute(
+      "aria-label",
+      `${expanded ? "Collapse" : "Expand"} notes panel, status ${this.view ? PILL_LABELS[this.view] ?? "Notetaker" : "Notetaker"}`,
+    );
     this.root.querySelector("#chevron")?.setAttribute("aria-label", expanded ? "Collapse notes panel" : "Expand notes panel");
     this.applyPlacement();
     if (expanded && this.view === "recording") {

@@ -46,13 +46,5 @@
       }
     },
     "createUpdaterArtifacts": false
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "REPLACE_WITH_OWNER_GENERATED_TAURI_UPDATER_PUBLIC_KEY",
-      "endpoints": [
-        "https://updates.example.invalid/ai-notetaker/{{target}}/{{arch}}/{{current_version}}"
-      ]
-    }
   }
 }

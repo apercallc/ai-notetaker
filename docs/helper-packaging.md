@@ -2,9 +2,9 @@
 
 The helper is a tray-only Tauri v2 application. `notetaker-helper` owns the
 persistent capture/pipeline process; `notetaker-nm-host` remains a separate,
-Tauri-free Native Messaging relay that Chrome starts per connection. The
-placeholder icon set under `helper/crates/app/icons/` was generated from
-`placeholder.svg`; replace it with real branding art before release.
+Tauri-free Native Messaging relay that Chrome starts per connection. Extension
+and desktop icons use the shared AI Notetaker note-and-waveform mark. Rebuild
+the platform icon files with `python3 scripts/generate-brand-icons.py`.
 
 For the user path, start with [`docs/getting-started.md`](getting-started.md).
 This document is the packaging and uninstall reference. A raw `cargo build`
@@ -29,39 +29,30 @@ cargo install cargo-deb
 cargo deb --manifest-path helper/crates/app/Cargo.toml
 ```
 
-## End-user distribution channels
+## End-user downloads
 
-When a release is published, use the native artifact for the operating system
-or the package-manager channel below. All channels install the same helper and
-Native Messaging relay; they do not install the Chrome extension.
+Users download the matching installer from the [AI Notetaker install
+page](https://apercallc.github.io/ai-notetaker/) or the [latest GitHub
+release](https://github.com/apercallc/ai-notetaker/releases/latest). The
+current target set is Apple silicon Mac (arm64), Windows 64-bit (x86_64), and
+Debian/Ubuntu Linux 64-bit (x86_64). The Mac DMG and Windows installer are
+unsigned; Linux uses a `.deb`. The release manifest and `SHA256SUMS` describe
+the exact published files.
 
-```sh
-# macOS
-brew install --cask ai-notetaker
+AppImage is not offered as a primary Linux download because a portable mount
+cannot safely provide Chrome a stable path to the Native Messaging relay. The
+Debian package depends on `pulseaudio-utils`, which supplies `pactl` for audio
+setup/probing and `parec` for monitor capture.
 
-# Windows PowerShell
-winget install AI.Notetaker
-# Chocolatey is also supported: choco install ai-notetaker
-```
+The helper checks for a newer stable GitHub release daily and asks before
+opening the official release page. It never downloads or installs an update
+automatically. Users can also choose **Check for Updates…** from the tray
+menu. This keeps updates available without requiring a Tauri updater signing
+key or endpoint.
 
-Linux users should install the signed `.deb` from the release page. The
-AppImage is a fallback for distributions that cannot use the Debian package,
-but it cannot safely register a Native Messaging relay inside a transient
-mount, so the `.deb` or an explicit stable-path registration is preferred.
-The Debian package depends on `pulseaudio-utils`, which supplies both `pactl`
-for virtual-device setup/probing and `parec` for monitor capture.
-
-Package-manager packages are pinned to a release URL and SHA-256; they must
-never fetch a floating “latest” binary during installation. Update a
-package-managed helper with its package manager. Direct-download installs use
-the newer native installer until the Tauri updater key and endpoint are
-configured. Never mix the two update mechanisms.
-
-The release workflow publishes GitHub Release assets and `SHA256SUMS` for every
-version tag. It also renders the Homebrew, WinGet, and Chocolatey package files
-when `CHROME_WEB_STORE_URL` is configured as a repository variable. Publishing
-those package files to the external registries still requires the release-owner
-credentials and review described in [`../release/README.md`](../release/README.md).
+The release workflow uploads native installers, the Chrome extension ZIP,
+manifest, and `SHA256SUMS`; it does not publish Homebrew, WinGet, or Chocolatey
+packages.
 
 Linux CI installs the Tauri v2 WebKitGTK, GTK, Ayatana AppIndicator, and
 librsvg development packages in addition to the ALSA headers.
@@ -112,22 +103,15 @@ inside a transient AppImage mount; use the Debian package for automatic Linux
 registration, or perform an explicit manual install with a stable extracted
 relay path.
 
-## Updater signing
+## Update behavior
 
-The updater plugin and endpoint shape are wired, but the public key and
-endpoint in `tauri.conf.json` are placeholders. Artifact generation is
-disabled until the owner supplies a real signing key; enable
-`bundle.createUpdaterArtifacts` only in the release configuration after
-generating and protecting the key pair:
-
-```sh
-npx --yes @tauri-apps/cli@2.11.5 signer generate -w ~/.tauri/ai-notetaker.key
-```
-
-Only the owner may replace `REPLACE_WITH_OWNER_GENERATED_TAURI_UPDATER_PUBLIC_KEY`,
-choose the real HTTPS endpoint, and publish artifacts with
-`TAURI_SIGNING_PRIVATE_KEY`. Never commit the private key or claim updater
-release proof from a local compile.
+The helper fetches the latest stable release metadata from GitHub at most once
+per 24 hours. If the release is newer than the installed version, a native
+yes/no prompt offers to open the fixed official GitHub Releases page. Accepting
+opens the page; declining is remembered for that version. No executable,
+installer, or update metadata is downloaded by the helper, and nothing is
+installed in the background. **Check for Updates…** in the tray menu performs
+an immediate check.
 
 ## Uninstall
 
@@ -182,35 +166,15 @@ keep visible attribution to [vb-cable.com](https://vb-audio.com/Cable/) and
 the donation option. It must never silently remove unrelated A+B/C+D
 variants.
 
-## macOS / Windows code signing
+## Signing and release acceptance
 
-`release-build.yml` is wired to sign and notarize automatically once the
-release owner adds the corresponding repository secrets — it does nothing
-different from today (unsigned artifacts) when they're absent, so this is
-safe to merge ahead of actually having a cert.
+The budget release plan intentionally publishes unsigned artifacts and
+documents the per-app macOS and per-file Windows prompts in
+[`code-signing-policy.md`](code-signing-policy.md). Signing can be reconsidered
+later, but release artifacts must not be labeled signed unless the actual
+native signatures have been checked.
 
-- **macOS**: set `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
-  `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an
-  [app-specific password](https://support.apple.com/en-us/102654), not the
-  Apple ID password), and `APPLE_TEAM_ID`. Tauri's bundler imports the
-  certificate into a temporary keychain and notarizes automatically — see
-  [Tauri: Sign macOS applications](https://tauri.app/distribute/sign/macos/).
-  Requires an active Apple Developer Program membership (release-owner cost,
-  not something this repo can supply).
-- **Windows**: set `WINDOWS_CERTIFICATE` (base64 `.pfx`) and
-  `WINDOWS_CERTIFICATE_PASSWORD`. A post-build step signs every `.msi`/`.exe`
-  in the bundle output with `signtool` and a DigiCert timestamp server.
-  Requires a purchased Authenticode code-signing certificate (release-owner
-  cost).
-
-## Release-only prerequisites
-
-Actually obtaining the Apple Developer Program membership and an Authenticode
-certificate, generating and protecting the Tauri updater key pair (see
-above — the doc for that step is intentionally owner-only, not something to
-automate here), macOS installer-helper execution, and uninstall runs on each
-native OS remain release-owner validation. The Linux build and config are
-locally compilable here; that is not proof of macOS/Windows signing or
-hardware audio behavior. CI is now wired to consume owner-supplied signing
-secrets the moment they exist — no further code change should be needed to
-turn signing on.
+The generated Linux build and cross-platform CI do not prove Mac/Windows
+installer behavior or physical-device audio capture. Verify installer launch,
+Native Messaging registration, uninstall, permissions, and audio preflight on
+each target OS before treating desktop downloads as accepted.

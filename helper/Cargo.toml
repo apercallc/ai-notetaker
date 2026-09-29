@@ -24,9 +24,8 @@ base64 = "0.23"
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 sha2 = "0.11"
-# reqwest 0.13 leaves the rustls crypto provider to the app. Use ring, as
-# tauri-plugin-updater does, instead of pulling in aws-lc-sys and its C
-# toolchain requirements.
+# reqwest 0.13 leaves the rustls crypto provider to the app. Use ring instead
+# of pulling in aws-lc-sys and its C toolchain requirements.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 # Tauri 2.11.6 still resolves the GTK 3 stack to glib 0.18.x, while the

@@ -131,6 +131,8 @@ describe("MeetWidget: idle", () => {
     expect($(".nt")?.dataset.view).toBe("ready");
     expect($(".nt")?.dataset.expanded).toBe("false");
     expect($("#toggle")?.getAttribute("aria-expanded")).toBe("false");
+    expect($("#toggle")?.getAttribute("aria-label")).toContain("Expand notes panel");
+    expect($("#toggle")?.getAttribute("aria-label")).toContain("status Notetaker");
     expect($(".pill-main")?.textContent).toContain("Notetaker");
   });
 
@@ -141,6 +143,7 @@ describe("MeetWidget: idle", () => {
     await click("#toggle");
     expect($(".nt")?.dataset.expanded).toBe("true");
     expect($("#toggle")?.getAttribute("aria-expanded")).toBe("true");
+    expect($("#toggle")?.getAttribute("aria-label")).toContain("Collapse notes panel");
     expect($("#start")).not.toBeNull();
 
     $("#mode")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -922,7 +925,7 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
 
   it("does not let a changing timer rename the toggle button for screen readers", async () => {
     harness = await createHarness(baseState({ active: activeMeeting() }));
-    expect(harness.$("#toggle")?.getAttribute("aria-label")).toBe("Recording");
+    expect(harness.$("#toggle")?.getAttribute("aria-label")).toBe("Expand notes panel, status Recording");
   });
 
   it("can be moved with the arrow keys, remembering the new spot", async () => {

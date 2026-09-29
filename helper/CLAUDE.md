@@ -1,8 +1,9 @@
 # helper/ — Desktop Capture Helper
 
-Tauri (Rust), not Electron — smaller install, one shared codebase across
-macOS/Windows/Linux with small platform-specific audio modules, and Tauri's
-built-in updater covers the "how do security patches reach users" gap. See
+Tauri (Rust), not Electron — smaller install and one shared codebase across
+macOS/Windows/Linux with small platform-specific audio modules. Daily stable
+release checks ask before opening the GitHub download page; installers are
+downloaded and run by the user. See
 `docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md` (§3.1)
 for the full rationale.
 

@@ -1,9 +1,8 @@
 # Installing an unsigned development build
 
-Unsigned native artifacts are for maintainers and testers only. Prefer the
-signed release installer or the package-manager channel once a public release
-is available; signing lets the operating system verify where the binary came
-from.
+This page covers local source builds. The public desktop release is also
+unsigned; see [`code-signing-policy.md`](code-signing-policy.md) for its
+platform-specific first-open steps and checksum limits.
 
 ## Linux
 
@@ -40,5 +39,5 @@ have verified its checksum. Windows SmartScreen warnings are expected for an
 unsigned build. Do not disable SmartScreen globally; use the installer’s
 per-file **More info → Run anyway** path only for this test build.
 
-Unsigned development artifacts must never be presented as the public release,
-and they must not be used to set `RELEASE_SIGNING_CONFIRMED=true`.
+Do not treat a checksum as proof of publisher identity. Only install source
+builds you created or whose source you have independently reviewed.

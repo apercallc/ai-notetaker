@@ -1,9 +1,9 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
-This tracks the current implementation baseline, the approved Scribbl-like
-dual-mode migration, and the remaining production gates. The current target
+This tracks the current implementation baseline, the approved dual-mode
+product migration, and the remaining production gates. The current target
 architecture is
-[`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md);
+[`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-dual-mode-product-design.md);
 the 2026-09-21 architecture is historical.
 
 Check items off as they land. If a decision here turns out wrong once
@@ -30,7 +30,7 @@ ports) lives under "Ideas" at the bottom, not in the roadmap.
 ## Approved product migration (2026-09-24)
 
 Implementation plan:
-[`docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md`](docs/superpowers/plans/2026-09-24-scribbl-dual-mode-product-migration.md)
+[`docs/superpowers/plans/2026-09-24-dual-mode-product-migration.md`](docs/superpowers/plans/2026-09-24-dual-mode-product-migration.md)
 
 - [x] Approve dual-mode product direction: free local BYOK plus paid hosted AI.
 - [x] Define botless Google Meet capture as a first-class recording source.
@@ -160,9 +160,10 @@ decided yet.
       Messaging `allowed_origins` with the real Chrome Web Store extension ID
       once the listing exists, and verify the committed manifest `key`
       derives the published ID (or add both origins deliberately).
-- [ ] (e) Generate and protect the Tauri updater signing key and set the
-      updater endpoint so the automatic updater can be enabled (see also the
-      Sub-project 2 updater item).
+- [x] (e) Replace the signed Tauri installer updater plan with a daily
+      GitHub-release check and explicit opt-in to the release page. The helper
+      never downloads or installs updates; a tray action also supports manual
+      checks.
 - [ ] (f) Capture real store screenshots on each OS (macOS, Windows, Linux) for
       the Chrome Web Store listing, the install page, and the README; current
       screenshots are rendered extension UI only.
@@ -238,59 +239,62 @@ reintroducing its old assumptions.
       Messaging and native-loopback audio are now verified on the current host;
       other OSes and live provider responses remain unverified.
 
-## Distribution and installation architecture (2026-09-21)
+## Distribution and installation architecture (2026-09-28)
 
-The approved direction is documented in
-[`docs/superpowers/specs/2026-09-21-distribution-and-installation-architecture.md`](docs/superpowers/specs/2026-09-21-distribution-and-installation-architecture.md).
-The desktop helper remains native; Docker is for the optional history webapp
-only.
+Current decisions are documented in
+[`docs/superpowers/specs/2026-09-28-direct-download-distribution.md`](docs/superpowers/specs/2026-09-28-direct-download-distribution.md).
+The 2026-09-21 package-manager and paid-signing plan is historical. The helper
+remains native; Docker is for the optional history webapp only.
 
-- [x] Add the release manifest schema/template covering helper/extension
-      versions, protocol compatibility, OS/architecture artifacts, checksums,
-      and package-manager metadata; publishing real signed values remains
-      release-owner work.
-- [x] Replace the onboarding's generic GitHub Releases link with an
-      OS-detected install page and a manual platform override; GitHub Pages
-      is enabled for the configured repository and the install site is live at
-      `https://apercallc.github.io/ai-notetaker/`.
-- [ ] Finish and test direct native installers, including release-owner
-      signing/notarization and per-OS Native Messaging registration.
-- [x] Add Homebrew Cask plus WinGet/Chocolatey templates and release-build
-      rendering around pinned native artifacts; publishing packages remains
-      release-owner work. npm stays limited to source builds.
-- [x] Make package-manager installs and channel-specific upgrade commands the
-      primary user documentation; keep source builds in the contributor path
-      and document that npm/npx cannot replace the native helper installer.
-- [x] Release workflow now uploads versioned native artifacts, a generated
-      checksum manifest, and the optional webapp image to GitHub Releases and
-      GHCR. External Homebrew/WinGet/Chocolatey publication remains owner work.
+- [x] Build the install page into a marketing homepage with clear Google Meet
+      and desktop-call paths, privacy/AI-mode explanations, and explicitly
+      illustrative use-case cards rather than fabricated testimonials.
+- [x] Add downloadable SVG infographics for the capture workflow and example
+      role-based use cases.
+- [x] Remove Homebrew, WinGet, and Chocolatey from release generation and
+      end-user setup instructions; update by downloading the newer GitHub
+      release artifact.
+- [x] Make the release manifest publish checksum-verified unsigned native
+      downloads without requiring paid signing or a Chrome Web Store URL.
+- [x] Target Apple silicon for the Mac DMG; target Windows x64 and Debian/
+      Ubuntu Linux x64, and link the exact artifact from the site manifest.
+- [x] Fix the release workflow artifact names so publish-release downloads the
+      extension and helper artifacts produced by tagged jobs.
+- [x] Add a daily stable-release check to the desktop helper. It asks before
+      opening the official GitHub release page and never downloads or installs
+      an update; users can also check from the tray menu.
+- [ ] Publish a tagged release and confirm the real Apple-silicon, Windows,
+      and Linux artifacts install/register Native Messaging on their target OS.
+- [ ] Publish the Chrome Web Store listing and capture real customer stories
+      with written permission before presenting testimonials as social proof.
 
-## Live release gates (audit, 2026-09-27)
+## Live release gates (audit, 2026-09-27; rechecked 2026-09-29)
 
-- [ ] Restore the production API hostname: Railway reports that
+- [ ] Restore the production API hostname: Railway currently reports that
       `ai-notetaker.apercallc.com` requires a CNAME to
-      `rgkzqax9.up.railway.app`; public DNS currently returns NXDOMAIN, so the
-      deployed `/api/health` endpoint cannot be verified at that hostname.
+      `rgkzqax9.up.railway.app`; the record is unset and certificate ownership
+      is still validating, so `/api/health` cannot be reached at that hostname.
 - [ ] Finish managed-hosting configuration before enabling customer signups:
       production currently has only the web and Postgres services (no worker),
-      and Railway is missing `MANAGED_WORKER_TOKEN`, S3 bucket configuration,
-      managed Deepgram/Anthropic keys, and Stripe secret, webhook, and price
-      variables. The application fails managed signup closed until readiness
-      checks pass. Configure secrets in Railway and verify `managedReady:true`
-      plus a real worker processing an uploaded recording.
-- [ ] Re-run cross-platform helper CI with readable macOS and Windows logs.
-      The latest recorded run failed both platform Clippy jobs, while Linux
-      helper fmt, Clippy, and tests pass locally; existing GitHub logs expired,
-      so the cause is not yet known. Do not waive the platform jobs without
-      actionable diagnostics.
+      and Railway is missing `MANAGED_WORKER_TOKEN`, `S3_BUCKET`,
+      `MANAGED_DEEPGRAM_API_KEY`, `MANAGED_ANTHROPIC_API_KEY`,
+      `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and both Stripe price IDs.
+      The application fails managed signup closed until readiness checks pass.
+      Configure required production values and a real worker, then verify
+      `managedReady:true` and a completed upload.
+- [ ] Run cross-platform helper CI on the current uncommitted candidate. The
+      latest GitHub helper matrix on the committed baseline passed for Linux,
+      macOS, and Windows; local fmt, Clippy, and tests also pass. Those results
+      do not include the current dirty helper changes.
 - [ ] Complete production acceptance with live Chrome/Meet, Google OAuth and
       Drive, providers, managed upload/worker/storage, Stripe billing, and
       health checks after configuration; local tests/builds do not prove those
       account- and deployment-backed flows.
-- [ ] Publish signed native installers and the Chrome Web Store listing,
+- [ ] Publish the first unsigned native release and Chrome Web Store listing,
       replace the development extension ID in Native Messaging origins, and
-      capture real store screenshots. `release/manifest.json` remains marked
-      unpublished with no release artifacts or store URL.
+      capture real store screenshots. Rechecked: GitHub has no published
+      release and `release/manifest.json` remains unpublished with no artifacts
+      or store URL.
 - [x] Add `webapp/Dockerfile` and Docker Compose for the optional webapp and
       Postgres, with persistent storage, migrations, health checks, and
       authenticated token setup.
@@ -300,8 +304,8 @@ only.
 - [x] Add helper/extension protocol compatibility and a user-facing install
       health state for helper missing, incompatible, driver missing, routing
       incomplete, and ready.
-- [ ] Complete acceptance testing for native installers, package-manager
-      install/upgrade/uninstall, and Chrome Web Store/manual extension paths.
+- [ ] Complete acceptance testing for native installers, GitHub Release
+      download/update flows, and Chrome Web Store/manual extension paths.
 - [x] Docker webapp acceptance smoke test passes: image build, migrations,
       health endpoint, unauthenticated rejection, and authenticated API access;
       native OS and remote deployment proof remain release-owner work. The
@@ -535,10 +539,11 @@ accessibility failures):*
 - [x] Tauri tray/app shell wired — `notetaker-helper` now has a plain
       Tauri-owned `main()`, IPC starts from `.setup()`, and the tray exposes
       idle/recording status, recent notes, notes folder, opt-in launch-at-login,
-      and quit. Placeholder icon art is checked in; real branding remains.
-- [x] Tauri auto-updater plugin and artifact configuration wired — updater
-      public key, endpoint, and signing artifacts remain owner-only release
-      setup; see `docs/helper-packaging.md`.
+      and quit. The 2026-09-29 brand pass replaces the placeholder app icon
+      across extension and desktop icon formats.
+- [x] Daily GitHub stable-release check with a native yes/no prompt; users
+      download and run the newer installer themselves. See
+      `docs/getting-started.md`.
 - [x] Startup check for an in-progress recording (crash recovery) —
       tested; resume reprocesses the durable raw-audio tail after the last
       persisted transcription cursor before finalizing the summary.
@@ -706,9 +711,8 @@ Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
       guarded macOS app-bundled install/uninstall helpers are implemented;
       macOS DMG still requires the owner to run the helper after copying the
       app because DMG has no post-install phase.
-- [ ] Generate and publish the owner-controlled Tauri updater key/endpoint —
-      config placeholders are intentional until the release owner supplies
-      signing credentials.
+- [x] No Tauri updater signing key or endpoint is needed for the approved
+      manual-download update flow.
 
 ---
 
@@ -989,6 +993,43 @@ Consciously deferred (why):
 
 ---
 
+## Product design and branding (2026-09-29)
+
+- [x] Establish one product mark and regenerate extension and desktop app
+      icons from the canonical local SVG; align the favicon, landing page,
+      signed-in app, extension, and sign-in screens.
+- [x] Unify primary action color, control sizing, focus feedback, and reduced
+      motion behavior across the extension, history app, and marketing site.
+- [x] Record design tokens, accessible interaction rules, and the licensed
+      local icon approach in `docs/design-system.md`.
+- [ ] Capture and review real browser and native OS screenshots for the
+      extension, helper, and history app before store/release publication.
+
+## Final production-readiness audit (2026-09-29)
+
+- [x] Keep Google Meet processing bound to the mode stored when capture starts;
+      a Settings change cannot silently send local BYOK audio to Hosted AI or
+      process a Hosted AI recording with local keys. Automatic attendee sharing
+      also checks the recording's original managed workspace.
+- [x] Register Meet capture before the offscreen start acknowledgement so its
+      first audio chunks are not discarded.
+- [x] Bound public Stripe webhook request bodies to 1 MiB before signature
+      verification or JSON parsing.
+- [x] Reduce release workflow token permissions to read-only builds, with
+      package publishing on the image job and repository write access only on
+      the GitHub release publishing job; build checkouts do not persist tokens.
+- [x] Keep the Meet widget's keyboard toggle action clear to screen readers and
+      retain section links in the mobile site navigation.
+- [ ] Track six RustSec unmaintained-dependency warnings in the transitive
+      Tauri/GTK dependency graph (`proc-macro-error` and the `unic-*` crates).
+      The 2026-09-29 `cargo audit` run found zero vulnerable or yanked crates;
+      revisit when upstream Tauri dependencies offer supported replacements.
+- [ ] Run the full cross-platform, live-provider, signed-in managed service,
+      browser install, and native audio acceptance checks; these need real
+      accounts/devices and a published release.
+
+---
+
 ## How to use this file
 
 - Pick items top-down within sub-project 1 before touching later
@@ -998,5 +1039,5 @@ Consciously deferred (why):
   pass before calling that sub-project done, not just at the very end.
 - If scope changes (a gap turns out bigger or smaller than expected),
   update the current design spec
-  (`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`)
+  (`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`)
   first, then reflect the change here.

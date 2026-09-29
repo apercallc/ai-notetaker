@@ -40,7 +40,7 @@ export function errorMessage(ctx: TemplateContext): string {
   return ctx.ui.error ?? ctx.state?.latest?.errorMessage ?? "Something went wrong.";
 }
 
-const PILL_LABELS: Partial<Record<WidgetView, string>> = {
+export const PILL_LABELS: Partial<Record<WidgetView, string>> = {
   recording: "Recording",
   starting: "Starting…",
   processing: "Writing notes…",
@@ -59,11 +59,12 @@ export function renderPill(view: WidgetView, ctx: TemplateContext): string {
   const recording = view === "recording";
   const elapsed = recording && state?.active ? formatElapsed(state.active.startedAt, ctx.now) : "";
   const label = PILL_LABELS[view] ?? "Notetaker";
+  const panelAction = ctx.expanded ? "Collapse notes panel" : "Expand notes panel";
   const quickStart = view === "ready" && canStart(state);
   const hint = (text: string, keys: string | undefined): string => escapeHtml(keys ? `${text} (${keys})` : text);
   return `
       <div class="pill" role="group" aria-label="AI Notetaker" title="Drag to move, or focus and use the arrow keys">
-        <button type="button" class="pill-main" id="toggle" aria-label="${escapeHtml(label)}" aria-expanded="${ctx.expanded}" aria-controls="panel">
+        <button type="button" class="pill-main" id="toggle" aria-label="${escapeHtml(`${panelAction}, status ${label}`)}" aria-expanded="${ctx.expanded}" aria-controls="panel">
           <span class="dot" aria-hidden="true"></span>
           <span>${escapeHtml(label)}</span>
           ${recording ? `<span class="elapsed" id="elapsed" role="timer">${elapsed}</span>` : ""}

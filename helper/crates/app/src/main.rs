@@ -15,6 +15,7 @@ mod notify;
 mod paths;
 mod single_instance;
 mod tray;
+mod update_check;
 
 use async_trait::async_trait;
 use notetaker_audio::{AudioCapture, AudioDiagnostics};
@@ -809,7 +810,7 @@ fn main() {
     };
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
@@ -843,6 +844,14 @@ fn main() {
                 subscribers: std::sync::Mutex::new(HashMap::new()),
             });
             let tray = tray::initialize(app.handle(), root.clone());
+            let update_app = app.handle().clone();
+            let update_data_dir = root.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    update_check::check_if_due(&update_app, &update_data_dir).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(6 * 60 * 60)).await;
+                }
+            });
             if let Ok(interrupted) = state
                 .store
                 .find_interrupted_meetings_excluding(&HashSet::new())

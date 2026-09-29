@@ -4,7 +4,7 @@ Manifest V3. This package owns the Google Meet browser path: its offscreen
 document captures the tab and microphone, and IndexedDB persists chunks before
 local BYOK processing or Hosted AI upload. For desktop-call sources it is a
 **thin UI** that forwards start/stop and settings to the native helper. See the root `CLAUDE.md` and
-`docs/superpowers/specs/2026-09-24-scribbl-dual-mode-product-design.md`
+`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`
 for why: service workers die after ~30s idle and cannot own the long-running
 desktop pipeline; the offscreen Meet path is explicitly durable and rehydrates
 from IndexedDB after service-worker suspension.

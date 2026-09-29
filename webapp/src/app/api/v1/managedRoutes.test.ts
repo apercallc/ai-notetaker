@@ -453,6 +453,13 @@ describe("managed upload routes", () => {
       body: payload,
     }));
     expect(invalid.status).toBe(400);
+
+    const oversized = await billingWebhook(new Request("http://localhost/api/v1/billing/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": `t=${timestamp},v1=00`, "content-type": "application/json" },
+      body: new Uint8Array(1_048_577),
+    }));
+    expect(oversized.status).toBe(413);
   });
 
   it("accepts a bounded extension error report and rejects unauthenticated or malformed ones", async () => {

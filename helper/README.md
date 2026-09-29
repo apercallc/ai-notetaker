@@ -11,10 +11,11 @@ Native Messaging host; use the packaged installer flow in
 [`../docs/helper-packaging.md`](../docs/helper-packaging.md) when you need a
 working extension-to-helper install.
 
-End users should install the published helper with Homebrew, WinGet,
-Chocolatey, or the Linux `.deb` instead of cloning this workspace. Those
-channels update the helper and its Native Messaging relay together; npm/npx is
-not a supported native-helper installer.
+End users download the native installer for their operating system from the
+[AI Notetaker install page](https://apercallc.github.io/ai-notetaker/) or the
+[latest GitHub release](https://github.com/apercallc/ai-notetaker/releases/latest).
+The GitHub release publishes unsigned installers with checksums and clear
+first-open guidance; npm/npx is not a supported native-helper installer.
 
 ## Workspace layout
 
@@ -47,8 +48,8 @@ verified locally. The repository's three-OS CI matrix runs the same Rust gates
 and an unsigned Tauri bundle smoke build for each native target. CI pins the
 Tauri CLI 2.11.5, alongside the lockfile's Rust Tauri 2.11.6 release. This
 Linux host does not have the Apple or MinGW toolchains needed for local
-cross-target checks; signing, device permissions, and installer execution still
-require native runners.
+cross-target checks; OS trust prompts, device permissions, and installer
+execution still require native runners.
 
 ## What's genuinely verified vs. what isn't (read this before trusting a "done" claim)
 
@@ -127,13 +128,13 @@ meeting app. The GitHub Actions matrix is the native compile gate:
   the crash rather than reconstructing a final chunk that was captured but
   never reached the transcription provider. The raw audio itself is never
   lost (that's the resilience guarantee, and it holds).
-- **Tauri auto-updater configuration** — plugin and artifact shape are wired,
-  but updater keys/endpoints are owner-generated release placeholders. See
-  `../docs/helper-packaging.md`.
-- **Per-OS installer registration and code signing** — Debian and Windows
-  package hooks register Native Messaging, and macOS bundles guarded
-  install/uninstall helpers; macOS notarization, Windows signing, and the
-  macOS post-copy helper run still require native release work.
+- **Daily release checks** — the helper asks before opening the official
+  GitHub download page and never installs silently. See
+  `../docs/getting-started.md`.
+- **Per-OS installer registration and trust prompts** — Debian and Windows
+  installer hooks register Native Messaging, and macOS bundles guarded
+  install/uninstall helpers. macOS first-open guidance and native installer
+  execution still need checks on actual target hardware.
 
 ## A deviation from the docs, flagged as instructed
 

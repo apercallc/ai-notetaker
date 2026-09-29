@@ -11,15 +11,14 @@ This is the complete first-use guide for AI Notetaker. It has two paths:
 You only need the optional webapp if you want meeting history on more than
 one device.
 
-For the release and installation model, including Homebrew Cask,
-WinGet/Chocolatey, OS prerequisite detection, release updates, and the
-Docker-only webapp option, see the [distribution and installation architecture](superpowers/specs/2026-09-21-distribution-and-installation-architecture.md).
+For the release and installation model, including direct platform downloads,
+first-open warnings, checksums, and the Docker-only webapp option, see the
+[current distribution decision](superpowers/specs/2026-09-28-direct-download-distribution.md).
 
-> **Release status.** The repository has no public release yet. Package
-> manager commands, the Chrome Web Store listing, and the signed installers in
-> this guide describe the release channels as they will work
-> **when released**. Until then, use the [build from source](#build-from-source)
-> path.
+> **Release status.** Public desktop downloads are unsigned and will show
+> platform trust warnings. The install page and GitHub release manifest list
+> only artifacts that were actually published. If the extension is not yet
+> available in the Chrome Web Store, the page links to its fallback ZIP.
 
 ## Terms used in the product
 
@@ -213,51 +212,29 @@ the desktop helper.
 
 ### 1. Install the helper
 
-> The package-manager commands below work **when released**. Until a release
-> is published, use [Build from source](#build-from-source).
+Open the [AI Notetaker download page](https://apercallc.github.io/ai-notetaker/)
+or the [latest GitHub release](https://github.com/apercallc/ai-notetaker/releases/latest)
+and download the file for your computer. The first release targets Apple
+silicon Macs (M1 or later), 64-bit Windows, and 64-bit Debian/Ubuntu Linux.
 
-Open the [install page](https://apercallc.github.io/ai-notetaker/) to see the
-channels that exist in the current published release for your OS.
+- **Mac:** open the DMG and drag AI Notetaker into Applications. On the first
+  launch, Control-click the app, choose **Open**, and confirm **Open**. This
+  per-app confirmation is required because the project does not use a paid
+  Apple Developer account for signing and notarization. Never run a command
+  that disables Gatekeeper globally.
+- **Windows:** run the downloaded installer. If SmartScreen appears, confirm
+  the file came from the official GitHub release and compare its SHA-256 with
+  `SHA256SUMS`; then choose **More info → Run anyway**. Never disable
+  SmartScreen globally.
+- **Linux:** open the downloaded `.deb` in Software Install and choose
+  **Install**, or use `sudo apt install ./<downloaded-file>.deb`. This release
+  path targets Debian/Ubuntu on x86_64 and registers Native Messaging for
+  Chrome.
 
-**macOS** (when released):
-
-```sh
-brew install --cask ai-notetaker
-brew upgrade --cask ai-notetaker
-```
-
-Homebrew Cask installs the same signed DMG used by the release page and runs
-the Native Messaging registration hook. On first desktop capture, macOS asks
-for Microphone and Screen Recording permission. Grant both in System Settings;
-the native ScreenCaptureKit path does not require BlackHole. If Screen
-Recording permission cannot be granted, AI Notetaker links to the official
-BlackHole installer; it never bundles BlackHole.
-
-**Windows** (when released):
-
-```powershell
-winget install AI.Notetaker
-winget upgrade AI.Notetaker
-
-# Chocolatey alternative
-choco install ai-notetaker
-choco upgrade ai-notetaker
-```
-
-The installer registers Native Messaging for Chrome, Edge, and Brave. Base
-VB-CABLE, if a release includes it, is launched visibly with VB-Audio
-attribution and may require administrator approval or a reboot.
-
-**Linux** (when released): download the `.deb` matching your architecture from
-the release page, then:
-
-```sh
-sudo apt install ./AI-Notetaker_<version>_amd64.deb
-```
-
-Run `sudo apt install` again with the newer `.deb` to update. Use the AppImage
-only when a Debian package is not suitable; it needs an explicit stable-path
-Native Messaging registration and is not the recommended first install.
+Base VB-CABLE, if included on Windows, is launched visibly with VB-Audio
+attribution and may require administrator approval or a reboot. macOS
+ScreenCaptureKit and Windows WASAPI loopback do not need virtual drivers for
+the usual setup.
 
 Start **AI Notetaker** from your application menu so the tray helper is
 running. Launch-at-login is an opt-in tray menu action and is off by default,
@@ -334,21 +311,15 @@ recoverable: reopen the popup and choose **Resume** or **Discard**.
 
 ### Updating the helper
 
-Use the same channel used to install it. Do not mix a package-manager install
-with a direct-download updater:
+The helper checks GitHub once a day for a newer stable release and asks before
+opening the official download page. GitHub receives the ordinary network
+metadata for that request; the helper sends no recordings or provider keys.
+The helper never downloads or installs an update for you. Choose **Check for
+Updates…** from the tray menu to check manually, then download and install the
+new build for your platform. For the optional Docker webapp update path, see
+its separate deployment guide.
 
-| Install method | Update command |
-| --- | --- |
-| Homebrew Cask | `brew upgrade --cask ai-notetaker` |
-| WinGet | `winget upgrade AI.Notetaker` |
-| Chocolatey | `choco upgrade ai-notetaker` |
-| Linux `.deb` | `sudo apt install ./AI-Notetaker_<new-version>_amd64.deb` |
-| Release DMG/MSI/NSIS | Download and run the newer installer |
-| Docker image (webapp only) | `docker compose -f webapp/docker-compose.registry.yml pull && docker compose -f webapp/docker-compose.registry.yml up -d` |
-
-The Tauri automatic updater is disabled until the release owner supplies and
-protects the updater key and endpoint, so package-manager upgrades and newer
-installers are the update path.
+Download the newer installer from GitHub Releases for each manual update.
 
 ## Optional: save notes to Google Drive
 

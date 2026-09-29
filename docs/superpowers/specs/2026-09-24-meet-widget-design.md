@@ -6,7 +6,7 @@ integrations: Slack webhook, Notion, email recap) each get their own spec and
 plan; this document covers only the in-call experience.
 
 > **Current product contract:** the 2026-09-24 dual-mode design in
-> [`2026-09-24-scribbl-dual-mode-product-design.md`](2026-09-24-scribbl-dual-mode-product-design.md)
+> [`2026-09-24-dual-mode-product-design.md`](2026-09-24-dual-mode-product-design.md)
 > supersedes the BYOK-only wording below. The widget remains botless and
 > Meet-first, but it may feed either free local BYOK or optional Hosted AI.
 
@@ -14,8 +14,8 @@ plan; this document covers only the in-call experience.
 
 Make taking notes on a Google Meet call one click, keep the live transcript
 visible while the call is on screen, and let the user flag important moments
-without leaving the call. The comparison point is Scribbl: bot-free capture,
-notes right after the call. Our edge is local-first free BYOK plus an optional
+without leaving the call. The experience should pair bot-free capture with
+useful notes as soon as the call ends. Its strengths are local-first free BYOK plus an optional
 Hosted AI mode, with plan limits made explicit instead of hidden.
 
 ## Decisions

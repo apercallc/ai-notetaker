@@ -66,6 +66,24 @@ describe("Google Meet capture orchestration", () => {
     });
   });
 
+  it("forwards the first chunk even when it arrives before the offscreen start reply", async () => {
+    grantStreamId("stream-abc");
+    const sendChunk = vi.fn();
+    const controller = new MeetCaptureController(sendChunk);
+    const pcm = btoa(String.fromCharCode(1, 2));
+    chromeMock.runtime.sendMessage.mockImplementation(async (message: { type?: string; meetingId?: string }) => {
+      if (message.type === "MEET_CAPTURE_START") {
+        expect(controller.isActive("meeting-1")).toBe(true);
+        controller.forwardChunk({ type: "MEET_AUDIO_CHUNK", meetingId: "meeting-1", channel: "speaker", sampleRateHz: 48_000, pcm16Base64: pcm });
+      }
+      return { ok: true };
+    });
+
+    await controller.start(7, "meeting-1");
+
+    expect(sendChunk).toHaveBeenCalledWith(new Uint8Array([1, 2]), "meeting-1", "speaker");
+  });
+
   it("requests the tab stream id from the service worker, never the offscreen page", async () => {
     grantStreamId("stream-abc");
     await new MeetCaptureController(vi.fn()).start(7, "meeting-1");

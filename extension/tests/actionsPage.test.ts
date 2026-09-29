@@ -41,9 +41,10 @@ const texts = (): string[] => [...document.querySelectorAll(".action-text")].map
 describe("actions page", () => {
   beforeEach(() => document.body.replaceChildren());
 
-  it("has no dead Record link to the popup", async () => {
+  it("keeps the brand link and has no dead Record call to action", async () => {
     await openActions();
-    expect(document.querySelector('a[href*="popup.html"]')).toBeNull();
+    expect(document.querySelector('.brand-lockup a[href="../popup/popup.html"]')?.textContent).toBe("AI Notetaker");
+    expect([...document.querySelectorAll("a")].some((link) => link.textContent?.trim() === "Record")).toBe(false);
   });
 
   it("sorts by due date (open first, undated last, done at the end) and marks overdue with text", async () => {

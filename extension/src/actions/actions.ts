@@ -76,6 +76,7 @@ async function render(focus?: FocusHint): Promise<void> {
   const emptyText = filter === "done" ? "No completed action items yet." : filter === "open" ? "Nothing open. You are all caught up." : "No action items yet. They appear here after a meeting is summarized.";
 
   app.innerHTML = `
+    <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><a href="../popup/popup.html">AI Notetaker</a></div>
     <header class="action-header">
       <h1 tabindex="-1">Action items</h1>
     </header>

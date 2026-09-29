@@ -428,6 +428,7 @@ function render(options: { focus?: string } = {}): void {
   const stepChanged = renderedStep !== step;
   renderedStep = step;
   app.innerHTML = `
+    <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div>
     ${renderStepIndicator()}
     <form id="onboarding-form" novalidate>
       <div class="step-content">${renderStep()}</div>

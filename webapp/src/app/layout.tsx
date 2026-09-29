@@ -10,6 +10,7 @@ import { getUserDefaultWorkspaceId, getUserRole } from "@/lib/workspaces";
 export const metadata: Metadata = {
   title: { default: "AI Notetaker", template: "%s · AI Notetaker" },
   description: "Private meeting notes, transcripts and action items from AI Notetaker.",
+  icons: { icon: "/ai-notetaker-mark.svg" },
 };
 
 /**

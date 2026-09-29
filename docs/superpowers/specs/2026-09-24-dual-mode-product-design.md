@@ -1,4 +1,4 @@
-# AI Notetaker — Scribbl-like Dual-Mode Product Design
+# AI Notetaker — Dual-Mode Product Design
 
 Date: 2026-09-24
 Status: Approved direction; implementation migration in progress
@@ -20,7 +20,7 @@ The managed service is an additional deployment topology, not a replacement
 for the open-source local/self-hosted path. The existing self-hosted webapp
 remains useful for users who want their own storage and BYOK execution.
 
-The product goal is Scribbl-like simplicity: install once, detect a Google
+The product goal is a simple setup: install once, detect a Google
 Meet tab automatically, record without a bot joining the call, and finish
 with a recording, transcript, summary, action items, searchable history, and
 sharing/export controls.

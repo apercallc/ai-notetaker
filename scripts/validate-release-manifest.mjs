@@ -26,19 +26,13 @@ export function validateManifest(manifest) {
     add(["dmg", "pkg", "msi", "nsis", "deb", "appimage"].includes(artifact.format), `artifacts[${index}].format is invalid`);
     add(typeof artifact.url === "string" && /^https:\/\//.test(artifact.url), `artifacts[${index}].url must be HTTPS`);
     add(typeof artifact.sha256 === "string" && /^[a-f0-9]{64}$/.test(artifact.sha256), `artifacts[${index}].sha256 must be a lowercase SHA-256`);
-    add(["signed", "notarized", "signed_and_notarized", "checksummed"].includes(artifact.signatureStatus), `artifacts[${index}].signatureStatus is invalid`);
+    add(["unsigned", "signed", "notarized", "signed_and_notarized"].includes(artifact.signatureStatus), `artifacts[${index}].signatureStatus is invalid`);
   }
 
   if (manifest.status === "published") {
     add(manifest.artifacts.length > 0, "published manifests must contain artifacts");
-    add(typeof manifest.extension.chromeWebStoreUrl === "string" && /^https:\/\//.test(manifest.extension.chromeWebStoreUrl), "published manifests need an HTTPS Chrome Web Store URL");
-    add(typeof manifest.extension.fallbackZipUrl === "string" && /^https:\/\//.test(manifest.extension.fallbackZipUrl), "published manifests need an HTTPS fallback extension ZIP URL");
   }
 
-  for (const name of ["homebrew", "winget", "chocolatey"]) {
-    add(typeof manifest.packageManagers?.[name]?.installCommand === "string", `packageManagers.${name}.installCommand is required`);
-    add(typeof manifest.packageManagers?.[name]?.updateCommand === "string", `packageManagers.${name}.updateCommand is required`);
-  }
   add(manifest.docker?.scope === "history-webapp-only", "docker scope must remain history-webapp-only");
 
   return errors;

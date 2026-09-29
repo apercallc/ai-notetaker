@@ -1,10 +1,12 @@
 :root {
-  --color-bg: #ffffff;
-  --color-surface: #f7f7f8;
-  --color-border: #e2e2e5;
-  --color-text: #17171a;
-  --color-text-muted: #63636b;
-  --color-accent: #1e56c9; /* was #2f6feb (~4.57:1 on white, right at the AA floor); darkened for headroom */
+  color-scheme: light dark;
+  --color-bg: #f7f8f4;
+  --color-surface: #ffffff;
+  --color-border: #dce4dc;
+  --color-text: #18241e;
+  --color-text-muted: #57665e;
+  --color-accent: #176c4b;
+  --color-action: #176c4b;
   --color-accent-contrast: #ffffff;
   --color-danger: #c0392b;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -13,18 +15,19 @@
   --space-3: 16px;
   --space-4: 24px;
   --space-5: 32px;
-  --radius: 8px;
+  --radius: 12px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #121214;
-    --color-surface: #1b1b1e;
-    --color-border: #2c2c30;
-    --color-text: #f2f2f3;
-    --color-text-muted: #9a9aa2;
-    --color-accent: #6ea8ff;
-    --color-accent-contrast: #0a1a33;
+    --color-bg: #121a15;
+    --color-surface: #1c2821;
+    --color-border: #33443a;
+    --color-text: #f1f6f2;
+    --color-text-muted: #a9b8ad;
+    --color-accent: #83d9a8;
+    --color-action: #176c4b;
+    --color-accent-contrast: #ffffff;
     /* --color-danger (#c0392b) was never overridden for dark mode, so it
        stayed tuned for a white background — against this dark background
        it measures ~3.4:1, below the 4.5:1 AA minimum, affecting the login
@@ -43,8 +46,110 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: 40px;
+  border-radius: 10px;
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-accent) 65%, transparent);
+  outline-offset: 3px;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.app-header-inner {
+  width: min(1200px, calc(100% - 40px));
+  min-height: 68px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.brand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-text);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-decoration: none;
+}
+
+.brand img {
+  width: 32px;
+  height: 32px;
+}
+
+.login-form {
+  max-width: 440px;
+  padding: clamp(24px, 5vw, 40px);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-surface);
+  box-shadow: 0 18px 48px #18241e0d;
+}
+
+.login-form .brand-heading {
+  margin-bottom: 8px;
+}
+
+.app-nav {
+  flex: 1;
+}
+
+.app-nav ul {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 9px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 0.9375rem;
+}
+
+.app-nav a:hover,
+.app-nav a[aria-current="page"] {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.app-nav a[aria-current="page"] {
+  font-weight: 650;
+}
+
+.app-signout {
+  flex: 0 0 auto;
 }
 
 a {
@@ -52,7 +157,7 @@ a {
 }
 
 .container {
-  max-width: 760px;
+  max-width: 960px;
   margin: 0 auto;
   padding: var(--space-4) var(--space-3);
 }
@@ -110,7 +215,7 @@ a {
   border: 0;
   border-radius: var(--radius);
   padding: 10px 14px;
-  background: var(--color-accent);
+  background: var(--color-action);
   color: var(--color-accent-contrast);
   cursor: pointer;
   font: inherit;
@@ -299,7 +404,7 @@ a {
   border: 0;
   border-radius: var(--radius);
   padding: var(--space-2) var(--space-3);
-  background: var(--color-accent);
+  background: var(--color-action);
   color: var(--color-accent-contrast);
   cursor: pointer;
   font: inherit;
@@ -433,26 +538,36 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius);
+  min-height: 42px;
+  padding: 0 var(--space-3);
+  border-radius: 10px;
   border: 1px solid transparent;
   font-size: 1rem;
   cursor: pointer;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
 
 .button-primary {
-  background: var(--color-accent);
+  background: var(--color-action);
   color: var(--color-accent-contrast);
+  box-shadow: 0 2px 6px #176c4b24;
 }
 
 .button-primary:hover {
-  filter: brightness(0.95);
+  filter: brightness(0.92);
+  transform: translateY(-1px);
 }
 
 .button-danger {
+  min-height: 42px;
   background: transparent;
   border-color: var(--color-danger);
   color: var(--color-danger);
+}
+
+.button-danger:hover {
+  background: color-mix(in srgb, var(--color-danger) 9%, transparent);
 }
 
 .button-secondary {
@@ -463,6 +578,21 @@ a {
 
 .button-secondary:hover {
   background: var(--color-surface);
+  border-color: color-mix(in srgb, var(--color-accent) 32%, var(--color-border));
+}
+
+.brand-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.04em;
+}
+
+.brand-heading img {
+  width: 40px;
+  height: 40px;
 }
 
 .error-text {
@@ -524,6 +654,32 @@ a {
 }
 
 @media (max-width: 560px) {
+  .login-form {
+    padding: 24px 18px;
+  }
+  .app-header-inner {
+    width: calc(100% - 24px);
+    min-height: 60px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 8px 0;
+  }
+
+  .app-nav {
+    order: 3;
+    flex-basis: 100%;
+    overflow-x: auto;
+  }
+
+  .app-nav ul {
+    width: max-content;
+  }
+
+  .app-nav a {
+    min-height: 36px;
+    padding-inline: 10px;
+  }
+
   .header-links,
   .detail-action-form,
   .action-inbox-form {

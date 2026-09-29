@@ -159,14 +159,21 @@ export class MeetCaptureController {
         justification: "Capture the Google Meet microphone and remote audio as two local note-taking channels.",
       });
     }
-    const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId, streamId });
-    if (response?.ok !== true) {
+    // The offscreen page may emit a worklet chunk before its START reply gets
+    // back to this worker. Mark the meeting active first so that the initial
+    // audio is durably forwarded instead of silently dropped.
+    this.activeMeetings.set(meetingId, { tabId, callCode: callCodeOf(url) });
+    try {
+      const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId, streamId });
+      if (response?.ok !== true) throw new Error(response?.error ?? "Google Meet capture could not start.");
+      await this.persistCaptures();
+    } catch (error) {
+      this.activeMeetings.delete(meetingId);
+      await this.persistCaptures().catch(() => undefined);
       // Leave no half-started capture behind; the next attempt starts clean.
       await chrome.offscreen.closeDocument().catch(() => {});
-      throw new Error(response?.error ?? "Google Meet capture could not start.");
+      throw error;
     }
-    this.activeMeetings.set(meetingId, { tabId, callCode: callCodeOf(url) });
-    await this.persistCaptures();
   }
 
   async stop(meetingId: string): Promise<void> {

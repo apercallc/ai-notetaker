@@ -130,6 +130,7 @@ function render(options: RenderOptions = {}): void {
   const scrollY = window.scrollY;
 
   app.innerHTML = `
+    <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div>
     <h1 tabindex="-1" data-view-heading>Settings</h1>
     <p class="page-intro text-secondary">Choose how meetings are processed, then tailor the notes you get back.</p>
 

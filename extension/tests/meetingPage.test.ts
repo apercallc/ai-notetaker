@@ -56,7 +56,7 @@ describe("meeting page: summary", () => {
       summary: "## Key points\n- <script>alert(1)</script>",
       actionItems: [{ id: "a1", text: '"><svg onload=alert(1)>', status: "open" }],
     });
-    expect(document.querySelector("img, script, svg")).toBeNull();
+    expect(document.querySelector("#meeting-title img, #meeting-title script, .summary-section script, .summary-section svg, .action-item script, .action-item svg")).toBeNull();
     expect($("meeting-title").textContent).toBe('<img src=x onerror="alert(1)">');
   });
 });

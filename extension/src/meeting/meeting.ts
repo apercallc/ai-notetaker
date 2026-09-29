@@ -107,6 +107,7 @@ async function render(focusActionId?: string): Promise<void> {
   const hasActions = meeting.actionItems.length > 0;
 
   app.innerHTML = `
+    <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><a href="../popup/popup.html">AI Notetaker</a></div>
     <div class="title-row" id="title-row">${titleRowHtml(title)}</div>
     <p class="meeting-meta text-secondary">${new Date(meeting.startedAt).toLocaleString()}</p>
     ${meeting.attendeeShare
