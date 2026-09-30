@@ -74,10 +74,11 @@ Implementation plan:
       `hosted_pro`/`active`, the Customer Portal opened, and a cancel set
       `cancel_at` to period end. Fixed along the way: promo codes now allowed
       at checkout, and a retry expires an abandoned session instead of a
-      one-hour lockout. Still open: the key's restricted scope is unconfirmed
-      (Railway redacts it), the portal has no return/privacy/terms URLs, and
-      the billing page cannot show "cancels on <date>" because the app ignores
-      Stripe's `cancel_at`.
+      one-hour lockout. The portal now has return/privacy/terms URLs, and the
+      billing page shows "ends on <date>" for a pending cancellation
+      (`cancelsAt`, from Stripe's `cancel_at`). Still open: the key's
+      restricted scope is unconfirmed (Railway redacts it; check the Stripe
+      dashboard).
 - [x] Enforce managed upload checksums and streamed body limits; release failed
       processing reservations so retries do not burn successful-operation quota.
 - [x] Purge successful managed audio immediately and reap expired temporary

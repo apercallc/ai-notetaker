@@ -16,8 +16,8 @@ items here and mirror the result into `TODO.md` ("Live release gates").
       `cancel_at` set).
 - [ ] Confirm the key is the restricted one (Checkout Sessions + portal write,
       Prices read); Railway redacts the value, so check in the Stripe dashboard.
-- [ ] Portal: set default return URL and privacy/terms URLs.
-- [ ] Follow-up: show "cancels on <date>" (app ignores `cancel_at`).
+- [x] Portal return URL and privacy/terms URLs set; billing page shows
+      "ends on <date>" for a pending cancellation.
 
 ### 2. Managed upload end to end
 - [ ] Upload one real recording; job completes; staged audio object is gone.
