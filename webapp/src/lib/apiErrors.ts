@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ValidationError } from "./meetings";
-import { ENTITLEMENT_PUBLIC_MESSAGE, EntitlementError } from "./entitlementError";
+import { AUDIO_BUDGET_PUBLIC_MESSAGE, AudioBudgetError, ENTITLEMENT_PUBLIC_MESSAGE, EntitlementError } from "./entitlementError";
 import { safeRequestId } from "./requestId";
 import { captureServerError } from "./observability";
 
@@ -33,7 +33,7 @@ export function apiErrorResponse(
 
   if (error instanceof EntitlementError) {
     return NextResponse.json(
-      { error: ENTITLEMENT_PUBLIC_MESSAGE, code: "entitlement_unavailable", requestId },
+      { error: error instanceof AudioBudgetError ? AUDIO_BUDGET_PUBLIC_MESSAGE : ENTITLEMENT_PUBLIC_MESSAGE, code: "entitlement_unavailable", requestId },
       { status: 402, headers: { "x-request-id": requestId } },
     );
   }

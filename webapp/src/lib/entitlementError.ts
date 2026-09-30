@@ -11,4 +11,14 @@ export class EntitlementError extends Error {
   }
 }
 
+/** The workspace's monthly audio hours cannot cover this recording. Same 402 as any entitlement failure. */
+export class AudioBudgetError extends EntitlementError {
+  constructor() {
+    super("managed audio hours are exhausted");
+    this.name = "AudioBudgetError";
+  }
+}
+
+export const AUDIO_BUDGET_PUBLIC_MESSAGE = "This recording is longer than the hosted meeting hours left in your plan. Upgrade under Plans & usage, or wait for the next period.";
+
 export const ENTITLEMENT_PUBLIC_MESSAGE = "Your plan has no hosted processing left. Upgrade under Plans & usage to keep processing meetings.";

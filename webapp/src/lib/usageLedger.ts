@@ -1,7 +1,7 @@
-import { EntitlementError } from "./entitlementError";
+import { AudioBudgetError, EntitlementError } from "./entitlementError";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
-import { HOSTED_TRIAL_MEETINGS, PLAN_MEETING_LIMITS, isManagedPlan, planLabel, type ManagedPlan } from "./plans";
+import { HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS, PLAN_MEETING_LIMITS, audioSecondsForBytes, isManagedPlan, planLabel, type ManagedPlan } from "./plans";
 
 export type { ManagedPlan } from "./plans";
 
@@ -70,6 +70,15 @@ function planLimit(plan: string): number {
   return isManagedPlan(plan) ? PLAN_MEETING_LIMITS[plan] : 0;
 }
 
+function planAudioSeconds(plan: string): number {
+  return isManagedPlan(plan) ? PLAN_AUDIO_HOUR_LIMITS[plan] * 3_600 : 0;
+}
+
+/** Only live reservations count: a released (failed) job gives its hours back. */
+function audioUsageWhere(workspaceId: string, window: UsageWindow) {
+  return { ...usageWhere(workspaceId, window), units: { gt: 0 } };
+}
+
 export type QuotaWarning = "none" | "low" | "exhausted";
 
 export function quotaWarning(used: number, limit: number): QuotaWarning {
@@ -86,6 +95,9 @@ export async function getEntitlements(workspaceId: string) {
   const window = usageWindow(subscription, now);
   const aggregate = await prisma.usageLedgerEntry.aggregate({ where: usageWhere(workspaceId, window), _sum: { units: true } });
   const used = aggregate._sum.units ?? 0;
+  const audio = await prisma.usageLedgerEntry.aggregate({ where: audioUsageWhere(workspaceId, window), _sum: { audioSeconds: true } });
+  const audioUsedSeconds = audio._sum.audioSeconds ?? 0;
+  const audioLimitSeconds = planAudioSeconds(plan);
   const limit = planLimit(plan);
   const remaining = Math.max(0, limit - used);
   const inPaymentGrace = subscription?.status === "past_due" && Boolean(subscription.graceEndsAt && subscription.graceEndsAt >= now);
@@ -98,7 +110,12 @@ export async function getEntitlements(workspaceId: string) {
     remaining,
     inPaymentGrace,
     graceEndsAt: inPaymentGrace ? subscription?.graceEndsAt?.toISOString() ?? null : null,
-    canProcess: hasProcessingAccess(subscription, now) && limit > used,
+    audio: {
+      usedSeconds: audioUsedSeconds,
+      limitSeconds: audioLimitSeconds,
+      remainingSeconds: Math.max(0, audioLimitSeconds - audioUsedSeconds),
+    },
+    canProcess: hasProcessingAccess(subscription, now) && limit > used && audioLimitSeconds > audioUsedSeconds,
     period: {
       source: window.source,
       start: window.source === "trial" ? null : window.start.toISOString(),
@@ -142,7 +159,8 @@ export function isSerializationConflict(error: unknown): boolean {
 /** Serializable conflicts are expected when several uploads for one workspace reserve at once. */
 const RESERVATION_ATTEMPTS = 8;
 
-export async function reserveMeetingProcessing(workspaceId: string, idempotencyKey: string): Promise<{ alreadyReserved: boolean }> {
+export async function reserveMeetingProcessing(workspaceId: string, idempotencyKey: string, audioBytes = 0): Promise<{ alreadyReserved: boolean }> {
+  const audioSeconds = audioSecondsForBytes(audioBytes);
   // The entitlement check and ledger insert must share a serializable
   // transaction. A check-then-insert sequence lets two simultaneous uploads
   // both observe the same remaining unit and oversubscribe a plan.
@@ -169,11 +187,17 @@ export async function reserveMeetingProcessing(workspaceId: string, idempotencyK
           ) {
             throw new EntitlementError();
           }
+          if (audioSeconds > 0) {
+            const usedAudio = await tx.usageLedgerEntry.aggregate({ where: audioUsageWhere(workspaceId, window), _sum: { audioSeconds: true } });
+            if ((usedAudio._sum.audioSeconds ?? 0) + audioSeconds > planAudioSeconds(subscription?.plan ?? "local")) {
+              throw new AudioBudgetError();
+            }
+          }
 
           if (existing) {
             await tx.usageLedgerEntry.update({
               where: { id: existing.id },
-              data: { periodStart: currentPeriodStart, units: 1, releasedAt: null },
+              data: { periodStart: currentPeriodStart, units: 1, audioSeconds, releasedAt: null },
             });
           } else {
             await tx.usageLedgerEntry.create({
@@ -182,6 +206,7 @@ export async function reserveMeetingProcessing(workspaceId: string, idempotencyK
                 periodStart: currentPeriodStart,
                 kind: UNITS_KIND,
                 units: 1,
+                audioSeconds,
                 idempotencyKey,
               },
             });

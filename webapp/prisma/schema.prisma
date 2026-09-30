@@ -238,6 +238,8 @@ model UsageLedgerEntry {
   periodStart    DateTime
   kind           String
   units          Int
+  // Two-channel-equivalent audio time reserved with this unit; caps provider cost.
+  audioSeconds   Int      @default(0)
   idempotencyKey String
   releasedAt     DateTime?
   createdAt      DateTime @default(now())

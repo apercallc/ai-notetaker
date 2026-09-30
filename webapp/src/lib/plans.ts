@@ -15,6 +15,26 @@ export const PLAN_MEETING_LIMITS: Record<ManagedPlan, number> = {
   hosted_team: 2_500,
 };
 
+/**
+ * Monthly audio-hours cap per plan. Meetings are cheap on average (about $0.09
+ * of provider cost per two-channel hour on the Groq default), but the meeting
+ * count alone let one workspace burn far more than its subscription pays, so
+ * hours bound the worst case. Trial is a one-time grant.
+ */
+export const PLAN_AUDIO_HOUR_LIMITS: Record<ManagedPlan, number> = {
+  local: 0,
+  hosted_trial: 3,
+  hosted_pro: 60,
+  hosted_team: 200,
+};
+
+/** Two channels of 48 kHz 16-bit mono PCM; a one-channel upload counts as half. */
+export const AUDIO_BYTES_PER_SECOND = 2 * 48_000 * 2;
+
+export function audioSecondsForBytes(bytes: number): number {
+  return Math.ceil(bytes / AUDIO_BYTES_PER_SECOND);
+}
+
 const PLAN_LABELS: Record<ManagedPlan, string> = {
   local: "Local (bring your own keys)",
   hosted_trial: "Hosted Free Trial",

@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
-import { EntitlementError } from "./entitlementError";
+import { audioSecondsForBytes } from "./plans";
+import { AudioBudgetError, EntitlementError } from "./entitlementError";
 import { ValidationError } from "./meetings";
 import { deleteObject, getObject } from "./objectStorage";
 import { deleteMeeting } from "./meetings";
@@ -140,7 +141,9 @@ export async function createManagedUpload(
 
   // Fail before any audio is staged: an exhausted plan would otherwise fill
   // the staging cap for 24 hours and only be refused after the upload.
-  if (!(await getEntitlements(workspaceId)).canProcess) throw new EntitlementError();
+  const entitlements = await getEntitlements(workspaceId);
+  if (!entitlements.canProcess) throw new EntitlementError();
+  if (audioSecondsForBytes(input.totalBytes) > entitlements.audio.remainingSeconds) throw new AudioBudgetError();
 
   let created;
   try {
@@ -402,7 +405,7 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
     (await prisma.processingJob.findFirst({ where: { workspaceId, uploadId }, orderBy: { createdAt: "asc" } }));
   if (existing) {
     if (existing.status !== "error") return existing;
-    await reserveMeetingProcessing(workspaceId, existing.idempotencyKey);
+    await reserveMeetingProcessing(workspaceId, existing.idempotencyKey, upload.totalBytes);
     // Guard on status so two concurrent retries cannot reset a job another
     // request already restarted and a worker has begun.
     const revived = await prisma.processingJob.updateMany({
@@ -414,7 +417,7 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
     void revived;
     return prisma.processingJob.findUniqueOrThrow({ where: { id: existing.id } });
   }
-  await reserveMeetingProcessing(workspaceId, idempotencyKey);
+  await reserveMeetingProcessing(workspaceId, idempotencyKey, upload.totalBytes);
   try {
     return await prisma.processingJob.create({
       data: { workspaceId, meetingId, uploadId, idempotencyKey, status: "queued" },

@@ -217,12 +217,13 @@ export function PricingView({ context, prices }: { context: ShellContext; prices
           </div>
           <div className="mk-prose">
             <ul>
-              <li>Your first {LIMITS.trial} hosted meetings are free and need no card. The free allowance is a one-time grant.</li>
+              <li>Your first {LIMITS.trial} hosted meetings (up to {LIMITS.trialHours} hours in total) are free and need no card. The free allowance is a one-time grant.</li>
               <li>Paid plans are billed monthly in US dollars by Stripe. We never see or store your card number.</li>
               <li>
-                Pro includes up to {LIMITS.pro.toLocaleString("en-US")} meetings a month and Team up to{" "}
-                {LIMITS.team.toLocaleString("en-US")}. The count resets each billing period, and the extension tells you
-                before a meeting starts if you have no meetings left.
+                Pro includes up to {LIMITS.pro.toLocaleString("en-US")} meetings or {LIMITS.proHours} meeting hours a
+                month, whichever comes first, and Team up to {LIMITS.team.toLocaleString("en-US")} meetings or{" "}
+                {LIMITS.teamHours} hours. Both reset each billing period, and the extension tells you before a meeting
+                starts if you have no meetings or hours left.
               </li>
               <li>Cancel from the billing page. Your plan stays active until the end of the period you paid for.</li>
               <li>If a payment fails, you keep access for a short grace period while Stripe retries.</li>
@@ -581,7 +582,7 @@ export function TermsView() {
 
             <h2>Plans and billing</h2>
             <ul>
-              <li>Hosted Pro and Hosted Team are monthly subscriptions billed in US dollars through Stripe. Each includes the monthly meeting allowance shown on the pricing page.</li>
+              <li>Hosted Pro and Hosted Team are monthly subscriptions billed in US dollars through Stripe. Each includes the monthly meeting and meeting-hours allowance shown on the pricing page.</li>
               <li>Your first {LIMITS.trial} hosted meetings are a free one-time allowance. When an allowance is used up, processing stops until the next period or a plan change.</li>
               <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for, and it does not renew.</li>
               <li>

@@ -5,11 +5,13 @@ import {
   assignHostedTrial,
   getEntitlements,
   quotaWarning,
+  releaseMeetingProcessing,
   reserveMeetingProcessing,
   usageWindow,
 } from "./usageLedger";
 import { createHostedWorkspaceWithOwner } from "./workspaces";
-import { HOSTED_TRIAL_MEETINGS } from "./plans";
+import { AUDIO_BYTES_PER_SECOND, HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS } from "./plans";
+import { AudioBudgetError } from "./entitlementError";
 
 const now = new Date("2026-09-24T12:00:00.000Z");
 
@@ -139,6 +141,46 @@ describe("hosted trial", () => {
         status: "trialing",
       });
       await prisma.workspace.delete({ where: { id: freshWorkspaceId } });
+    } finally {
+      await prisma.workspace.delete({ where: { id: workspaceId } });
+    }
+  });
+});
+describe("monthly audio-hours cap", () => {
+  const hoursToBytes = (hours: number) => hours * 3_600 * AUDIO_BYTES_PER_SECOND;
+
+  async function proWorkspace() {
+    const workspaceId = randomUUID();
+    await prisma.workspace.create({ data: { id: workspaceId, name: "Audio cap workspace" } });
+    await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_pro", status: "active" } });
+    return workspaceId;
+  }
+
+  it("refuses a recording that would pass the plan's hours, and counts released jobs as free", async () => {
+    const workspaceId = await proWorkspace();
+    const cap = PLAN_AUDIO_HOUR_LIMITS.hosted_pro;
+    try {
+      await reserveMeetingProcessing(workspaceId, "a", hoursToBytes(cap - 1));
+      await expect(reserveMeetingProcessing(workspaceId, "b", hoursToBytes(2))).rejects.toBeInstanceOf(AudioBudgetError);
+      // Exactly the remaining hour still fits.
+      await reserveMeetingProcessing(workspaceId, "c", hoursToBytes(1));
+      const entitlements = await getEntitlements(workspaceId);
+      expect(entitlements.audio.remainingSeconds).toBe(0);
+      expect(entitlements.canProcess).toBe(false);
+      await releaseMeetingProcessing(workspaceId, "a");
+      expect((await getEntitlements(workspaceId)).audio.remainingSeconds).toBe((cap - 1) * 3_600);
+    } finally {
+      await prisma.workspace.delete({ where: { id: workspaceId } });
+    }
+  });
+
+  it("is idempotent for a retried reservation and ignores callers that pass no size", async () => {
+    const workspaceId = await proWorkspace();
+    try {
+      await reserveMeetingProcessing(workspaceId, "same", hoursToBytes(5));
+      await expect(reserveMeetingProcessing(workspaceId, "same", hoursToBytes(5))).resolves.toEqual({ alreadyReserved: true });
+      await reserveMeetingProcessing(workspaceId, "legacy");
+      expect((await getEntitlements(workspaceId)).audio.usedSeconds).toBe(5 * 3_600);
     } finally {
       await prisma.workspace.delete({ where: { id: workspaceId } });
     }

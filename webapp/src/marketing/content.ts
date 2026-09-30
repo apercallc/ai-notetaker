@@ -1,4 +1,4 @@
-import { HOSTED_TRIAL_MEETINGS, PLAN_MEETING_LIMITS } from "@/lib/plans";
+import { HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS, PLAN_MEETING_LIMITS } from "@/lib/plans";
 
 /**
  * One source of truth for every product fact the marketing site states: the
@@ -31,6 +31,9 @@ export const LIMITS = {
   trial: HOSTED_TRIAL_MEETINGS,
   pro: PLAN_MEETING_LIMITS.hosted_pro,
   team: PLAN_MEETING_LIMITS.hosted_team,
+  trialHours: PLAN_AUDIO_HOUR_LIMITS.hosted_trial,
+  proHours: PLAN_AUDIO_HOUR_LIMITS.hosted_pro,
+  teamHours: PLAN_AUDIO_HOUR_LIMITS.hosted_team,
 } as const;
 
 const n = (value: number): string => value.toLocaleString("en-US");
@@ -59,7 +62,7 @@ export const FAQS: Faq[] = [
   {
     question: "How much does AI Notetaker cost?",
     topics: ["pricing"],
-    answer: `Using your own AI keys is free (the providers you choose bill you directly). Hosted AI includes ${LIMITS.trial} free meetings with no card. After that, Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for up to ${n(LIMITS.pro)} meetings a month, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace with up to ${n(LIMITS.team)} meetings a month. Cancel any time from the billing page.`,
+    answer: `Using your own AI keys is free (the providers you choose bill you directly). Hosted AI includes ${LIMITS.trial} free meetings with no card. After that, Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for up to ${n(LIMITS.pro)} meetings or ${n(LIMITS.proHours)} meeting hours a month, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace with up to ${n(LIMITS.team)} meetings or ${n(LIMITS.teamHours)} meeting hours a month. Cancel any time from the billing page.`,
   },
   {
     question: "Can I cancel any time?",

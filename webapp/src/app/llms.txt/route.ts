@@ -29,7 +29,7 @@ export function GET(): Response {
     "## Two ways to run the AI",
     "",
     `- Your own keys: free software. The user supplies AI provider keys and pays those providers directly. No AI Notetaker account is required.`,
-    `- Hosted AI: the project runs transcription (Groq) and summaries (OpenAI). ${LIMITS.trial} free meetings with no card, then Hosted Pro at ${FALLBACK_PRICE_LABELS.hosted_pro} (up to ${LIMITS.pro} meetings per month) or Hosted Team at ${FALLBACK_PRICE_LABELS.hosted_team} (shared workspace, up to ${LIMITS.team} meetings per month). Billed monthly in USD through Stripe; cancel any time.`,
+    `- Hosted AI: the project runs transcription (Groq) and summaries (OpenAI). ${LIMITS.trial} free meetings with no card, then Hosted Pro at ${FALLBACK_PRICE_LABELS.hosted_pro} (up to ${LIMITS.pro} meetings or ${LIMITS.proHours} meeting hours per month) or Hosted Team at ${FALLBACK_PRICE_LABELS.hosted_team} (shared workspace, up to ${LIMITS.team} meetings or ${LIMITS.teamHours} meeting hours per month). Billed monthly in USD through Stripe; cancel any time.`,
     "- Users can switch between the two in the extension's Settings.",
     "",
     "## Data handling",

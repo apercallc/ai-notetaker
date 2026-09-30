@@ -18,6 +18,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   "owner-only": "Only the workspace owner can manage billing.",
 };
 
+function formatHours(seconds: number): string {
+  const hours = seconds / 3_600;
+  return hours >= 10 ? Math.round(hours).toString() : (Math.round(hours * 10) / 10).toString();
+}
+
 function formatDate(iso: string | null | undefined): string | null {
   if (!iso) return null;
   return new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -99,6 +104,13 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           </div>
         ) : (
           <p className="muted-copy">Meetings are processed with your own provider keys. Choose a hosted plan below to have the service transcribe and summarize for you.</p>
+        )}
+
+        {entitlements.limit > 0 && (
+          <p className="muted-copy">
+            {formatHours(entitlements.audio.usedSeconds)} of {formatHours(entitlements.audio.limitSeconds)} meeting hours used
+            {entitlements.isTrial ? " in your free trial" : ""}
+          </p>
         )}
 
         {entitlements.warning === "exhausted" && (
