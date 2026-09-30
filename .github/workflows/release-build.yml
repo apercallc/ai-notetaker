@@ -72,10 +72,18 @@ jobs:
       - run: npm run build
       - name: Package extension fallback ZIP
         run: zip -r "../ai-notetaker-extension-${GITHUB_REF_NAME}.zip" dist
+      - name: Package Chrome Web Store ZIP (manifest.json at the zip root)
+        # The store rejects a package with the files inside a folder, so this
+        # one is built from inside dist/. The name deliberately does not start
+        # with "ai-notetaker-extension" so the release manifest keeps pointing
+        # at the load-unpacked fallback.
+        run: (cd dist && zip -qr "../../ai-notetaker-chrome-web-store-${GITHUB_REF_NAME}.zip" .)
       - uses: actions/upload-artifact@v7
         with:
           name: extension-${{ github.ref_name }}
-          path: ai-notetaker-extension-${{ github.ref_name }}.zip
+          path: |
+            ai-notetaker-extension-${{ github.ref_name }}.zip
+            ai-notetaker-chrome-web-store-${{ github.ref_name }}.zip
 
   helper:
     name: Build helper (${{ matrix.os }})
@@ -227,10 +235,6 @@ jobs:
         with:
           name: extension-${{ github.ref_name }}
           path: store
-      - name: Repackage with manifest.json at the zip root
-        run: |
-          unzip -q store/ai-notetaker-extension-${GITHUB_REF_NAME}.zip -d store/unpacked
-          (cd store/unpacked/dist && zip -qr ../../store-upload.zip .)
       - name: Upload and publish
         env:
           EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
@@ -239,7 +243,7 @@ jobs:
           REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
         run: |
           npx --yes chrome-webstore-upload-cli@3 upload \
-            --source store/store-upload.zip \
+            --source store/ai-notetaker-chrome-web-store-${GITHUB_REF_NAME}.zip \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \

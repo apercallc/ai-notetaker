@@ -6,18 +6,23 @@ const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_EVENTS_ENDPOINT = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const GOOGLE_DRIVE_FILES_ENDPOINT = "https://www.googleapis.com/drive/v3/files";
-const GOOGLE_DOCS_ENDPOINT = "https://docs.googleapis.com/v1/documents";
+const GOOGLE_DRIVE_UPLOAD_ENDPOINT = "https://www.googleapis.com/upload/drive/v3/files";
 const REQUEST_TIMEOUT_MS = 10_000;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1_000;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 const ENCRYPTION_VERSION = "v1";
 
+/**
+ * Keep this list as small as the product allows: only calendar.readonly is a
+ * "sensitive" scope that Google must review (drive.file, openid and email are
+ * not). Exporting a meeting creates a Google Doc through Drive's text import,
+ * so the broad Docs scope is deliberately not requested.
+ */
 export const GOOGLE_OAUTH_SCOPES = [
   "openid",
   "email",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/documents",
 ].join(" ");
 
 export class GoogleIntegrationError extends Error {
@@ -341,6 +346,29 @@ function formatMeetingForGoogleDoc(meeting: { title: string; startedAt: Date; en
   return lines.join("\n");
 }
 
+/**
+ * A single Drive multipart upload that creates a Google Doc from plain text.
+ * Asking for the Google Docs MIME type makes Drive import (convert) the text,
+ * which needs only the drive.file scope for a file this app creates.
+ */
+export function buildDriveDocumentUpload(name: string, folderId: string, text: string): { body: string; contentType: string } {
+  const boundary = `ainotetaker${randomBytes(12).toString("hex")}`;
+  const metadata = { name, mimeType: "application/vnd.google-apps.document", parents: [folderId] };
+  const body = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    text,
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  return { body, contentType: `multipart/related; boundary=${boundary}` };
+}
+
 async function findOrCreateExportFolder(userId: string): Promise<string> {
   const query = "trashed = false and name = 'ai-notetaker' and mimeType = 'application/vnd.google-apps.folder' and 'root' in parents";
   const existing = await googleRequest(userId, `${GOOGLE_DRIVE_FILES_ENDPOINT}?${new URLSearchParams({ q: query, pageSize: "1", fields: "files(id)" }).toString()}`);
@@ -367,18 +395,18 @@ export async function exportMeetingToGoogleDrive(userId: string, workspaceId: st
   });
   if (!meeting) throw new GoogleIntegrationError("Completed meeting not found.", 404);
   const folderId = await findOrCreateExportFolder(userId);
-  const created = await googleRequest(userId, `${GOOGLE_DRIVE_FILES_ENDPOINT}?fields=id,webViewLink`, {
+  const upload = buildDriveDocumentUpload(
+    `${meeting.title} — ${meeting.startedAt.toISOString().slice(0, 10)}`,
+    folderId,
+    formatMeetingForGoogleDoc(meeting),
+  );
+  const created = await googleRequest(userId, `${GOOGLE_DRIVE_UPLOAD_ENDPOINT}?uploadType=multipart&fields=id,webViewLink`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: `${meeting.title} — ${meeting.startedAt.toISOString().slice(0, 10)}`, mimeType: "application/vnd.google-apps.document", parents: [folderId] }),
+    headers: { "Content-Type": upload.contentType },
+    body: upload.body,
   });
   const file = (await created.json()) as { id?: string; webViewLink?: string };
   if (!file.id) throw new GoogleIntegrationError("Google Drive did not create an export document.");
-  await googleRequest(userId, `${GOOGLE_DOCS_ENDPOINT}/${encodeURIComponent(file.id)}:batchUpdate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: formatMeetingForGoogleDoc(meeting) } }] }),
-  });
   return { fileId: file.id, ...(file.webViewLink ? { webViewLink: file.webViewLink } : {}) };
 }
 

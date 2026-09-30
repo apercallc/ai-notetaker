@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createOAuthState, googleOAuthConfigured, oauthStateMatches, openOAuthState, sealOAuthState } from "./googleIntegration";
+import { buildDriveDocumentUpload, createOAuthState, GOOGLE_OAUTH_SCOPES, googleOAuthConfigured, oauthStateMatches, openOAuthState, sealOAuthState } from "./googleIntegration";
 
 const original = {
   appUrl: process.env.APP_URL,
@@ -52,5 +52,43 @@ describe("server-owned Google OAuth configuration and state", () => {
     expect(openOAuthState(`${sealed}tampered`)).toBeNull();
     expect(oauthStateMatches(state.state, state.state)).toBe(true);
     expect(oauthStateMatches(state.state, "different")).toBe(false);
+  });
+});
+
+describe("Google scopes and Drive export upload", () => {
+  it("requests only the scopes the product needs, and never the broad Docs scope", () => {
+    expect(GOOGLE_OAUTH_SCOPES.split(" ")).toEqual([
+      "openid",
+      "email",
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+    ]);
+    expect(GOOGLE_OAUTH_SCOPES).not.toContain("auth/documents");
+  });
+
+  it("builds one multipart upload that imports the notes as a Google Doc in the export folder", () => {
+    const upload = buildDriveDocumentUpload("Weekly sync — 2026-09-30", "folder-1", "Decision: ship it\nLine with --boundary-like text");
+    const boundary = /boundary=(.+)$/u.exec(upload.contentType)?.[1];
+    expect(upload.contentType.startsWith("multipart/related; boundary=")).toBe(true);
+    expect(boundary).toMatch(/^ainotetaker[0-9a-f]{24}$/u);
+
+    const parts = upload.body.split(`--${boundary}`).map((part) => part.trim()).filter((part) => part && part !== "--");
+    expect(parts).toHaveLength(2);
+    const [metadataPart, contentPart] = parts;
+    expect(metadataPart).toContain("Content-Type: application/json");
+    expect(JSON.parse(metadataPart.split("\r\n\r\n")[1])).toEqual({
+      name: "Weekly sync — 2026-09-30",
+      mimeType: "application/vnd.google-apps.document",
+      parents: ["folder-1"],
+    });
+    expect(contentPart).toContain("Content-Type: text/plain; charset=UTF-8");
+    expect(contentPart).toContain("Decision: ship it");
+    expect(upload.body.endsWith(`--${boundary}--\r\n`)).toBe(true);
+  });
+
+  it("uses a fresh boundary every time so notes can never forge the part separator", () => {
+    const first = buildDriveDocumentUpload("a", "f", "x").contentType;
+    const second = buildDriveDocumentUpload("a", "f", "x").contentType;
+    expect(first).not.toBe(second);
   });
 });

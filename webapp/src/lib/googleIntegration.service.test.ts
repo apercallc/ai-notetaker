@@ -157,17 +157,25 @@ describe("Google Drive meeting export", () => {
     fetch.mockReset();
     fetch.mockResolvedValueOnce(response({ files: [{ id: "existing-folder" }] }));
     fetch.mockResolvedValueOnce(response({ id: "document-1", webViewLink: "https://docs.google.com/document/d/document-1" }));
-    fetch.mockResolvedValueOnce(response({}));
     expect(await exportMeetingToGoogleDrive(USER_ID, WORKSPACE_ID, MEETING_ID)).toEqual({
       fileId: "document-1", webViewLink: "https://docs.google.com/document/d/document-1",
     });
-    expect(fetch).toHaveBeenCalledTimes(3);
-    const documentRequest = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body));
-    expect(documentRequest).toMatchObject({ name: "Export review — 2026-09-27", mimeType: "application/vnd.google-apps.document", parents: ["existing-folder"] });
-    const contentRequest = JSON.parse(String(fetch.mock.calls[2]?.[1]?.body));
-    expect(contentRequest.requests[0].insertText.text).toContain("Ship the safer flow.");
-    expect(contentRequest.requests[0].insertText.text).toContain("- [open] Ship it (Sam) — due 2026-10-01");
-    expect(contentRequest.requests[0].insertText.text).toContain("[2026-09-27T14:02:00.000Z] Sam: Let's ship it.");
+    // One folder lookup and one Drive upload. The Docs API, which needs the broad
+    // documents scope, is never called.
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.map((call) => String(call[0])).some((url) => url.includes("docs.googleapis.com"))).toBe(false);
+    const uploadUrl = String(fetch.mock.calls[1]?.[0]);
+    expect(uploadUrl).toContain("https://www.googleapis.com/upload/drive/v3/files");
+    expect(uploadUrl).toContain("uploadType=multipart");
+    const uploadInit = fetch.mock.calls[1]?.[1];
+    const contentType = String((uploadInit?.headers as Record<string, string>)["Content-Type"]);
+    expect(contentType).toMatch(/^multipart\/related; boundary=/u);
+    const [metadataPart, contentPart] = String(uploadInit?.body).split(`--${contentType.split("boundary=")[1]}`).map((part) => part.trim()).filter((part) => part && part !== "--");
+    expect(JSON.parse(metadataPart.split("\r\n\r\n")[1])).toMatchObject({ name: "Export review — 2026-09-27", mimeType: "application/vnd.google-apps.document", parents: ["existing-folder"] });
+    expect(contentPart).toContain("Content-Type: text/plain");
+    expect(contentPart).toContain("Ship the safer flow.");
+    expect(contentPart).toContain("- [open] Ship it (Sam) — due 2026-10-01");
+    expect(contentPart).toContain("[2026-09-27T14:02:00.000Z] Sam: Let's ship it.");
   });
 
   it("checks configuration and completion before creating remote files, and rejects unusable Drive results", async () => {

@@ -496,6 +496,25 @@ export function PrivacyView() {
           <div className="mk-prose">
             <p className="mk-mt-s">Each provider handles the data it receives under its own terms and privacy policy.</p>
 
+            <h2>Google Calendar and Drive</h2>
+            <p>
+              Connecting Google is optional and always your choice. If you connect it, AI Notetaker asks for read-only
+              access to your calendar, so it can name the meeting you are in, and for access to the files it creates in
+              your Drive, so it can export a meeting you choose as a Google Doc. It does not request access to your other
+              Drive files or to edit your calendar.
+            </p>
+            <ul>
+              <li>We store your Google account email and encrypted access tokens so these features keep working. Choosing Disconnect in your account deletes them.</li>
+              <li>We use Google data only to provide those two features. We do not use it for advertising, sell it, or use it to train AI models.</li>
+              <li>We do not let people read your Google data unless you ask us to, it is needed to investigate abuse or a security problem, or the law requires it.</li>
+              <li>You can also remove access at any time from your <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.</li>
+            </ul>
+            <p>
+              AI Notetaker&apos;s use and transfer to any other app of information received from Google APIs adheres to the{" "}
+              <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+              including the Limited Use requirements.
+            </p>
+
             <h2>Self-hosted history</h2>
             <p>
               If you run the optional history app yourself, notes go to the server you chose. You control its access,
