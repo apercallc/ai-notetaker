@@ -277,6 +277,14 @@ jobs:
         with:
           name: helper-windows-latest-${{ github.ref_name }}
           path: release-assets/helper-windows
+      - name: Normalize asset file names
+        # GitHub rewrites spaces in uploaded names to dots. The manifest URLs and
+        # SHA256SUMS must use the names people will actually download, so make
+        # the names final before anything records them.
+        run: |
+          find release-assets -type f -name '* *' -print0 | while IFS= read -r -d '' file; do
+            mv "$file" "$(dirname "$file")/$(basename "$file" | tr ' ' '.')"
+          done
       - name: Generate release manifest and checksums
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -286,8 +294,30 @@ jobs:
           node scripts/validate-release-manifest.mjs release-assets/release-manifest.json
           find release-assets -mindepth 2 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name '*.json' \) -exec cp {} release-assets/ \;
           cp release-assets/release-manifest.json release-assets/manifest.json
-          cp webapp/docker-compose.registry.yml webapp/.env.docker.example release-assets/
-          (cd release-assets && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name 'manifest.json' -o -name 'docker-compose.registry.yml' -o -name '.env.docker.example' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cp webapp/docker-compose.registry.yml release-assets/
+          cp webapp/.env.docker.example release-assets/env.docker.example
+          (cd release-assets && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name 'manifest.json' -o -name 'docker-compose.registry.yml' -o -name 'env.docker.example' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Check manifest and checksums match the files being uploaded
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const dir = 'release-assets';
+          const present = new Set(fs.readdirSync(dir));
+          const problems = [];
+          const manifest = JSON.parse(fs.readFileSync(`${dir}/manifest.json`, 'utf8'));
+          const names = [...manifest.artifacts.map((a) => a.url), manifest.extension.fallbackZipUrl]
+            .filter(Boolean)
+            .map((url) => decodeURIComponent(new URL(url).pathname.split('/').pop()));
+          for (const name of names) if (!present.has(name)) problems.push(`manifest names ${name}, which is not being uploaded`);
+          for (const line of fs.readFileSync(`${dir}/SHA256SUMS`, 'utf8').trim().split('\n')) {
+            const name = line.replace(/^[0-9a-f]{64}\s+\.?\/?/u, '');
+            if (!present.has(name)) problems.push(`SHA256SUMS names ${name}, which is not being uploaded`);
+            if (/\s/u.test(name) || name.startsWith('.')) problems.push(`${name} would be renamed by GitHub on upload`);
+          }
+          if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+          console.log(`Verified ${names.length} manifest URLs and the checksum list against the upload set.`);
+          NODE
+          (cd release-assets && sha256sum --check --strict SHA256SUMS)
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -297,7 +327,7 @@ jobs:
             release-assets/*.dmg release-assets/*.pkg release-assets/*.msi \
             release-assets/*.exe release-assets/*.deb release-assets/*.AppImage \
             release-assets/*.zip \
-            release-assets/docker-compose.registry.yml release-assets/.env.docker.example)
+            release-assets/docker-compose.registry.yml release-assets/env.docker.example)
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${assets[@]}"
           else
