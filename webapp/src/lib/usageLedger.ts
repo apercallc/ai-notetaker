@@ -123,11 +123,14 @@ export async function assignHostedTrial(client: Prisma.TransactionClient | typeo
   });
 }
 
+/** Serializable conflicts are expected when several uploads for one workspace reserve at once. */
+const RESERVATION_ATTEMPTS = 8;
+
 export async function reserveMeetingProcessing(workspaceId: string, idempotencyKey: string): Promise<{ alreadyReserved: boolean }> {
   // The entitlement check and ledger insert must share a serializable
   // transaction. A check-then-insert sequence lets two simultaneous uploads
   // both observe the same remaining unit and oversubscribe a plan.
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < RESERVATION_ATTEMPTS; attempt += 1) {
     try {
       return await prisma.$transaction(
         async (tx) => {
@@ -174,8 +177,12 @@ export async function reserveMeetingProcessing(workspaceId: string, idempotencyK
     } catch (error) {
       // PostgreSQL can abort a serializable transaction under contention. A
       // bounded retry preserves the API's idempotent behavior without making
-      // a transient conflict visible as a quota failure.
-      if ((error as { code?: string }).code === "P2034" && attempt < 2) continue;
+      // a transient conflict visible as a quota failure. The short jittered
+      // pause keeps simultaneous uploads from colliding again in lockstep.
+      if ((error as { code?: string }).code === "P2034" && attempt < RESERVATION_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1) + Math.random() * 20));
+        continue;
+      }
       throw error;
     }
   }

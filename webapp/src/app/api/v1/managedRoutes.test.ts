@@ -22,6 +22,7 @@ import { clientErrorLimiter } from "@/lib/clientErrors";
 import { prisma } from "@/lib/db";
 import { MAX_CHUNK_BYTES } from "@/lib/managedJobs";
 import { hashPassword } from "@/lib/passwords";
+import { PLAN_MEETING_LIMITS } from "@/lib/plans";
 
 const WORKSPACE_ID = randomUUID();
 const OTHER_WORKSPACE_ID = randomUUID();
@@ -166,7 +167,7 @@ describe("managed upload routes", () => {
     const response = await getEntitlements(new Request("http://localhost/api/v1/entitlements", { headers: auth(sessionId) }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ plan: "hosted_pro", status: "active", canProcess: true, remaining: 1_000 });
+    expect(await response.json()).toMatchObject({ plan: "hosted_pro", status: "active", canProcess: true, remaining: PLAN_MEETING_LIMITS.hosted_pro });
   });
 
   it("includes the request correlation id on managed authentication failures", async () => {
