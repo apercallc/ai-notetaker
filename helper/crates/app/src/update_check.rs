@@ -8,7 +8,6 @@ use chrono::{DateTime, Duration, Utc};
 use semver::Version;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
@@ -179,6 +178,7 @@ fn write_state(path: &Path, state: &CheckState) {
         let contents = serde_json::to_vec(state).map_err(std::io::Error::other)?;
         #[cfg(unix)]
         {
+            use std::io::Write;
             use std::os::unix::fs::OpenOptionsExt;
             std::fs::OpenOptions::new()
                 .write(true)
