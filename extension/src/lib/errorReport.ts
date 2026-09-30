@@ -1,4 +1,5 @@
 import type { ManagedServiceConfig } from "../types";
+import { serviceUrl } from "./managedClient";
 
 /**
  * Best-effort extension error reporting — Hosted AI mode only.
@@ -68,10 +69,18 @@ export function reportManagedError(config: ManagedServiceConfig | null | undefin
       if (now - time >= DEDUP_WINDOW_MS) recentReports.delete(mapKey);
     }
   }
+  // Reports carry the bearer token: never send them to a URL that is not a
+  // valid managed-service origin (corrupted or tampered stored settings).
+  let endpoint: string;
+  try {
+    endpoint = `${serviceUrl(config.baseUrl)}/api/v1/client-errors`;
+  } catch {
+    return;
+  }
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS);
-  void fetchImpl(`${config.baseUrl}/api/v1/client-errors`, {
+  void fetchImpl(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

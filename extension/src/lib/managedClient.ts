@@ -60,7 +60,7 @@ function waitForRetry(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function serviceUrl(baseUrl: string): string {
+export function serviceUrl(baseUrl: string): string {
   let parsed: URL;
   try {
     parsed = new URL(baseUrl);

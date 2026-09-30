@@ -47,6 +47,17 @@ function safeDriveLink(value: string | undefined): string {
   }
 }
 
+/** Attendee share links are rendered as hrefs, so only https (or local http) URLs are allowed. */
+function safeShareLink(value: string): string {
+  try {
+    const url = new URL(value);
+    const local = url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    return url.protocol === "https:" || local ? url.toString() : "#";
+  } catch {
+    return "#";
+  }
+}
+
 function downloadText(meeting: { title: string }, content: string, extension: string, type: string): void {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -111,7 +122,7 @@ async function render(focusActionId?: string): Promise<void> {
     <div class="title-row" id="title-row">${titleRowHtml(title)}</div>
     <p class="meeting-meta text-secondary">${new Date(meeting.startedAt).toLocaleString()}</p>
     ${meeting.attendeeShare
-      ? `<p class="drive-export-status" role="status">Attendee share link (expires ${escapeHtml(new Date(meeting.attendeeShare.expiresAt).toLocaleDateString())}): <a href="${escapeHtml(meeting.attendeeShare.shareUrl)}" target="_blank" rel="noreferrer">${escapeHtml(meeting.attendeeShare.shareUrl)}</a></p>`
+      ? `<p class="drive-export-status" role="status">Attendee share link (expires ${escapeHtml(new Date(meeting.attendeeShare.expiresAt).toLocaleDateString())}): <a href="${escapeHtml(safeShareLink(meeting.attendeeShare.shareUrl))}" target="_blank" rel="noreferrer">${escapeHtml(meeting.attendeeShare.shareUrl)}</a></p>`
       : ""}
     ${meeting.driveExport?.status === "exported"
       ? `<p class="drive-export-status text-success" role="status">Saved to <a href="${safeDriveLink(meeting.driveExport.webViewLink)}" target="_blank" rel="noreferrer">Google Drive</a>.</p>`

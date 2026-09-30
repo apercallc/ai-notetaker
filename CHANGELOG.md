@@ -4,6 +4,20 @@ All notable changes to AI Notetaker are documented here.
 
 ## Unreleased
 
+- Added "Continue with Google" sign-in and sign-up (identity scopes only).
+  Only verified Google emails are accepted, unconfirmed and owner-provisioned
+  accounts are never linked, and new accounts record terms consent before
+  Google opens.
+- Fixed hosted checkout for trial workspaces and for customers resubscribing
+  after a cancellation, so the paid funnel no longer dead-ends.
+- Exhausted plans now return a 402 upgrade prompt and are refused before audio
+  is staged; one processing job per upload prevents double charges.
+- Added the missing workspace data export download; deleting a workspace now
+  cancels its Stripe subscription first.
+- Hardened invitations (throttled), Stripe webhook secret rotation, Google
+  disconnect (revokes at Google), the worker's default URL on Railway, and the
+  health check (verifies the database).
+- Rewrote the security policy scope for the hosted service.
 - Added the dual-mode capture architecture: botless Google Meet browser
   recording with free local BYOK, optional hosted AI processing with
   workspace-scoped usage and billing, and native desktop-call capture for

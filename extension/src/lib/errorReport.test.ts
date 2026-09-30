@@ -31,4 +31,16 @@ describe("managed error telemetry privacy", () => {
     expect(JSON.stringify(body)).not.toMatch(/private|secret|token|transcript/);
     expect(init?.headers).toMatchObject({ Authorization: "Bearer private-access-token" });
   });
+
+  it("never sends the bearer token to an insecure or malformed service URL", () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    for (const [index, baseUrl] of ["http://evil.example.test", "not a url", "https://user:pw@managed.example.test"].entries()) {
+      reportManagedError(
+        { baseUrl, accessToken: "private-access-token", workspaceId: "w", accountId: "a", plan: "pro" },
+        new Error("x"),
+        { surface: "managed_upload", key: `bad-url-${index}`, fetchImpl },
+      );
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });

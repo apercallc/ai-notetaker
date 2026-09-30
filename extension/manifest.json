@@ -13,6 +13,7 @@
   },
   "permissions": ["storage", "activeTab", "tabCapture", "offscreen", "notifications", "unlimitedStorage", "clipboardWrite"],
   "optional_permissions": ["nativeMessaging", "alarms", "identity"],
+  "minimum_chrome_version": "116",
   "optional_host_permissions": [
     "https://*/*",
     "http://localhost/*",
