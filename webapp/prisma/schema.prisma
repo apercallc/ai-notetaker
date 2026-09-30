@@ -84,6 +84,9 @@ model User {
   // Set when an owner issues a temporary password; cleared by the next
   // successful password change.
   mustChangePassword Boolean @default(false)
+  // Created by a workspace owner who typed the address; the mailbox holder never
+  // proved it, so Google sign-in refuses to attach to this account.
+  ownerProvisioned Boolean @default(false)
   // Recorded at self-service signup: explicit ToS / recording-consent tick.
   termsAcceptedAt DateTime?
   termsVersion    String?
@@ -253,6 +256,8 @@ model WorkspaceSubscription {
   currentPeriodEnd     DateTime?
   graceEndsAt           DateTime?
   lastBillingEventCreatedAt Int?
+  // Set while an owner has an uncompleted Stripe Checkout; never touches "status".
+  checkoutClaimedAt    DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

@@ -93,7 +93,7 @@ describe("checkout and portal failure recovery", () => {
       fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "card configuration rejected" } }), { status: 400 }));
       await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_gaps", "https://billing.example.test/ok", "https://billing.example.test/cancel"))
         .rejects.toThrow("card configuration rejected");
-      await expect(prisma.workspaceSubscription.findUnique({ where: { workspaceId } })).resolves.toMatchObject({ status: "inactive" });
+      await expect(prisma.workspaceSubscription.findUnique({ where: { workspaceId } })).resolves.toMatchObject({ status: "inactive", checkoutClaimedAt: null });
     });
     await withWorkspace("Checkout malformed response", async (workspaceId) => {
       fetch.mockResolvedValueOnce(new Response("not-json", { status: 500 }));
@@ -128,10 +128,26 @@ describe("checkout and portal failure recovery", () => {
     });
   });
 
+  it("lets a trial workspace start checkout without spending its free meetings", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ url: "https://checkout.stripe.test/trial" }), { status: 200 }));
+    await withWorkspace("Trial buys a plan", async (workspaceId) => {
+      await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_trial", status: "trialing" } });
+      await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_gaps", "https://billing.example.test/ok", "https://billing.example.test/cancel"))
+        .resolves.toBe("https://checkout.stripe.test/trial");
+      const row = await prisma.workspaceSubscription.findUniqueOrThrow({ where: { workspaceId } });
+      expect(row).toMatchObject({ plan: "hosted_trial", status: "trialing" });
+      expect(row.checkoutClaimedAt).not.toBeNull();
+      // A second concurrent attempt is blocked by the fresh claim, not by the trial status.
+      await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_gaps", "https://billing.example.test/ok", "https://billing.example.test/cancel"))
+        .rejects.toThrow("checkout session was just started");
+    });
+    fetch.mockRestore();
+  });
+
   it("reclaims expired checkout mutexes and directs an already-subscribed workspace to the portal", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ url: "https://checkout.stripe.test/new" }), { status: 200 }));
     await withWorkspace("Stale checkout mutex", async (workspaceId) => {
-      await prisma.workspaceSubscription.create({ data: { workspaceId, status: "checkout_pending", updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000) } });
+      await prisma.workspaceSubscription.create({ data: { workspaceId, checkoutClaimedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000) } });
       await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_gaps", "https://billing.example.test/ok", "https://billing.example.test/cancel"))
         .resolves.toBe("https://checkout.stripe.test/new");
     });

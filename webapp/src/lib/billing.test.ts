@@ -412,6 +412,23 @@ describe("checkout gating", () => {
         createCheckoutSession(workspaceId, "owner@example.com", "price_gate_pro", "https://notes.example.com/billing?checkout=success", "https://notes.example.com/billing?checkout=cancelled"),
       ).resolves.toBe("https://notes.example.com/checkout");
       expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      // Regression: a customer who resubscribes after cancelling must get access
+      // when Stripe reports the NEW subscription, not have it dropped as a
+      // "replaced" one because the checkout claim rewrote the status.
+      const resubscribeId = `evt-resub-${workspaceId}`;
+      await applyStripeEvent({
+        id: resubscribeId,
+        type: "customer.subscription.created",
+        data: { object: { id: "sub_new", customer: "cus_new", status: "active", metadata: { workspaceId }, items: { data: [{ price: { id: "price_gate_pro" } }] } } },
+      });
+      await expect(prisma.workspaceSubscription.findUnique({ where: { workspaceId } })).resolves.toMatchObject({
+        stripeSubscriptionId: "sub_new",
+        plan: "hosted_pro",
+        status: "active",
+        checkoutClaimedAt: null,
+      });
+      await prisma.billingEvent.deleteMany({ where: { id: resubscribeId } });
     } finally {
       await prisma.workspace.delete({ where: { id: workspaceId } });
       fetchSpy.mockRestore();

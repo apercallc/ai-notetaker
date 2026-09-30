@@ -1,3 +1,4 @@
+import { EntitlementError } from "./entitlementError";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { HOSTED_TRIAL_MEETINGS, PLAN_MEETING_LIMITS, isManagedPlan, planLabel, type ManagedPlan } from "./plans";
@@ -166,7 +167,7 @@ export async function reserveMeetingProcessing(workspaceId: string, idempotencyK
             !hasProcessingAccess(subscription) ||
             limit <= (used._sum.units ?? 0)
           ) {
-            throw new Error("managed processing entitlement is unavailable");
+            throw new EntitlementError();
           }
 
           if (existing) {

@@ -19,6 +19,7 @@ import {
   MAX_PENDING_MANAGED_UPLOADS,
   MAX_PENDING_MANAGED_UPLOAD_BYTES,
 } from "./managedJobs";
+import { EntitlementError } from "./entitlementError";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
 import { chunkObjectKey, getObject, putObject } from "./objectStorage";
 
@@ -48,6 +49,8 @@ beforeEach(async () => {
       { id: OTHER_WORKSPACE_ID, name: "Other managed workspace" },
     ],
   });
+  // Uploads are refused up front for a workspace with no processing entitlement.
+  await prisma.workspaceSubscription.create({ data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
 });
 
 afterEach(async () => {
@@ -100,6 +103,14 @@ describe("managed upload contracts", () => {
     const replay = await createManagedUpload(WORKSPACE_ID, good);
     expect(replay.chunks).toEqual([{ chunkIndex: 0, byteLength: 2, checksum: "private-checksum" }]);
     expect(JSON.stringify(replay)).not.toContain("private/object-key");
+  });
+
+  it("refuses to stage audio for a workspace whose plan has no processing left", async () => {
+    await prisma.workspaceSubscription.update({ where: { workspaceId: WORKSPACE_ID }, data: { plan: "hosted_trial", status: "trialing" } });
+    const meetingId = await createMeeting(WORKSPACE_ID);
+    for (let index = 0; index < 3; index += 1) await reserveMeetingProcessing(WORKSPACE_ID, `used-${index}`);
+    await expect(createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `blocked-${meetingId}` })).rejects.toBeInstanceOf(EntitlementError);
+    expect(await prisma.managedUpload.count({ where: { workspaceId: WORKSPACE_ID } })).toBe(0);
   });
 
   it("is workspace-scoped and rejects conflicting idempotency manifests", async () => {
@@ -423,9 +434,7 @@ describe("managed upload contracts", () => {
 
 describe("managed usage reservations", () => {
   it("charges a replayed idempotency key only once", async () => {
-    await prisma.workspaceSubscription.create({
-      data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" },
-    });
+    await prisma.workspaceSubscription.upsert({ where: { workspaceId: WORKSPACE_ID }, create: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" }, update: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
 
     await expect(reserveMeetingProcessing(WORKSPACE_ID, "same-job")).resolves.toEqual({ alreadyReserved: false });
     await expect(reserveMeetingProcessing(WORKSPACE_ID, "same-job")).resolves.toEqual({ alreadyReserved: true });
@@ -433,9 +442,7 @@ describe("managed usage reservations", () => {
   });
 
   it("does not oversubscribe a hosted trial under concurrent reservations", async () => {
-    await prisma.workspaceSubscription.create({
-      data: { workspaceId: WORKSPACE_ID, plan: "hosted_trial", status: "trialing" },
-    });
+    await prisma.workspaceSubscription.upsert({ where: { workspaceId: WORKSPACE_ID }, create: { workspaceId: WORKSPACE_ID, plan: "hosted_trial", status: "trialing" }, update: { workspaceId: WORKSPACE_ID, plan: "hosted_trial", status: "trialing" } });
 
     const results = await Promise.allSettled(
       Array.from({ length: 5 }, (_, index) => reserveMeetingProcessing(WORKSPACE_ID, `trial-${index}`)),
@@ -445,9 +452,7 @@ describe("managed usage reservations", () => {
   });
 
   it("releases a failed reservation and allows the same job to retry", async () => {
-    await prisma.workspaceSubscription.create({
-      data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" },
-    });
+    await prisma.workspaceSubscription.upsert({ where: { workspaceId: WORKSPACE_ID }, create: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" }, update: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
 
     await expect(reserveMeetingProcessing(WORKSPACE_ID, "retry-job")).resolves.toEqual({ alreadyReserved: false });
     expect((await getEntitlements(WORKSPACE_ID)).used).toBe(1);
@@ -471,7 +476,7 @@ describe("managed processing job queue", () => {
     await expect(enqueueManagedJob(WORKSPACE_ID, meetingId, upload.id, "job-key")).rejects.toThrow("completed upload");
     await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 2, checksum: "job-checksum", objectKey: "job-chunk" } });
     await completeManagedUpload(WORKSPACE_ID, upload.id);
-    await prisma.workspaceSubscription.create({ data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
+    await prisma.workspaceSubscription.upsert({ where: { workspaceId: WORKSPACE_ID }, create: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" }, update: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
 
     const first = await enqueueManagedJob(WORKSPACE_ID, meetingId, upload.id, "job-key");
     expect(first).toMatchObject({ status: "queued", meetingId, uploadId: upload.id });
@@ -490,7 +495,7 @@ describe("managed processing job queue", () => {
     const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `race-job-upload-${meetingId}` });
     await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 1, checksum: "race-job", objectKey: "race-job" } });
     await completeManagedUpload(WORKSPACE_ID, upload.id);
-    await prisma.workspaceSubscription.create({ data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
+    await prisma.workspaceSubscription.upsert({ where: { workspaceId: WORKSPACE_ID }, create: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" }, update: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
     const winner = await prisma.processingJob.create({ data: { workspaceId: WORKSPACE_ID, meetingId, uploadId: upload.id, idempotencyKey: "job-race", status: "queued" } });
     const find = vi.spyOn(prisma.processingJob, "findUnique").mockResolvedValueOnce(null as never);
     const create = vi.spyOn(prisma.processingJob, "create").mockRejectedValueOnce({ code: "P2002" });

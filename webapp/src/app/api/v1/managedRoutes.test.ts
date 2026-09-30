@@ -68,6 +68,8 @@ beforeEach(async () => {
       { id: OTHER_WORKSPACE_ID, name: "Other route workspace" },
     ],
   });
+  // Uploads are refused up front for a workspace with no processing entitlement.
+  await prisma.workspaceSubscription.create({ data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
 });
 
 afterEach(async () => {
@@ -113,7 +115,7 @@ describe("managed upload routes", () => {
       body: JSON.stringify({ email: "login-route@example.com", password }),
     }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ accountId: USER_ID, workspaceId: WORKSPACE_ID, plan: "local", role: "owner" });
+    expect(await response.json()).toMatchObject({ accountId: USER_ID, workspaceId: WORKSPACE_ID, plan: "hosted_pro", role: "owner" });
   });
 
   it("returns a retryable quota response when the workspace pending upload budget is full", async () => {
@@ -163,7 +165,7 @@ describe("managed upload routes", () => {
 
   it("returns workspace-scoped entitlements for a managed client preflight", async () => {
     const sessionId = await createPrincipal(USER_ID, "entitlements-route@example.com", WORKSPACE_ID);
-    await prisma.workspaceSubscription.create({ data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
+    await prisma.workspaceSubscription.upsert({ where: { workspaceId: WORKSPACE_ID }, create: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" }, update: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
     const response = await getEntitlements(new Request("http://localhost/api/v1/entitlements", { headers: auth(sessionId) }));
 
     expect(response.status).toBe(200);
@@ -210,6 +212,7 @@ describe("managed upload routes", () => {
   it("honors an explicitly selected workspace only when the session is a member", async () => {
     const sessionId = await createPrincipal(USER_ID, "multi-workspace@example.com", WORKSPACE_ID);
     await prisma.workspaceMembership.create({ data: { userId: USER_ID, workspaceId: OTHER_WORKSPACE_ID, role: "member" } });
+    await prisma.workspaceSubscription.create({ data: { workspaceId: OTHER_WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
     const meetingId = randomUUID();
     await prisma.meeting.create({
       data: {
@@ -361,9 +364,7 @@ describe("managed upload routes", () => {
     );
     expect(complete.status).toBe(200);
 
-    await prisma.workspaceSubscription.create({
-      data: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" },
-    });
+    await prisma.workspaceSubscription.upsert({ where: { workspaceId: WORKSPACE_ID }, create: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" }, update: { workspaceId: WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
     const queued = await enqueueJob(
       new Request("http://localhost/api/v1/meetings/process", {
         method: "POST",

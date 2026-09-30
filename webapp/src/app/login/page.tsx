@@ -69,6 +69,8 @@ function messageFor(error: string | undefined, retry: string | undefined, proble
       return "Google says that email address isn't verified, so we can't use it to sign you in.";
     case "google-account-unconfirmed":
       return "An account with that email exists but its email was never confirmed. Confirm it with the link we sent, or reset your password, then try again.";
+    case "google-account-provisioned":
+      return "This account was set up for you by a workspace owner. Sign in with the email and password they gave you, then change it.";
     case "google-no-account":
       return "No account exists for that Google address yet. Create one below — it takes one click.";
     case "token-invalid":

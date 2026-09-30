@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ValidationError } from "./meetings";
+import { EntitlementError } from "./entitlementError";
 import { apiErrorResponse, jsonError, requestIdFrom } from "./apiErrors";
 
 afterEach(() => vi.restoreAllMocks());
@@ -10,6 +11,14 @@ describe("API error responses", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "bad input" });
     expect(response.headers.get("x-request-id")).toBe("request-1");
+  });
+
+  it("answers an exhausted plan with a 402 upgrade prompt, not a 500, and does not log it as a failure", async () => {
+    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = apiErrorResponse(new EntitlementError(), { requestId: "request-2" });
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({ code: "entitlement_unavailable", error: expect.stringContaining("Upgrade") });
+    expect(logger).not.toHaveBeenCalled();
   });
 
   it("logs unexpected errors and returns a generic 500 with a correlation id", async () => {

@@ -1,5 +1,6 @@
 import { prisma } from "./db";
-import { releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
+import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
+import { EntitlementError } from "./entitlementError";
 import { ValidationError } from "./meetings";
 import { deleteObject, getObject } from "./objectStorage";
 import { deleteMeeting } from "./meetings";
@@ -136,6 +137,10 @@ export async function createManagedUpload(
       };
     }
   }
+
+  // Fail before any audio is staged: an exhausted plan would otherwise fill
+  // the staging cap for 24 hours and only be refused after the upload.
+  if (!(await getEntitlements(workspaceId)).canProcess) throw new EntitlementError();
 
   let created;
   try {

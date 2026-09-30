@@ -147,7 +147,7 @@ export async function registerHostedAccount(input: {
 
 export type GoogleSignInResult =
   | { ok: true; userId: string; workspaceId: string; created: boolean; mustChangePassword: boolean }
-  | { ok: false; error: "google-email-unverified" | "google-account-unconfirmed" | "google-no-account" | "no-workspace" | "consent-required" | SignupError }
+  | { ok: false; error: "google-email-unverified" | "google-account-unconfirmed" | "google-account-provisioned" | "google-no-account" | "no-workspace" | "consent-required" | SignupError }
   | { ok: false; error: "throttled"; retryAfterMs: number };
 
 /**
@@ -160,6 +160,8 @@ export type GoogleSignInResult =
  * - An existing account that never confirmed its email is REFUSED, not taken
  *   over. Otherwise someone could pre-register a victim's address with a
  *   password they know and inherit the victim's Google sign-in later.
+ * - An account an owner provisioned for that address is refused for the same
+ *   reason: someone else holds its password.
  * - `signin` never creates an account: terms consent is collected on our own
  *   page before the redirect, so a new user is sent to the sign-up form.
  * - New accounts get the same workspace, trial and terms record as email
@@ -179,9 +181,13 @@ export async function resolveGoogleAccount(input: {
   const email = normalizeEmail(input.email);
   if (!isPlausibleEmail(email)) return { ok: false, error: "email-invalid" };
 
-  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, emailVerifiedAt: true, mustChangePassword: true } });
+  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, emailVerifiedAt: true, mustChangePassword: true, ownerProvisioned: true } });
   if (existing) {
     if (!existing.emailVerifiedAt) return { ok: false, error: "google-account-unconfirmed" };
+    // A workspace owner created this account with a password they chose. The
+    // real mailbox holder never proved the address, so Google must not sign
+    // them into it (the owner would keep a working password).
+    if (existing.ownerProvisioned) return { ok: false, error: "google-account-provisioned" };
     const active = await resolveActiveWorkspace(existing.id);
     if (!active) return { ok: false, error: "no-workspace" };
     return { ok: true, userId: existing.id, workspaceId: active.workspaceId, created: false, mustChangePassword: existing.mustChangePassword };

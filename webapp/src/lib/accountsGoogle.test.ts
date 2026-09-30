@@ -85,6 +85,24 @@ describe("resolveGoogleAccount", () => {
     expect(await prisma.session.count({ where: { userId: attackerUser } })).toBe(0);
   });
 
+  it("refuses an owner-provisioned account, whose password someone else chose", async () => {
+    const email = `${EMAIL_PREFIX}provisioned@example.test`;
+    const userId = await seedUser(email, true);
+    await prisma.user.update({ where: { id: userId }, data: { ownerProvisioned: true } });
+    for (const mode of ["signin", "signup"] as const) {
+      expect(await resolveGoogleAccount({ ...base, email, mode })).toEqual({ ok: false, error: "google-account-provisioned" });
+    }
+  });
+
+  it("marks accounts created through addWorkspaceMember as owner-provisioned", async () => {
+    const workspace = await prisma.workspace.create({ data: { name: `${WORKSPACE_PREFIX}team`, isDefault: false } });
+    const email = `${EMAIL_PREFIX}added@example.test`;
+    const { addWorkspaceMember } = await import("./workspaces");
+    await addWorkspaceMember(workspace.id, email, await hashPassword("temporary password 1!"));
+    expect((await prisma.user.findUniqueOrThrow({ where: { email } })).ownerProvisioned).toBe(true);
+    expect(await resolveGoogleAccount({ ...base, email, mode: "signin" })).toEqual({ ok: false, error: "google-account-provisioned" });
+  });
+
   it("does not create accounts in sign-in mode, so terms consent is never skipped", async () => {
     const email = `${EMAIL_PREFIX}nobody@example.test`;
     expect(await resolveGoogleAccount({ ...base, email, mode: "signin" })).toEqual({ ok: false, error: "google-no-account" });

@@ -83,14 +83,14 @@ async function stripePost(path: string, form: URLSearchParams): Promise<Record<s
 export async function createCheckoutSession(workspaceId: string, email: string, priceId: string, successUrl: string, cancelUrl: string) {
   const price = priceFor(priceId);
   // Validate the redirect targets before claiming anything: a rejected
-  // request must not leave a checkout_pending row behind (it would block
+  // request must not leave a checkout claim behind (it would block
   // the user's next, valid attempt for an hour) nor consume the mutex.
   const success = validateBillingRedirect(successUrl);
   const cancel = validateBillingRedirect(cancelUrl);
   // Claim a checkout slot before talking to Stripe. The read-then-create
   // pattern let two concurrent owner requests both pass hasLiveSubscription
   // and create two live subscriptions (double billing, Stripe support needed
-  // to untangle). The status row acts as a mutex: a fresh `checkout_pending`
+  // to untangle). The claim timestamp acts as a mutex: a fresh claim
   // blocks a second session, a stale one (abandoned checkout over an hour
   // ago) is reclaimable, and any live status still routes to the portal.
   await claimCheckoutSlot(workspaceId);
@@ -113,7 +113,7 @@ export async function createCheckoutSession(workspaceId: string, email: string, 
   } catch (error) {
     // Never leave the mutex claimed when no checkout session exists.
     await prisma.workspaceSubscription
-      .updateMany({ where: { workspaceId, status: "checkout_pending", stripeSubscriptionId: null }, data: { status: "inactive" } })
+      .updateMany({ where: { workspaceId }, data: { checkoutClaimedAt: null } })
       .catch(() => undefined);
     throw error;
   }
@@ -122,6 +122,12 @@ export async function createCheckoutSession(workspaceId: string, email: string, 
 /** How long an uncompleted checkout session blocks a new one for the workspace. */
 const CHECKOUT_PENDING_MS = 60 * 60 * 1_000;
 
+/**
+ * The claim is a timestamp beside the subscription, not a status. Overwriting
+ * `status` (the old `checkout_pending`) erased a trial's remaining meetings
+ * and made a canceled workspace look "replaced" when its new subscription
+ * arrived, so a paying customer never got access back.
+ */
 async function claimCheckoutSlot(workspaceId: string): Promise<void> {
   const existing = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
   if (hasLiveSubscription(existing)) {
@@ -129,7 +135,7 @@ async function claimCheckoutSlot(workspaceId: string): Promise<void> {
   }
   if (!existing) {
     try {
-      await prisma.workspaceSubscription.create({ data: { workspaceId, status: "checkout_pending" } });
+      await prisma.workspaceSubscription.create({ data: { workspaceId, checkoutClaimedAt: new Date() } });
       return;
     } catch (error) {
       if ((error as { code?: string }).code !== "P2002") throw error;
@@ -140,13 +146,13 @@ async function claimCheckoutSlot(workspaceId: string): Promise<void> {
   const claimed = await prisma.workspaceSubscription.updateMany({
     where: {
       workspaceId,
-      OR: [
-        { status: { notIn: [...LIVE_SUBSCRIPTION_STATUSES, "checkout_pending"] } },
-        // A pending claim from a checkout the user abandoned long ago is stale.
-        { status: "checkout_pending", updatedAt: { lt: new Date(Date.now() - CHECKOUT_PENDING_MS) } },
-      ],
+      // The trial row is `trialing` with no Stripe subscription; only a real,
+      // live subscription blocks checkout.
+      OR: [{ stripeSubscriptionId: null }, { plan: "hosted_trial" }, { status: { notIn: [...LIVE_SUBSCRIPTION_STATUSES] } }],
+      // A claim from a checkout the user abandoned long ago is stale.
+      AND: [{ OR: [{ checkoutClaimedAt: null }, { checkoutClaimedAt: { lt: new Date(Date.now() - CHECKOUT_PENDING_MS) } }] }],
     },
-    data: { status: "checkout_pending" },
+    data: { checkoutClaimedAt: new Date() },
   });
   if (claimed.count === 1) return;
   const blocked = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
@@ -450,6 +456,7 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
       ...(start ? { currentPeriodStart: start } : {}),
       ...(end ? { currentPeriodEnd: end } : {}),
       graceEndsAt,
+      checkoutClaimedAt: null,
       ...(eventCreatedAt !== undefined ? { lastBillingEventCreatedAt: eventCreatedAt } : {}),
     };
     await tx.workspaceSubscription.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });

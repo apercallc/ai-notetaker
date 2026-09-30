@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ValidationError } from "./meetings";
+import { ENTITLEMENT_PUBLIC_MESSAGE, EntitlementError } from "./entitlementError";
 import { safeRequestId } from "./requestId";
 import { captureServerError } from "./observability";
 
@@ -27,6 +28,13 @@ export function apiErrorResponse(
     return NextResponse.json(
       { error: error.message },
       { status: 400, headers: { "x-request-id": requestId } },
+    );
+  }
+
+  if (error instanceof EntitlementError) {
+    return NextResponse.json(
+      { error: ENTITLEMENT_PUBLIC_MESSAGE, code: "entitlement_unavailable", requestId },
+      { status: 402, headers: { "x-request-id": requestId } },
     );
   }
 

@@ -97,6 +97,7 @@ export async function addWorkspaceMember(
         passwordHash,
         emailVerifiedAt: new Date(),
         mustChangePassword: options.mustChangePassword ?? false,
+        ownerProvisioned: true,
       },
     });
     await tx.workspaceMembership.create({
