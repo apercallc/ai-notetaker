@@ -115,6 +115,43 @@ describe("Stripe checkout retry", () => {
   });
 });
 
+describe("pending cancellation", () => {
+  it("records cancel_at (new API) and cancel_at_period_end (old API), and clears it on resume", async () => {
+    const workspaceId = randomUUID();
+    const originalPrice = process.env.STRIPE_PRICE_HOSTED_PRO;
+    process.env.STRIPE_PRICE_HOSTED_PRO = "price_pro_cancels";
+    const periodEnd = Math.floor(Date.now() / 1_000) + 86_400 * 20;
+    const eventIds = ["a", "b", "c"].map((k) => `evt-cancels-${k}-${workspaceId}`);
+    const subscription = (extra: Record<string, unknown>) => ({
+      id: "sub_cancels",
+      customer: "cus_cancels",
+      status: "active",
+      current_period_end: periodEnd,
+      metadata: { workspaceId },
+      items: { data: [{ price: { id: "price_pro_cancels" } }] },
+      ...extra,
+    });
+    try {
+      await prisma.workspace.create({ data: { id: workspaceId, name: "Pending cancellation workspace" } });
+      await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_trial", status: "trialing" } });
+
+      await applyStripeEvent({ id: eventIds[0], type: "customer.subscription.updated", created: 100, data: { object: subscription({ cancel_at: periodEnd, cancel_at_period_end: false }) } });
+      expect((await prisma.workspaceSubscription.findUnique({ where: { workspaceId } }))?.cancelsAt?.getTime()).toBe(periodEnd * 1_000);
+
+      await applyStripeEvent({ id: eventIds[1], type: "customer.subscription.updated", created: 200, data: { object: subscription({}) } });
+      expect((await prisma.workspaceSubscription.findUnique({ where: { workspaceId } }))?.cancelsAt).toBeNull();
+
+      await applyStripeEvent({ id: eventIds[2], type: "customer.subscription.updated", created: 300, data: { object: subscription({ cancel_at_period_end: true }) } });
+      expect((await prisma.workspaceSubscription.findUnique({ where: { workspaceId } }))?.cancelsAt?.getTime()).toBe(periodEnd * 1_000);
+    } finally {
+      await prisma.billingEvent.deleteMany({ where: { id: { in: eventIds } } }).catch(() => undefined);
+      await prisma.workspace.delete({ where: { id: workspaceId } });
+      if (originalPrice === undefined) delete process.env.STRIPE_PRICE_HOSTED_PRO;
+      else process.env.STRIPE_PRICE_HOSTED_PRO = originalPrice;
+    }
+  });
+});
+
 describe("Stripe portal redirect safety", () => {
   it("allows only the configured app origin", async () => {
     const workspaceId = randomUUID();

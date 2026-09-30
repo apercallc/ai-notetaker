@@ -48,6 +48,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const usedPercent = entitlements.limit > 0 ? Math.min(100, Math.round((entitlements.used / entitlements.limit) * 100)) : 0;
   const resetDate = formatDate(entitlements.period.end);
   const graceDate = formatDate(entitlements.graceEndsAt);
+  const cancelsDate = live ? formatDate(subscription?.cancelsAt?.toISOString()) : null;
 
   return (
     <div className="container">
@@ -72,6 +73,12 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           <strong>{planLabel(entitlements.plan)}</strong>
           {entitlements.plan !== "local" && <> · {statusLabel(entitlements.status)}</>}
         </p>
+        {cancelsDate && (
+          <p className="muted-copy" role="status">
+            Your subscription is cancelled and ends on {cancelsDate}. You keep full access until then.
+            {isOwner ? " Use Manage billing to resume it." : ""}
+          </p>
+        )}
 
         {entitlements.limit > 0 ? (
           <div>

@@ -387,6 +387,17 @@ function periodOf(object: Record<string, unknown>): { start?: Date; end?: Date }
   };
 }
 
+/**
+ * When Stripe will end the subscription. Newer API versions report a pending
+ * cancellation as `cancel_at` (with `cancel_at_period_end` left false); older
+ * ones set `cancel_at_period_end` and expect the period end.
+ */
+function cancelsAtOf(object: Record<string, unknown>, periodEnd: Date | undefined): Date | null {
+  const cancelAt = asSeconds(object.cancel_at);
+  if (cancelAt) return cancelAt;
+  return object.cancel_at_period_end === true && periodEnd ? periodEnd : null;
+}
+
 function planForPrice(priceId: string | undefined): "hosted_pro" | "hosted_team" | undefined {
   if (!priceId) return undefined;
   if (priceId === process.env.STRIPE_PRICE_HOSTED_TEAM) return "hosted_team";
@@ -532,6 +543,7 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
       ...(start ? { currentPeriodStart: start } : {}),
       ...(end ? { currentPeriodEnd: end } : {}),
       graceEndsAt,
+      cancelsAt: live ? cancelsAtOf(object, end) : null,
       checkoutClaimedAt: null,
       checkoutSessionId: null,
       ...(eventCreatedAt !== undefined ? { lastBillingEventCreatedAt: eventCreatedAt } : {}),

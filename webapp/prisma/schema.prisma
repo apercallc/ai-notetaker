@@ -263,6 +263,8 @@ model WorkspaceSubscription {
   checkoutClaimedAt    DateTime?
   // The open Stripe Checkout Session behind the claim, so a retry can expire it.
   checkoutSessionId    String?
+  // Set while Stripe has a pending cancellation; access lasts until then.
+  cancelsAt            DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
