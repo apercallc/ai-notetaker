@@ -506,7 +506,8 @@ export function PrivacyView() {
             </p>
             <ul>
               <li>We store your Google account email and encrypted access tokens so these features keep working. Choosing Disconnect in your account deletes them.</li>
-              <li>We use Google data only to provide those two features. We do not use it for advertising, sell it, or use it to train AI models.</li>
+              <li>If you choose Continue with Google to sign in or create an account, we receive only your Google email address and whether Google has verified it. We use it to find or create your account and keep no Google access token for sign-in.</li>
+              <li>We use Google data only to provide sign-in and those two features. We do not use it for advertising, sell it, or use it to train AI models.</li>
               <li>We do not let people read your Google data unless you ask us to, it is needed to investigate abuse or a security problem, or the law requires it.</li>
               <li>You can also remove access at any time from your <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.</li>
             </ul>

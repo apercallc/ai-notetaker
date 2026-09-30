@@ -65,7 +65,7 @@ export function contentSecurityPolicy(nonce: string, development = process.env.N
     `connect-src 'self'${sentry ? ` ${sentry}` : ""}${development ? " ws: wss:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self' https://checkout.stripe.com https://billing.stripe.com",
+    "form-action 'self' https://checkout.stripe.com https://billing.stripe.com https://accounts.google.com",
     "frame-ancestors 'none'",
   ].join("; ");
 }
@@ -98,7 +98,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     // These browser OAuth endpoints validate the signed-in session and the
     // encrypted, one-time PKCE state themselves. Google must be able to
     // redirect to the callback without an API Bearer token.
-    if (pathname === "/api/google/oauth/connect" || pathname === "/api/google/oauth/callback") {
+    if (pathname === "/api/google/oauth/connect" || pathname === "/api/google/oauth/callback" || pathname === "/api/google/oauth/start") {
       return NextResponse.next();
     }
     if (pathname.startsWith("/api/v1/")) {

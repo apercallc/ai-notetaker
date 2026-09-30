@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { cookies, getSessionContext, createOAuthState, sealOAuthState, completeOAuthConnection, oauthStateMatches, openOAuthState } = vi.hoisted(() => ({
+const { cookies, getSessionContext, createSession, resolveGoogleAccount, createSignInState, completeGoogleSignIn, googleOAuthConfigured, createOAuthState, sealOAuthState, completeOAuthConnection, oauthStateMatches, openOAuthState } = vi.hoisted(() => ({
+  createSession: vi.fn(),
+  resolveGoogleAccount: vi.fn(),
+  createSignInState: vi.fn(),
+  completeGoogleSignIn: vi.fn(),
+  googleOAuthConfigured: vi.fn(),
   cookies: vi.fn(),
   getSessionContext: vi.fn(),
   createOAuthState: vi.fn(),
@@ -11,8 +16,12 @@ const { cookies, getSessionContext, createOAuthState, sealOAuthState, completeOA
 }));
 
 vi.mock("next/headers", () => ({ cookies }));
-vi.mock("@/lib/sessions", () => ({ getSessionContext }));
+vi.mock("@/lib/sessions", () => ({ getSessionContext, createSession }));
+vi.mock("@/lib/accounts", () => ({ resolveGoogleAccount }));
 vi.mock("@/lib/googleIntegration", () => ({
+  createSignInState,
+  completeGoogleSignIn,
+  googleOAuthConfigured,
   createOAuthState,
   sealOAuthState,
   completeOAuthConnection,
@@ -25,6 +34,7 @@ vi.mock("@/lib/googleIntegration", () => ({
 
 import { GET as connect } from "./connect/route";
 import { GET as callback } from "./callback/route";
+import { GET as start } from "./start/route";
 
 const state = { userId: "user-1", state: "state-1", verifier: "private-verifier", expiresAt: Date.now() + 10_000 };
 const session = { user: { id: "user-1", mustChangePassword: false } };
@@ -150,5 +160,125 @@ describe("redirects behind the platform proxy", () => {
       const response = await connect(new Request("https://fallback.example.test/api/google/oauth/connect"));
       expect(response.headers.get("location")).toBe("https://fallback.example.test/login?next=/account");
     } finally { restore(); }
+  });
+});
+
+describe("Google sign-in start route", () => {
+  beforeEach(() => {
+    googleOAuthConfigured.mockReturnValue(true);
+    createSignInState.mockReturnValue({ state: { ...state, userId: "", purpose: "signin" }, authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=state-1" });
+  });
+
+  it("redirects to Google with sealed state, needing no session", async () => {
+    const response = await start(new Request("https://app.example.com/api/google/oauth/start?mode=signin&next=/meetings/abc"));
+    expect(response.headers.get("location")).toBe("https://accounts.google.com/o/oauth2/v2/auth?state=state-1");
+    expect(createSignInState).toHaveBeenCalledWith({ mode: "signin", next: "/meetings/abc", termsAccepted: false, workspaceName: undefined });
+    expect(getSessionContext).not.toHaveBeenCalled();
+    expect(response.cookies.get("google_oauth_state")).toMatchObject({ value: "sealed-state", httpOnly: true, sameSite: "lax", path: "/api/google/oauth" });
+  });
+
+  it("refuses sign-up without the terms tick and never contacts Google", async () => {
+    const response = await start(new Request("https://app.example.com/api/google/oauth/start?mode=signup"));
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("tab")).toBe("signup");
+    expect(location.searchParams.get("error")).toBe("consent-required");
+    expect(createSignInState).not.toHaveBeenCalled();
+  });
+
+  it("records the consent for sign-up and sanitizes next", async () => {
+    await start(new Request("https://app.example.com/api/google/oauth/start?mode=signup&acceptTerms=on&next=//evil.example"));
+    expect(createSignInState).toHaveBeenCalledWith(expect.objectContaining({ mode: "signup", termsAccepted: true, next: expect.not.stringContaining("evil") }));
+  });
+
+  it("falls back to the login page when Google is not configured", async () => {
+    googleOAuthConfigured.mockReturnValue(false);
+    const response = await start(new Request("https://app.example.com/api/google/oauth/start?mode=signin"));
+    expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe("google-unavailable");
+  });
+});
+
+describe("Google sign-in callback", () => {
+  const signinState = { userId: "", state: "state-1", verifier: "v", expiresAt: Date.now() + 10_000, purpose: "signin", next: "/meetings/abc" };
+
+  beforeEach(() => {
+    cookieValues.google_oauth_state = "sealed-state";
+    getSessionContext.mockResolvedValue(null);
+    openOAuthState.mockReturnValue(signinState);
+    completeGoogleSignIn.mockResolvedValue({ email: "person@example.test", emailVerified: true });
+    resolveGoogleAccount.mockResolvedValue({ ok: true, userId: "user-9", workspaceId: "ws-9", created: false, mustChangePassword: false });
+    createSession.mockResolvedValue({ id: "session-id", expiresAt: new Date(Date.now() + 60_000) });
+  });
+
+  const call = (query = "state=state-1&code=auth-code") => callback(new Request(`https://app.example.com/api/google/oauth/callback?${query}`));
+
+  it("creates a session cookie, clears the one-time state and lands on the requested page", async () => {
+    const response = await call();
+    expect(response.headers.get("location")).toBe("https://app.example.com/meetings/abc");
+    expect(response.cookies.get("session")).toMatchObject({ value: "session-id", httpOnly: true, sameSite: "lax", path: "/" });
+    expect(response.cookies.get("google_oauth_state")?.maxAge).toBe(0);
+    expect(createSession).toHaveBeenCalledWith("user-9", expect.objectContaining({ activeWorkspaceId: "ws-9" }));
+    expect(resolveGoogleAccount).toHaveBeenCalledWith(expect.objectContaining({ email: "person@example.test", emailVerified: true, mode: "signin", termsAccepted: false }));
+  });
+
+  it("does not need, and ignores, an existing session", async () => {
+    getSessionContext.mockResolvedValue({ user: { id: "someone-else", mustChangePassword: false } });
+    const response = await call();
+    expect(createSession).toHaveBeenCalledWith("user-9", expect.anything());
+    expect(response.headers.get("location")).toContain("/meetings/abc");
+  });
+
+  it("rejects a mismatched state before any token exchange", async () => {
+    const response = await call("state=forged&code=auth-code");
+    expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe("google-failed");
+    expect(completeGoogleSignIn).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+    expect(response.cookies.get("session")).toBeUndefined();
+  });
+
+  it("reports cancellation and a missing code without creating a session", async () => {
+    const denied = await call("state=state-1&error=access_denied");
+    expect(new URL(denied.headers.get("location")!).searchParams.get("error")).toBe("google-cancelled");
+    const noCode = await call("state=state-1");
+    expect(new URL(noCode.headers.get("location")!).searchParams.get("error")).toBe("google-failed");
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("shows a safe error when the token exchange fails", async () => {
+    completeGoogleSignIn.mockRejectedValue(new Error("secret provider detail"));
+    const response = await call();
+    expect(response.headers.get("location")).not.toContain("secret");
+    expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe("google-failed");
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["google-email-unverified", "google-account-unconfirmed", "signup-disabled"])("never signs in when the account rules refuse (%s)", async (error) => {
+    resolveGoogleAccount.mockResolvedValue({ ok: false, error });
+    const response = await call();
+    expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe(error);
+    expect(createSession).not.toHaveBeenCalled();
+    expect(response.cookies.get("session")).toBeUndefined();
+  });
+
+  it("sends a new Google user who used Sign in to the sign-up form, where consent is collected", async () => {
+    resolveGoogleAccount.mockResolvedValue({ ok: false, error: "google-no-account" });
+    const location = new URL((await call()).headers.get("location")!);
+    expect(location.searchParams.get("tab")).toBe("signup");
+    expect(location.searchParams.get("error")).toBe("google-no-account");
+  });
+
+  it("creates the account in sign-up mode with the consent captured before Google", async () => {
+    openOAuthState.mockReturnValue({ ...signinState, purpose: "signup", termsAccepted: true, workspaceName: "Acme" });
+    resolveGoogleAccount.mockResolvedValue({ ok: true, userId: "new-1", workspaceId: "ws-new", created: true, mustChangePassword: false });
+    await call();
+    expect(resolveGoogleAccount).toHaveBeenCalledWith(expect.objectContaining({ mode: "signup", termsAccepted: true, workspaceName: "Acme" }));
+  });
+
+  it("keeps the connect flow for legacy states without a purpose", async () => {
+    openOAuthState.mockReturnValue(state);
+    getSessionContext.mockResolvedValue(session);
+    const response = await call();
+    expect(response.headers.get("location")).toBe("https://app.example.com/account?google=connected");
+    expect(completeGoogleSignIn).not.toHaveBeenCalled();
   });
 });

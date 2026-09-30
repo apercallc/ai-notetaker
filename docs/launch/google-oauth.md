@@ -117,6 +117,28 @@ Note: while the publishing status is **Testing**, Google expires the refresh
 token after 7 days. That is fine for this test and is fixed by publishing in the
 next step.
 
+### Continue with Google (sign-in)
+
+The login and sign-up tabs also offer **Continue with Google**. It reuses this
+same OAuth client and callback URL (`/api/google/oauth/callback`) but requests
+only `openid email`, so it adds no scope to review and needs no console change.
+It appears only when the Google variables in step 6 are set.
+
+- **Sign in** signs into an existing account whose email is confirmed. Google
+  must report the address as verified.
+- An account that exists but never confirmed its email is refused (otherwise
+  someone could pre-register a victim's address). Confirming the email or
+  resetting the password unblocks it.
+- A new Google user is sent to the **Create workspace** tab, where the terms
+  tick is captured before Google opens; the account then gets a workspace and
+  the free trial like any email sign-up. Its password is random; "Forgot your
+  password?" sets one.
+- Calendar and Drive stay a separate opt-in under **Account → Connect Google**.
+
+Test: sign out, choose **Continue with Google** on the sign-in tab with an
+address that has no account (you land on Create workspace), tick the terms and
+continue, and confirm you arrive signed in. Then sign out and sign in again.
+
 ## 8. Publish and submit for verification
 
 1. **Audience**, **Publish app**, confirm. The status becomes **In production**

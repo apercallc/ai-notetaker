@@ -4,7 +4,7 @@ import { getSessionContext } from "@/lib/sessions";
 import { publicUrl } from "@/lib/publicUrl";
 import { createOAuthState, GoogleIntegrationError, sealOAuthState } from "@/lib/googleIntegration";
 
-const OAUTH_STATE_COOKIE = "google_oauth_state";
+import { OAUTH_STATE_COOKIE } from "../stateCookie";
 
 export async function GET(request: Request) {
   const store = await cookies();

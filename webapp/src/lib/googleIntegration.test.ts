@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { buildDriveDocumentUpload, createOAuthState, GOOGLE_OAUTH_SCOPES, googleOAuthConfigured, oauthStateMatches, openOAuthState, sealOAuthState } from "./googleIntegration";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildDriveDocumentUpload, completeGoogleSignIn, createOAuthState, createSignInState, GOOGLE_OAUTH_SCOPES, googleOAuthConfigured, oauthStateMatches, openOAuthState, sealOAuthState } from "./googleIntegration";
 
 const original = {
   appUrl: process.env.APP_URL,
@@ -90,5 +90,66 @@ describe("Google scopes and Drive export upload", () => {
     const first = buildDriveDocumentUpload("a", "f", "x").contentType;
     const second = buildDriveDocumentUpload("a", "f", "x").contentType;
     expect(first).not.toBe(second);
+  });
+});
+
+describe("Google sign-in", () => {
+  function configure(): void {
+    process.env.APP_URL = "https://ai-notetaker.apercallc.com";
+    process.env.GOOGLE_OAUTH_CLIENT_ID = "client-id";
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET = "client-secret";
+    process.env.GOOGLE_OAUTH_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("asks for identity only: no Calendar/Drive scope, no offline access, and the same callback URL", () => {
+    configure();
+    const { state, authorizationUrl } = createSignInState({ mode: "signup", next: "/meetings", termsAccepted: true, workspaceName: "Acme" });
+    const params = new URL(authorizationUrl).searchParams;
+    expect(params.get("scope")).toBe("openid email");
+    expect(params.get("access_type")).toBeNull();
+    expect(params.get("include_granted_scopes")).toBeNull();
+    expect(params.get("prompt")).toBe("select_account");
+    expect(params.get("redirect_uri")).toBe("https://ai-notetaker.apercallc.com/api/google/oauth/callback");
+    expect(params.get("code_challenge_method")).toBe("S256");
+    expect(state).toMatchObject({ purpose: "signup", userId: "", next: "/meetings", termsAccepted: true, workspaceName: "Acme" });
+  });
+
+  it("round-trips the sealed sign-in state and rejects an unknown purpose", () => {
+    configure();
+    const { state } = createSignInState({ mode: "signin" });
+    expect(openOAuthState(sealOAuthState(state))).toMatchObject({ purpose: "signin" });
+    expect(openOAuthState(sealOAuthState({ ...state, purpose: "admin" as never }))).toBeNull();
+  });
+
+  it("still requests Calendar and Drive for the Account connect flow", () => {
+    configure();
+    const { state, authorizationUrl } = createOAuthState("user-1");
+    expect(state.purpose).toBe("connect");
+    expect(new URL(authorizationUrl).searchParams.get("access_type")).toBe("offline");
+  });
+
+  it("returns the email and Google's verified flag without storing anything", async () => {
+    configure();
+    const { state } = createSignInState({ mode: "signin" });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ email: "a@b.test", email_verified: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(completeGoogleSignIn("code", state)).resolves.toEqual({ email: "a@b.test", emailVerified: true });
+    const tokenBody = String(fetchMock.mock.calls[0][1].body);
+    expect(tokenBody).toContain("code_verifier=");
+    expect(tokenBody).toContain("grant_type=authorization_code");
+  });
+
+  it("reports an unverified Google email as unverified, and fails safely without an email", async () => {
+    configure();
+    const { state } = createSignInState({ mode: "signin" });
+    const tokens = () => new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }), { status: 200 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(tokens()).mockResolvedValueOnce(new Response(JSON.stringify({ email: "a@b.test", email_verified: false }), { status: 200 })));
+    await expect(completeGoogleSignIn("code", state)).resolves.toMatchObject({ emailVerified: false });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(tokens()).mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 })));
+    await expect(completeGoogleSignIn("code", state)).rejects.toThrow();
   });
 });

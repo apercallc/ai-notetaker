@@ -11,6 +11,7 @@ import { SESSION_COOKIE, cookiesLikelyDropped } from "@/lib/sessionCookie";
 import { contextFromHeaders } from "@/lib/requestContext";
 import { emailDeliveryMode } from "@/lib/mailer";
 import { signupAvailability } from "@/lib/signupPolicy";
+import { googleOAuthConfigured } from "@/lib/googleIntegration";
 import { formatRetryAfter } from "@/lib/loginThrottle";
 import { bootstrap, login, signup, requestPasswordReset, resendVerification, verifyEmail, resetPassword, acceptInvite, acceptInviteNewAccount } from "./actions";
 import { SubmitButton } from "./SubmitButton";
@@ -58,6 +59,18 @@ function messageFor(error: string | undefined, retry: string | undefined, proble
       return "Give your workspace a name (at least 2 characters).";
     case "consent-required":
       return "Please accept the Terms and the recording notice to continue.";
+    case "google-unavailable":
+      return "Google sign-in isn't available right now. Use your email and password instead.";
+    case "google-failed":
+      return "Google sign-in didn't complete. Please try again.";
+    case "google-cancelled":
+      return "Google sign-in was cancelled.";
+    case "google-email-unverified":
+      return "Google says that email address isn't verified, so we can't use it to sign you in.";
+    case "google-account-unconfirmed":
+      return "An account with that email exists but its email was never confirmed. Confirm it with the link we sent, or reset your password, then try again.";
+    case "google-no-account":
+      return "No account exists for that Google address yet. Create one below — it takes one click.";
     case "token-invalid":
       return "That link is invalid or has expired. Request a new one and try again.";
     case "email-not-configured":
@@ -86,6 +99,10 @@ function noticeFor(notice: string | undefined): string | null {
     default:
       return null;
   }
+}
+
+function GoogleDivider() {
+  return <p className="muted-copy" aria-hidden="true" style={{ textAlign: "center", margin: 0 }}>or</p>;
 }
 
 function Consent() {
@@ -134,6 +151,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const noticeText = noticeFor(params.notice);
   const cookieHint = cookiesLikelyDropped(requestContext);
   const availability = signupAvailability();
+  const googleEnabled = googleOAuthConfigured();
 
   const banner = (
     <>
@@ -205,6 +223,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
         {banner}
 
+        {tab === "signin" && googleEnabled && (
+          <>
+            {/* A plain anchor: this is an API redirect, so it must not be prefetched by next/link. */}
+            <a className="button button-secondary" href={`/api/google/oauth/start?mode=signin&next=${encodeURIComponent(next)}`}>Continue with Google</a>
+            <GoogleDivider />
+          </>
+        )}
         {tab === "signin" && (
           <form action={login} style={formStyle}>
             <input type="hidden" name="next" value={next} />
@@ -224,6 +249,17 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <p className="error-text" role="alert">
             {messageFor(availability.reason === "disabled" ? "signup-disabled" : availability.reason === "not-ready" ? "signup-not-ready" : "signup-email-required", undefined, undefined)}
           </p>
+        )}
+        {tab === "signup" && managedHosting && availability.allowed && googleEnabled && (
+          <>
+            <form method="get" action="/api/google/oauth/start" style={formStyle}>
+              <input type="hidden" name="mode" value="signup" />
+              <input type="hidden" name="next" value={next} />
+              <Consent />
+              <SubmitButton label="Continue with Google" pendingLabel="Opening Google…" variant="secondary" />
+            </form>
+            <GoogleDivider />
+          </>
         )}
         {tab === "signup" && managedHosting && availability.allowed && (
           <form action={signup} style={formStyle}>

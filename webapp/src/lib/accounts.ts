@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { randomBytes } from "node:crypto";
 import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from "./passwords";
 import { isPlausibleEmail, normalizeEmail } from "./email";
 import { MAX_PASSWORD_LENGTH, passwordProblem, type PasswordProblem } from "./passwordPolicy";
@@ -19,7 +20,7 @@ import { sendVerificationEmail, type DeliveredLink } from "./authEmails";
 import { consumeAuthToken, peekAuthToken } from "./authTokens";
 import { revokeAllApiTokens } from "./apiTokens";
 import { cleanupExpiredAuth } from "./sessions";
-import { createHostedWorkspaceWithOwner, createUserFromInvite, joinWorkspaceFromInvite } from "./workspaces";
+import { createHostedWorkspaceWithOwner, createUserFromInvite, joinWorkspaceFromInvite, resolveActiveWorkspace } from "./workspaces";
 import type { RequestContext } from "./requestContext";
 
 const MAX_WORKSPACE_NAME_LENGTH = 100;
@@ -136,6 +137,79 @@ export async function registerHostedAccount(input: {
       verification = await sendVerificationEmail({ userId, email, context: input.context });
     }
     return { ok: true, userId, workspaceId, verificationRequired, verification };
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") return { ok: false, error: "email-taken" };
+    throw error;
+  }
+}
+
+// ------------------------------------------------- Google sign-in
+
+export type GoogleSignInResult =
+  | { ok: true; userId: string; workspaceId: string; created: boolean; mustChangePassword: boolean }
+  | { ok: false; error: "google-email-unverified" | "google-account-unconfirmed" | "google-no-account" | "no-workspace" | "consent-required" | SignupError }
+  | { ok: false; error: "throttled"; retryAfterMs: number };
+
+/**
+ * Signs in (or, in `signup` mode, creates) the account for an email Google
+ * vouches for.
+ *
+ * Linking rules — all deliberate:
+ * - Google's `email_verified` must be true; anything else is refused.
+ * - An existing account whose own email is verified is signed into directly.
+ * - An existing account that never confirmed its email is REFUSED, not taken
+ *   over. Otherwise someone could pre-register a victim's address with a
+ *   password they know and inherit the victim's Google sign-in later.
+ * - `signin` never creates an account: terms consent is collected on our own
+ *   page before the redirect, so a new user is sent to the sign-up form.
+ * - New accounts get the same workspace, trial and terms record as email
+ *   sign-ups. Their password is random and unknowable; "Forgot your
+ *   password?" lets them set one.
+ */
+export async function resolveGoogleAccount(input: {
+  email: string;
+  emailVerified: boolean;
+  mode: "signin" | "signup";
+  termsAccepted: boolean;
+  workspaceName?: string;
+  context: RequestContext;
+  now?: number;
+}): Promise<GoogleSignInResult> {
+  if (!input.emailVerified) return { ok: false, error: "google-email-unverified" };
+  const email = normalizeEmail(input.email);
+  if (!isPlausibleEmail(email)) return { ok: false, error: "email-invalid" };
+
+  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, emailVerifiedAt: true, mustChangePassword: true } });
+  if (existing) {
+    if (!existing.emailVerifiedAt) return { ok: false, error: "google-account-unconfirmed" };
+    const active = await resolveActiveWorkspace(existing.id);
+    if (!active) return { ok: false, error: "no-workspace" };
+    return { ok: true, userId: existing.id, workspaceId: active.workspaceId, created: false, mustChangePassword: existing.mustChangePassword };
+  }
+
+  if (input.mode !== "signup") return { ok: false, error: "google-no-account" };
+  const availability = signupAvailability();
+  // Google already proved the mailbox, so a missing email transport is not a blocker here.
+  if (!availability.allowed && availability.reason !== "email-required") {
+    return { ok: false, error: availability.reason === "disabled" ? "signup-disabled" : "signup-not-ready" };
+  }
+  if (!input.termsAccepted) return { ok: false, error: "consent-required" };
+  const throttle = { ip: input.context.ip, now: input.now };
+  const status = await signupThrottleStatus(throttle);
+  if (status.blocked) return { ok: false, error: "throttled", retryAfterMs: status.retryAfterMs };
+  await recordSignupAttempt(throttle);
+
+  const requested = (input.workspaceName ?? "").normalize("NFC").trim().slice(0, MAX_WORKSPACE_NAME_LENGTH);
+  const workspaceName = requested.length >= 2 ? requested : `${email.split("@")[0]}'s workspace`.slice(0, MAX_WORKSPACE_NAME_LENGTH);
+  try {
+    const passwordHash = await hashPassword(randomBytes(32).toString("base64url"));
+    const now = new Date(input.now ?? Date.now());
+    const { userId, workspaceId } = await createHostedWorkspaceWithOwner(email, passwordHash, workspaceName, {
+      termsAcceptedAt: now,
+      termsVersion: CURRENT_TERMS_VERSION,
+      emailVerifiedAt: now,
+    });
+    return { ok: true, userId, workspaceId, created: true, mustChangePassword: false };
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") return { ok: false, error: "email-taken" };
     throw error;

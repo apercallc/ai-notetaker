@@ -25,6 +25,9 @@ export const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ].join(" ");
 
+/** Sign-in asks for identity only, so it needs no Google sensitive-scope review. */
+export const GOOGLE_SIGNIN_SCOPES = "openid email";
+
 export class GoogleIntegrationError extends Error {
   constructor(
     public readonly publicMessage: string,
@@ -41,11 +44,23 @@ interface GoogleConfig {
   appUrl: string;
 }
 
-interface OAuthState {
+/**
+ * `purpose` is absent on states sealed before sign-in existed; those are
+ * always the Account "Connect Google" flow. Sign-in states carry no user.
+ */
+export type OAuthPurpose = "connect" | "signin" | "signup";
+
+export interface OAuthState {
   userId: string;
   state: string;
   verifier: string;
   expiresAt: number;
+  purpose?: OAuthPurpose;
+  /** Post-sign-in destination; re-validated with safeNextPath on use. */
+  next?: string;
+  /** Terms/recording consent captured on our page before leaving for Google. */
+  termsAccepted?: boolean;
+  workspaceName?: string;
 }
 
 interface GoogleTokenResponse {
@@ -134,22 +149,44 @@ function oauthRedirectUri(config: GoogleConfig): string {
 }
 
 export function createOAuthState(userId: string): { state: OAuthState; authorizationUrl: string } {
+  return buildAuthorization({ userId, purpose: "connect" });
+}
+
+/**
+ * Identity-only sign-in: openid + email, no refresh token, no sensitive scopes.
+ * Calendar and Drive stay a separate opt-in from Account after sign-up.
+ */
+export function createSignInState(options: {
+  mode: "signin" | "signup";
+  next?: string;
+  termsAccepted?: boolean;
+  workspaceName?: string;
+}): { state: OAuthState; authorizationUrl: string } {
+  return buildAuthorization({ userId: "", purpose: options.mode, next: options.next, termsAccepted: options.termsAccepted, workspaceName: options.workspaceName });
+}
+
+function buildAuthorization(input: Pick<OAuthState, "userId" | "next" | "termsAccepted" | "workspaceName"> & { purpose: OAuthPurpose }): { state: OAuthState; authorizationUrl: string } {
   const config = getGoogleConfig();
   const verifier = base64Url(randomBytes(32));
+  const identityOnly = input.purpose !== "connect";
   const state: OAuthState = {
-    userId,
+    userId: input.userId,
     state: base64Url(randomBytes(32)),
     verifier,
     expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
+    purpose: input.purpose,
+    ...(input.next ? { next: input.next } : {}),
+    ...(input.termsAccepted ? { termsAccepted: true } : {}),
+    ...(input.workspaceName ? { workspaceName: input.workspaceName } : {}),
   };
   const params = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: oauthRedirectUri(config),
     response_type: "code",
-    scope: GOOGLE_OAUTH_SCOPES,
-    access_type: "offline",
-    prompt: "consent",
-    include_granted_scopes: "true",
+    scope: identityOnly ? GOOGLE_SIGNIN_SCOPES : GOOGLE_OAUTH_SCOPES,
+    ...(identityOnly
+      ? { prompt: "select_account" }
+      : { access_type: "offline", prompt: "consent", include_granted_scopes: "true" }),
     state: state.state,
     code_challenge: sha256Base64Url(verifier),
     code_challenge_method: "S256",
@@ -172,6 +209,7 @@ export function openOAuthState(value: string): OAuthState | null {
       typeof parsed.expiresAt !== "number" ||
       parsed.expiresAt < Date.now()
     ) return null;
+    if (parsed.purpose !== undefined && parsed.purpose !== "connect" && parsed.purpose !== "signin" && parsed.purpose !== "signup") return null;
     return parsed as OAuthState;
   } catch {
     return null;
@@ -219,6 +257,43 @@ async function lookupGoogleAccountEmail(accessToken: string): Promise<string | n
   } catch {
     return null;
   }
+}
+
+export interface GoogleIdentity {
+  email: string;
+  emailVerified: boolean;
+}
+
+/**
+ * Exchanges a sign-in code and reads the account's email from Google's
+ * userinfo endpoint. Nothing is stored: sign-in keeps no Google tokens.
+ * `email_verified` is returned, not assumed — callers must reject false.
+ */
+export async function completeGoogleSignIn(code: string, state: OAuthState): Promise<GoogleIdentity> {
+  const config = getGoogleConfig();
+  const tokens = await googleTokenRequest(new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    code,
+    code_verifier: state.verifier,
+    grant_type: "authorization_code",
+    redirect_uri: oauthRedirectUri(config),
+  }));
+  let response: Response;
+  try {
+    response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new GoogleIntegrationError("Google could not be reached. Try again.");
+  }
+  if (!response.ok) throw new GoogleIntegrationError("Google did not share your email address. Try again.", 400);
+  const body = (await response.json()) as { email?: unknown; email_verified?: unknown };
+  if (typeof body.email !== "string" || !body.email || body.email.length > 320) {
+    throw new GoogleIntegrationError("Google did not share your email address. Try again.", 400);
+  }
+  return { email: body.email, emailVerified: body.email_verified === true || body.email_verified === "true" };
 }
 
 export async function completeOAuthConnection(userId: string, code: string, state: OAuthState): Promise<void> {
