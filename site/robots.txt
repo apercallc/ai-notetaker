@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://apercallc.github.io/ai-notetaker/sitemap.xml
+# The site moved to https://ai-notetaker.apercallc.com
+Sitemap: https://ai-notetaker.apercallc.com/sitemap.xml

@@ -125,7 +125,7 @@ jobs:
             echo "Could not locate libswift_Concurrency.dylib under $swift_root." >&2
             exit 1
           fi
-          lipo -verify_arch "$(uname -m)" "$swift_runtime"
+          lipo "$swift_runtime" -verify_arch "$(uname -m)"
           swift_lib="$(dirname "$swift_runtime")"
           cargo test --workspace --no-run
           cp "$swift_lib"/*.dylib target/debug/deps/
@@ -211,6 +211,40 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+
+  chrome-web-store:
+    name: Upload to Chrome Web Store
+    # Inactive until the listing exists: set the repository variable
+    # CWS_EXTENSION_ID and the secrets CWS_CLIENT_ID, CWS_CLIENT_SECRET and
+    # CWS_REFRESH_TOKEN (see docs/chrome-web-store-listing.md).
+    if: startsWith(github.ref, 'refs/tags/v') && vars.CWS_EXTENSION_ID != ''
+    needs: [metadata, extension]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension-${{ github.ref_name }}
+          path: store
+      - name: Repackage with manifest.json at the zip root
+        run: |
+          unzip -q store/ai-notetaker-extension-${GITHUB_REF_NAME}.zip -d store/unpacked
+          (cd store/unpacked/dist && zip -qr ../../store-upload.zip .)
+      - name: Upload and publish
+        env:
+          EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          npx --yes chrome-webstore-upload-cli@3 upload \
+            --source store/store-upload.zip \
+            --extension-id "$EXTENSION_ID" \
+            --client-id "$CLIENT_ID" \
+            --client-secret "$CLIENT_SECRET" \
+            --refresh-token "$REFRESH_TOKEN" \
+            --auto-publish
 
   publish-release:
     name: Publish GitHub release assets

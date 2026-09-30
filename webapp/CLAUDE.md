@@ -35,7 +35,11 @@ billing; self-hosted deployments retain local/BYOK operation. See
   "public by default" page or API route — a self-hosted instance sits on a
   public Railway URL, and an unauthenticated read path would expose a
   user's meeting notes to anyone who finds that URL. Enforced in one place
-  (`src/proxy.ts`), not re-implemented per route.
+  (`src/proxy.ts`), not re-implemented per route. **One narrow exception:** the
+  project-operated managed site's static marketing pages (the exact paths in
+  `src/marketing/paths.ts`) are public, but only when `MANAGED_HOSTING=true`,
+  by exact-path allowlist, and they never read or render user data. Self-hosted
+  instances have no public page. See `docs/marketing-site.md`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

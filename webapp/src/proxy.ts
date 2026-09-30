@@ -6,6 +6,7 @@ import { isValidWorkerToken } from "./lib/secureCompare";
 import { isManagedCorsOrigin, managedCorsHeaders } from "./lib/cors";
 import { requestIdFrom } from "./lib/requestId";
 import { getSessionUser } from "./lib/sessions";
+import { MARKETING_HEADER, isMarketingPath } from "./marketing/paths";
 
 // Proxy files (Next.js 16's replacement for middleware.ts) always run on
 // the Node.js runtime, which is exactly why we moved off middleware.ts in
@@ -53,6 +54,11 @@ export function contentSecurityPolicy(nonce: string, development = process.env.N
     // execution is nonce-only in production; style elements also accept the
     // request nonce so generated Next.js styles remain compatible.
     `style-src 'self' 'unsafe-inline' 'nonce-${nonce}'`,
+    // A nonce in style-src makes browsers ignore 'unsafe-inline' for it, which
+    // silently blocked every inline style="" attribute React renders. Attributes
+    // cannot run script, so allow them explicitly while <style> elements stay
+    // nonce-only.
+    "style-src-attr 'unsafe-inline'",
     `img-src 'self' data: blob:${sentry ? ` ${sentry}` : ""}`,
     "font-src 'self' data:",
     "media-src 'self' blob:",
@@ -64,11 +70,14 @@ export function contentSecurityPolicy(nonce: string, development = process.env.N
   ].join("; ");
 }
 
-function nextPage(request: NextRequest): NextResponse {
+function nextPage(request: NextRequest, options: { marketing?: boolean } = {}): NextResponse {
   const nonce = randomBytes(18).toString("base64");
   const policy = contentSecurityPolicy(nonce);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
+  // Never trust a client-supplied value: set it only for marketing pages.
+  requestHeaders.delete(MARKETING_HEADER);
+  if (options.marketing) requestHeaders.set(MARKETING_HEADER, "1");
   // Next extracts the nonce from the forwarded request CSP and adds it to
   // framework and inline scripts during dynamic rendering.
   requestHeaders.set("Content-Security-Policy", policy);
@@ -134,6 +143,14 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   if (pathname === "/login") {
     return nextPage(request);
+  }
+
+  // The project-operated managed service has a public front page. These routes
+  // are static product copy only (see marketing/paths.ts); the check is exact
+  // path equality, and self-hosted instances never reach it, so a private
+  // deployment's meeting data is never one route away from being public.
+  if (process.env.MANAGED_HOSTING === "true" && isMarketingPath(pathname)) {
+    return nextPage(request, { marketing: true });
   }
 
   // Share links are bearer capabilities themselves. The page validates the

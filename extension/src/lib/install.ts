@@ -4,7 +4,7 @@
  */
 export type InstallPlatform = "macos" | "windows" | "linux" | "unknown";
 
-const INSTALL_PAGE_BASE_URL = "https://apercallc.github.io/ai-notetaker/";
+const INSTALL_PAGE_BASE_URL = "https://ai-notetaker.apercallc.com/download";
 
 export function detectInstallPlatform(): InstallPlatform {
   const browser = navigator as Navigator & { userAgentData?: { platform?: string } };

@@ -212,7 +212,7 @@ the desktop helper.
 
 ### 1. Install the helper
 
-Open the [AI Notetaker download page](https://apercallc.github.io/ai-notetaker/)
+Open the [AI Notetaker download page](https://ai-notetaker.apercallc.com/download)
 or the [latest GitHub release](https://github.com/apercallc/ai-notetaker/releases/latest)
 and download the file for your computer. The first release targets Apple
 silicon Macs (M1 or later), 64-bit Windows, and 64-bit Debian/Ubuntu Linux.

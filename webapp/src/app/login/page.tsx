@@ -18,7 +18,8 @@ import { loginUrl, type LoginTab } from "./url";
 
 // Verification, reset and invite links carry a secret in the query string —
 // never leak it to third parties through the Referer header.
-export const metadata: Metadata = { title: "Sign in · AI Notetaker", referrer: "no-referrer" };
+// The root layout's title template already appends " · AI Notetaker".
+export const metadata: Metadata = { title: "Sign in", referrer: "no-referrer" };
 
 type SearchParams = Record<string, string | undefined>;
 

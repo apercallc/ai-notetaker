@@ -32,7 +32,7 @@ cargo deb --manifest-path helper/crates/app/Cargo.toml
 ## End-user downloads
 
 Users download the matching installer from the [AI Notetaker install
-page](https://apercallc.github.io/ai-notetaker/) or the [latest GitHub
+page](https://ai-notetaker.apercallc.com/download) or the [latest GitHub
 release](https://github.com/apercallc/ai-notetaker/releases/latest). The
 current target set is Apple silicon Mac (arm64), Windows 64-bit (x86_64), and
 Debian/Ubuntu Linux 64-bit (x86_64). The Mac DMG and Windows installer are
