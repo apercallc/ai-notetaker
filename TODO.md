@@ -291,20 +291,22 @@ remains native; Docker is for the optional history webapp only.
 - [x] Restore and verify the production API hostname (2026-09-29): Hostinger
       CNAME and Railway ownership TXT records propagated, TLS became valid,
       and `https://ai-notetaker.apercallc.com/api/health` returned `ok:true`.
-- [ ] Finish managed-hosting configuration before enabling customer signups:
-      Railway has a `managed-worker` service and a private S3-compatible bucket
-      for temporary processing staging. R2 remains an optional compatible
-      backend; do not migrate to permanent audio storage. Recheck production
-      `/api/health` after deployment: it returns `ok:true`,
-      `managedReady:false`, and `objectStorage:"s3"`. Railway web and worker
-      are deployed from the audio-retention change; the worker now has the
-      shared S3 variable references. Signup remains closed because these
-      production values are absent: `MANAGED_DEEPGRAM_API_KEY`,
-      `MANAGED_ANTHROPIC_API_KEY`, `STRIPE_SECRET_KEY`,
-      `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HOSTED_PRO`, and
-      `STRIPE_PRICE_HOSTED_TEAM`. Configure them in Railway, then verify
-      `managedReady:true`, complete an upload, and confirm staged audio
-      deletion on success and expiry.
+- [x] Managed-hosting configuration (2026-09-29): `/api/health` returns
+      `managedReady:true`. `web` and `managed-worker` have the Groq and OpenAI
+      keys (the default pipeline), the shared S3 variables, and worker token;
+      `web` has the Stripe secret, webhook secret, and Pro/Team price IDs.
+      A live put/get/delete against the Railway bucket
+      `ai-notetaker-audio-prod` succeeded with the production credentials. The
+      bucket has no server-side lifecycle rule, so the 24-hour expiry of
+      abandoned uploads relies on the worker cleanup sweep alone.
+- [x] Sentry (2026-09-29): project `ai-notetaker-web` in the `apercallc` org,
+      DSN set on `web` and `managed-worker`, plus a 5-minute uptime monitor on
+      `/api/health`. Still to do: alert rules that notify a person.
+- [ ] Configure outbound email on `web` (`RESEND_API_KEY` + `EMAIL_FROM`, or
+      `SMTP_URL` + `EMAIL_FROM`). Production has no silent fallback, so managed
+      signup and password reset refuse until this is set.
+- [ ] Complete an upload end to end and confirm staged audio deletion on
+      success and expiry.
 - [ ] Run cross-platform helper CI on the exact release candidate. The latest
       recorded GitHub helper matrix passed for Linux, macOS, and Windows; repeat
       it against the tagged candidate before publishing native artifacts.
