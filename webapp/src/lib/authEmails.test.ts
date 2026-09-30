@@ -27,6 +27,27 @@ afterAll(() => {
   else process.env.NEXT_PUBLIC_APP_URL = prior.publicAppUrl;
 });
 
+describe("invite email text", () => {
+  it("keeps a user-chosen workspace name on one line in the subject and body", async () => {
+    const send = vi.fn(async (_message: { subject: string; text: string }) => undefined);
+    process.env.APP_URL = "https://app.example.com";
+    sender.current = { mode: "resend", send };
+    await sendInviteEmail({
+      workspaceId: "workspace-1",
+      workspaceName: "Acme\r\nBcc: victim@example.com\n\nClick here",
+      email: "new@example.com",
+      role: "member",
+      invitedById: "owner-1",
+      invitedByEmail: "owner@example.com",
+      context: { protocol: "https", host: "notes.example.com" },
+    });
+    const message = send.mock.calls[0]![0];
+    expect(message.subject).not.toMatch(/[\r\n]/);
+    expect(message.subject).toContain("Acme Bcc: victim@example.com Click here");
+    expect(message.text).toContain('"Acme Bcc: victim@example.com Click here"');
+  });
+});
+
 describe("auth email links", () => {
   it("shows a development verification link using a validated request host", async () => {
     const result = await sendVerificationEmail({

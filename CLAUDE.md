@@ -46,7 +46,9 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
 - **Local BYOK keys live in protected local storage only** — never `.sync`.
   Managed provider keys are server-side secrets and never reach the client.
 - **Helper is built on Tauri (Rust)**, not Electron — smaller install, one
-  shared codebase across OSes, built-in updater.
+  shared codebase across OSes. Updates are an update-check tray item that opens
+  the signed-release page (`docs/helper-packaging.md`); an in-place Tauri
+  updater waits on release-signing keys.
 - **Extension `manifest.json` carries a committed, stable `key` field.**
   Native Messaging's host allowlist is keyed to the extension ID that field
   derives — regenerating it breaks every installed helper's handshake.
