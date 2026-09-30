@@ -421,8 +421,14 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
     });
   } catch (error) {
     if ((error as { code?: string }).code !== "P2002") throw error;
-    const replay = await prisma.processingJob.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } } });
+    // Lost a race: the unique keys are (workspace, idempotency key) and
+    // (upload). Return the winner, and give back the unit this loser reserved
+    // if the winner used a different key.
+    const replay =
+      (await prisma.processingJob.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } } })) ??
+      (await prisma.processingJob.findUnique({ where: { uploadId } }));
     if (!replay) throw error;
+    if (replay.idempotencyKey !== idempotencyKey) await releaseMeetingProcessing(workspaceId, idempotencyKey);
     return replay;
   }
 }

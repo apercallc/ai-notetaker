@@ -226,6 +226,7 @@ model ProcessingJob {
   upload    ManagedUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, idempotencyKey])
+  @@unique([uploadId])
   @@index([workspaceId, status, createdAt])
 }
 

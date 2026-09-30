@@ -533,4 +533,22 @@ describe("one processing job per upload", () => {
     expect(await prisma.processingJob.count({ where: { workspaceId: WORKSPACE_ID, uploadId: upload.id } })).toBe(1);
     expect(await prisma.usageLedgerEntry.count({ where: { workspaceId: WORKSPACE_ID } })).toBe(1);
   });
+
+  it("gives back the extra unit when two different keys race for one upload", async () => {
+    const meetingId = await createMeeting(WORKSPACE_ID);
+    const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `race-${meetingId}` });
+    await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 1, checksum: "race-two", objectKey: "race-two" } });
+    await completeManagedUpload(WORKSPACE_ID, upload.id);
+    const winner = await prisma.processingJob.create({ data: { workspaceId: WORKSPACE_ID, meetingId, uploadId: upload.id, idempotencyKey: "winner-key", status: "queued" } });
+    await reserveMeetingProcessing(WORKSPACE_ID, "winner-key");
+    // The loser's up-front lookups miss (as if the winner committed a moment later)...
+    vi.spyOn(prisma.processingJob, "findUnique").mockResolvedValueOnce(null as never);
+    vi.spyOn(prisma.processingJob, "findFirst").mockResolvedValueOnce(null as never);
+    const loser = await enqueueManagedJob(WORKSPACE_ID, meetingId, upload.id, "loser-key");
+    vi.restoreAllMocks();
+    expect(loser.id).toBe(winner.id);
+    expect(await prisma.processingJob.count({ where: { uploadId: upload.id } })).toBe(1);
+    const live = await prisma.usageLedgerEntry.findMany({ where: { workspaceId: WORKSPACE_ID, units: { gt: 0 } } });
+    expect(live.map((entry) => entry.idempotencyKey)).toEqual(["winner-key"]);
+  });
 });

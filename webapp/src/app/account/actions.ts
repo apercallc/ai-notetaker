@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/currentUser";
-import { cancelWorkspaceSubscription } from "@/lib/billing";
+import { BillingError, cancelWorkspaceSubscription } from "@/lib/billing";
 import { getRequestContext } from "@/lib/requestContext";
 import { clearSessionCookie } from "@/lib/sessionCookie";
 import { changePassword } from "@/lib/accounts";
@@ -193,7 +193,8 @@ export async function deleteWorkspaceAction(formData: FormData): Promise<DeleteW
       workspaceId: session.workspaceId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { ok: false, error: "We couldn't cancel this workspace's subscription, so nothing was deleted. Cancel it under Billing, or try again in a moment." };
+    const detail = error instanceof BillingError && error.message.startsWith("A checkout is in progress") ? ` ${error.message}` : " Cancel it under Billing, or try again in a moment.";
+    return { ok: false, error: `We couldn't cancel this workspace's subscription, so nothing was deleted.${detail}` };
   }
 
   const memberUserIds = (

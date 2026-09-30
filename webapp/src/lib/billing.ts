@@ -170,6 +170,11 @@ async function claimCheckoutSlot(workspaceId: string): Promise<void> {
  */
 export async function cancelWorkspaceSubscription(workspaceId: string): Promise<void> {
   const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+  // A Checkout the owner has open right now could still complete after the
+  // workspace is gone, creating a subscription nothing can ever cancel.
+  if (subscription?.checkoutClaimedAt && subscription.checkoutClaimedAt.getTime() > Date.now() - CHECKOUT_PENDING_MS) {
+    throw new BillingError("A checkout is in progress for this workspace. Finish or abandon it, wait an hour, then delete the workspace.");
+  }
   if (!subscription?.stripeSubscriptionId) return;
   if (TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) return;
   const response = await fetch(stripeUrl(`subscriptions/${encodeURIComponent(subscription.stripeSubscriptionId)}`), {

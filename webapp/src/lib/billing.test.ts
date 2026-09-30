@@ -521,6 +521,15 @@ describe("cancelWorkspaceSubscription", () => {
     });
   });
 
+  it("refuses while a checkout is open, since it could still create a subscription after deletion", async () => {
+    await withSubscription({ status: "trialing", stripeSubscriptionId: null }, async (workspaceId) => {
+      await prisma.workspaceSubscription.update({ where: { workspaceId }, data: { checkoutClaimedAt: new Date() } });
+      await expect(cancelWorkspaceSubscription(workspaceId)).rejects.toThrow("checkout is in progress");
+      await prisma.workspaceSubscription.update({ where: { workspaceId }, data: { checkoutClaimedAt: new Date(Date.now() - 2 * 60 * 60 * 1000) } });
+      await expect(cancelWorkspaceSubscription(workspaceId)).resolves.toBeUndefined();
+    });
+  });
+
   it("does nothing for trial, terminal, or never-subscribed workspaces", async () => {
     await withSubscription({ status: "canceled", stripeSubscriptionId: "sub_gone" }, async (workspaceId) => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
