@@ -116,7 +116,7 @@ the Postgres volume and all stored meeting history.
    acceptance and operations checklist.
 5. Deploy. The start command (`railway.json`) runs pending database
    migrations automatically before starting the server — no manual
-   migration step. For managed Google Calendar/Drive integration, set
+   migration step. For managed Google sign-in and Drive export, set
    `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and a base64-encoded
    32-byte `GOOGLE_OAUTH_ENCRYPTION_KEY` (for example, `openssl rand -base64 32`),
    then register `https://ai-notetaker.apercallc.com/api/google/oauth/callback`

@@ -1,14 +1,13 @@
 /**
  * Local end-to-end checks for the manual acceptance list, run against real
  * Postgres and the real route handlers with an in-memory fake of Google
- * (OAuth, Calendar, Drive) and Stripe. They prove our side of each flow
+ * (OAuth, Drive) and Stripe. They prove our side of each flow
  * without live accounts; they cannot prove Google's or Stripe's own behaviour.
  */
 import { createHmac, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as checkout } from "./billing/checkout/route";
 import { POST as billingWebhook } from "./billing/webhook/route";
-import { GET as currentGoogleCalendar } from "./google/calendar/current/route";
 import { POST as exportGoogleDrive } from "./google/drive/export/route";
 import { POST as createUpload } from "./uploads/route";
 import { GET as getEntitlements } from "./entitlements/route";
@@ -30,7 +29,6 @@ interface DriveFile { id: string; name: string; mimeType: string; parents: strin
 function makeFakeGoogle() {
   const files: DriveFile[] = [];
   const calls: string[] = [];
-  let calendarItems: unknown[] = [];
   let revoked: string | null = null;
   let nextId = 1;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -39,14 +37,13 @@ function makeFakeGoogle() {
     const url = new URL(String(input));
     calls.push(`${init?.method ?? "GET"} ${url.origin}${url.pathname}`);
     if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/token") {
-      return json({ access_token: "fake-access", refresh_token: "fake-refresh", expires_in: 3600, scope: "openid email calendar.events.readonly drive.file" });
+      return json({ access_token: "fake-access", refresh_token: "fake-refresh", expires_in: 3600, scope: "openid email drive.file" });
     }
     if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/revoke") {
       revoked = new URLSearchParams(String(init?.body)).get("token");
       return json({});
     }
     if (url.pathname === "/oauth2/v3/userinfo") return json({ email: "person@example.test", email_verified: true });
-    if (url.pathname === "/calendar/v3/calendars/primary/events") return json({ items: calendarItems });
     if (url.pathname === "/drive/v3/files" && (init?.method ?? "GET") === "GET") {
       const q = url.searchParams.get("q") ?? "";
       const found = files.filter((file) => file.mimeType === "application/vnd.google-apps.folder" && q.includes(`name = '${file.name}'`));
@@ -70,7 +67,7 @@ function makeFakeGoogle() {
     }
     return json({ error: "unexpected fake Google call" }, 500);
   }
-  return { handle, files, calls, setCalendar: (items: unknown[]) => { calendarItems = items; }, revokedToken: () => revoked };
+  return { handle, files, calls, revokedToken: () => revoked };
 }
 
 // ---------------------------------------------------------------- helpers
@@ -159,26 +156,7 @@ async function seedFinishedMeeting(): Promise<void> {
 
 // ------------------------------------------------------------------ flows
 
-describe("acceptance: Google Calendar naming, Drive export, disconnect", () => {
-  it("names the current meeting from the calendar event that is happening now", async () => {
-    await connectGoogle();
-    const now = Date.now();
-    google.setCalendar([
-      { summary: "Earlier standup", start: { dateTime: new Date(now - 4 * 3_600_000).toISOString() }, end: { dateTime: new Date(now - 3 * 3_600_000).toISOString() } },
-      {
-        summary: "Design review",
-        attendees: [{ displayName: "Sam" }, { email: "lee@example.test" }],
-        hangoutLink: "https://meet.google.com/abc-defg-hij",
-        start: { dateTime: new Date(now - 10 * 60_000).toISOString() },
-        end: { dateTime: new Date(now + 20 * 60_000).toISOString() },
-      },
-    ]);
-    const response = await currentGoogleCalendar(new Request("http://localhost/api/v1/google/calendar/current", { headers: bearer(sessionId) }));
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ event: { title: "Design review", attendees: ["Sam", "lee@example.test"], meetUrl: "https://meet.google.com/abc-defg-hij" } });
-    expect(google.calls).toContain("GET https://www.googleapis.com/calendar/v3/calendars/primary/events");
-  });
-
+describe("acceptance: Google Drive export, disconnect and reconnect", () => {
   it("exports a finished meeting to a Google Doc in an ai-notetaker folder, reusing the folder next time", async () => {
     await connectGoogle();
     await seedFinishedMeeting();

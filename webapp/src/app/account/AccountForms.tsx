@@ -167,14 +167,14 @@ export function GoogleConnectionPanel({
   accountEmail: string | null;
 }) {
   if (!configured) {
-    return <p role="status" className="muted-copy">Google Calendar and Drive are not configured on this deployment.</p>;
+    return <p role="status" className="muted-copy">Google Drive export is not configured on this deployment.</p>;
   }
   if (!connected) {
     return <p><a href="/api/google/oauth/connect" className="button button-primary">Connect Google</a></p>;
   }
   return (
     <div>
-      <p role="status" className="muted-copy">Connected{accountEmail ? ` as ${accountEmail}` : ""}. Calendar lookup and Drive exports are available to your signed-in extension.</p>
+      <p role="status" className="muted-copy">Connected{accountEmail ? ` as ${accountEmail}` : ""}. Exporting notes to Google Drive is available.</p>
       <form action={disconnectGoogleAction}>
         <button type="submit" className="button button-secondary">Disconnect Google</button>
       </form>

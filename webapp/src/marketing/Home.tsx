@@ -144,8 +144,8 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           </dl>
           <p className="mk-prose mk-mt-l">
             You can delete any meeting, and workspace owners choose how long hosted notes are kept. If you choose to
-            connect Google, AI Notetaker reads your calendar read-only to name the meeting you are in, and creates
-            Google Docs only for meetings you choose to export to your Drive. It uses Google data for nothing else.{" "}
+            connect Google, AI Notetaker creates Google Docs in your Drive only for meetings you choose to export, and
+            can see only the files it creates. It uses Google data for nothing else.{" "}
             <Link href="/privacy#google">How we handle Google data</Link> and the <Link href="/privacy">full privacy notice</Link>.
           </p>
         </div>

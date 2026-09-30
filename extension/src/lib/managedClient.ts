@@ -24,14 +24,6 @@ export interface ManagedUploadResult {
  */
 export const MANAGED_SERVICE_ORIGIN = "https://ai-notetaker.apercallc.com";
 
-export interface ManagedCalendarEvent {
-  title: string;
-  attendees: string[];
-  startsAt: string;
-  endsAt: string;
-  meetUrl?: string;
-}
-
 export interface ManagedDriveExportResult {
   fileId: string;
   webViewLink?: string;
@@ -211,25 +203,6 @@ export async function getManagedEntitlements(
     remaining: numberField("remaining"),
     canProcess: body.canProcess === true,
     inPaymentGrace: body.inPaymentGrace === true,
-  };
-}
-
-/** Calendar metadata is resolved by the service; Google tokens never reach Chrome. */
-export async function getManagedGoogleCalendarEvent(
-  config: ManagedServiceConfig,
-  fetchImpl: typeof fetch = fetch,
-): Promise<ManagedCalendarEvent | null> {
-  const body = await requestJson(config, "/api/v1/google/calendar/current", { method: "GET" }, fetchImpl);
-  const event = body.event;
-  if (!event || typeof event !== "object") return null;
-  const value = event as Record<string, unknown>;
-  if (typeof value.title !== "string" || typeof value.startsAt !== "string" || typeof value.endsAt !== "string") return null;
-  return {
-    title: value.title,
-    attendees: Array.isArray(value.attendees) ? value.attendees.filter((item): item is string => typeof item === "string").slice(0, 200) : [],
-    startsAt: value.startsAt,
-    endsAt: value.endsAt,
-    ...(typeof value.meetUrl === "string" ? { meetUrl: value.meetUrl } : {}),
   };
 }
 

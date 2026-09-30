@@ -14,7 +14,6 @@ import { POST as pollNextJob } from "./jobs/next/route";
 import { POST as checkout } from "./billing/checkout/route";
 import { POST as portal } from "./billing/portal/route";
 import { POST as billingWebhook } from "./billing/webhook/route";
-import { GET as currentGoogleCalendar } from "./google/calendar/current/route";
 import { POST as exportGoogleDrive } from "./google/drive/export/route";
 import { POST as reportClientError } from "./client-errors/route";
 import { POST as createShare } from "./meetings/[meetingId]/share/route";
@@ -184,10 +183,6 @@ describe("managed upload routes", () => {
 
   it("returns a safe 503 when Google integration configuration is absent", async () => {
     const sessionId = await createPrincipal(USER_ID, "google-route@example.com", WORKSPACE_ID);
-    const calendar = await currentGoogleCalendar(new Request("http://localhost/api/v1/google/calendar/current", { headers: auth(sessionId) }));
-    expect(calendar.status).toBe(503);
-    expect(await calendar.json()).toMatchObject({ error: "Google integration is not configured. Ask an administrator to configure it." });
-
     const drive = await exportGoogleDrive(new Request("http://localhost/api/v1/google/drive/export", {
       method: "POST",
       headers: auth(sessionId),

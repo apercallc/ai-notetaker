@@ -5,7 +5,6 @@ import { getAppUrl } from "./deploymentConfig";
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
-const GOOGLE_CALENDAR_EVENTS_ENDPOINT = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const GOOGLE_DRIVE_FILES_ENDPOINT = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DRIVE_UPLOAD_ENDPOINT = "https://www.googleapis.com/upload/drive/v3/files";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -16,15 +15,16 @@ const TOKEN_REFRESH_SKEW_MS = 60_000;
 const ENCRYPTION_VERSION = "v1";
 
 /**
- * Keep this list as small as the product allows: only calendar.events.readonly is a
- * "sensitive" scope that Google must review (drive.file, openid and email are
- * not). Exporting a meeting creates a Google Doc through Drive's text import,
- * so the broad Docs scope is deliberately not requested.
+ * Keep this list as small as the product allows. Every scope here is
+ * non-sensitive, so the app needs no sensitive-scope review: openid and email
+ * identify the account, and drive.file only reaches files this app creates.
+ * Exporting a meeting creates a Google Doc through Drive's text import, so the
+ * broad Docs scope is deliberately not requested. Calendar access was removed
+ * on purpose; do not re-add a Calendar scope without a product reason.
  */
 export const GOOGLE_OAUTH_SCOPES = [
   "openid",
   "email",
-  "https://www.googleapis.com/auth/calendar.events.readonly",
   "https://www.googleapis.com/auth/drive.file",
 ].join(" ");
 
@@ -74,14 +74,6 @@ interface GoogleTokenResponse {
 }
 
 type UsableGoogleTokenResponse = GoogleTokenResponse & { access_token: string; expires_in: number };
-
-export interface GoogleCalendarEvent {
-  title: string;
-  attendees: string[];
-  startsAt: string;
-  endsAt: string;
-  meetUrl?: string;
-}
 
 function configuredValue(name: string): string | null {
   const value = process.env[name]?.trim();
@@ -157,7 +149,7 @@ export function createOAuthState(userId: string): { state: OAuthState; authoriza
 
 /**
  * Identity-only sign-in: openid + email, no refresh token, no sensitive scopes.
- * Calendar and Drive stay a separate opt-in from Account after sign-up.
+ * Drive export stays a separate opt-in from Account after sign-up.
  */
 export function createSignInState(options: {
   mode: "signin" | "signup";
@@ -385,33 +377,6 @@ async function googleRequest(userId: string, url: string, init: RequestInit & { 
   }
   if (!response.ok) throw new GoogleIntegrationError("Google request failed. Try again.");
   return response;
-}
-
-function parseCalendarEvent(value: unknown): GoogleCalendarEvent | null {
-  if (!value || typeof value !== "object") return null;
-  const event = value as { summary?: unknown; attendees?: Array<{ displayName?: unknown; email?: unknown }>; start?: { dateTime?: unknown }; end?: { dateTime?: unknown }; hangoutLink?: unknown; conferenceData?: { entryPoints?: Array<{ entryPointType?: unknown; uri?: unknown }> } };
-  if (typeof event.start?.dateTime !== "string" || typeof event.end?.dateTime !== "string") return null;
-  const videoEntry = event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video" && typeof entry.uri === "string")?.uri;
-  return {
-    title: typeof event.summary === "string" ? event.summary : "",
-    attendees: (event.attendees ?? []).map((attendee) => typeof attendee.displayName === "string" ? attendee.displayName : typeof attendee.email === "string" ? attendee.email : "").filter(Boolean),
-    startsAt: event.start.dateTime,
-    endsAt: event.end.dateTime,
-    ...(typeof event.hangoutLink === "string" ? { meetUrl: event.hangoutLink } : typeof videoEntry === "string" ? { meetUrl: videoEntry } : {}),
-  };
-}
-
-export async function findCurrentGoogleCalendarEvent(userId: string, now = new Date()): Promise<GoogleCalendarEvent | null> {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(now);
-  end.setHours(23, 59, 59, 999);
-  const params = new URLSearchParams({ singleEvents: "true", orderBy: "startTime", timeMin: start.toISOString(), timeMax: end.toISOString() });
-  const response = await googleRequest(userId, `${GOOGLE_CALENDAR_EVENTS_ENDPOINT}?${params.toString()}`);
-  const body = (await response.json()) as { items?: unknown[] };
-  const nowMs = now.getTime();
-  const events = (body.items ?? []).map(parseCalendarEvent).filter((event): event is GoogleCalendarEvent => event !== null);
-  return events.find((event) => new Date(event.startsAt).getTime() <= nowMs && nowMs <= new Date(event.endsAt).getTime()) ?? null;
 }
 
 function formatMeetingForGoogleDoc(meeting: { title: string; startedAt: Date; endedAt: Date; summary: string; transcript: Array<{ speaker: string; text: string; timestamp: Date }>; actionItems: Array<{ text: string; owner: string | null; status: string; dueAt: Date | null }> }): string {

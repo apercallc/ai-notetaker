@@ -4,6 +4,10 @@ All notable changes to AI Notetaker are documented here.
 
 ## Unreleased
 
+- Removed hosted Google Calendar access. The hosted service now requests only
+  non-sensitive Google scopes (`openid`, `email`, `drive.file`), so it needs no
+  sensitive-scope review. The extension's optional local-mode calendar
+  (your own OAuth client) is unchanged.
 - Added "Continue with Google" sign-in and sign-up (identity scopes only).
   Only verified Google emails are accepted, unconfirmed and owner-provisioned
   accounts are never linked, and new accounts record terms consent before

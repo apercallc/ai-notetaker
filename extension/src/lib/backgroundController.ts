@@ -18,7 +18,7 @@ import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
 import { browserMeetChunkStats, clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
-import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedGoogleCalendarEvent, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
+import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { reportManagedError } from "./errorReport";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment, type LiveTranscriptStatus } from "../types";
 
@@ -266,13 +266,10 @@ export class BackgroundController {
     const meetingId = generateMeetingId();
     let title = titleHint?.trim().slice(0, 200) || `Meeting on ${new Date().toLocaleString()}`;
     let attendees: string[] | undefined;
-    const managedGoogle = this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null;
     const localCalendar = this.settings?.calendar;
-    if (managedGoogle || localCalendar) {
+    if (localCalendar) {
       try {
-        const event = managedGoogle
-          ? await getManagedGoogleCalendarEvent(managedGoogle, this.fetchImpl)
-          : await findCurrentEvent(localCalendar!);
+        const event = await findCurrentEvent(localCalendar);
         if (event) {
           if (event.title) title = event.title;
           if (event.attendees.length > 0) attendees = event.attendees;
@@ -694,15 +691,12 @@ export class BackgroundController {
    * background, after which open widgets are told to look again.
    */
   private currentCallTitle(settings: NotetakerSettings): string | null {
-    const managedGoogle = settings.processingMode.kind === "managed" ? settings.managedService : null;
     const localCalendar = settings.calendar;
-    if (!managedGoogle && !localCalendar) return null;
+    if (!localCalendar) return null;
     const stale = !this.currentEventCache || Date.now() - this.currentEventCache.at > 60_000;
     if (stale && !this.currentEventRefresh) {
       this.currentEventRefresh = (async () => {
-        const event = managedGoogle
-          ? await getManagedGoogleCalendarEvent(managedGoogle, this.fetchImpl).catch(() => null)
-          : await findCurrentEvent(localCalendar!).catch(() => null);
+        const event = await findCurrentEvent(localCalendar).catch(() => null);
         const title = event?.title?.trim() || null;
         const changed = this.currentEventCache?.title !== title;
         this.currentEventCache = { at: Date.now(), title };

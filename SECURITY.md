@@ -37,8 +37,9 @@ AI Notetaker has two modes, and the guarantees differ:
   abandoned uploads expire within 24 hours). Transcripts, summaries and action
   items are stored per workspace and isolated from other workspaces.
 - Billing runs through Stripe; card data never touches the service. Optional
-  Google sign-in requests only `openid email`; optional Calendar and Drive
-  access is a separate opt-in with encrypted tokens.
+  Google sign-in requests only `openid email`; optional Drive
+  export is a separate opt-in that can only reach files the app creates, with
+  encrypted tokens.
 - Error reporting to Sentry is enabled on the project-operated service only
   and excludes meeting content.
 - Vulnerabilities in the hosted service (authentication, workspace isolation,

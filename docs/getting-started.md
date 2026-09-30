@@ -348,7 +348,7 @@ you use:
 
 - Google: [Google Cloud Console, create OAuth client credentials](https://developers.google.com/identity/protocols/oauth2)
   (application type: Chrome Extension), enable the Google Calendar API, and add
-  the `calendar.events.readonly` scope.
+  the `calendar.readonly` scope.
 - Microsoft: [Microsoft Entra ID, register an application](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app)
   (public client), and add the `Calendars.Read` and `offline_access` Microsoft
   Graph permissions.

@@ -90,8 +90,8 @@ provider keys, access tokens, recordings, or personal meeting content.
 ## Local acceptance flows (no live accounts)
 
 `webapp/src/app/api/v1/localFlows.test.ts` drives the real route handlers
-against Postgres with an in-memory fake of Google (OAuth, Calendar, Drive) and
-Stripe. It covers calendar naming, the Drive export (folder, Doc parents, text
+against Postgres with an in-memory fake of Google (OAuth, Drive) and
+Stripe. It covers the Drive export (folder, Doc parents, text
 content, folder reuse), disconnect with revocation and reconnect, trial →
 Pro → cancel → resubscribe access, forged-webhook rejection and the 402 upgrade
 prompt. Run it with `npm run test:with-postgres -- src/app/api/v1/localFlows.test.ts`

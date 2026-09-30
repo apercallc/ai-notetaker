@@ -425,7 +425,7 @@ const SUBPROCESSORS: { name: string; role: string; data: string }[] = [
   { name: "Stripe", role: "Payments and billing portal", data: "Your email and payment details, which Stripe collects directly" },
   { name: "Resend", role: "Sign-up and password-reset email", data: "Your email address" },
   { name: "Sentry", role: "Error diagnostics for the hosted service", data: "Technical error details and workspace-safe identifiers, not designed to include audio or transcript text" },
-  { name: "Google", role: "Calendar and Drive, only if you connect them", data: "What you choose to sync or export" },
+  { name: "Google", role: "Sign-in, and Drive export only if you connect it", data: "What you choose to sync or export" },
 ];
 
 export function PrivacyView() {
@@ -497,17 +497,16 @@ export function PrivacyView() {
           <div className="mk-prose">
             <p className="mk-mt-s">Each provider handles the data it receives under its own terms and privacy policy.</p>
 
-            <h2 id="google">Google Calendar and Drive</h2>
+            <h2 id="google">Google sign-in and Drive</h2>
             <p>
-              Connecting Google is optional and always your choice. If you connect it, AI Notetaker asks for read-only
-              access to your calendar, so it can name the meeting you are in, and for access to the files it creates in
-              your Drive, so it can export a meeting you choose as a Google Doc. It does not request access to your other
-              Drive files or to edit your calendar.
+              Connecting Google is optional and always your choice. If you connect Drive, AI Notetaker asks only for
+              access to the files it creates in your Drive, so it can export a meeting you choose as a Google Doc. It
+              does not request access to your other Drive files, your calendar, or your email.
             </p>
             <ul>
               <li>We store your Google account email and encrypted access tokens so these features keep working. Choosing Disconnect in your account deletes them.</li>
               <li>If you choose Continue with Google to sign in or create an account, we receive only your Google email address and whether Google has verified it. We use it to find or create your account and keep no Google access token for sign-in.</li>
-              <li>We use Google data only to provide sign-in and those two features. We do not use it for advertising, sell it, or use it to train AI models.</li>
+              <li>We use Google data only to provide sign-in and Drive export. We do not use it for advertising, sell it, or use it to train AI models.</li>
               <li>We do not let people read your Google data unless you ask us to, it is needed to investigate abuse or a security problem, or the law requires it.</li>
               <li>You can also remove access at any time from your <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.</li>
             </ul>

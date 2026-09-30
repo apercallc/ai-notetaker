@@ -89,8 +89,8 @@ export default async function AccountPage({
         }))}
       />
 
-      <h2 id="google-services" className="section-title">Google Calendar &amp; Drive</h2>
-      <p className="muted-copy">Connect one Google account to label recordings from your current calendar event and export completed notes to a private Drive document. Google access is stored encrypted and can be removed here.</p>
+      <h2 id="google-services" className="section-title">Google Drive</h2>
+      <p className="muted-copy">Connect a Google account to export completed notes to a Google Doc in your own Drive. AI Notetaker can only access files it creates. Google access is stored encrypted and can be removed here.</p>
       {googleNotice === "connected" && <p role="status" className="empty-state">Google account connected.</p>}
       {googleError && <p role="alert" className="error-text">{googleError}</p>}
       <GoogleConnectionPanel {...google} />
