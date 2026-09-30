@@ -17,6 +17,13 @@ export class BillingPortalRequiredError extends BillingError {
   readonly portalRequired = true;
 }
 
+/** A fresh checkout claim exists; carries the Stripe session to supersede. */
+class CheckoutInProgressError extends BillingError {
+  constructor(message: string, readonly sessionId: string | null) {
+    super(message);
+  }
+}
+
 /** Stripe subscription statuses that still represent a subscription the customer can manage. */
 const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
 /** Statuses after which a workspace may start a fresh subscription. */
@@ -93,7 +100,16 @@ export async function createCheckoutSession(workspaceId: string, email: string, 
   // to untangle). The claim timestamp acts as a mutex: a fresh claim
   // blocks a second session, a stale one (abandoned checkout over an hour
   // ago) is reclaimable, and any live status still routes to the portal.
-  await claimCheckoutSlot(workspaceId);
+  try {
+    await claimCheckoutSlot(workspaceId);
+  } catch (error) {
+    if (!(error instanceof CheckoutInProgressError)) throw error;
+    // The owner abandoned (or wants to redo) an earlier checkout. Expire that
+    // session so it can never be paid, release the claim, and start fresh
+    // instead of locking them out for an hour.
+    if (!(await supersedeOpenCheckout(workspaceId, error.sessionId))) throw error;
+    await claimCheckoutSlot(workspaceId);
+  }
   try {
     const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
     const form = new URLSearchParams({
@@ -110,14 +126,39 @@ export async function createCheckoutSession(workspaceId: string, email: string, 
     else form.set("customer_email", email);
     const body = await stripePost("checkout/sessions", form);
     if (typeof body.url !== "string") throw new BillingError("Stripe returned no checkout URL");
+    if (typeof body.id === "string") {
+      await prisma.workspaceSubscription.updateMany({ where: { workspaceId }, data: { checkoutSessionId: body.id } });
+    }
     return body.url;
   } catch (error) {
     // Never leave the mutex claimed when no checkout session exists.
     await prisma.workspaceSubscription
-      .updateMany({ where: { workspaceId }, data: { checkoutClaimedAt: null } })
+      .updateMany({ where: { workspaceId }, data: { checkoutClaimedAt: null, checkoutSessionId: null } })
       .catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Expires the workspace's pending Checkout Session (if it is still open) and
+ * releases the claim. Returns false when the session cannot be confirmed
+ * closed, leaving the claim in place so double billing stays impossible.
+ */
+async function supersedeOpenCheckout(workspaceId: string, sessionId: string | null): Promise<boolean> {
+  if (!sessionId) return false;
+  const path = `checkout/sessions/${encodeURIComponent(sessionId)}`;
+  const current = await fetch(stripeUrl(path), { headers: stripeHeaders(), signal: AbortSignal.timeout(15_000) }).catch(() => null);
+  if (!current?.ok) return false;
+  const session = (await current.json().catch(() => ({}))) as { status?: string };
+  if (session.status === "open") {
+    const expired = await fetch(stripeUrl(`${path}/expire`), { method: "POST", headers: stripeHeaders(), signal: AbortSignal.timeout(15_000) }).catch(() => null);
+    if (!expired?.ok) return false;
+  } else if (session.status === "complete") {
+    // Paid: the webhook will attach the subscription; do not start another.
+    return false;
+  }
+  await prisma.workspaceSubscription.updateMany({ where: { workspaceId }, data: { checkoutClaimedAt: null, checkoutSessionId: null } });
+  return true;
 }
 
 /** How long an uncompleted checkout session blocks a new one for the workspace. */
@@ -160,7 +201,10 @@ async function claimCheckoutSlot(workspaceId: string): Promise<void> {
   if (hasLiveSubscription(blocked)) {
     throw new BillingPortalRequiredError("This workspace already has a subscription. Use Manage billing to change or cancel your plan.");
   }
-  throw new BillingError("A checkout session was just started for this workspace. Complete it or try again in a few minutes.");
+  throw new CheckoutInProgressError(
+    "A checkout session was just started for this workspace. Complete it or try again in a few minutes.",
+    blocked?.checkoutSessionId ?? null,
+  );
 }
 
 /**
@@ -489,6 +533,7 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
       ...(end ? { currentPeriodEnd: end } : {}),
       graceEndsAt,
       checkoutClaimedAt: null,
+      checkoutSessionId: null,
       ...(eventCreatedAt !== undefined ? { lastBillingEventCreatedAt: eventCreatedAt } : {}),
     };
     await tx.workspaceSubscription.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });

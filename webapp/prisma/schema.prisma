@@ -261,6 +261,8 @@ model WorkspaceSubscription {
   lastBillingEventCreatedAt Int?
   // Set while an owner has an uncompleted Stripe Checkout; never touches "status".
   checkoutClaimedAt    DateTime?
+  // The open Stripe Checkout Session behind the claim, so a retry can expire it.
+  checkoutSessionId    String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

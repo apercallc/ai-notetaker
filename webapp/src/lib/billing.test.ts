@@ -56,6 +56,65 @@ describe("Stripe checkout redirect safety", () => {
   });
 });
 
+describe("Stripe checkout retry", () => {
+  const success = "https://notes.example.com/billing?checkout=success";
+  const cancel = "https://notes.example.com/billing?checkout=cancelled";
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+
+  async function withWorkspace(run: (workspaceId: string) => Promise<void>) {
+    const workspaceId = randomUUID();
+    const originalKey = process.env.STRIPE_SECRET_KEY;
+    const originalPrice = process.env.STRIPE_PRICE_HOSTED_PRO;
+    process.env.STRIPE_SECRET_KEY = "sk_test";
+    process.env.STRIPE_PRICE_HOSTED_PRO = "price_pro_retry";
+    process.env.APP_URL = "https://notes.example.com";
+    await prisma.workspace.create({ data: { id: workspaceId, name: "Checkout retry workspace" } });
+    try {
+      await run(workspaceId);
+    } finally {
+      await prisma.workspace.delete({ where: { id: workspaceId } });
+      vi.restoreAllMocks();
+      if (originalKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = originalKey;
+      if (originalPrice === undefined) delete process.env.STRIPE_PRICE_HOSTED_PRO;
+      else process.env.STRIPE_PRICE_HOSTED_PRO = originalPrice;
+    }
+  }
+
+  it("expires the abandoned session and starts a new one instead of locking the owner out", async () => {
+    await withWorkspace(async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      fetchSpy.mockResolvedValueOnce(json({ id: "cs_first", url: "https://checkout.stripe.com/first" }));
+      await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).resolves.toBe("https://checkout.stripe.com/first");
+
+      fetchSpy.mockResolvedValueOnce(json({ status: "open" })); // GET old session
+      fetchSpy.mockResolvedValueOnce(json({ status: "expired" })); // POST expire
+      fetchSpy.mockResolvedValueOnce(json({ id: "cs_second", url: "https://checkout.stripe.com/second" }));
+      await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).resolves.toBe("https://checkout.stripe.com/second");
+      expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("checkout/sessions/cs_first/expire");
+      const row = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+      expect(row?.checkoutSessionId).toBe("cs_second");
+    });
+  });
+
+  it("keeps the lock when the old session is already paid or cannot be expired", async () => {
+    await withWorkspace(async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      fetchSpy.mockResolvedValueOnce(json({ id: "cs_paid", url: "https://checkout.stripe.com/paid" }));
+      await createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel);
+
+      fetchSpy.mockResolvedValueOnce(json({ status: "complete" }));
+      await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).rejects.toThrow("just started");
+
+      fetchSpy.mockResolvedValueOnce(json({ status: "open" }));
+      fetchSpy.mockResolvedValueOnce(new Response("{}", { status: 500 }));
+      await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).rejects.toThrow("just started");
+      const row = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+      expect(row?.checkoutSessionId).toBe("cs_paid");
+    });
+  });
+});
+
 describe("Stripe portal redirect safety", () => {
   it("allows only the configured app origin", async () => {
     const workspaceId = randomUUID();
