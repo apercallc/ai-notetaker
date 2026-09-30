@@ -67,11 +67,17 @@ Implementation plan:
       `/api/v1/billing/webhook` endpoint; set `STRIPE_PRICE_HOSTED_PRO`,
       `STRIPE_PRICE_HOSTED_TEAM`, and `STRIPE_WEBHOOK_SECRET` on the Railway
       `web` service (2026-09-29).
-- [ ] Set `STRIPE_SECRET_KEY` on the Railway `web` service (restricted key:
-      Checkout Sessions + Customer portal sessions write, Prices read),
-      configure the Stripe Customer Portal, redeploy, and test
-      checkout/webhook/portal end to end before enabling paid plans. Hosted
-      readiness stays closed until then.
+- [x] `STRIPE_SECRET_KEY` is set on Railway `web`; hosted readiness is open
+      (`/api/health` reports `managedReady: true`). Verified live 2026-09-30
+      with a 100%-off one-time promotion code: Checkout created the Pro
+      subscription ($0.00 invoice), the webhook moved the workspace to
+      `hosted_pro`/`active`, the Customer Portal opened, and a cancel set
+      `cancel_at` to period end. Fixed along the way: promo codes now allowed
+      at checkout, and a retry expires an abandoned session instead of a
+      one-hour lockout. Still open: the key's restricted scope is unconfirmed
+      (Railway redacts it), the portal has no return/privacy/terms URLs, and
+      the billing page cannot show "cancels on <date>" because the app ignores
+      Stripe's `cancel_at`.
 - [x] Enforce managed upload checksums and streamed body limits; release failed
       processing reservations so retries do not burn successful-operation quota.
 - [x] Purge successful managed audio immediately and reap expired temporary
@@ -347,7 +353,7 @@ remains native; Docker is for the optional history webapp only.
       live sign-in check exposed a production logo 404.
 - [x] Managed billing route smoke coverage accepts a signed Stripe webhook,
       rejects invalid signatures, and ignores duplicate event delivery against
-      disposable Postgres; live Stripe test-mode delivery remains open.
+      disposable Postgres; live webhook delivery was confirmed 2026-09-30.
 
 ## Hardening pass (2026-09-21)
 

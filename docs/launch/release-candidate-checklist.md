@@ -8,15 +8,16 @@ items here and mirror the result into `TODO.md` ("Live release gates").
 
 ## Gate A: Hosted mode (blockers 1 to 4)
 
-### 1. Stripe
-- [ ] Create a restricted key: Checkout Sessions (write), Customer portal
-      (write), Prices (read). Nothing broader.
-- [ ] Set `STRIPE_SECRET_KEY` on Railway `web` (plus webhook secret and price
-      IDs per `docs/hosted-deployment.md`); redeploy.
-- [ ] Configure the Customer Portal in the Stripe dashboard.
-- [ ] Test mode: checkout, webhook delivery (Stripe dashboard shows 2xx),
-      plan change in the webapp, portal open/cancel.
-- [ ] Hosted readiness endpoint reports open.
+### 1. Stripe (verified live 2026-09-30)
+- [x] `STRIPE_SECRET_KEY`, webhook secret and price IDs set on Railway `web`;
+      `/api/health` reports `managedReady: true`.
+- [x] Checkout, webhook and portal cancel tested end to end with a 100%-off
+      one-time promotion code (invoice $0.00, workspace `hosted_pro`/`active`,
+      `cancel_at` set).
+- [ ] Confirm the key is the restricted one (Checkout Sessions + portal write,
+      Prices read); Railway redacts the value, so check in the Stripe dashboard.
+- [ ] Portal: set default return URL and privacy/terms URLs.
+- [ ] Follow-up: show "cancels on <date>" (app ignores `cancel_at`).
 
 ### 2. Managed upload end to end
 - [ ] Upload one real recording; job completes; staged audio object is gone.
