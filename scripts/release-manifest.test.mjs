@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 
 const manifest = JSON.parse(fs.readFileSync(new URL("../release/manifest.json", import.meta.url), "utf8"));
+// The auto-release bumps the version in every file, so tests must never hard-code it.
+const TAG = `v${manifest.version}`;
 
 test("the checked-in release manifest is valid and intentionally unpublished", () => {
   assert.deepEqual(validateManifest(manifest), []);
@@ -43,8 +45,8 @@ test("published manifests need a supported extension install channel and platfor
   const published = structuredClone(manifest);
   published.status = "published";
   published.artifacts = [
-    { platform: "macos", architecture: "arm64", format: "dmg", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.dmg", sha256: "a".repeat(64), signatureStatus: "unsigned" },
-    { platform: "windows", architecture: "x86_64", format: "nsis", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.exe", sha256: "b".repeat(64), signatureStatus: "unsigned" },
+    { platform: "macos", architecture: "arm64", format: "dmg", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.dmg`, sha256: "a".repeat(64), signatureStatus: "unsigned" },
+    { platform: "windows", architecture: "x86_64", format: "nsis", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.exe`, sha256: "b".repeat(64), signatureStatus: "unsigned" },
   ];
   const errors = validateManifest(published).join("\n");
   assert.match(errors, /Chrome Web Store URL or extension fallback ZIP URL/);
@@ -55,11 +57,11 @@ test("only Chrome Web Store detail URLs and release ZIP fallback URLs are accept
   const published = structuredClone(manifest);
   published.status = "published";
   published.extension.chromeWebStoreUrl = "https://example.com/detail/not-the-store";
-  published.extension.fallbackZipUrl = "https://example.com/ai-notetaker-extension-v0.1.0.zip";
+  published.extension.fallbackZipUrl = `https://example.com/ai-notetaker-extension-${TAG}.zip`;
   published.artifacts = [
-    { platform: "macos", architecture: "arm64", format: "dmg", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.dmg", sha256: "a".repeat(64), signatureStatus: "unsigned" },
-    { platform: "windows", architecture: "x86_64", format: "nsis", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.exe", sha256: "b".repeat(64), signatureStatus: "unsigned" },
-    { platform: "linux", architecture: "x86_64", format: "deb", url: "https://github.com/apercallc/ai-notetaker/releases/download/v0.1.0/a.deb", sha256: "c".repeat(64), signatureStatus: "unsigned" },
+    { platform: "macos", architecture: "arm64", format: "dmg", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.dmg`, sha256: "a".repeat(64), signatureStatus: "unsigned" },
+    { platform: "windows", architecture: "x86_64", format: "nsis", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.exe`, sha256: "b".repeat(64), signatureStatus: "unsigned" },
+    { platform: "linux", architecture: "x86_64", format: "deb", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.deb`, sha256: "c".repeat(64), signatureStatus: "unsigned" },
   ];
   const errors = validateManifest(published).join("\n");
   assert.match(errors, /Chrome Web Store detail URL/);
@@ -75,12 +77,12 @@ test("release metadata is generated from direct unsigned native assets", () => {
   fs.writeFileSync(path.join(assets, "helper-macos", "AI Notetaker.dmg"), "mac");
   fs.writeFileSync(path.join(assets, "helper-windows", "AI Notetaker.exe"), "windows");
   fs.writeFileSync(path.join(assets, "helper-ubuntu", "AI Notetaker.deb"), "linux");
-  fs.writeFileSync(path.join(assets, "extension", "ai-notetaker-extension-v0.1.0.zip"), "extension");
+  fs.writeFileSync(path.join(assets, "extension", `ai-notetaker-extension-${TAG}.zip`), "extension");
 
   const generated = generateReleaseManifest(manifest, {
     assetDirectory: assets,
     repository: "apercallc/ai-notetaker",
-    tag: "v0.1.0",
+    tag: TAG,
     chromeWebStoreUrl: "https://chromewebstore.google.com/detail/example",
   });
 
@@ -88,5 +90,5 @@ test("release metadata is generated from direct unsigned native assets", () => {
   assert.equal(generated.artifacts.length, 3);
   assert.equal(generated.artifacts[0].signatureStatus, "unsigned");
   assert.match(generated.extension.fallbackZipUrl, /ai-notetaker-extension-.+\.zip/);
-  assert.match(generated.artifacts[0].url, /releases\/download\/v0\.1\.0/);
+  assert.ok(generated.artifacts[0].url.includes(`/releases/download/${TAG}/`));
 });

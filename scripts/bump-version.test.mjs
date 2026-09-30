@@ -48,6 +48,8 @@ test("bumpFromCommits skips housekeeping and ranks feat above fixes", () => {
 test("bumpFiles moves every version field together and only those", () => {
   const root = fixture();
   const before = currentVersion(root);
+  const thirdPartyBefore = /name = "vswhom"\nversion = "([^"]+)"/u.exec(fs.readFileSync(path.join(root, "helper/Cargo.lock"), "utf8"))?.[1];
+  assert.ok(thirdPartyBefore, "fixture needs a third-party crate to prove it is left alone");
   const { newVersion } = bumpFiles(root, nextVersion(before, "minor"));
   assert.notEqual(newVersion, before);
   assert.equal(currentVersion(root), newVersion);
@@ -68,7 +70,7 @@ test("bumpFiles moves every version field together and only those", () => {
   for (const name of ["notetaker-app", "notetaker-audio", "notetaker-core"]) {
     assert.match(cargoLock, new RegExp(`name = "${name}"\\nversion = "${newVersion.replaceAll(".", "\\.")}"`, "u"));
   }
-  // Third-party crates that share the old version number stay untouched.
-  assert.match(cargoLock, new RegExp(`name = "vswhom"\\nversion = "${before.replaceAll(".", "\\.")}"`, "u"));
+  // Third-party crates keep their own version, even if it happens to equal the old project version.
+  assert.match(cargoLock, new RegExp(`name = "vswhom"\\nversion = "${thirdPartyBefore.replaceAll(".", "\\.")}"`, "u"));
   fs.rmSync(root, { recursive: true, force: true });
 });
