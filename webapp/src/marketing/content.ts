@@ -116,3 +116,13 @@ export const FAQS: Faq[] = [
 
 export const NOT_LEGAL_ADVICE =
   "Always tell participants you are recording and get the consent that your local law and workplace policy require. AI Notetaker asks you to acknowledge this before every recording. It is not legal advice.";
+
+/**
+ * A monitored support address, set as SUPPORT_EMAIL on the deployment. It is
+ * optional and validated, and never hard-coded, so the legal pages only show an
+ * address the operator has actually chosen to publish.
+ */
+export function supportEmail(env: Record<string, string | undefined> = process.env): string | null {
+  const value = env.SUPPORT_EMAIL?.trim();
+  return value && value.length <= 254 && /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']{2,}$/u.test(value) ? value : null;
+}

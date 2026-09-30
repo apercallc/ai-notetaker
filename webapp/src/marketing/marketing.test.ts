@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import robots from "../app/robots";
 import sitemap from "../app/sitemap";
 import { GET as llms } from "../app/llms.txt/route";
-import { FALLBACK_PRICE_AMOUNTS, FALLBACK_PRICE_LABELS, FAQS, LIMITS } from "./content";
+import { FALLBACK_PRICE_AMOUNTS, FALLBACK_PRICE_LABELS, FAQS, LIMITS, supportEmail } from "./content";
 import { breadcrumbNode, faqNode, howToNode, serializeJsonLd, softwareNode } from "./jsonld";
 import { MARKETING_PATHS, isMarketingPath } from "./paths";
 import { chromeWebStoreUrl, formatBytes, pickAssets } from "./release";
@@ -148,5 +148,15 @@ describe("crawler surfaces", () => {
     expect(body).toContain(FAQS[0].question);
     delete process.env.MANAGED_HOSTING;
     expect(llms().status).toBe(404);
+  });
+});
+
+describe("support email", () => {
+  it("shows only a valid address the operator configured", () => {
+    expect(supportEmail({})).toBeNull();
+    expect(supportEmail({ SUPPORT_EMAIL: "  help@apercallc.com " })).toBe("help@apercallc.com");
+    for (const bad of ["", "not an email", "a@b", "x@y.z", "a b@c.com", "<script>@x.com", "\"quoted\"@x.com", `${"a".repeat(250)}@x.com`]) {
+      expect(supportEmail({ SUPPORT_EMAIL: bad }), bad).toBeNull();
+    }
   });
 });

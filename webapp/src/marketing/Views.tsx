@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Download, Laptop, Puzzle, Share2 } from "lucide-react";
-import { LIMITS, NOT_LEGAL_ADVICE, SITE } from "./content";
+import { LIMITS, NOT_LEGAL_ADVICE, SITE, supportEmail } from "./content";
 import { Faq } from "./Faq";
 import { Icon } from "./Icon";
 import { Plans, type PlanDisplay } from "./Plans";
@@ -429,6 +429,7 @@ const SUBPROCESSORS: { name: string; role: string; data: string }[] = [
 ];
 
 export function PrivacyView() {
+  const contact = supportEmail();
   return (
     <>
       <PageHead title="Privacy notice" lede={`Effective ${EFFECTIVE}. Plain language, specific about where your data goes.`} />
@@ -496,7 +497,7 @@ export function PrivacyView() {
           <div className="mk-prose">
             <p className="mk-mt-s">Each provider handles the data it receives under its own terms and privacy policy.</p>
 
-            <h2>Google Calendar and Drive</h2>
+            <h2 id="google">Google Calendar and Drive</h2>
             <p>
               Connecting Google is optional and always your choice. If you connect it, AI Notetaker asks for read-only
               access to your calendar, so it can name the meeting you are in, and for access to the files it creates in
@@ -534,7 +535,8 @@ export function PrivacyView() {
             <h2>Security and contact</h2>
             <p>
               The source code is public. Report a suspected vulnerability privately through the{" "}
-              <a href={SITE.securityUrl}>security policy</a>. For questions about this notice, open an issue on the{" "}
+              <a href={SITE.securityUrl}>security policy</a>. For questions about this notice,{" "}
+              {contact ? <>email <a href={`mailto:${contact}`}>{contact}</a> or </> : null}open an issue on the{" "}
               <a href={SITE.supportUrl}>project&apos;s issue tracker</a>, and never post keys, recordings or transcripts
               there. We will show a new effective date whenever this notice changes.
             </p>
@@ -548,6 +550,7 @@ export function PrivacyView() {
 /* ------------------------------------------------------------------ */
 
 export function TermsView() {
+  const contact = supportEmail();
   return (
     <>
       <PageHead title="Terms of use" lede={`Effective ${EFFECTIVE}. These cover this website, the software, and the Hosted AI service.`} />
@@ -605,8 +608,9 @@ export function TermsView() {
 
             <h2>Contact</h2>
             <p>
-              Raise questions on the <a href={SITE.supportUrl}>project&apos;s issue tracker</a>, without posting private
-              meeting content, keys or personal information.
+              {contact ? <>Email <a href={`mailto:${contact}`}>{contact}</a>, or raise </> : "Raise "}questions on the{" "}
+              <a href={SITE.supportUrl}>project&apos;s issue tracker</a>, without posting private meeting content, keys or
+              personal information.
             </p>
             <p className="mk-small">These terms are plain-language project information and are not legal advice.</p>
           </div>
