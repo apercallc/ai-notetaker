@@ -519,3 +519,18 @@ describe("temporary audio streaming", () => {
     expect(parts.map((part) => Array.from(part))).toEqual([[10, 11], [12]]);
   });
 });
+
+describe("one processing job per upload", () => {
+  it("returns the existing job for a different idempotency key instead of reserving twice", async () => {
+    const meetingId = await createMeeting(WORKSPACE_ID);
+    const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `upload-${meetingId}` });
+    await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 1, checksum: "one-job", objectKey: "one-job" } });
+    await completeManagedUpload(WORKSPACE_ID, upload.id);
+
+    const first = await enqueueManagedJob(WORKSPACE_ID, meetingId, upload.id, "key-one");
+    const second = await enqueueManagedJob(WORKSPACE_ID, meetingId, upload.id, "key-two");
+    expect(second.id).toBe(first.id);
+    expect(await prisma.processingJob.count({ where: { workspaceId: WORKSPACE_ID, uploadId: upload.id } })).toBe(1);
+    expect(await prisma.usageLedgerEntry.count({ where: { workspaceId: WORKSPACE_ID } })).toBe(1);
+  });
+});

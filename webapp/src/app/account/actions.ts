@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/currentUser";
+import { cancelWorkspaceSubscription } from "@/lib/billing";
 import { getRequestContext } from "@/lib/requestContext";
 import { clearSessionCookie } from "@/lib/sessionCookie";
 import { changePassword } from "@/lib/accounts";
@@ -181,6 +182,18 @@ export async function deleteWorkspaceAction(formData: FormData): Promise<DeleteW
   });
   if (!workspace || confirmation !== workspace.name) {
     return { ok: false, error: "Type the workspace name exactly to confirm." };
+  }
+
+  // Stop billing first. If Stripe cannot cancel, keep the workspace so the
+  // customer is never left paying for data they can no longer reach.
+  try {
+    await cancelWorkspaceSubscription(session.workspaceId);
+  } catch (error) {
+    console.error("workspace deletion blocked: subscription cancellation failed", {
+      workspaceId: session.workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false, error: "We couldn't cancel this workspace's subscription, so nothing was deleted. Cancel it under Billing, or try again in a moment." };
   }
 
   const memberUserIds = (

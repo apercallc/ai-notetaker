@@ -90,6 +90,33 @@ describe("server-owned Google credential exchange", () => {
   });
 });
 
+describe("disconnect and revoked access", () => {
+  it("revokes the grant at Google before deleting the local copy, and still deletes if Google is unreachable", async () => {
+    await createConnection();
+    const fetch = vi.mocked(globalThis.fetch);
+    fetch.mockReset();
+    fetch.mockResolvedValueOnce(response({}));
+    await disconnectGoogle(USER_ID);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://oauth2.googleapis.com/revoke");
+    expect(new URLSearchParams(String(fetch.mock.calls[0]?.[1]?.body)).get("token")).toBe("refresh-secret");
+    expect(await googleConnectionStatus(USER_ID)).toMatchObject({ connected: false });
+
+    await createConnection();
+    fetch.mockReset();
+    fetch.mockRejectedValueOnce(new Error("offline"));
+    await disconnectGoogle(USER_ID);
+    expect(await googleConnectionStatus(USER_ID)).toMatchObject({ connected: false });
+  });
+
+  it("asks the user to reconnect when Google reports the refresh grant as invalid", async () => {
+    await createConnection(0);
+    const fetch = vi.mocked(globalThis.fetch);
+    fetch.mockReset();
+    fetch.mockResolvedValueOnce(response({ error: "invalid_grant" }, 400));
+    await expect(findCurrentGoogleCalendarEvent(USER_ID)).rejects.toMatchObject({ status: 409, publicMessage: expect.stringContaining("Reconnect Google") });
+  });
+});
+
 describe("current calendar event lookup", () => {
   it("ignores malformed and non-current events and returns a normalized active event", async () => {
     await createConnection();

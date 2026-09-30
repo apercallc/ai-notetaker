@@ -96,7 +96,12 @@ function boundedMilliseconds(value, fallback) {
 }
 
 export function workerConfig(env = process.env) {
-  const baseUrl = env.MANAGED_WORKER_WEBAPP_URL?.trim() || "http://webapp:3000";
+  // The docker-compose service name only resolves in compose. On Railway the
+  // worker is a separate service, so it must be told where the web app is:
+  // fall back to the public APP_URL rather than a hostname that never resolves.
+  const onRailway = Boolean(env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID);
+  const baseUrl = env.MANAGED_WORKER_WEBAPP_URL?.trim() || (onRailway ? env.APP_URL?.trim() : "") || (onRailway ? "" : "http://webapp:3000");
+  if (!baseUrl) throw new Error("MANAGED_WORKER_WEBAPP_URL (or APP_URL) is required for the managed worker on Railway");
   const token = env.MANAGED_WORKER_TOKEN?.trim();
   if (!token) throw new Error("MANAGED_WORKER_TOKEN is required for the managed worker");
   return {

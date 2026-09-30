@@ -12,6 +12,9 @@ import { sendInviteEmail, sendPasswordResetEmail } from "@/lib/authEmails";
 import { getRequestContext } from "@/lib/requestContext";
 import { changeMemberRole, removeWorkspaceMember, getWorkspaceMembership, userBelongsOnlyTo } from "@/lib/workspaces";
 import { revokeInvites } from "@/lib/authTokens";
+import { emailRequestStatus, formatRetryAfter, recordEmailRequest } from "@/lib/loginThrottle";
+
+const MAX_INVITES_PER_OWNER_PER_DAY = 50;
 
 /**
  * Expected failures are returned, never thrown.
@@ -71,8 +74,18 @@ export async function manageTeam(formData: FormData): Promise<TeamActionResult> 
   if (operation === "invite") {
     const email = normalizeEmail(String(formData.get("email") ?? ""));
     if (!isPlausibleEmail(email)) return { ok: false, error: "Enter a valid email address." };
+    // Invitations send mail from our domain to an address the owner picks, so
+    // cap them per recipient, per network address, and per owner per day.
+    const context = await getRequestContext();
+    const throttle = await emailRequestStatus("invite", email, { ip: context.ip });
+    if (throttle.blocked) return { ok: false, error: `Too many invitations to that address. Try again in ${formatRetryAfter(throttle.retryAfterMs)}.` };
+    const sentToday = await prisma.authToken.count({
+      where: { purpose: "invite", invitedById: session.userId, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    });
+    if (sentToday >= MAX_INVITES_PER_OWNER_PER_DAY) return { ok: false, error: "You've reached today's invitation limit. Try again tomorrow." };
+    await recordEmailRequest("invite", email, { ip: context.ip });
     const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: session.workspaceId } });
-    const result = await sendInviteEmail({ workspaceId: workspace.id, workspaceName: workspace.name, email, role: "member", invitedById: session.userId, invitedByEmail: session.email, context: await getRequestContext() });
+    const result = await sendInviteEmail({ workspaceId: workspace.id, workspaceName: workspace.name, email, role: "member", invitedById: session.userId, invitedByEmail: session.email, context });
     revalidatePath("/team");
     return { ok: true, message: result.delivered ? "Invitation sent." : "Share this invitation privately with the intended teammate.", ...(!result.delivered ? { link: result.link } : {}) };
   }

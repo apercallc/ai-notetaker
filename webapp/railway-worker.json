@@ -5,7 +5,6 @@
   },
   "deploy": {
     "startCommand": "npm run managed:worker",
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
+    "restartPolicyType": "ALWAYS"
   }
 }

@@ -11,6 +11,14 @@ describe("managed worker runner", () => {
     expect(nextErrorDelay(60_000, 10_000)).toBe(60_000);
   });
 
+  it("never defaults to the docker-compose hostname on Railway", () => {
+    const token = { MANAGED_WORKER_TOKEN: "worker" };
+    expect(workerConfig(token).baseUrl).toBe("http://webapp:3000");
+    expect(workerConfig({ ...token, RAILWAY_ENVIRONMENT: "production", APP_URL: "https://notes.example.com" }).baseUrl).toBe("https://notes.example.com");
+    expect(workerConfig({ ...token, RAILWAY_ENVIRONMENT: "production", MANAGED_WORKER_WEBAPP_URL: "http://web.railway.internal:8080" }).baseUrl).toBe("http://web.railway.internal:8080");
+    expect(() => workerConfig({ ...token, RAILWAY_ENVIRONMENT: "production" })).toThrow("MANAGED_WORKER_WEBAPP_URL");
+  });
+
   it("treats an empty poll as idle and sends only the worker token", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     await expect(pollOnce({ baseUrl: "http://webapp:3000", token: "secret", fetchImpl })).resolves.toEqual({ status: "idle" });

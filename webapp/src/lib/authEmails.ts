@@ -103,6 +103,8 @@ export async function sendInviteEmail(
   },
 ): Promise<DeliveredLink> {
   const email = normalizeEmail(input.email);
+  // Workspace names are user-chosen; keep them on one line in the subject and body.
+  const workspaceName = input.workspaceName.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
   const { token } = await issueAuthToken({
     purpose: "invite",
     email,
@@ -111,7 +113,7 @@ export async function sendInviteEmail(
     invitedById: input.invitedById,
   });
   return deliver("invite", token, (link) => ({
-    subject: `${input.invitedByEmail} invited you to ${input.workspaceName} on AI Notetaker`,
-    text: `${input.invitedByEmail} invited you to join the workspace "${input.workspaceName}".\n\nAccept the invitation:\n\n${link}\n\nThe link works once and expires in 7 days.`,
+    subject: `${input.invitedByEmail} invited you to ${workspaceName} on AI Notetaker`,
+    text: `${input.invitedByEmail} invited you to join the workspace "${workspaceName}".\n\nAccept the invitation:\n\n${link}\n\nThe link works once and expires in 7 days.`,
   }), email, input.context);
 }

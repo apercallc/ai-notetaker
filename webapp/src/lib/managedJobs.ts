@@ -394,14 +394,25 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
   if (!upload || upload.meetingId !== meetingId || upload.status !== "complete") {
     throw new ManagedValidationError("a completed upload for this meeting is required");
   }
-  const existing = await prisma.processingJob.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } } });
+  // One job per upload: a second request with a different idempotency key must
+  // not reserve another unit or reprocess audio that is purged after success
+  // (which would finalize an empty transcript over the real one).
+  const existing =
+    (await prisma.processingJob.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } } })) ??
+    (await prisma.processingJob.findFirst({ where: { workspaceId, uploadId }, orderBy: { createdAt: "asc" } }));
   if (existing) {
     if (existing.status !== "error") return existing;
-    await reserveMeetingProcessing(workspaceId, idempotencyKey);
-    return prisma.processingJob.update({
-      where: { id: existing.id },
+    await reserveMeetingProcessing(workspaceId, existing.idempotencyKey);
+    // Guard on status so two concurrent retries cannot reset a job another
+    // request already restarted and a worker has begun.
+    const revived = await prisma.processingJob.updateMany({
+      where: { id: existing.id, status: "error" },
       data: { status: "queued", errorMessage: null, startedAt: null, leaseToken: null, completedAt: null },
     });
+    // count 0 means another retry won; the shared idempotency key already
+    // holds the single reservation, so there is nothing to undo here.
+    void revived;
+    return prisma.processingJob.findUniqueOrThrow({ where: { id: existing.id } });
   }
   await reserveMeetingProcessing(workspaceId, idempotencyKey);
   try {

@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyStripeEvent,
+  cancelWorkspaceSubscription,
   BillingPortalRequiredError,
   clearPriceCache,
   createCheckoutSession,
@@ -82,6 +83,17 @@ describe("Stripe webhook signatures", () => {
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
     const digest = createHmac("sha256", "whsec_test").update(`${timestamp}.${payload}`).digest("hex");
     expect(verifyStripeSignature(payload, `t=${timestamp},v1=${digest}`)).toBe(true);
+  });
+
+  it("accepts any v1 value so a rolling webhook secret keeps working", () => {
+    const payload = "{}";
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_new";
+    const oldDigest = createHmac("sha256", "whsec_old").update(`${timestamp}.${payload}`).digest("hex");
+    const newDigest = createHmac("sha256", "whsec_new").update(`${timestamp}.${payload}`).digest("hex");
+    expect(verifyStripeSignature(payload, `t=${timestamp},v1=${newDigest},v1=${oldDigest}`)).toBe(true);
+    expect(verifyStripeSignature(payload, `t=${timestamp},v1=${oldDigest},v1=${newDigest}`)).toBe(true);
+    expect(verifyStripeSignature(payload, `t=${timestamp},v1=${oldDigest}`)).toBe(false);
   });
 
   it("rejects stale, malformed, and tampered signatures", () => {
@@ -488,5 +500,48 @@ describe("plan catalog", () => {
         else process.env[key] = value as string;
       }
     }
+  });
+});
+
+describe("cancelWorkspaceSubscription", () => {
+  async function withSubscription(data: { status: string; stripeSubscriptionId: string | null }, run: (workspaceId: string) => Promise<void>) {
+    const workspaceId = randomUUID();
+    process.env.STRIPE_SECRET_KEY = "sk_cancel";
+    await prisma.workspace.create({ data: { id: workspaceId, name: "Cancel on delete workspace" } });
+    await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_pro", ...data } });
+    try { await run(workspaceId); } finally { await prisma.workspace.delete({ where: { id: workspaceId } }); vi.restoreAllMocks(); }
+  }
+
+  it("cancels a live subscription at Stripe with a DELETE", async () => {
+    await withSubscription({ status: "active", stripeSubscriptionId: "sub_cancel_1" }, async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+      await cancelWorkspaceSubscription(workspaceId);
+      expect(String(fetchSpy.mock.calls[0]?.[0])).toBe("https://api.stripe.com/v1/subscriptions/sub_cancel_1");
+      expect(fetchSpy.mock.calls[0]?.[1]?.method).toBe("DELETE");
+    });
+  });
+
+  it("does nothing for trial, terminal, or never-subscribed workspaces", async () => {
+    await withSubscription({ status: "canceled", stripeSubscriptionId: "sub_gone" }, async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      await cancelWorkspaceSubscription(workspaceId);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+    await withSubscription({ status: "trialing", stripeSubscriptionId: null }, async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      await cancelWorkspaceSubscription(workspaceId);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it("treats an already-missing subscription as cancelled but surfaces real Stripe failures", async () => {
+    await withSubscription({ status: "active", stripeSubscriptionId: "sub_missing" }, async (workspaceId) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "resource_missing" } }), { status: 404 }));
+      await expect(cancelWorkspaceSubscription(workspaceId)).resolves.toBeUndefined();
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 }));
+      await expect(cancelWorkspaceSubscription(workspaceId)).rejects.toThrow("rate limited");
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network"));
+      await expect(cancelWorkspaceSubscription(workspaceId)).rejects.toThrow("could not be reached");
+    });
   });
 });

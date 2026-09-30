@@ -724,7 +724,7 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
     // The message is shown to the workspace in the UI (ProcessingJob.errorMessage):
     // provider/worker errors are already user-safe, anything else (database,
     // storage, programming errors) is logged and replaced with a generic line.
-    const message = error instanceof ManagedWorkerError ? error.message : "Processing failed unexpectedly. It will be retried automatically.";
+    const message = error instanceof ManagedWorkerError ? error.message : "Processing failed unexpectedly. Use Retry on this meeting to try again.";
     if (!(error instanceof ManagedWorkerError)) {
       console.error("managed job failed unexpectedly", { workspaceId, jobId: job.id, error: error instanceof Error ? error.message : String(error) });
     }

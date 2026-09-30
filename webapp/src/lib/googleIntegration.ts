@@ -4,10 +4,13 @@ import { getAppUrl } from "./deploymentConfig";
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 const GOOGLE_CALENDAR_EVENTS_ENDPOINT = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const GOOGLE_DRIVE_FILES_ENDPOINT = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DRIVE_UPLOAD_ENDPOINT = "https://www.googleapis.com/upload/drive/v3/files";
 const REQUEST_TIMEOUT_MS = 10_000;
+/** Drive imports a whole transcript as a Doc; give that upload longer than a lookup. */
+const UPLOAD_TIMEOUT_MS = 60_000;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1_000;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 const ENCRYPTION_VERSION = "v1";
@@ -235,7 +238,15 @@ async function googleTokenRequest(body: URLSearchParams): Promise<UsableGoogleTo
   } catch {
     throw new GoogleIntegrationError("Google could not be reached. Try again.");
   }
-  if (!response.ok) throw new GoogleIntegrationError("Google authorization was not accepted. Try connecting again.", 400);
+  if (!response.ok) {
+    // A refresh that Google rejects as invalid_grant means the user revoked
+    // access (or the grant expired): ask them to reconnect, not to "try again".
+    const failure = (await response.json().catch(() => ({}))) as { error?: unknown };
+    if (body.get("grant_type") === "refresh_token" && failure.error === "invalid_grant") {
+      throw new GoogleIntegrationError("Google access was removed or expired. Reconnect Google from your Account page.", 409);
+    }
+    throw new GoogleIntegrationError("Google authorization was not accepted. Try connecting again.", 400);
+  }
   const tokens = (await response.json()) as GoogleTokenResponse;
   const accessToken = tokens.access_token;
   const expiresIn = tokens.expires_in;
@@ -355,14 +366,15 @@ async function accessTokenFor(userId: string): Promise<string> {
   return tokens.access_token;
 }
 
-async function googleRequest(userId: string, url: string, init: RequestInit = {}, retry = true): Promise<Response> {
+async function googleRequest(userId: string, url: string, init: RequestInit & { timeoutMs?: number } = {}, retry = true): Promise<Response> {
+  const { timeoutMs, ...fetchInit } = init;
   const token = await accessTokenFor(userId);
   let response: Response;
   try {
     response = await fetch(url, {
-      ...init,
-      headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      ...fetchInit,
+      headers: { Authorization: `Bearer ${token}`, ...(fetchInit.headers ?? {}) },
+      signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
   } catch {
     throw new GoogleIntegrationError("Google could not be reached. Try again.");
@@ -479,6 +491,7 @@ export async function exportMeetingToGoogleDrive(userId: string, workspaceId: st
     method: "POST",
     headers: { "Content-Type": upload.contentType },
     body: upload.body,
+    timeoutMs: UPLOAD_TIMEOUT_MS,
   });
   const file = (await created.json()) as { id?: string; webViewLink?: string };
   if (!file.id) throw new GoogleIntegrationError("Google Drive did not create an export document.");
@@ -493,5 +506,21 @@ export async function googleConnectionStatus(userId: string): Promise<{ configur
 }
 
 export async function disconnectGoogle(userId: string): Promise<void> {
+  // Revoke the grant at Google too, so "Disconnect" really ends access instead
+  // of only forgetting our copy. Best effort: never block the local delete.
+  try {
+    const connection = await prisma.googleOAuthConnection.findUnique({ where: { userId }, select: { refreshTokenCiphertext: true } });
+    if (connection) {
+      const token = decrypt(connection.refreshTokenCiphertext, getGoogleConfig().encryptionKey);
+      await fetch(GOOGLE_REVOKE_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    }
+  } catch {
+    // Revocation is a courtesy; the local credentials are removed regardless.
+  }
   await prisma.googleOAuthConnection.deleteMany({ where: { userId } });
 }

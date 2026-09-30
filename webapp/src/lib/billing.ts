@@ -162,6 +162,29 @@ async function claimCheckoutSlot(workspaceId: string): Promise<void> {
   throw new BillingError("A checkout session was just started for this workspace. Complete it or try again in a few minutes.");
 }
 
+/**
+ * Cancels a workspace's live Stripe subscription immediately. Used before the
+ * workspace is deleted so the customer is never billed for data that no longer
+ * exists. A subscription Stripe already reports gone counts as cancelled.
+ * Throws BillingError on any other failure so the caller can abort.
+ */
+export async function cancelWorkspaceSubscription(workspaceId: string): Promise<void> {
+  const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+  if (!subscription?.stripeSubscriptionId) return;
+  if (TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) return;
+  const response = await fetch(stripeUrl(`subscriptions/${encodeURIComponent(subscription.stripeSubscriptionId)}`), {
+    method: "DELETE",
+    headers: stripeHeaders(),
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null);
+  if (!response) throw new BillingError("Stripe could not be reached to cancel the subscription");
+  if (response.ok || response.status === 404) return;
+  const body = (await response.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
+  // Already cancelled on Stripe's side is the outcome we want.
+  if (body.error?.code === "resource_missing") return;
+  throw new BillingError(body.error?.message ? `Stripe: ${body.error.message}` : "Stripe could not cancel the subscription");
+}
+
 export async function createPortalSession(workspaceId: string, returnUrl: string) {
   const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
   if (!subscription?.stripeCustomerId) throw new BillingError("No Stripe customer exists for this workspace");
@@ -173,15 +196,18 @@ export async function createPortalSession(workspaceId: string, returnUrl: string
 export function verifyStripeSignature(payload: string, signature: string | null): boolean {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret || !signature) return false;
-  const values = Object.fromEntries(signature.split(",").map((part) => part.split("=", 2) as [string, string]));
-  const timestamp = values.t;
-  const provided = values.v1;
+  // Stripe sends one v1 signature per active webhook secret while a secret is
+  // being rolled, so accept a match against any of them.
+  const parts = signature.split(",").map((part) => part.split("=", 2) as [string, string | undefined]);
+  const timestamp = parts.find(([key]) => key === "t")?.[1];
+  const candidates = parts.filter(([key, value]) => key === "v1" && value).map(([, value]) => value as string);
   const timestampSeconds = Number(timestamp);
-  if (!timestamp || !provided || !Number.isSafeInteger(timestampSeconds) || Math.abs(Date.now() / 1000 - timestampSeconds) > 300) return false;
-  const expected = createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex");
-  const actualBuffer = Buffer.from(provided, "hex");
-  const expectedBuffer = Buffer.from(expected, "hex");
-  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+  if (!timestamp || candidates.length === 0 || !Number.isSafeInteger(timestampSeconds) || Math.abs(Date.now() / 1000 - timestampSeconds) > 300) return false;
+  const expectedBuffer = createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest();
+  return candidates.some((candidate) => {
+    const actualBuffer = Buffer.from(candidate, "hex");
+    return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+  });
 }
 
 // ---------------------------------------------------------------------------
