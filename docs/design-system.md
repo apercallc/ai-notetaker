@@ -33,6 +33,15 @@ and marketing site.
 
 ## Open-source assets
 
-Marketing illustrations use local, licensed Lucide SVG icons in
-`site/icons/`. Serve assets from the repository; do not load an icon or font
-CDN at runtime.
+The public site (`webapp/src/marketing`) uses Lucide icons (ISC license)
+through `lucide-react`, always via the `Icon` component: 1.75 stroke, decorative
+by default, and never the only carrier of meaning, so every icon sits next to a
+text label. Its typeface is Bricolage Grotesque (SIL OFL 1.1), self-hosted from
+`webapp/src/marketing/fonts/`. Serve assets from the repository; do not load an
+icon or font CDN at runtime.
+
+Marketing-site rules: forest green and the paper background are shared with the
+app; the one recording red is reserved for the recording dot; channel colors
+(your microphone = forest, the meeting's audio = ochre) always come with a text
+label. Avoid inline `style` attributes (use classes), shadows, and identical card
+grids. Every claim on a marketing page must be true of the shipping product.

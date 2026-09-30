@@ -51,7 +51,11 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
   Native Messaging's host allowlist is keyed to the extension ID that field
   derives — regenerating it breaks every installed helper's handshake.
 - **Every webapp route checks the auth token, including reads.** No
-  "public by default" page — it sits on a public Railway URL.
+  "public by default" page — it sits on a public Railway URL. The only
+  exception is the managed deployment's static marketing pages: exact-path
+  allowlist in `webapp/src/marketing/paths.ts`, served only when
+  `MANAGED_HOSTING=true`, never showing user data. Self-hosted instances have
+  no public page.
 - **Helper checks for and offers to resume an in-progress recording on
   startup** — an unclean shutdown must not silently orphan raw audio
   that's already on disk.

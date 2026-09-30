@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const getSessionUser = vi.fn();
@@ -81,6 +81,62 @@ describe("page content security policy", () => {
     expect(productionPolicy).not.toContain("unsafe-eval");
     expect(second.headers.get("x-middleware-request-x-nonce")).not.toBe(nonce);
     expect(second.headers.get("content-security-policy")).not.toBe(policy);
+  });
+
+  it("allows inline style attributes explicitly, because a style-src nonce makes browsers ignore unsafe-inline", () => {
+    const productionPolicy = contentSecurityPolicy("test-nonce", false);
+    expect(productionPolicy).toContain("style-src-attr 'unsafe-inline'");
+    // <style> elements stay nonce-gated: attributes cannot run script, elements can carry rules.
+    expect(productionPolicy).toMatch(/style-src 'self' 'unsafe-inline' 'nonce-test-nonce'/);
+  });
+});
+
+describe("public marketing routes", () => {
+  const originalManagedHosting = process.env.MANAGED_HOSTING;
+
+  beforeEach(() => {
+    getSessionUser.mockReset();
+    getSessionUser.mockResolvedValue(null);
+    process.env.MANAGED_HOSTING = "true";
+  });
+
+  afterEach(() => {
+    if (originalManagedHosting === undefined) delete process.env.MANAGED_HOSTING;
+    else process.env.MANAGED_HOSTING = originalManagedHosting;
+  });
+
+  it.each(["/", "/how-it-works", "/pricing", "/download", "/compare", "/privacy", "/terms"])(
+    "serves %s without a session on the managed deployment",
+    async (path) => {
+      const response = await proxy(request(path));
+      expect(response.status).toBe(200);
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.headers.get("x-middleware-request-x-marketing")).toBe("1");
+      expect(response.headers.get("content-security-policy")).toContain("'nonce-");
+      expect(getSessionUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps every app route behind a session, including lookalike marketing paths", async () => {
+    for (const path of ["/meetings", "/actions", "/account", "/billing", "/team", "/pricing/anything", "/privacy/", "/pricing.json"]) {
+      const response = await proxy(request(path));
+      expect(response.headers.get("location"), path).toContain("/login");
+      expect(response.headers.get("x-middleware-request-x-marketing"), path).toBeNull();
+    }
+  });
+
+  it("never publishes marketing pages on a self-hosted instance", async () => {
+    delete process.env.MANAGED_HOSTING;
+    for (const path of ["/", "/pricing", "/download", "/privacy"]) {
+      const response = await proxy(request(path));
+      expect(response.headers.get("location"), path).toContain("/login");
+    }
+  });
+
+  it("ignores a client-supplied marketing header on app pages", async () => {
+    getSessionUser.mockResolvedValue({ userId: "user-1" });
+    const response = await proxy(request("/meetings", { headers: { "x-marketing": "1" } }));
+    expect(response.headers.get("x-middleware-request-x-marketing")).toBeNull();
   });
 });
 

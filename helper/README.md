@@ -12,7 +12,7 @@ Native Messaging host; use the packaged installer flow in
 working extension-to-helper install.
 
 End users download the native installer for their operating system from the
-[AI Notetaker install page](https://apercallc.github.io/ai-notetaker/) or the
+[AI Notetaker install page](https://ai-notetaker.apercallc.com/download) or the
 [latest GitHub release](https://github.com/apercallc/ai-notetaker/releases/latest).
 The GitHub release publishes unsigned installers with checksums and clear
 first-open guidance; npm/npx is not a supported native-helper installer.

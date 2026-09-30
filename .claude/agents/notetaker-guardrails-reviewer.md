@@ -92,9 +92,16 @@ these regressions.
    or writes, client-granted entitlements, and logs containing audio,
    transcript bodies, keys, or bearer tokens.
 8. **Every webapp route checks authentication, including reads.** There is no
-   "public by default" page; it sits on a public URL. The only intended
-   exception is the health endpoint (`/api/health`), which must not leak
-   secrets.
+   "public by default" page; it sits on a public URL. The intended exceptions
+   are the health endpoint (`/api/health`), which must not leak secrets, and
+   the managed deployment's static marketing pages. Flag any change that
+   widens that second exception: it must stay an exact-path allowlist
+   (`webapp/src/marketing/paths.ts`, compared by equality, never a prefix or
+   pattern), be active only when `MANAGED_HOSTING=true` (and 404 otherwise),
+   and render no meeting, workspace, account or billing data. Also flag any
+   marketing page or metadata route that could expose `/share/`, `/meetings`,
+   or `/api/` content, or that stops stripping a client-sent `x-marketing`
+   header.
 9. **Electron creeping into `helper/`.** The helper is Tauri (Rust) by design,
    for install size, one shared codebase, and the built-in updater.
 10. **A custom virtual-audio driver or kernel component being written.** Prefer

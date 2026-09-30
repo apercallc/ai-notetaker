@@ -46,7 +46,8 @@ describe("small deterministic extension utilities", () => {
   it("builds an install URL with detected platform and source", () => {
     expect(["macos", "windows", "linux", "unknown"]).toContain(detectInstallPlatform());
     const url = new URL(getInstallPageUrl("popup"));
-    expect(url.origin).toBe("https://apercallc.github.io");
+    expect(url.origin).toBe("https://ai-notetaker.apercallc.com");
+    expect(url.pathname).toBe("/download");
     expect(url.searchParams.get("source")).toBe("popup");
     expect(url.searchParams.get("platform")).toBeTruthy();
     expect(url.searchParams.get("mode")).toBeNull();
