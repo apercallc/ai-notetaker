@@ -281,12 +281,16 @@ remains native; Docker is for the optional history webapp only.
       Railway has a `managed-worker` service and a private S3-compatible bucket
       for temporary processing staging. R2 remains an optional compatible
       backend; do not migrate to permanent audio storage. Recheck production
-      `/api/health` after this code deploy. References for the existing S3
-      settings were added to the Railway worker without exposing their values;
-      the worker must redeploy before those references take effect. Managed
-      provider and Stripe secrets are absent, so signup must remain closed.
-      Configure those credentials, then verify `managedReady:true`, complete
-      an upload, and confirm staged audio deletion on success and expiry.
+      `/api/health` after deployment: it returns `ok:true`,
+      `managedReady:false`, and `objectStorage:"s3"`. Railway web and worker
+      are deployed from the audio-retention change; the worker now has the
+      shared S3 variable references. Signup remains closed because these
+      production values are absent: `MANAGED_DEEPGRAM_API_KEY`,
+      `MANAGED_ANTHROPIC_API_KEY`, `STRIPE_SECRET_KEY`,
+      `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HOSTED_PRO`, and
+      `STRIPE_PRICE_HOSTED_TEAM`. Configure them in Railway, then verify
+      `managedReady:true`, complete an upload, and confirm staged audio
+      deletion on success and expiry.
 - [ ] Run cross-platform helper CI on the exact release candidate. The latest
       recorded GitHub helper matrix passed for Linux, macOS, and Windows; repeat
       it against the tagged candidate before publishing native artifacts.
