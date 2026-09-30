@@ -62,10 +62,16 @@ Implementation plan:
       GPT-6 Luna; keep Deepgram/Anthropic configurable. Groq uses four-minute
       WAV chunks that fit the documented 25 MB free-tier upload cap and labels
       the remote channel generically because Groq does not diarize speakers.
-- [ ] Configure managed provider credentials and Stripe secret, webhook, and
-      hosted plan price IDs in Railway production; test checkout/webhook/portal
-      end to end before enabling paid plans. Current production service variable
-      inventory has none of these keys, so hosted readiness remains closed.
+- [x] Create live Stripe products/prices (Hosted Pro $12/mo, capped at 300
+      meetings; Hosted Team $39/mo flat per workspace, capped at 2,500) and the
+      `/api/v1/billing/webhook` endpoint; set `STRIPE_PRICE_HOSTED_PRO`,
+      `STRIPE_PRICE_HOSTED_TEAM`, and `STRIPE_WEBHOOK_SECRET` on the Railway
+      `web` service (2026-09-29).
+- [ ] Set `STRIPE_SECRET_KEY` on the Railway `web` service (restricted key:
+      Checkout Sessions + Customer portal sessions write, Prices read),
+      configure the Stripe Customer Portal, redeploy, and test
+      checkout/webhook/portal end to end before enabling paid plans. Hosted
+      readiness stays closed until then.
 - [x] Enforce managed upload checksums and streamed body limits; release failed
       processing reservations so retries do not burn successful-operation quota.
 - [x] Purge successful managed audio immediately and reap expired temporary

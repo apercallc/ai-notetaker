@@ -11,8 +11,8 @@ export const HOSTED_TRIAL_MEETINGS = 3;
 export const PLAN_MEETING_LIMITS: Record<ManagedPlan, number> = {
   local: 0,
   hosted_trial: HOSTED_TRIAL_MEETINGS,
-  hosted_pro: 1_000,
-  hosted_team: 10_000,
+  hosted_pro: 300,
+  hosted_team: 2_500,
 };
 
 const PLAN_LABELS: Record<ManagedPlan, string> = {

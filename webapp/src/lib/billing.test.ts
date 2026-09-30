@@ -455,8 +455,8 @@ describe("plan catalog", () => {
     try {
       const catalog = await getPlanCatalog();
       expect(catalog).toEqual([
-        { id: "hosted_pro", name: "Hosted Pro", priceId: "price_catalog_pro", meetingLimit: 1_000, priceLabel: "$19.50 / month" },
-        { id: "hosted_team", name: "Hosted Team", priceId: "price_catalog_team", meetingLimit: 10_000, priceLabel: "$49 / month" },
+        { id: "hosted_pro", name: "Hosted Pro", priceId: "price_catalog_pro", meetingLimit: 300, priceLabel: "$19.50 / month" },
+        { id: "hosted_team", name: "Hosted Team", priceId: "price_catalog_team", meetingLimit: 2_500, priceLabel: "$49 / month" },
       ]);
 
       // The next render is served from the price cache: only the Pro lookup ever hit Stripe.
