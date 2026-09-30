@@ -41,6 +41,7 @@ describe("Stripe checkout redirect safety", () => {
       const checkoutRequest = fetchSpy.mock.calls[0]?.[1];
       expect(checkoutRequest?.body).toBeInstanceOf(URLSearchParams);
       const checkoutForm = checkoutRequest?.body as URLSearchParams;
+      expect(checkoutForm.get("allow_promotion_codes")).toBe("true");
       expect(checkoutForm.get("metadata[workspaceId]")).toBe(workspaceId);
       expect(checkoutForm.get("subscription_data[metadata][workspaceId]")).toBe(workspaceId);
       await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_redirect", "https://evil.example/return", "https://notes.example.com/billing")).rejects.toThrow("configured APP_URL origin");

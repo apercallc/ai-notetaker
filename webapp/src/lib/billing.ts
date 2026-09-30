@@ -102,6 +102,7 @@ export async function createCheckoutSession(workspaceId: string, email: string, 
       "line_items[0][quantity]": "1",
       success_url: success,
       cancel_url: cancel,
+      allow_promotion_codes: "true",
       "metadata[workspaceId]": workspaceId,
       "subscription_data[metadata][workspaceId]": workspaceId,
     });
