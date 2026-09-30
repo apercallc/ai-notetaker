@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/currentUser";
-import { BillingError, cancelWorkspaceSubscription } from "@/lib/billing";
+import { deleteAccount, purgeWorkspace } from "@/lib/workspacePurge";
 import { getRequestContext } from "@/lib/requestContext";
 import { clearSessionCookie } from "@/lib/sessionCookie";
 import { changePassword } from "@/lib/accounts";
@@ -184,65 +184,26 @@ export async function deleteWorkspaceAction(formData: FormData): Promise<DeleteW
     return { ok: false, error: "Type the workspace name exactly to confirm." };
   }
 
-  // Stop billing first. If Stripe cannot cancel, keep the workspace so the
-  // customer is never left paying for data they can no longer reach.
-  try {
-    await cancelWorkspaceSubscription(session.workspaceId);
-  } catch (error) {
-    console.error("workspace deletion blocked: subscription cancellation failed", {
-      workspaceId: session.workspaceId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    const detail = error instanceof BillingError && error.message.startsWith("A checkout is in progress") ? ` ${error.message}` : " Cancel it under Billing, or try again in a moment.";
-    return { ok: false, error: `We couldn't cancel this workspace's subscription, so nothing was deleted.${detail}` };
+  const purged = await purgeWorkspace(session.workspaceId);
+  if (!purged.ok) return purged;
+
+  await clearSessionCookie();
+  redirect("/login");
+}
+
+export type DeleteAccountState = { ok: true } | { ok: false; error: string };
+
+/**
+ * "Delete my account". The person types their own email to confirm; the
+ * account id comes from the session, never the form.
+ */
+export async function deleteAccountAction(formData: FormData): Promise<DeleteAccountState> {
+  const session = await requireSession({ allowPasswordChange: true });
+  if (field(formData, "confirm").toLowerCase() !== session.email.toLowerCase()) {
+    return { ok: false, error: "Type your email address exactly to confirm." };
   }
-
-  const memberUserIds = (
-    await prisma.workspaceMembership.findMany({
-      where: { workspaceId: session.workspaceId },
-      select: { userId: true },
-    })
-  ).map((membership) => membership.userId);
-
-  // Legacy meetings have no Workspace foreign key. Gather every private
-  // object key up front, then delete the rows in ONE transaction so a
-  // mid-loop failure cannot leave a half-deleted workspace (some meetings
-  // gone, workspace still present, user confused about what happened).
-  // Object storage is cleaned up after the commit; a storage failure logs
-  // the orphaned keys for operator repair rather than rolling back a
-  // deletion the user already confirmed.
-  const meetings = await prisma.meeting.findMany({
-    where: { workspaceId: session.workspaceId },
-    select: { id: true, recordingObjectKey: true, uploads: { select: { objectKey: true, chunks: { select: { objectKey: true } } } } },
-  });
-  const objectKeys = meetings.flatMap((meeting) => [
-    meeting.recordingObjectKey,
-    ...meeting.uploads.flatMap((upload) => [upload.objectKey, ...upload.chunks.map((chunk) => chunk.objectKey)]),
-  ]).filter((key): key is string => Boolean(key));
-
-  await prisma.$transaction(async (tx) => {
-    // Deletes cascade from the workspace row to membership/subscription/
-    // upload/job/share rows, but legacy meetings have no Workspace relation,
-    // so they are removed explicitly — inside the same transaction.
-    await tx.meeting.deleteMany({ where: { workspaceId: session.workspaceId } });
-    await tx.workspace.delete({ where: { id: session.workspaceId } });
-    // An account whose last workspace is gone can never sign in again and
-    // would squat its email address — remove it.
-    for (const userId of memberUserIds) {
-      await tx.user.deleteMany({ where: { id: userId, memberships: { none: {} } } });
-    }
-  });
-
-  const cleanup = await Promise.allSettled(objectKeys.map((key) => deleteObject(key)));
-  const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-  if (failures.length) {
-    console.error("workspace deletion object cleanup failed", {
-      workspaceId: session.workspaceId,
-      failedObjects: failures.length,
-      firstError: failures[0]?.reason instanceof Error ? failures[0].reason.message : String(failures[0]?.reason),
-    });
-  }
-
+  const deleted = await deleteAccount(session.userId);
+  if (!deleted.ok) return deleted;
   await clearSessionCookie();
   redirect("/login");
 }

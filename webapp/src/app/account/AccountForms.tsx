@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import {
   changePasswordAction,
   createApiTokenAction,
+  deleteAccountAction,
   deleteWorkspaceAction,
   disconnectGoogleAction,
   leaveWorkspaceAction,
@@ -13,6 +14,7 @@ import {
   switchWorkspaceAction,
   type ChangePasswordState,
   type CreateApiTokenState,
+  type DeleteAccountState,
   type DeleteWorkspaceState,
   type LeaveWorkspaceState,
 } from "./actions";
@@ -27,6 +29,9 @@ async function callCreateToken(previous: CreateApiTokenState | null, formData: F
 }
 async function callDeleteWorkspace(previous: DeleteWorkspaceState | null, formData: FormData): Promise<DeleteWorkspaceState> {
   return deleteWorkspaceAction(formData);
+}
+async function callDeleteAccount(previous: DeleteAccountState | null, formData: FormData): Promise<DeleteAccountState> {
+  return deleteAccountAction(formData);
 }
 async function callLeaveWorkspace(previous: LeaveWorkspaceState | null, formData: FormData): Promise<LeaveWorkspaceState> {
   return leaveWorkspaceAction(formData);
@@ -226,6 +231,23 @@ export function DeleteWorkspaceForm({ workspaceName }: { workspaceName: string }
       <input id="delete-confirm" name="confirm" type="text" className="text-input" autoComplete="off" required />
       <button type="submit" className="button button-danger" disabled={pending} aria-busy={pending}>
         {pending ? "Deleting…" : "Delete workspace"}
+      </button>
+      {result?.ok === false && (
+        <p role="alert" className="error-text">
+          {result.error}
+        </p>
+      )}
+    </form>
+  );
+}
+export function DeleteAccountForm({ email }: { email: string }) {
+  const [result, formAction, pending] = useActionState<DeleteAccountState | null, FormData>(callDeleteAccount, null);
+  return (
+    <form action={formAction} className="login-form">
+      <label htmlFor="delete-account-confirm">Type “{email}” to permanently delete your account</label>
+      <input id="delete-account-confirm" name="confirm" type="email" className="text-input" autoComplete="off" required />
+      <button type="submit" className="button button-danger" disabled={pending} aria-busy={pending}>
+        {pending ? "Deleting…" : "Delete my account"}
       </button>
       {result?.ok === false && (
         <p role="alert" className="error-text">

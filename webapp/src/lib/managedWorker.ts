@@ -89,6 +89,10 @@ export interface ManagedJobClaim {
 
 /** A crashed worker must not strand a hosted meeting forever. */
 export const MANAGED_JOB_LEASE_MS = 15 * 60 * 1_000;
+/** A live worker renews its lease this often, so long recordings are never reclaimed mid-run. */
+export const MANAGED_JOB_HEARTBEAT_MS = 2 * 60 * 1_000;
+/** Claims allowed before a stalled job is failed instead of reclaimed again. */
+export const MANAGED_JOB_MAX_ATTEMPTS = 4;
 const PROVIDER_REQUEST_TIMEOUT_MS = 60_000;
 const PROVIDER_MAX_ATTEMPTS = 3;
 
@@ -586,18 +590,39 @@ export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
   await expireManagedUploads();
   await expireManagedMeetings();
   const staleBefore = new Date(Date.now() - MANAGED_JOB_LEASE_MS);
+  await failExhaustedJobs(staleBefore);
   const job = await prisma.processingJob.findFirst({
     where: {
       OR: [
         { status: "queued" },
-        { status: "processing", startedAt: { lt: staleBefore } },
-        { status: "processing", startedAt: null },
+        { status: "processing", startedAt: { lt: staleBefore }, attempts: { lt: MANAGED_JOB_MAX_ATTEMPTS } },
+        { status: "processing", startedAt: null, attempts: { lt: MANAGED_JOB_MAX_ATTEMPTS } },
       ],
     },
     orderBy: { createdAt: "asc" },
     select: { id: true, workspaceId: true },
   });
   return job ? { jobId: job.id, workspaceId: job.workspaceId } : null;
+}
+
+/**
+ * A job whose worker keeps dying would otherwise be reclaimed forever, paying
+ * the providers each time. Past the attempt cap it is failed (the user can
+ * retry manually) and the meeting unit it reserved is given back.
+ */
+async function failExhaustedJobs(staleBefore: Date): Promise<void> {
+  const exhausted = await prisma.processingJob.findMany({
+    where: { status: "processing", attempts: { gte: MANAGED_JOB_MAX_ATTEMPTS }, OR: [{ startedAt: { lt: staleBefore } }, { startedAt: null }] },
+    select: { id: true, workspaceId: true, idempotencyKey: true },
+    take: 20,
+  });
+  for (const job of exhausted) {
+    const failed = await prisma.processingJob.updateMany({
+      where: { id: job.id, status: "processing", attempts: { gte: MANAGED_JOB_MAX_ATTEMPTS } },
+      data: { status: "error", leaseToken: null, errorMessage: "Processing did not finish after several attempts. Use Retry on this meeting to try again." },
+    });
+    if (failed.count === 1) await releaseMeetingProcessing(job.workspaceId, job.idempotencyKey).catch(() => undefined);
+  }
 }
 
 export async function runManagedJob(workspaceId: string, jobId: string): Promise<void> {
@@ -624,11 +649,11 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
         workspaceId,
         OR: [
           { status: "queued" },
-          { status: "processing", startedAt: { lt: staleBefore } },
-          { status: "processing", startedAt: null },
+          { status: "processing", startedAt: { lt: staleBefore }, attempts: { lt: MANAGED_JOB_MAX_ATTEMPTS } },
+          { status: "processing", startedAt: null, attempts: { lt: MANAGED_JOB_MAX_ATTEMPTS } },
         ],
       },
-      data: { status: "processing", startedAt: claimedAt, leaseToken, errorMessage: null },
+      data: { status: "processing", startedAt: claimedAt, leaseToken, errorMessage: null, attempts: { increment: 1 } },
     });
     if (claimed.count !== 1) return null;
     return tx.processingJob.findUnique({
@@ -641,6 +666,14 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
   });
   if (!job) throw new ManagedWorkerError("job not found or already running");
   let costMicros = 0;
+  // Renew the lease while we work. Transcribing a long recording can outlast
+  // the lease window; without this a second worker would reclaim and redo it.
+  const heartbeat = setInterval(() => {
+    void prisma.processingJob
+      .updateMany({ where: { id: job.id, workspaceId, status: "processing", leaseToken }, data: { startedAt: new Date() } })
+      .catch(() => undefined);
+  }, MANAGED_JOB_HEARTBEAT_MS);
+  heartbeat.unref?.();
   try {
     const startedAt = job.meeting.startedAt;
     const channelResults: Record<"mic" | "speaker", TranscriptionResult | null> = { mic: null, speaker: null };
@@ -743,5 +776,7 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
       });
     }
     throw error;
+  } finally {
+    clearInterval(heartbeat);
   }
 }

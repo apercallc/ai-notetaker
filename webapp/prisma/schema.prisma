@@ -218,6 +218,8 @@ model ProcessingJob {
   createdAt      DateTime @default(now())
   startedAt      DateTime?
   leaseToken     String?
+  // Times a worker has claimed this job; stalled jobs stop being reclaimed at the cap.
+  attempts       Int      @default(0)
   completedAt    DateTime?
   updatedAt      DateTime @updatedAt
 

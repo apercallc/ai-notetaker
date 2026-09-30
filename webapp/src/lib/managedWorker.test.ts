@@ -522,3 +522,28 @@ describe("managed worker pipeline", () => {
     expect(job.errorMessage).not.toContain("secret-host");
   });
 });
+
+describe("managed worker attempt cap", () => {
+  it("fails a job that keeps stalling instead of reclaiming it forever, and gives the unit back", async () => {
+    const workspaceId = randomUUID();
+    const meetingId = randomUUID();
+    const uploadId = randomUUID();
+    try {
+      await prisma.workspace.create({ data: { id: workspaceId, name: "Attempt cap workspace" } });
+      await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_pro", status: "active" } });
+      await prisma.meeting.create({ data: { id: meetingId, userId: "attempt-cap-user", workspaceId, title: "Poison recording", startedAt: new Date("2026-09-24T15:00:00.000Z"), endedAt: new Date("2026-09-24T15:30:00.000Z"), summary: "" } });
+      await prisma.managedUpload.create({ data: { id: uploadId, workspaceId, meetingId, idempotencyKey: `up-${uploadId}`, totalChunks: 1, totalBytes: 1, status: "complete", expiresAt: new Date(Date.now() + 3_600_000), completedAt: new Date() } });
+      const job = await enqueueManagedJob(workspaceId, meetingId, uploadId, `job-${meetingId}`);
+      expect((await getEntitlements(workspaceId)).used).toBe(1);
+
+      // A worker that died mid-run four times: lease long expired, cap reached.
+      await prisma.processingJob.update({ where: { id: job.id }, data: { status: "processing", attempts: 4, startedAt: new Date(Date.now() - 3 * 60 * 60 * 1_000), leaseToken: "dead-worker" } });
+      const next = await nextManagedJob();
+      expect(next?.jobId).not.toBe(job.id);
+      expect(await prisma.processingJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "error", leaseToken: null, errorMessage: expect.stringContaining("several attempts") });
+      expect((await getEntitlements(workspaceId)).used).toBe(0);
+    } finally {
+      await prisma.workspace.delete({ where: { id: workspaceId } }).catch(() => undefined);
+    }
+  });
+});

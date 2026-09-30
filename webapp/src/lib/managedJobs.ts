@@ -407,7 +407,7 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
     // request already restarted and a worker has begun.
     const revived = await prisma.processingJob.updateMany({
       where: { id: existing.id, status: "error" },
-      data: { status: "queued", errorMessage: null, startedAt: null, leaseToken: null, completedAt: null },
+      data: { status: "queued", errorMessage: null, startedAt: null, leaseToken: null, completedAt: null, attempts: 0 },
     });
     // count 0 means another retry won; the shared idempotency key already
     // holds the single reservation, so there is nothing to undo here.

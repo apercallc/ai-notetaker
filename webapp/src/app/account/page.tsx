@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { describeUserAgent, listUserSessions } from "@/lib/sessions";
 import { listApiTokens } from "@/lib/apiTokens";
 import { listUserWorkspaces } from "@/lib/workspaces";
-import { ApiTokenPanel, ChangePasswordForm, DeleteWorkspaceForm, GoogleConnectionPanel, LeaveWorkspaceForm, SessionList, WorkspaceSwitcher } from "./AccountForms";
+import { ApiTokenPanel, ChangePasswordForm, DeleteAccountForm, DeleteWorkspaceForm, GoogleConnectionPanel, LeaveWorkspaceForm, SessionList, WorkspaceSwitcher } from "./AccountForms";
 import { googleConnectionStatus } from "@/lib/googleIntegration";
 import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
 
@@ -131,6 +131,14 @@ export default async function AccountPage({
           <LeaveWorkspaceForm workspaceName={workspace.name} />
         </>
       )}
+
+      <h2 className="section-title">Delete my account</h2>
+      <p className="muted-copy">
+        Permanently deletes your account, your Google connection, and every workspace you own alone (with its meetings
+        and any active subscription). Workspaces shared with others are left in place and you are simply removed.
+        Export your meetings first — this cannot be undone.
+      </p>
+      <DeleteAccountForm email={session.email} />
     </div>
   );
 }
