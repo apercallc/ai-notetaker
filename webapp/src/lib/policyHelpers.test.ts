@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, passwordProblem, passwordProblemMessage, type PasswordProblem } from "./passwordPolicy";
 import { clientIpFromHeaders, contextFromHeaders, contextFromRequest, protocolFromHeaders } from "./requestContext";
 import { allowUnverifiedSignup, emailVerificationRequired, signupAvailability } from "./signupPolicy";
+import { isSerializationConflict } from "./usageLedger";
 
 const headersOf = (values: Record<string, string>) => (name: string): string | null => values[name.toLowerCase()] ?? null;
 
@@ -107,5 +108,24 @@ describe("signup policy", () => {
     expect(emailVerificationRequired(optOut)).toBe(false);
     expect(signupAvailability(optOut)).toEqual({ allowed: true });
     expect(emailVerificationRequired(ready)).toBe(true);
+  });
+});
+
+describe("serializable transaction conflicts", () => {
+  it("recognizes both the Prisma engine code and the pg driver adapter's error", () => {
+    expect(isSerializationConflict({ code: "P2034" })).toBe(true);
+    const adapter = Object.assign(new Error("TransactionWriteConflict"), { name: "DriverAdapterError" });
+    expect(isSerializationConflict(adapter)).toBe(true);
+    expect(isSerializationConflict(Object.assign(new Error("could not serialize access due to concurrent update"), { name: "DriverAdapterError" }))).toBe(true);
+    expect(isSerializationConflict(Object.assign(new Error("deadlock detected"), { name: "DriverAdapterError" }))).toBe(true);
+  });
+
+  it("does not retry ordinary failures, including a genuine quota refusal", () => {
+    expect(isSerializationConflict(new Error("managed processing entitlement is unavailable"))).toBe(false);
+    expect(isSerializationConflict(Object.assign(new Error("connection refused"), { name: "DriverAdapterError" }))).toBe(false);
+    expect(isSerializationConflict(Object.assign(new Error("TransactionWriteConflict"), { name: "Error" }))).toBe(false);
+    expect(isSerializationConflict({ code: "P2002" })).toBe(false);
+    expect(isSerializationConflict(null)).toBe(false);
+    expect(isSerializationConflict("TransactionWriteConflict")).toBe(false);
   });
 });

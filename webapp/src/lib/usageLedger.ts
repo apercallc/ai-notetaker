@@ -123,6 +123,21 @@ export async function assignHostedTrial(client: Prisma.TransactionClient | typeo
   });
 }
 
+/**
+ * Whether a database error is a serializable-transaction conflict worth retrying.
+ * Prisma's own engine reports it as a known request error with code P2034, but
+ * the pg driver adapter this app uses surfaces it as a DriverAdapterError whose
+ * message is "TransactionWriteConflict" and which has no code at all. Matching
+ * only P2034 meant the retry loop never ran, so a legitimate reservation could
+ * fail under concurrent uploads and look like an exhausted quota.
+ */
+export function isSerializationConflict(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { code, name, message } = error as { code?: unknown; name?: unknown; message?: unknown };
+  if (code === "P2034") return true;
+  return name === "DriverAdapterError" && typeof message === "string" && /TransactionWriteConflict|could not serialize|deadlock detected/iu.test(message);
+}
+
 /** Serializable conflicts are expected when several uploads for one workspace reserve at once. */
 const RESERVATION_ATTEMPTS = 8;
 
@@ -179,7 +194,7 @@ export async function reserveMeetingProcessing(workspaceId: string, idempotencyK
       // bounded retry preserves the API's idempotent behavior without making
       // a transient conflict visible as a quota failure. The short jittered
       // pause keeps simultaneous uploads from colliding again in lockstep.
-      if ((error as { code?: string }).code === "P2034" && attempt < RESERVATION_ATTEMPTS - 1) {
+      if (isSerializationConflict(error) && attempt < RESERVATION_ATTEMPTS - 1) {
         await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1) + Math.random() * 20));
         continue;
       }
