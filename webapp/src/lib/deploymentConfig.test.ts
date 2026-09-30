@@ -18,6 +18,8 @@ const completeManagedEnv = {
   R2_ACCESS_KEY_ID: "r2-access-key",
   R2_SECRET_ACCESS_KEY: "r2-secret-key",
   MANAGED_WORKER_TOKEN: "worker-token",
+  MANAGED_TRANSCRIPTION_PROVIDER: "deepgram",
+  MANAGED_SUMMARY_PROVIDER: "anthropic",
   MANAGED_DEEPGRAM_API_KEY: "deepgram-key",
   MANAGED_ANTHROPIC_API_KEY: "anthropic-key",
   STRIPE_SECRET_KEY: "stripe-secret",
@@ -69,14 +71,38 @@ describe("managed URL configuration", () => {
       S3_ACCESS_KEY_ID: "s3-access-key",
       S3_SECRET_ACCESS_KEY: "s3-secret-key",
       MANAGED_WORKER_TOKEN: "worker-token",
-      MANAGED_DEEPGRAM_API_KEY: "deepgram-key",
-      MANAGED_ANTHROPIC_API_KEY: "anthropic-key",
+      MANAGED_GROQ_API_KEY: "groq-key",
+      MANAGED_OPENAI_API_KEY: "openai-key",
       STRIPE_SECRET_KEY: "stripe-secret",
       STRIPE_WEBHOOK_SECRET: "stripe-webhook",
       STRIPE_PRICE_HOSTED_PRO: "price-pro",
       STRIPE_PRICE_HOSTED_TEAM: "price-team",
     });
     expect(status).toEqual({ enabled: true, ready: true, objectStorage: "s3", missing: [] });
+  });
+
+  it("selects provider credentials from the managed configuration", () => {
+    const status = managedConfigurationStatus({
+      ...completeManagedEnv,
+      MANAGED_TRANSCRIPTION_PROVIDER: "groq",
+      MANAGED_SUMMARY_PROVIDER: "openai",
+      MANAGED_GROQ_API_KEY: "groq-key",
+      MANAGED_OPENAI_API_KEY: "openai-key",
+    });
+    expect(status.ready).toBe(true);
+    expect(status.missing).not.toContain("MANAGED_DEEPGRAM_API_KEY");
+    expect(status.missing).not.toContain("MANAGED_ANTHROPIC_API_KEY");
+  });
+
+  it("keeps managed readiness closed for unsupported provider names", () => {
+    const status = managedConfigurationStatus({
+      ...completeManagedEnv,
+      MANAGED_TRANSCRIPTION_PROVIDER: "unknown",
+      MANAGED_SUMMARY_PROVIDER: "unknown",
+    });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("MANAGED_TRANSCRIPTION_PROVIDER (groq or deepgram)");
+    expect(status.missing).toContain("MANAGED_SUMMARY_PROVIDER (openai or anthropic)");
   });
 
   it("requires a private shared bucket for temporary managed audio staging", () => {

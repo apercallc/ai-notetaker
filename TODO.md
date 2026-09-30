@@ -58,6 +58,14 @@ Implementation plan:
       job succeeds and expire failed/abandoned staging within 24 hours. R2 and
       S3 backends remain supported; neither is a permanent recording library.
 - [x] Implement hosted billing, Stripe retry idempotency, and entitlement enforcement.
+- [x] Default managed processing to lower-cost Groq Whisper Large V3 Turbo and
+      GPT-6 Luna; keep Deepgram/Anthropic configurable. Groq uses four-minute
+      WAV chunks that fit the documented 25 MB free-tier upload cap and labels
+      the remote channel generically because Groq does not diarize speakers.
+- [ ] Configure managed provider credentials and Stripe secret, webhook, and
+      hosted plan price IDs in Railway production; test checkout/webhook/portal
+      end to end before enabling paid plans. Current production service variable
+      inventory has none of these keys, so hosted readiness remains closed.
 - [x] Enforce managed upload checksums and streamed body limits; release failed
       processing reservations so retries do not burn successful-operation quota.
 - [x] Purge successful managed audio immediately and reap expired temporary

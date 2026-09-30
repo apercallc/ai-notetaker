@@ -13,10 +13,13 @@ import {
   ManagedWorkerError,
   formatSummaryText,
   isPlaceholderTitle,
+  managedSummaryProvider,
   managedSummaryModel,
+  managedTranscriptionProvider,
   mergeUtterances,
   nextManagedJob,
   parseDeepgramUtterances,
+  parseGroqUtterances,
   parseSummary,
   providerRequest,
   runManagedJob,
@@ -110,9 +113,33 @@ describe("managed worker response parsing", () => {
   });
 
   it("uses one configurable summary model constant that is not the retired alias", () => {
+    expect(managedSummaryModel({})).toBe("gpt-6-luna");
     expect(managedSummaryModel({})).toBe(DEFAULT_MANAGED_SUMMARY_MODEL);
+    expect(managedSummaryModel({ MANAGED_SUMMARY_PROVIDER: "anthropic" })).toBe("claude-sonnet-5");
     expect(managedSummaryModel({ MANAGED_SUMMARY_MODEL: "  custom-model " })).toBe("custom-model");
     expect(DEFAULT_MANAGED_SUMMARY_MODEL).not.toContain("claude-3");
+  });
+
+  it("defaults hosted jobs to Groq and OpenAI but allows Deepgram and Anthropic overrides", () => {
+    expect(managedTranscriptionProvider({})).toBe("groq");
+    expect(managedTranscriptionProvider({ MANAGED_TRANSCRIPTION_PROVIDER: "deepgram" })).toBe("deepgram");
+    expect(managedSummaryProvider({})).toBe("openai");
+    expect(managedSummaryProvider({ MANAGED_SUMMARY_PROVIDER: "anthropic" })).toBe("anthropic");
+    expect(() => managedTranscriptionProvider({ MANAGED_TRANSCRIPTION_PROVIDER: "unknown" })).toThrow("must be groq or deepgram");
+    expect(() => managedSummaryProvider({ MANAGED_SUMMARY_PROVIDER: "unknown" })).toThrow("must be openai or anthropic");
+  });
+
+  it("parses Groq segments with an offset and the generic channel speaker label", () => {
+    expect(parseGroqUtterances({ duration: 4.5, segments: [
+      { start: 0.25, end: 1.5, text: " hello " },
+      { start: 2, end: 3, text: "world" },
+    ] }, "them", 8_000)).toEqual({
+      durationMs: 4_500,
+      utterances: [
+        { speaker: "them", text: "hello", startMs: 8_250, endMs: 9_500 },
+        { speaker: "them", text: "world", startMs: 10_000, endMs: 11_000 },
+      ],
+    });
   });
 
   it("only replaces auto-generated titles", () => {
@@ -134,12 +161,16 @@ describe("managed worker lifecycle", () => {
     const uploadId = randomUUID();
     const storageDir = await mkdtemp(path.join(os.tmpdir(), "ai-notetaker-managed-worker-"));
     const previousStorageDir = process.env.OBJECT_STORAGE_DIR;
+    const previousTranscriptionProvider = process.env.MANAGED_TRANSCRIPTION_PROVIDER;
+    const previousSummaryProvider = process.env.MANAGED_SUMMARY_PROVIDER;
     const previousDeepgramKey = process.env.MANAGED_DEEPGRAM_API_KEY;
-    const previousAnthropicKey = process.env.MANAGED_ANTHROPIC_API_KEY;
+    const previousOpenAIKey = process.env.MANAGED_OPENAI_API_KEY;
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("provider unavailable", { status: 503 }));
     process.env.OBJECT_STORAGE_DIR = storageDir;
+    process.env.MANAGED_TRANSCRIPTION_PROVIDER = "deepgram";
+    process.env.MANAGED_SUMMARY_PROVIDER = "openai";
     process.env.MANAGED_DEEPGRAM_API_KEY = "test-deepgram-key";
-    process.env.MANAGED_ANTHROPIC_API_KEY = "test-anthropic-key";
+    process.env.MANAGED_OPENAI_API_KEY = "test-openai-key";
 
     try {
       await prisma.workspace.create({ data: { id: workspaceId, name: "Worker test workspace" } });
@@ -190,10 +221,14 @@ describe("managed worker lifecycle", () => {
       await rm(storageDir, { recursive: true, force: true });
       if (previousStorageDir === undefined) delete process.env.OBJECT_STORAGE_DIR;
       else process.env.OBJECT_STORAGE_DIR = previousStorageDir;
+      if (previousTranscriptionProvider === undefined) delete process.env.MANAGED_TRANSCRIPTION_PROVIDER;
+      else process.env.MANAGED_TRANSCRIPTION_PROVIDER = previousTranscriptionProvider;
+      if (previousSummaryProvider === undefined) delete process.env.MANAGED_SUMMARY_PROVIDER;
+      else process.env.MANAGED_SUMMARY_PROVIDER = previousSummaryProvider;
       if (previousDeepgramKey === undefined) delete process.env.MANAGED_DEEPGRAM_API_KEY;
       else process.env.MANAGED_DEEPGRAM_API_KEY = previousDeepgramKey;
-      if (previousAnthropicKey === undefined) delete process.env.MANAGED_ANTHROPIC_API_KEY;
-      else process.env.MANAGED_ANTHROPIC_API_KEY = previousAnthropicKey;
+      if (previousOpenAIKey === undefined) delete process.env.MANAGED_OPENAI_API_KEY;
+      else process.env.MANAGED_OPENAI_API_KEY = previousOpenAIKey;
       fetchSpy.mockRestore();
     }
   });
@@ -204,12 +239,16 @@ describe("managed worker lifecycle", () => {
     const uploadId = randomUUID();
     const storageDir = await mkdtemp(path.join(os.tmpdir(), "ai-notetaker-managed-worker-claim-"));
     const previousStorageDir = process.env.OBJECT_STORAGE_DIR;
+    const previousTranscriptionProvider = process.env.MANAGED_TRANSCRIPTION_PROVIDER;
+    const previousSummaryProvider = process.env.MANAGED_SUMMARY_PROVIDER;
     const previousDeepgramKey = process.env.MANAGED_DEEPGRAM_API_KEY;
-    const previousAnthropicKey = process.env.MANAGED_ANTHROPIC_API_KEY;
+    const previousOpenAIKey = process.env.MANAGED_OPENAI_API_KEY;
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("provider unavailable", { status: 503 }));
     process.env.OBJECT_STORAGE_DIR = storageDir;
+    process.env.MANAGED_TRANSCRIPTION_PROVIDER = "deepgram";
+    process.env.MANAGED_SUMMARY_PROVIDER = "openai";
     process.env.MANAGED_DEEPGRAM_API_KEY = "test-deepgram-key";
-    process.env.MANAGED_ANTHROPIC_API_KEY = "test-anthropic-key";
+    process.env.MANAGED_OPENAI_API_KEY = "test-openai-key";
 
     try {
       await prisma.workspace.create({ data: { id: workspaceId, name: "Concurrent worker workspace" } });
@@ -255,10 +294,14 @@ describe("managed worker lifecycle", () => {
       await rm(storageDir, { recursive: true, force: true });
       if (previousStorageDir === undefined) delete process.env.OBJECT_STORAGE_DIR;
       else process.env.OBJECT_STORAGE_DIR = previousStorageDir;
+      if (previousTranscriptionProvider === undefined) delete process.env.MANAGED_TRANSCRIPTION_PROVIDER;
+      else process.env.MANAGED_TRANSCRIPTION_PROVIDER = previousTranscriptionProvider;
+      if (previousSummaryProvider === undefined) delete process.env.MANAGED_SUMMARY_PROVIDER;
+      else process.env.MANAGED_SUMMARY_PROVIDER = previousSummaryProvider;
       if (previousDeepgramKey === undefined) delete process.env.MANAGED_DEEPGRAM_API_KEY;
       else process.env.MANAGED_DEEPGRAM_API_KEY = previousDeepgramKey;
-      if (previousAnthropicKey === undefined) delete process.env.MANAGED_ANTHROPIC_API_KEY;
-      else process.env.MANAGED_ANTHROPIC_API_KEY = previousAnthropicKey;
+      if (previousOpenAIKey === undefined) delete process.env.MANAGED_OPENAI_API_KEY;
+      else process.env.MANAGED_OPENAI_API_KEY = previousOpenAIKey;
       fetchSpy.mockRestore();
     }
   });
@@ -273,15 +316,17 @@ describe("managed worker pipeline", () => {
   let jobId: string;
   const saved: Record<string, string | undefined> = {};
 
-  async function setup(options: { title?: string; channels?: ("mic" | "speaker")[] } = {}) {
+  async function setup(options: { title?: string; channels?: ("mic" | "speaker")[]; audioData?: number[] } = {}) {
     workspaceId = randomUUID();
     meetingId = randomUUID();
     uploadId = randomUUID();
     storageDir = await mkdtemp(path.join(os.tmpdir(), "ai-notetaker-managed-pipeline-"));
-    for (const name of ["OBJECT_STORAGE_DIR", "MANAGED_DEEPGRAM_API_KEY", "MANAGED_ANTHROPIC_API_KEY", "MANAGED_SUMMARY_MODEL"]) saved[name] = process.env[name];
+    for (const name of ["OBJECT_STORAGE_DIR", "MANAGED_TRANSCRIPTION_PROVIDER", "MANAGED_DEEPGRAM_API_KEY", "MANAGED_GROQ_API_KEY", "MANAGED_SUMMARY_PROVIDER", "MANAGED_OPENAI_API_KEY", "MANAGED_ANTHROPIC_API_KEY", "MANAGED_SUMMARY_MODEL"]) saved[name] = process.env[name];
     process.env.OBJECT_STORAGE_DIR = storageDir;
+    process.env.MANAGED_TRANSCRIPTION_PROVIDER = "deepgram";
     process.env.MANAGED_DEEPGRAM_API_KEY = "test-deepgram-key";
-    process.env.MANAGED_ANTHROPIC_API_KEY = "test-anthropic-key";
+    process.env.MANAGED_SUMMARY_PROVIDER = "openai";
+    process.env.MANAGED_OPENAI_API_KEY = "test-openai-key";
     delete process.env.MANAGED_SUMMARY_MODEL;
     await prisma.workspace.create({ data: { id: workspaceId, name: "Pipeline workspace" } });
     await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_pro", status: "active" } });
@@ -289,13 +334,14 @@ describe("managed worker pipeline", () => {
       data: { id: meetingId, userId: "pipeline-user", workspaceId, title: options.title ?? "Meeting on 2026-09-24", startedAt: STARTED_AT, endedAt: new Date("2026-09-24T15:00:05.000Z"), summary: "" },
     });
     const channels = options.channels ?? ["mic", "speaker"];
+    const audioData = options.audioData ?? channels.map((_, index) => index + 1);
     await prisma.managedUpload.create({
-      data: { id: uploadId, workspaceId, meetingId, idempotencyKey: `upload-${uploadId}`, totalChunks: channels.length, totalBytes: channels.length, status: "complete", expiresAt: new Date(Date.now() + 3_600_000), completedAt: new Date() },
+      data: { id: uploadId, workspaceId, meetingId, idempotencyKey: `upload-${uploadId}`, totalChunks: channels.length, totalBytes: channels.length * audioData.length, status: "complete", expiresAt: new Date(Date.now() + 3_600_000), completedAt: new Date() },
     });
     for (const [index, channel] of channels.entries()) {
       const objectKey = `uploads/${workspaceId}/${uploadId}/${index}-pipeline-${channel}.chunk`;
-      await putObject(objectKey, new Uint8Array([index + 1]));
-      await prisma.uploadChunk.create({ data: { uploadId, chunkIndex: index, channel, byteLength: 1, checksum: `pipeline-${channel}`, objectKey } });
+      await putObject(objectKey, new Uint8Array(audioData));
+      await prisma.uploadChunk.create({ data: { uploadId, chunkIndex: index, channel, byteLength: audioData.length, checksum: `pipeline-${channel}`, objectKey } });
     }
     jobId = (await enqueueManagedJob(workspaceId, meetingId, uploadId, `job-${meetingId}`)).id;
   }
@@ -310,21 +356,52 @@ describe("managed worker pipeline", () => {
     vi.restoreAllMocks();
   });
 
-  function mockProviders(handlers: { deepgram: (call: number, url: string) => unknown; anthropic?: () => Response }) {
+  function mockProviders(handlers: { deepgram?: (call: number, url: string) => unknown; groq?: (call: number, init?: RequestInit) => Response; openai?: () => Response }) {
     const calls: { url: string; init?: RequestInit }[] = [];
     let deepgramCalls = 0;
+    let groqCalls = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       calls.push({ url, init });
       if (url.includes("api.deepgram.com")) {
         deepgramCalls += 1;
-        return new Response(JSON.stringify(handlers.deepgram(deepgramCalls, url)), { status: 200 });
+        return new Response(JSON.stringify(handlers.deepgram?.(deepgramCalls, url) ?? {}), { status: 200 });
       }
-      if (url.includes("api.anthropic.com") && handlers.anthropic) return handlers.anthropic();
+      if (url.includes("api.groq.com") && handlers.groq) return handlers.groq(++groqCalls, init);
+      if (url.includes("api.openai.com/v1/responses") && handlers.openai) return handlers.openai();
       return new Response("unexpected provider", { status: 500 });
     });
     return calls;
   }
+
+  it("sends bounded WAV audio to Groq and stores generic remote speaker labels", async () => {
+    await setup({ channels: ["mic", "speaker"], audioData: [0, 0, 0, 0] });
+    process.env.MANAGED_TRANSCRIPTION_PROVIDER = "groq";
+    process.env.MANAGED_GROQ_API_KEY = "test-groq-key";
+    const calls = mockProviders({
+      groq: (_call, init) => {
+        const form = init?.body as FormData;
+        const file = form.get("file") as File;
+        expect(form.get("model")).toBe("whisper-large-v3-turbo");
+        expect(form.get("response_format")).toBe("verbose_json");
+        expect(file.type).toBe("audio/wav");
+        expect(file.size).toBe(48);
+        return new Response(JSON.stringify({ duration: 1, segments: [{ start: 0, end: 0.5, text: "hello from the call" }] }), { status: 200 });
+      },
+      openai: () => new Response(JSON.stringify({
+        status: "completed",
+        usage: { input_tokens: 100, output_tokens: 50 },
+        output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ title: "Call notes", overview: "A call took place.", key_points: [], decisions: [], action_items: [] }) }] }],
+      }), { status: 200 }),
+    });
+
+    await runManagedJob(workspaceId, jobId);
+
+    expect(calls.filter((call) => call.url.includes("api.groq.com"))).toHaveLength(2);
+    const meeting = await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId }, include: { transcript: { orderBy: { order: "asc" } } } });
+    expect(meeting.transcript.map(({ speaker, text }) => [speaker, text])).toEqual([["you", "hello from the call"], ["them", "hello from the call"]]);
+    expect(meeting.endedAt.toISOString()).toBe("2026-09-24T15:00:05.000Z");
+  });
 
   it("stores chronological diarized utterances, the recording duration, a generated title, structured notes and cost", async () => {
     await setup();
@@ -334,15 +411,16 @@ describe("managed worker pipeline", () => {
       deepgram: (call) => call === 1
         ? { metadata: { duration: 65 }, results: { utterances: [{ start: 12, end: 15, transcript: "I will send the draft" }, { start: 61, end: 64, transcript: "Thanks everyone" }] } }
         : { metadata: { duration: 64 }, results: { utterances: [{ start: 2, end: 8, transcript: "Welcome, let's start", speaker: 0 }, { start: 20, end: 25, transcript: "Please send it by Friday", speaker: 1 }] } },
-      anthropic: () => new Response(JSON.stringify({
+      openai: () => new Response(JSON.stringify({
+        status: "completed",
         usage: { input_tokens: 1_000, output_tokens: 200 },
-        content: [{ type: "tool_use", name: "record_meeting_notes", input: {
+        output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
           title: "Draft review and Friday deadline",
           overview: "The draft is due Friday.",
           key_points: ["Draft owed by Friday"],
           decisions: ["Ship on Friday"],
           action_items: [{ text: "Send the draft", owner: "You", due: "2026-09-25" }],
-        } }],
+        }) }] }],
       }), { status: 200 }),
     });
 
@@ -350,10 +428,17 @@ describe("managed worker pipeline", () => {
 
     const deepgramUrl = calls.find((call) => call.url.includes("deepgram"))!.url;
     for (const parameter of ["utterances=true", "smart_format=true", "diarize=true", "model=nova-3"]) expect(deepgramUrl).toContain(parameter);
-    const anthropicBody = JSON.parse(String(calls.find((call) => call.url.includes("anthropic"))!.init!.body)) as { model: string; tools: { name: string }[]; messages: { content: string }[] };
-    expect(anthropicBody.model).toBe(DEFAULT_MANAGED_SUMMARY_MODEL);
-    expect(anthropicBody.tools[0]?.name).toBe("record_meeting_notes");
-    expect(anthropicBody.messages[0]?.content).toContain("[00:02] Them 1: Welcome, let's start");
+    const openaiCall = calls.find((call) => call.url.includes("api.openai.com/v1/responses"))!;
+    const openaiBody = JSON.parse(String(openaiCall.init!.body)) as {
+      model: string;
+      store: boolean;
+      text: { format: { type: string; strict: boolean; schema: unknown } };
+      input: { role: string; content: { type: string; text: string }[] }[];
+    };
+    expect(openaiBody.model).toBe(DEFAULT_MANAGED_SUMMARY_MODEL);
+    expect(openaiBody.store).toBe(false);
+    expect(openaiBody.text.format).toMatchObject({ type: "json_schema", strict: true });
+    expect(openaiBody.input[0]?.content[0]?.text).toContain("[00:02] Them 1: Welcome, let's start");
 
     const meeting = await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId }, include: { transcript: { orderBy: { order: "asc" } }, actionItems: true } });
     expect(meeting).toMatchObject({
@@ -375,7 +460,7 @@ describe("managed worker pipeline", () => {
     const job = await prisma.processingJob.findUniqueOrThrow({ where: { id: jobId } });
     expect(job).toMatchObject({ status: "complete", errorMessage: null });
     // 129s of audio across both channels + 1000 input / 200 output tokens.
-    expect(job.providerCostMicros).toBeGreaterThan(2_000 + 2_000);
+    expect(job.providerCostMicros).toBeGreaterThan(100);
     expect((await getEntitlements(workspaceId)).used).toBe(1);
     expect(await prisma.uploadChunk.count({ where: { uploadId } })).toBe(0);
     await expect(getObject(`uploads/${workspaceId}/${uploadId}/0-pipeline-mic.chunk`)).rejects.toThrow();
@@ -386,7 +471,10 @@ describe("managed worker pipeline", () => {
     await setup({ title: "Quarterly planning with Dana", channels: ["mic"] });
     mockProviders({
       deepgram: () => ({ results: { utterances: [{ start: 0, end: 2, transcript: "hello", speaker: 0 }] } }),
-      anthropic: () => new Response(JSON.stringify({ content: [{ type: "tool_use", name: "record_meeting_notes", input: { title: "Generated", overview: "o", key_points: [], decisions: [], action_items: [] } }] }), { status: 200 }),
+      openai: () => new Response(JSON.stringify({
+        status: "completed",
+        output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ title: "Generated", overview: "o", key_points: [], decisions: [], action_items: [] }) }] }],
+      }), { status: 200 }),
     });
     await runManagedJob(workspaceId, jobId);
     expect((await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId } })).title).toBe("Quarterly planning with Dana");
@@ -396,7 +484,7 @@ describe("managed worker pipeline", () => {
     await setup();
     const calls = mockProviders({ deepgram: () => ({ metadata: { duration: 30 }, results: { utterances: [] , channels: [{ alternatives: [{ transcript: "" }] }] } }) });
     await runManagedJob(workspaceId, jobId);
-    expect(calls.some((call) => call.url.includes("anthropic"))).toBe(false);
+    expect(calls.some((call) => call.url.includes("api.openai.com/v1/responses"))).toBe(false);
     const meeting = await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId }, include: { transcript: true, actionItems: true } });
     expect(meeting).toMatchObject({ summary: "No speech detected", processingMode: "managed", transcript: [], actionItems: [] });
     expect(meeting.endedAt.toISOString()).toBe("2026-09-24T15:00:30.000Z");
@@ -408,7 +496,7 @@ describe("managed worker pipeline", () => {
     await setup({ channels: ["speaker"] });
     mockProviders({
       deepgram: () => ({ results: { utterances: [{ start: 1, end: 3, transcript: "budget is approved", speaker: 0 }] } }),
-      anthropic: () => new Response(JSON.stringify({ content: [{ type: "text", text: "Sorry, here is a plain summary: the budget was approved." }] }), { status: 200 }),
+      openai: () => new Response(JSON.stringify({ output: [{ type: "message", content: [{ type: "output_text", text: "Sorry, here is a plain summary: the budget was approved." }] }] }), { status: 200 }),
     });
     await runManagedJob(workspaceId, jobId);
     const meeting = await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId }, include: { actionItems: true } });
@@ -419,9 +507,9 @@ describe("managed worker pipeline", () => {
 
   it("persists a user-safe error message and releases usage when a provider fails", async () => {
     await setup({ channels: ["mic"] });
-    mockProviders({ deepgram: () => ({ results: { utterances: [{ start: 0, end: 1, transcript: "hi" }] } }), anthropic: () => new Response("bad request", { status: 400 }) });
-    await expect(runManagedJob(workspaceId, jobId)).rejects.toThrow("summary provider returned 400");
-    expect(await prisma.processingJob.findUniqueOrThrow({ where: { id: jobId } })).toMatchObject({ status: "error", errorMessage: "summary provider returned 400" });
+    mockProviders({ deepgram: () => ({ results: { utterances: [{ start: 0, end: 1, transcript: "hi" }] } }), openai: () => new Response("bad request", { status: 400 }) });
+    await expect(runManagedJob(workspaceId, jobId)).rejects.toThrow("OpenAI summary provider returned 400");
+    expect(await prisma.processingJob.findUniqueOrThrow({ where: { id: jobId } })).toMatchObject({ status: "error", errorMessage: "OpenAI summary provider returned 400" });
     expect((await getEntitlements(workspaceId)).used).toBe(0);
   });
 

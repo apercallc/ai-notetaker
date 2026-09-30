@@ -44,13 +44,19 @@ export function managedConfigurationStatus(env: DeploymentEnv = process.env): Ma
     : objectStorage(env) === "s3"
       ? ["S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
       : ["S3_BUCKET or R2_BUCKET"];
+  const transcriptionProvider = env.MANAGED_TRANSCRIPTION_PROVIDER?.trim().toLowerCase() || "groq";
+  const summaryProvider = env.MANAGED_SUMMARY_PROVIDER?.trim().toLowerCase() || "openai";
+  const validTranscriptionProvider = transcriptionProvider === "groq" || transcriptionProvider === "deepgram";
+  const validSummaryProvider = summaryProvider === "openai" || summaryProvider === "anthropic";
   const missing = [
     "MANAGED_WORKER_TOKEN",
     // A shared private bucket is temporary staging for jobs running on the
     // separate worker service. Audio is deleted after processing/expiry.
     ...storageMissing,
-    "MANAGED_DEEPGRAM_API_KEY",
-    "MANAGED_ANTHROPIC_API_KEY",
+    ...(!validTranscriptionProvider ? ["MANAGED_TRANSCRIPTION_PROVIDER (groq or deepgram)"] : []),
+    ...(!validSummaryProvider ? ["MANAGED_SUMMARY_PROVIDER (openai or anthropic)"] : []),
+    transcriptionProvider === "deepgram" ? "MANAGED_DEEPGRAM_API_KEY" : "MANAGED_GROQ_API_KEY",
+    summaryProvider === "anthropic" ? "MANAGED_ANTHROPIC_API_KEY" : "MANAGED_OPENAI_API_KEY",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
     "STRIPE_PRICE_HOSTED_PRO",

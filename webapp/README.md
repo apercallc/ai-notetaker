@@ -192,12 +192,15 @@ parallel would let one file's cleanup race another's assertions.
   deployments retain the legacy single default workspace and `AUTH_TOKEN`
   ingestion contract.
 - In local/BYOK mode this app only stores and serves finished notes. In managed
-  mode the worker calls the configured Deepgram/Anthropic providers using
-  server-side secrets after an authenticated, checksummed upload. Provider
-  requests have bounded cancellation and transient retry behavior. Managed
-  audio uploads use private temporary R2 or S3-compatible staging and are
-  deleted after processing or within 24 hours. Single-node self-hosted/Docker
-  deployments can use the local filesystem backend.
+  mode the worker defaults to Groq Whisper Large V3 Turbo and OpenAI GPT-6
+  Luna using server-side secrets after an authenticated, checksummed upload.
+  Deepgram and Anthropic remain selectable alternatives. Groq's budget profile
+  labels the remote audio as `Them` without individual diarization; Deepgram
+  can retain individual remote-speaker labels. Provider requests have bounded
+  cancellation and transient retry behavior. Managed audio uploads use private
+  temporary R2 or S3-compatible staging and are deleted after processing or
+  within 24 hours. Single-node self-hosted/Docker deployments can use the local
+  filesystem backend.
 - The authenticated `/actions` page is a cross-meeting action-item inbox. It
   supports open/completed filtering, completion toggles, and due dates, while
   keeping the meeting detail page as the source context for each item.

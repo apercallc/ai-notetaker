@@ -29,13 +29,43 @@ uploading it for processing. Hosted audio is temporary staging only.
   `railway-worker.json` for the worker service. Give both services the same
   `DATABASE_URL`, `AUTH_TOKEN`, and `MANAGED_WORKER_TOKEN`; set the worker's
   `MANAGED_WORKER_WEBAPP_URL` to the webapp's private or HTTPS service URL.
+  Also set the selected transcription and summary provider keys on both
+  services. Default managed processing uses Groq Whisper Large V3 Turbo and
+  OpenAI GPT-6 Luna; Deepgram Nova-3 and Anthropic remain selectable.
   The webapp service runs migrations before serving, and the worker starts
   polling after the webapp health check is available.
 - The released registry Compose file passes the same worker, provider, billing,
   and private temporary-storage variables as the source Compose file; do not assume the image alone
   carries deployment secrets.
-- Deepgram and Anthropic server-side keys, plus Stripe secret/webhook/price
-  configuration when paid plans are enabled.
+- The selected managed provider keys: by default `MANAGED_GROQ_API_KEY` and
+  `MANAGED_OPENAI_API_KEY`. Deepgram and Anthropic credentials are only needed
+  when `MANAGED_TRANSCRIPTION_PROVIDER=deepgram` or
+  `MANAGED_SUMMARY_PROVIDER=anthropic` is selected. The summary model defaults
+  to the selected provider's model; set `MANAGED_SUMMARY_MODEL` only to
+  override it with a model supported by that provider.
+- Stripe secret/webhook/price configuration when paid plans are enabled.
+
+The default Groq transcription profile is cheaper and does not identify
+individual speakers in the remote-audio channel; the transcript labels it
+`Them`. Select Deepgram when individual speaker diarization is more important
+than the lower transcription cost. Groq input is sent in bounded four-minute
+WAV chunks (about 23 MB of 48 kHz mono PCM each) to fit its documented 25 MB
+free-tier request limit. Published list rates currently put Groq Whisper Large
+V3 Turbo at $0.04 per audio hour and GPT-6 Luna at $0.10/$0.50 per million
+input/output tokens; Deepgram Nova-3 is $0.0043 per minute and Claude Sonnet 5
+is $2/$10 per million tokens. The app sends microphone and speaker as separate
+audio, so a one-hour meeting with both channels active costs about $0.08 for
+Groq transcription or $0.52 for Deepgram transcription at these list rates,
+plus the comparatively small summary-token charge. Actual provider invoices
+depend on account tier, usage, and provider pricing changes. See the current [Groq](https://console.groq.com/docs/model/whisper-large-v3-turbo),
+[Deepgram](https://deepgram.com/pricing), [OpenAI](https://developers.openai.com/api/docs/pricing),
+and [Anthropic](https://www.anthropic.com/news/claude-sonnet-5) pricing pages.
+
+Managed audio is uploaded to our temporary private staging bucket and then
+sent to the selected transcription provider. Our staging copy is deleted after
+processing or expires within 24 hours; the provider processes the audio under
+its own account terms and retention settings. Summarization receives transcript
+text, not audio.
 
 The filesystem object backend remains available for local or self-hosted
 deployments when no bucket is configured. Managed production requires a shared

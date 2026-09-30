@@ -13,7 +13,7 @@ meeting text, not the recording.
 | Provider API keys | Chrome extension `chrome.storage.local` in local mode; server secrets in managed mode | Local mode sends keys only to the selected provider; managed mode never sends provider keys to the extension |
 | Google Drive OAuth tokens | Chrome extension `chrome.storage.local` | Google receives them during OAuth/API calls; the project never sees them |
 | Native Messaging pairing token | Chrome extension `chrome.storage.local` and the local helper's private data directory | Never leaves the device; it is used only across the local extension/helper channel |
-| Raw mic/speaker PCM | Meet: extension IndexedDB; desktop calls: helper app-data directory under `ai-notetaker` | Local mode sends audio to the selected provider; managed mode uploads authenticated chunks to private processing staging, which is deleted on success or expires within 24 hours |
+| Raw mic/speaker PCM | Meet: extension IndexedDB; desktop calls: helper app-data directory under `ai-notetaker` | Local mode sends audio to the selected provider; managed mode uploads authenticated chunks to private processing staging, then sends them to the configured transcription provider (Groq by default). Our staging copy is deleted on success or expires within 24 hours; provider processing and retention follow that provider's account terms/settings |
 | Transcript and summary | Helper/extension local storage, optionally the user's own webapp/Postgres, managed workspace, or Google Drive Doc | Notes leave the device only through the selected local provider, managed workspace, optional webapp sync, or Drive export |
 | Retry queues | Meet: extension IndexedDB until processing succeeds; desktop calls: helper app-data directory | Never sent; they reference local audio ranges or resumable upload state |
 | Helper status/control | Native Messaging plus a local Unix socket/named pipe | Never to a project-operated server |
@@ -22,7 +22,12 @@ meeting text, not the recording.
 For Google Meet, local BYOK provider requests go directly from the extension
 after the audio is in IndexedDB; desktop-call local BYOK requests go from the
 helper. In managed mode, the hosted worker calls providers with server-side
-credentials; the extension never receives those credentials.
+credentials; the extension never receives those credentials. By default,
+managed transcription sends the meeting's separate microphone and speaker
+audio to Groq in short-lived WAV requests; summarization sends only the
+resulting transcript text to OpenAI. Choosing Deepgram or Anthropic changes
+the corresponding recipient. The project's temporary staging deletion policy
+does not control provider-side processing or retention.
 
 ## Deletion
 
