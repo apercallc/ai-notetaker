@@ -86,3 +86,14 @@ Testing or a developer-loaded unpacked extension for this smoke check.
 Webapp integration tests use a disposable Postgres database and must never
 use a production `DATABASE_URL`. Tests and fixtures must not contain live
 provider keys, access tokens, recordings, or personal meeting content.
+
+## Local acceptance flows (no live accounts)
+
+`webapp/src/app/api/v1/localFlows.test.ts` drives the real route handlers
+against Postgres with an in-memory fake of Google (OAuth, Calendar, Drive) and
+Stripe. It covers calendar naming, the Drive export (folder, Doc parents, text
+content, folder reuse), disconnect with revocation and reconnect, trial →
+Pro → cancel → resubscribe access, forged-webhook rejection and the 402 upgrade
+prompt. Run it with `npm run test:with-postgres -- src/app/api/v1/localFlows.test.ts`
+from `webapp/`. It proves our side of each flow; Google's consent screen and
+Stripe's hosted checkout still need one manual pass each.

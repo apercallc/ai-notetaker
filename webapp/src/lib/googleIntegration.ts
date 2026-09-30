@@ -16,7 +16,7 @@ const TOKEN_REFRESH_SKEW_MS = 60_000;
 const ENCRYPTION_VERSION = "v1";
 
 /**
- * Keep this list as small as the product allows: only calendar.readonly is a
+ * Keep this list as small as the product allows: only calendar.events.readonly is a
  * "sensitive" scope that Google must review (drive.file, openid and email are
  * not). Exporting a meeting creates a Google Doc through Drive's text import,
  * so the broad Docs scope is deliberately not requested.
@@ -24,7 +24,7 @@ const ENCRYPTION_VERSION = "v1";
 export const GOOGLE_OAUTH_SCOPES = [
   "openid",
   "email",
-  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
   "https://www.googleapis.com/auth/drive.file",
 ].join(" ");
 

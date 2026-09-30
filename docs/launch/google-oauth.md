@@ -14,9 +14,9 @@ of sensitive scopes takes days, and nothing else depends on it.
 | --- | --- | --- |
 | `openid`, `email` | Non-sensitive | Show which Google account is connected. |
 | `https://www.googleapis.com/auth/drive.file` | Non-sensitive | Create a folder and Google Docs that AI Notetaker itself makes. It cannot see any other file. |
-| `https://www.googleapis.com/auth/calendar.readonly` | **Sensitive** | Read events to name the current meeting. Cannot edit or delete. |
+| `https://www.googleapis.com/auth/calendar.events.readonly` | **Sensitive** | Read events to name the current meeting. Cannot edit or delete. |
 
-Only `calendar.readonly` needs Google's review. There are no *restricted*
+Only `calendar.events.readonly` needs Google's review. There are no *restricted*
 scopes, so no paid third-party security assessment is required. The code used
 to request the broad Docs scope as well; it no longer does, because a Google Doc
 is now created through Drive's text import.
@@ -60,12 +60,12 @@ verified domain.
 1. **Audience**: choose **External**. Leave it in **Testing** while you try it
    (step 7); add your own Google account under **Test users**.
 2. **Data Access**, **Add or remove scopes**: add exactly
-   `.../auth/calendar.readonly`, `.../auth/drive.file`, `openid` and
+   `.../auth/calendar.events.readonly`, `.../auth/drive.file`, `openid` and
    `.../auth/userinfo.email`. Nothing else.
 3. Paste these justifications when asked (they are also what the reviewer
    reads):
 
-**`calendar.readonly`**
+**`calendar.events.readonly`**
 
 > AI Notetaker records meetings the user chooses to record. To give the notes a meaningful title and attendee list, it reads the user's calendar events for the current time window (read-only) and matches the one whose Google Meet link the user is in. It never creates, edits or deletes events, and it does not store the calendar.
 
@@ -143,8 +143,9 @@ continue, and confirm you arrive signed in. Then sign out and sign in again.
 
 1. **Audience**, **Publish app**, confirm. The status becomes **In production**
    and the verification request opens.
-2. Fill in the verification form with the justifications above, and link the
-   demo video (below).
+2. Fill in the verification form with the justifications in
+   [`google-verification-submission.md`](google-verification-submission.md),
+   and link the demo video (script below and in that file).
 3. Google replies by email, usually within a few business days for sensitive
    scopes. Answer any question on the same thread. Until it is approved, users
    see the "unverified app" warning and the app is capped at 100 new users.

@@ -43,7 +43,7 @@ describe("server-owned Google OAuth configuration and state", () => {
     expect(authorization.origin).toBe("https://accounts.google.com");
     expect(authorization.searchParams.get("redirect_uri")).toBe("https://ai-notetaker.apercallc.com/api/google/oauth/callback");
     expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(authorization.searchParams.get("scope")).toContain("calendar.readonly");
+    expect(authorization.searchParams.get("scope")).toContain("calendar.events.readonly");
     expect(authorization.searchParams.get("scope")).toContain("drive.file");
 
     const sealed = sealOAuthState(state);
@@ -60,7 +60,7 @@ describe("Google scopes and Drive export upload", () => {
     expect(GOOGLE_OAUTH_SCOPES.split(" ")).toEqual([
       "openid",
       "email",
-      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
       "https://www.googleapis.com/auth/drive.file",
     ]);
     expect(GOOGLE_OAUTH_SCOPES).not.toContain("auth/documents");
