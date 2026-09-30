@@ -6,6 +6,26 @@ items here and mirror the result into `TODO.md` ("Live release gates").
 
 **Paid Hosted is "released" after Gate A. Public release needs Gate B.**
 
+## Critical path (updated 2026-09-30)
+
+Longest lead time first. Items in the same step can run in parallel.
+
+1. **Start today, then wait:** Chrome Web Store draft and review
+   (`chrome-web-store.md` steps 1 to 4, then `rotate-extension-id.mjs`), and
+   tag the release so the helper CI matrix runs on that exact tag.
+2. **Your devices (about half a day):** managed upload end to end (upload,
+   audio deleted, expiry sweep), Chrome + Meet with real participants, helper
+   Native Messaging, Groq/OpenAI calls, macOS and Windows audio checks.
+3. **15 minutes each:** Resend inbox test (plus-address signup, check
+   SPF/DKIM/DMARC), Google sign-in click-through, Sentry test event and an
+   "any new issue" alert.
+4. **Then publish:** GitHub Release with artifacts, installer acceptance,
+   real screenshots, store URL into `release/manifest.json`, launch-at-login
+   default.
+
+Done: Stripe end to end (2026-09-30), hosted readiness open, Sentry wired to
+`ai-notetaker-web`. Cloudflare R2 is not required (see `hosting-costs.md`).
+
 ## Gate A: Hosted mode (blockers 1 to 4)
 
 ### 1. Stripe (verified live 2026-09-30)
