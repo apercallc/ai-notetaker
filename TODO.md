@@ -302,9 +302,12 @@ remains native; Docker is for the optional history webapp only.
 - [x] Sentry (2026-09-29): project `ai-notetaker-web` in the `apercallc` org,
       DSN set on `web` and `managed-worker`, plus a 5-minute uptime monitor on
       `/api/health`. Still to do: alert rules that notify a person.
-- [ ] Configure outbound email on `web` (`RESEND_API_KEY` + `EMAIL_FROM`, or
-      `SMTP_URL` + `EMAIL_FROM`). Production has no silent fallback, so managed
-      signup and password reset refuse until this is set.
+- [x] Outbound email (2026-09-29): `RESEND_API_KEY` and `EMAIL_FROM`
+      (`AI Notetaker <noreply@apercallc.com>`) are set on `web`; the
+      `apercallc.com` sender domain is verified in Resend and a test message to
+      `delivered@resend.dev` was accepted. Production has no silent email
+      fallback, so these are required for managed signup and password reset.
+      Real inbox delivery (spam placement) is still unverified.
 - [ ] Complete an upload end to end and confirm staged audio deletion on
       success and expiry.
 - [ ] Run cross-platform helper CI on the exact release candidate. The latest
