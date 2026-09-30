@@ -110,3 +110,45 @@ describe("Google OAuth callback route", () => {
     expect(response.headers.get("location")).not.toContain("private+provider+detail");
   });
 });
+
+describe("redirects behind the platform proxy", () => {
+  const original = { managed: process.env.MANAGED_HOSTING, url: process.env.APP_URL };
+  const internal = "https://0.0.0.0:8080/api/google/oauth";
+
+  beforeEach(() => {
+    process.env.MANAGED_HOSTING = "true";
+    process.env.APP_URL = "https://public.example.test";
+  });
+
+  function restore(): void {
+    if (original.managed === undefined) delete process.env.MANAGED_HOSTING; else process.env.MANAGED_HOSTING = original.managed;
+    if (original.url === undefined) delete process.env.APP_URL; else process.env.APP_URL = original.url;
+  }
+
+  it("returns the user to the public origin, never the server's internal address, after Google approves", async () => {
+    try {
+      cookieValues.google_oauth_state = "sealed-state";
+      const response = await callback(new Request(`${internal}/callback?state=state-1&code=auth-code`));
+      expect(response.headers.get("location")).toBe("https://public.example.test/account?google=connected");
+    } finally { restore(); }
+  });
+
+  it("also uses the public origin for errors and for signed-out visitors", async () => {
+    try {
+      const denied = await callback(new Request(`${internal}/callback?state=state-1&error=access_denied`));
+      expect(new URL(denied.headers.get("location")!).origin).toBe("https://public.example.test");
+      getSessionContext.mockResolvedValueOnce(null);
+      const anonymous = await connect(new Request(`${internal}/connect`));
+      expect(anonymous.headers.get("location")).toBe("https://public.example.test/login?next=/account");
+    } finally { restore(); }
+  });
+
+  it("falls back to the request's origin if APP_URL is unusable, instead of failing the redirect", async () => {
+    try {
+      process.env.APP_URL = "not a url";
+      getSessionContext.mockResolvedValueOnce(null);
+      const response = await connect(new Request("https://fallback.example.test/api/google/oauth/connect"));
+      expect(response.headers.get("location")).toBe("https://fallback.example.test/login?next=/account");
+    } finally { restore(); }
+  });
+});

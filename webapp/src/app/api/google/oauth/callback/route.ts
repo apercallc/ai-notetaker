@@ -1,12 +1,13 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/sessions";
+import { publicUrl } from "@/lib/publicUrl";
 import { completeOAuthConnection, GoogleIntegrationError, oauthStateMatches, openOAuthState } from "@/lib/googleIntegration";
 
 const OAUTH_STATE_COOKIE = "google_oauth_state";
 
 function accountRedirect(request: Request, message?: string): NextResponse {
-  const url = new URL("/account", request.url);
+  const url = publicUrl("/account", request);
   if (message) url.searchParams.set("googleError", message);
   const response = NextResponse.redirect(url);
   response.cookies.set(OAUTH_STATE_COOKIE, "", { httpOnly: true, path: "/api/google/oauth", maxAge: 0 });
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
   if (!code) return accountRedirect(request, "Google did not return an authorization code. Try connecting again.");
   try {
     await completeOAuthConnection(session.user.id, code, state);
-    const response = NextResponse.redirect(new URL("/account?google=connected", request.url));
+    const response = NextResponse.redirect(publicUrl("/account?google=connected", request));
     response.cookies.set(OAUTH_STATE_COOKIE, "", { httpOnly: true, path: "/api/google/oauth", maxAge: 0 });
     return response;
   } catch (error) {
