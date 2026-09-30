@@ -122,6 +122,16 @@ export const NOT_LEGAL_ADVICE =
  * optional and validated, and never hard-coded, so the legal pages only show an
  * address the operator has actually chosen to publish.
  */
+/**
+ * The jurisdiction whose law governs the terms, e.g. "the State of Texas".
+ * Operator-supplied because it depends on where the publisher is organized;
+ * when unset the clause is omitted rather than guessed.
+ */
+export function governingLaw(env: Record<string, string | undefined> = process.env): string | null {
+  const value = env.GOVERNING_LAW?.trim();
+  return value && value.length <= 120 && /^[\p{L}\p{N} ,.'()-]+$/u.test(value) ? value : null;
+}
+
 export function supportEmail(env: Record<string, string | undefined> = process.env): string | null {
   const value = env.SUPPORT_EMAIL?.trim();
   return value && value.length <= 254 && /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']{2,}$/u.test(value) ? value : null;

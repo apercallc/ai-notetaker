@@ -8,21 +8,26 @@ export interface RequestContext {
 }
 
 /**
- * Best-effort client address. The LAST x-forwarded-for hop is the one the
- * nearest (platform) proxy appended; earlier hops are client-supplied and
- * trivially forged, so they are ignored. Without a proxy the header is fully
- * attacker-controlled — which is why the per-email throttle key exists as a
- * backstop that does not depend on this value.
+ * Best-effort client address.
+ *
+ * The LAST x-forwarded-for hop is the one the nearest (platform) proxy
+ * appended; earlier hops are client-supplied and trivially forged. That hop is
+ * preferred over x-real-ip because a proxy that merely passes x-real-ip
+ * through would let a client pick its own throttle bucket, whereas it cannot
+ * influence the hop the proxy adds. x-real-ip is the fallback for platforms
+ * that set only that header. Without any proxy both are attacker-controlled,
+ * which is why per-email throttle keys exist as a backstop that does not
+ * depend on this value.
  */
 export function clientIpFromHeaders(get: (name: string) => string | null): string | null {
-  const real = get("x-real-ip")?.trim();
-  if (real) return real.slice(0, 64);
   const forwarded = get("x-forwarded-for");
   if (forwarded) {
     const hops = forwarded.split(",").map((hop) => hop.trim()).filter(Boolean);
     const last = hops[hops.length - 1];
     if (last) return last.slice(0, 64);
   }
+  const real = get("x-real-ip")?.trim();
+  if (real) return real.slice(0, 64);
   return null;
 }
 

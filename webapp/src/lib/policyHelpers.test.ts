@@ -38,8 +38,10 @@ describe("request context", () => {
     expect(clientIpFromHeaders(headersOf({ "x-forwarded-for": " , " }))).toBeNull();
   });
 
-  it("prefers the platform's real-ip header and bounds its length", () => {
-    expect(clientIpFromHeaders(headersOf({ "x-real-ip": "7.7.7.7", "x-forwarded-for": "1.1.1.1" }))).toBe("7.7.7.7");
+  it("prefers the proxy-appended forwarded hop over a client-forgeable real-ip, and falls back to real-ip", () => {
+    expect(clientIpFromHeaders(headersOf({ "x-real-ip": "6.6.6.6", "x-forwarded-for": "1.1.1.1, 7.7.7.7" }))).toBe("7.7.7.7");
+    expect(clientIpFromHeaders(headersOf({ "x-real-ip": "7.7.7.7" }))).toBe("7.7.7.7");
+    expect(clientIpFromHeaders(headersOf({ "x-real-ip": "7.7.7.7", "x-forwarded-for": " , " }))).toBe("7.7.7.7");
     expect(clientIpFromHeaders(headersOf({ "x-real-ip": "9".repeat(200) }))?.length).toBe(64);
     expect(clientIpFromHeaders(headersOf({}))).toBeNull();
   });

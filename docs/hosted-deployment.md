@@ -15,6 +15,15 @@ uploading it for processing. Hosted audio is temporary staging only.
   object read/write/delete access; do not enable public access or versioning.
   Workers delete audio immediately after successful processing and cleanup
   expires failed/abandoned uploads after 24 hours.
+  **Use Cloudflare R2 for the project-operated service.** All large data
+  (staged audio) goes through this one storage layer, so pointing it at R2 is
+  configuration only: set `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and
+  `R2_SECRET_ACCESS_KEY` on both webapp and worker (when `R2_BUCKET` is set it
+  takes priority over `S3_*`; remove the `S3_*` variables afterwards). Then add
+  an R2 lifecycle rule that deletes objects under the `uploads/` prefix after
+  1 day. Railway Storage Buckets do not support lifecycle configuration.
+  Whatever the provider, the worker also deletes staged audio older than
+  48 hours every 30 minutes as a provider-independent backstop.
 - A durable managed worker. The source and registry Compose files ship a
   first-party worker under the `managed` profile; start it with
   `docker compose --profile managed up -d --build`. It polls
@@ -131,7 +140,8 @@ web replicas and survives a deployment.
 
 - Back up Postgres. Keep audio staging out of backups and ensure the worker
   cleanup loop remains healthy; configure an object lifecycle expiry as a
-  second deletion safeguard where the provider supports it.
+  second deletion safeguard (R2 supports it; Railway buckets do not, which is
+  why the worker's 48-hour orphan sweep exists).
 - Monitor queued/error processing jobs, provider failures, usage reservations,
   webhook failures, and object cleanup failures. The managed worker poll also
   reaps expired upload rows and private chunk objects. Do not log transcripts,

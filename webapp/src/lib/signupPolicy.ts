@@ -42,4 +42,4 @@ export function signupAvailability(env: Env = process.env): SignupAvailability {
   return { allowed: true };
 }
 
-export const CURRENT_TERMS_VERSION = "2026-09-24";
+export const CURRENT_TERMS_VERSION = "2026-09-30";

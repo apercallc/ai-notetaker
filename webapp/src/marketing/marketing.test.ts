@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import robots from "../app/robots";
 import sitemap from "../app/sitemap";
 import { GET as llms } from "../app/llms.txt/route";
-import { FALLBACK_PRICE_AMOUNTS, FALLBACK_PRICE_LABELS, FAQS, LIMITS, supportEmail } from "./content";
+import { FALLBACK_PRICE_AMOUNTS, FALLBACK_PRICE_LABELS, FAQS, LIMITS, governingLaw, supportEmail } from "./content";
 import { breadcrumbNode, faqNode, howToNode, serializeJsonLd, softwareNode } from "./jsonld";
 import { MARKETING_PATHS, isMarketingPath } from "./paths";
 import { chromeWebStoreUrl, formatBytes, pickAssets } from "./release";
@@ -158,5 +158,13 @@ describe("support email", () => {
     for (const bad of ["", "not an email", "a@b", "x@y.z", "a b@c.com", "<script>@x.com", "\"quoted\"@x.com", `${"a".repeat(250)}@x.com`]) {
       expect(supportEmail({ SUPPORT_EMAIL: bad }), bad).toBeNull();
     }
+  });
+});
+
+describe("governing law setting", () => {
+  it("is omitted unless the operator supplies a sensible jurisdiction", () => {
+    expect(governingLaw({})).toBeNull();
+    expect(governingLaw({ GOVERNING_LAW: "  the State of Texas " })).toBe("the State of Texas");
+    for (const bad of ["<script>", "x".repeat(200), "Texas; DROP", ""]) expect(governingLaw({ GOVERNING_LAW: bad }), bad).toBeNull();
   });
 });

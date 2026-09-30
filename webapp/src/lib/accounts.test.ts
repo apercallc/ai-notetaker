@@ -13,6 +13,7 @@ import {
 import { createApiToken } from "./apiTokens";
 import { issueAuthToken } from "./authTokens";
 import { hashPassword, verifyPassword } from "./passwords";
+import { CURRENT_TERMS_VERSION } from "./signupPolicy";
 
 const EMAIL_PREFIX = "accounts.batch.";
 const WORKSPACE_PREFIX = "Accounts batch ";
@@ -117,7 +118,7 @@ describe("hosted account creation", () => {
     if (!result.ok) throw new Error("expected signup success");
     const user = await prisma.user.findUniqueOrThrow({ where: { id: result.userId } });
     expect(user.email).toBe(`${EMAIL_PREFIX}alice@example.com`);
-    expect(user.termsVersion).toBe("2026-09-24");
+    expect(user.termsVersion).toBe(CURRENT_TERMS_VERSION);
     expect(user.termsAcceptedAt).not.toBeNull();
     const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: result.workspaceId }, include: { subscription: true } });
     expect(workspace.name).toHaveLength(100);

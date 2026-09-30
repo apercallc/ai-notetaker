@@ -1,6 +1,6 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const MAX_OBJECT_KEY_LENGTH = 300;
@@ -120,4 +120,62 @@ export async function getObject(key: string): Promise<Uint8Array> {
     return new Uint8Array(await response.Body.transformToByteArray());
   }
   return new Uint8Array(await readFile(path.join(/*turbopackIgnore: true*/ storageRoot(), normalized)));
+}
+
+/** Staged audio is legitimately kept 24 hours at most; anything older is an orphan. */
+export const STALE_STAGED_OBJECT_MS = 48 * 60 * 60 * 1_000;
+const STAGED_PREFIX = "uploads/";
+const SWEEP_LIST_PAGES = 5;
+
+/**
+ * Deletes staged audio older than `maxAgeMs`, independent of database state.
+ * The privacy promise ("unfinished uploads are removed within 24 hours") must
+ * not depend on the database rows that normally drive cleanup, and Railway
+ * buckets have no lifecycle rules, so this is the storage-level backstop.
+ * Bounded per call (a few thousand keys); repeated calls drain any backlog.
+ */
+export async function sweepStaleStagedObjects(now = new Date(), maxAgeMs = STALE_STAGED_OBJECT_MS): Promise<number> {
+  const cutoff = now.getTime() - maxAgeMs;
+  const backend = objectBackend();
+  if (backend) {
+    let deleted = 0;
+    let token: string | undefined;
+    for (let page = 0; page < SWEEP_LIST_PAGES; page += 1) {
+      const listing = await backend.client.send(new ListObjectsV2Command({
+        Bucket: backend.bucket,
+        Prefix: backendKey(backend, STAGED_PREFIX),
+        ContinuationToken: token,
+      }));
+      for (const object of listing.Contents ?? []) {
+        if (!object.Key || !object.LastModified || object.LastModified.getTime() > cutoff) continue;
+        await backend.client.send(new DeleteObjectCommand({ Bucket: backend.bucket, Key: object.Key }));
+        deleted += 1;
+      }
+      if (!listing.IsTruncated || !listing.NextContinuationToken) break;
+      token = listing.NextContinuationToken;
+    }
+    return deleted;
+  }
+  return sweepDirectory(path.join(/*turbopackIgnore: true*/ storageRoot(), STAGED_PREFIX), cutoff);
+}
+
+async function sweepDirectory(directory: string, cutoff: number): Promise<number> {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let deleted = 0;
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      deleted += await sweepDirectory(target, cutoff);
+      if ((await readdir(target).catch(() => ["x"])).length === 0) await rm(target, { recursive: true, force: true });
+    } else if ((await stat(target)).mtimeMs <= cutoff) {
+      await rm(target, { force: true });
+      deleted += 1;
+    }
+  }
+  return deleted;
 }

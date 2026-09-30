@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "./db";
 import { releaseMeetingProcessing } from "./usageLedger";
+import { sweepStaleStagedObjects } from "./objectStorage";
 import { chunksToReadableStream, deleteManagedUploadAudio, expireManagedMeetings, expireManagedUploads, readChunksSequentially } from "./managedJobs";
 
 export class ManagedWorkerError extends Error {}
@@ -589,6 +590,7 @@ export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
   // bounded cleanup heartbeat for abandoned private audio uploads as well.
   await expireManagedUploads();
   await expireManagedMeetings();
+  await sweepOrphanedAudio();
   const staleBefore = new Date(Date.now() - MANAGED_JOB_LEASE_MS);
   await failExhaustedJobs(staleBefore);
   const job = await prisma.processingJob.findFirst({
@@ -603,6 +605,22 @@ export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
     select: { id: true, workspaceId: true },
   });
   return job ? { jobId: job.id, workspaceId: job.workspaceId } : null;
+}
+
+const ORPHAN_SWEEP_INTERVAL_MS = 30 * 60 * 1_000;
+let lastOrphanSweepAt = 0;
+
+/** Storage-level backstop for the 24-hour audio promise; runs at most every 30 minutes per worker. */
+async function sweepOrphanedAudio(): Promise<void> {
+  const now = Date.now();
+  if (now - lastOrphanSweepAt < ORPHAN_SWEEP_INTERVAL_MS) return;
+  lastOrphanSweepAt = now;
+  try {
+    const removed = await sweepStaleStagedObjects(new Date(now));
+    if (removed > 0) console.warn("removed orphaned staged audio older than 48 hours", { removed });
+  } catch (error) {
+    console.error("orphaned audio sweep failed", { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /**

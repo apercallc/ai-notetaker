@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const sent: Array<{ kind: string; input: Record<string, unknown> }> = [];
 const clients: Array<Record<string, unknown>> = [];
+let listing: Array<{ Key: string; LastModified: Date }> = [];
 
 vi.mock("@aws-sdk/client-s3", () => ({
   S3Client: class {
@@ -12,8 +13,13 @@ vi.mock("@aws-sdk/client-s3", () => ({
       if (command.kind === "get") {
         return { Body: { transformToByteArray: async () => new Uint8Array([7, 8, 9]) } };
       }
+      if (command.kind === "list") return { Contents: listing, IsTruncated: false };
       return {};
     }
+  },
+  ListObjectsV2Command: class {
+    readonly kind = "list";
+    constructor(readonly input: Record<string, unknown>) {}
   },
   PutObjectCommand: class {
     readonly kind = "put";
@@ -29,7 +35,7 @@ vi.mock("@aws-sdk/client-s3", () => ({
   },
 }));
 
-import { deleteObject, getObject, putObject } from "./objectStorage";
+import { deleteObject, getObject, putObject, sweepStaleStagedObjects } from "./objectStorage";
 
 const originalS3 = {
   bucket: process.env.S3_BUCKET,
@@ -138,6 +144,24 @@ describe("object storage backends", () => {
     delete process.env.R2_SECRET_ACCESS_KEY;
 
     await expect(putObject("uploads/workspace/upload/0.chunk", new Uint8Array([1]))).rejects.toThrow("Cloudflare R2 requires");
+  });
+
+  it("sweeps only staged audio older than the cutoff from the private bucket, honouring the key prefix", async () => {
+    process.env.S3_BUCKET = "private-meetings";
+    process.env.S3_ACCESS_KEY_ID = "access";
+    process.env.S3_SECRET_ACCESS_KEY = "secret";
+    process.env.S3_PREFIX = "tenant-data";
+    const now = new Date("2026-10-01T12:00:00Z");
+    listing = [
+      { Key: "tenant-data/uploads/w/u/0-old.chunk", LastModified: new Date("2026-09-28T12:00:00Z") },
+      { Key: "tenant-data/uploads/w/u/1-fresh.chunk", LastModified: new Date("2026-10-01T06:00:00Z") },
+      { Key: "tenant-data/uploads/w/u/2-edge.chunk", LastModified: new Date("2026-09-29T12:00:00Z") },
+    ];
+    await expect(sweepStaleStagedObjects(now)).resolves.toBe(2);
+    expect(sent[0]).toMatchObject({ kind: "list", input: { Bucket: "private-meetings", Prefix: "tenant-data/uploads/" } });
+    const deleted = sent.filter((command) => command.kind === "delete").map((command) => command.input.Key);
+    expect(deleted).toEqual(["tenant-data/uploads/w/u/0-old.chunk", "tenant-data/uploads/w/u/2-edge.chunk"]);
+    listing = [];
   });
 
   it("rejects traversal-like object keys before touching storage", async () => {

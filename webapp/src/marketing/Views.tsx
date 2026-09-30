@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Download, Laptop, Puzzle, Share2 } from "lucide-react";
-import { LIMITS, NOT_LEGAL_ADVICE, SITE, supportEmail } from "./content";
+import { LIMITS, NOT_LEGAL_ADVICE, SITE, governingLaw, supportEmail } from "./content";
 import { Faq } from "./Faq";
 import { Icon } from "./Icon";
 import { Plans, type PlanDisplay } from "./Plans";
@@ -8,7 +8,7 @@ import { chromeWebStoreUrl, formatBytes, type DownloadLinks } from "./release";
 import type { ShellContext } from "./Shell";
 
 const UNSIGNED_DOC = "https://github.com/apercallc/ai-notetaker/blob/main/docs/unsigned-install.md";
-const EFFECTIVE = "September 29, 2026";
+const EFFECTIVE = "September 30, 2026";
 
 function PageHead({ title, lede }: { title: string; lede?: string }) {
   return (
@@ -552,6 +552,7 @@ export function PrivacyView() {
 
 export function TermsView() {
   const contact = supportEmail();
+  const law = governingLaw();
   return (
     <>
       <PageHead title="Terms of use" lede={`Effective ${EFFECTIVE}. These cover this website, the software, and the Hosted AI service.`} />
@@ -583,9 +584,23 @@ export function TermsView() {
             <ul>
               <li>Hosted Pro and Hosted Team are monthly subscriptions billed in US dollars through Stripe. Each includes the monthly meeting allowance shown on the pricing page.</li>
               <li>Your first {LIMITS.trial} hosted meetings are a free one-time allowance. When an allowance is used up, processing stops until the next period or a plan change.</li>
-              <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for.</li>
+              <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for, and it does not renew.</li>
+              <li>
+                Fees for a billing period that has started are not refunded, except where the law requires it or we
+                could not provide the service. If you were charged by mistake or twice, contact us within 14 days and
+                we will review it and refund what was charged in error.
+              </li>
               <li>If a payment fails, access continues for a short grace period while Stripe retries, and then processing stops.</li>
             </ul>
+
+            <h2>Your data, export and deletion</h2>
+            <p>
+              You can download all of a workspace&apos;s meetings from the Account page at any time. Deleting your
+              account, or a workspace you own, permanently removes its meetings and cancels any active subscription
+              first; audio staged for processing is deleted after processing or within 24 hours. Deleted data cannot be
+              recovered. We may suspend or end an account that breaks these terms or puts the service or other people at
+              risk, and will tell you why where we can.
+            </p>
 
             <h2>AI output and your own keys</h2>
             <p>
@@ -599,6 +614,20 @@ export function TermsView() {
               Current desktop installers are not code-signed and may show operating-system warnings. A checksum helps
               detect a changed or damaged file, but it does not establish who published it.
             </p>
+
+            <h2>Liability</h2>
+            <p>
+              The Hosted AI service is provided as is. To the extent the law allows, we are not liable for indirect or
+              consequential losses, and our total liability for the Hosted AI service is limited to the amount you paid
+              for it in the 12 months before the claim. This does not limit liability that the law does not allow to be
+              limited.
+            </p>
+            {law && (
+              <>
+                <h2>Governing law</h2>
+                <p>These terms are governed by the laws of {law}, without regard to its conflict-of-law rules.</p>
+              </>
+            )}
 
             <h2>Availability and changes</h2>
             <p>
