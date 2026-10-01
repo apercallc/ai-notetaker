@@ -29,6 +29,25 @@ describe("webapp sync durability", () => {
     expect(await getWebappSyncOutbox()).toEqual([meeting]);
   });
 
+  it("drops a meeting the server permanently refuses instead of retrying it forever", async () => {
+    const queued = vi.fn<typeof fetch>().mockRejectedValue(new Error("offline"));
+    await syncMeetingToWebapp(meeting, settings, queued);
+    expect(await getWebappSyncOutbox()).toEqual([meeting]);
+
+    const rejected = vi.fn<typeof fetch>().mockResolvedValue(new Response("too large", { status: 413 }));
+    await expect(syncMeetingToWebapp(meeting, settings, rejected)).resolves.toBe(false);
+    expect(await getWebappSyncOutbox()).toEqual([]);
+  });
+
+  it("keeps a meeting queued when the server is merely down or unauthorized", async () => {
+    for (const status of [401, 429, 503]) {
+      chromeMock.reset();
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status }));
+      await syncMeetingToWebapp(meeting, settings, fetchImpl);
+      expect(await getWebappSyncOutbox()).toEqual([meeting]);
+    }
+  });
+
   it("removes the outbox entry after a successful sync", async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
 
