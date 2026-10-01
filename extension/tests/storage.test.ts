@@ -239,6 +239,23 @@ describe("meeting storage", () => {
   });
 });
 
+describe("meeting index", () => {
+  const base = { title: "T", startedAt: "2026-09-24T10:00:00.000Z", endedAt: null, transcript: [], summary: null, actionItems: [], status: "recording" } as unknown as MeetingRecord;
+
+  it("keeps every meeting when several are saved and deleted at once", async () => {
+    await saveMeeting({ ...base, id: "keep-0" });
+    await Promise.all([
+      saveMeeting({ ...base, id: "keep-1" }),
+      saveMeeting({ ...base, id: "keep-2" }),
+      saveMeeting({ ...base, id: "keep-3" }),
+      deleteMeeting("keep-0"),
+      saveMeeting({ ...base, id: "keep-1", title: "updated" }),
+    ]);
+
+    expect((await listMeetings()).map((item) => item.id).sort()).toEqual(["keep-1", "keep-2", "keep-3"]);
+  });
+});
+
 describe("widget position and reminded calls", () => {
   it("remembers where the widget was dropped, rounded to whole pixels", async () => {
     expect(await getWidgetPosition()).toBeNull();

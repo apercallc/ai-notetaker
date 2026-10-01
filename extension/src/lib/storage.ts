@@ -185,12 +185,33 @@ function enqueueMeetingMutation<T>(id: string, mutation: MeetingMutation<T>): Pr
   });
 }
 
+// Per-meeting queues serialize one meeting's writes, but the index is shared by
+// every meeting: two meetings doing read-modify-write on it at once would drop
+// an id (a new recording vanishing, or a deleted one returning). One global
+// queue covers every index read-modify-write.
+let meetingsIndexQueue: Promise<void> = Promise.resolve();
+
+function withMeetingsIndexLock<T>(task: () => Promise<T>): Promise<T> {
+  const current = meetingsIndexQueue.catch(() => undefined).then(task);
+  meetingsIndexQueue = current.then(
+    () => undefined,
+    () => undefined,
+  );
+  return current;
+}
+
 async function saveMeetingUnlocked(meeting: MeetingRecord): Promise<void> {
-  const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-  const nextIndex = index.includes(meeting.id) ? index : [...index, meeting.id];
-  await storageSet({
-    [KEYS.meetingPrefix + meeting.id]: meeting,
-    [KEYS.meetingsIndex]: nextIndex,
+  await withMeetingsIndexLock(async () => {
+    const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
+    // Already indexed (every live-transcript update): leave the index untouched.
+    if (index.includes(meeting.id)) {
+      await storageSet({ [KEYS.meetingPrefix + meeting.id]: meeting });
+      return;
+    }
+    await storageSet({
+      [KEYS.meetingPrefix + meeting.id]: meeting,
+      [KEYS.meetingsIndex]: [...index, meeting.id],
+    });
   });
 }
 
@@ -214,8 +235,10 @@ export function updateMeeting(
 
 export async function deleteMeeting(id: string): Promise<void> {
   return enqueueMeetingMutation(id, async () => {
-    const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-    await storageSet({ [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id) });
+    await withMeetingsIndexLock(async () => {
+      const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
+      await storageSet({ [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id) });
+    });
     await removeWebappSyncOutbox(id);
     await storageRemove(KEYS.meetingPrefix + id);
   });
