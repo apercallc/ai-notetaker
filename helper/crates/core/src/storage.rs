@@ -266,6 +266,12 @@ impl MeetingStore {
         summary_options.mode = mode;
         self.update_meta(id, move |meta| {
             meta.summary_options = summary_options;
+            // Capture is starting again on this meeting. Leaving it Stopped/Processed would hide
+            // it from the startup recovery scan if the helper then dies mid-recording.
+            if meta.state != MeetingState::Recording {
+                meta.state = MeetingState::Recording;
+                meta.ended_at = None;
+            }
             Ok(())
         })
     }
@@ -911,12 +917,33 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), std::io::Err
         let mut file = fs::File::create(&temp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        fs::rename(&temp, path)
+        drop(file);
+        rename_with_retry(&temp, path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
     result
+}
+
+/// Renames over `to`, retrying briefly on a sharing violation. On Windows an antivirus scan or the
+/// search indexer can hold a freshly written file open for a few milliseconds, and the rename then
+/// fails with PermissionDenied although nothing is wrong. Other errors fail immediately.
+fn rename_with_retry(from: &Path, to: &Path) -> Result<(), std::io::Error> {
+    const ATTEMPTS: u32 = 6;
+    let mut attempt = 0;
+    loop {
+        match fs::rename(from, to) {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && attempt + 1 < ATTEMPTS =>
+            {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25 * u64::from(attempt)));
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Append-only writer for one meeting's two PCM channel files, owned by the
@@ -1170,6 +1197,45 @@ mod tests {
         let meta = reopened.load_meta(id).unwrap();
         assert_eq!(meta.managed_account_id.as_deref(), Some("account-1"));
         assert_eq!(meta.managed_workspace_id.as_deref(), Some("workspace-1"));
+    }
+
+    #[test]
+    fn restarting_a_stopped_meeting_makes_it_recoverable_again() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        let start = Utc::now();
+        store.create_meeting(id, start).unwrap();
+        store
+            .mark_stopped(id, start + Duration::minutes(5))
+            .unwrap();
+
+        store
+            .create_or_resume_meeting_with_options(
+                id,
+                start,
+                MeetingMode::General,
+                SummaryOptions::default(),
+            )
+            .unwrap();
+
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meta.state, MeetingState::Recording);
+        assert!(meta.ended_at.is_none());
+    }
+
+    #[test]
+    fn rename_with_retry_replaces_an_existing_file_and_reports_real_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("from.tmp");
+        let to = dir.path().join("to.json");
+        fs::write(&from, b"new").unwrap();
+        fs::write(&to, b"old").unwrap();
+        rename_with_retry(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"new");
+
+        let missing = dir.path().join("missing.tmp");
+        let error = rename_with_retry(&missing, &to).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]

@@ -2462,13 +2462,13 @@ mod tests {
         );
         assert_eq!(
             writer
-                .write(&store, id, AudioChannel::Speaker, &[9], 44_100)
+                .write(&store, id, AudioChannel::Speaker, &[9, 9], 44_100)
                 .unwrap(),
             0
         );
         assert_eq!(
             writer
-                .write(&store, id, AudioChannel::Mic, &[3, 4, 5], 48_000)
+                .write(&store, id, AudioChannel::Mic, &[3, 4, 5, 6], 48_000)
                 .unwrap(),
             2
         );
@@ -2477,7 +2477,7 @@ mod tests {
             store
                 .audio_len(id, notetaker_core::storage::MIC_FILE)
                 .unwrap(),
-            5
+            6
         );
         drop(writer);
 

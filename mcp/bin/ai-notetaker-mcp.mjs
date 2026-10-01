@@ -51,7 +51,17 @@ createInterface({ input: process.stdin })
       });
       if (response.status === 202) return;
       const text = await response.text();
-      if (response.ok) send(JSON.parse(text));
+      if (response.ok) {
+        let reply;
+        try {
+          reply = JSON.parse(text);
+        } catch {
+          // A 200 that is not JSON (a proxy or login page in front of the server) is not "unreachable".
+          if (id !== undefined) failure(id, "The notes server sent a reply that is not valid JSON. Check the endpoint URL.");
+          return;
+        }
+        send(reply);
+      }
       else if (id !== undefined) failure(id, response.status === 401 ? "The token was rejected. Create a new read-only token in Settings." : `The notes server answered HTTP ${response.status}.`);
     } catch {
       if (id !== undefined) failure(id, "Could not reach the notes server.");
