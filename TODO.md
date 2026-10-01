@@ -65,7 +65,10 @@ multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
       tokens, write tools behind explicit scopes, resources/prompts, and an Ask-your-notes tool.
 - [ ] Multilingual: detect, translated summary, custom vocabulary (the local
       helper already supports vocabulary; hosted does not).
-- [ ] Audit-log viewer for Team (filters, paging, CSV export).
+- [x] Audit-log viewer for Team: owner-only page, category/actor filters, keyset paging, CSV
+      export. Spec: [`docs/superpowers/specs/2026-09-30-audit-log-design.md`](docs/superpowers/specs/2026-09-30-audit-log-design.md).
+- [ ] Audit follow-ups: date filters and search, sign-in events, "who viewed" for shared
+      notes, SIEM export, and a browser/design-review pass (the page is not yet visually checked).
 
 ## Competitive features, ranked by value over cost (2026-09-30)
 

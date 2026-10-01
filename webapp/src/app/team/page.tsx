@@ -87,6 +87,12 @@ export default async function TeamPage() {
         </>
       )}
 
+      <section className="settings-card">
+        <h2>Activity log</h2>
+        <p className="muted-copy">See who added members, changed settings, shared or deleted notes, and connected integrations.</p>
+        <Link className="button button-secondary button-small" href="/team/audit">Open activity log</Link>
+      </section>
+
       {managedHostingEnabled() && (
         <section className="settings-card">
           <h2>Retention</h2>

@@ -2409,3 +2409,45 @@ a.meeting-card:hover,
   padding: 0 12px;
   font-size: 14px;
 }
+
+/* Activity log */
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.audit-filters select {
+  width: auto;
+  min-width: 160px;
+  max-width: 100%;
+}
+
+.audit-table-wrap {
+  overflow-x: auto;
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.audit-table th,
+.audit-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.audit-table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.audit-table td:first-child {
+  white-space: nowrap;
+}
