@@ -169,7 +169,7 @@ const PROVIDER_CONFIG: Record<"google" | "outlook", ProviderConfig> = {
     tokenEndpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
     scope: "Calendars.Read offline_access",
     eventsUrl: (dayStartIso, dayEndIso) =>
-      `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(dayStartIso)}&endDateTime=${encodeURIComponent(dayEndIso)}`,
+      `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(dayStartIso)}&endDateTime=${encodeURIComponent(dayEndIso)}&$top=100&$orderby=start/dateTime`,
     parseEvents: (body) => {
       const items = (body as { value?: OutlookEvent[] }).value ?? [];
       return items
@@ -272,7 +272,7 @@ export async function connectCalendar(
     clientSecret,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
-    expiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + (Number.isFinite(tokens.expires_in) && tokens.expires_in > 0 ? tokens.expires_in : 3600) * 1000).toISOString(),
   };
 }
 

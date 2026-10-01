@@ -91,6 +91,31 @@ pub enum ProviderError {
     Unreachable(String),
     #[error("unexpected response shape: {0}")]
     BadResponse(String),
+    /// The provider understood the request and refused it for good (400/413/422: too long,
+    /// malformed, unsupported). Sending the identical request again can never succeed.
+    #[error("provider rejected the request: {0}")]
+    Rejected(String),
+}
+
+impl ProviderError {
+    /// True when retrying the same request is pointless.
+    pub fn is_permanent(&self) -> bool {
+        matches!(self, ProviderError::Rejected(_))
+    }
+}
+
+/// Maps an unsuccessful provider HTTP status that the caller has not already handled (401/429)
+/// to the right error: credentials and billing problems are the user's to fix, refused requests
+/// are permanent, and only server-side failures are worth retrying as "unreachable".
+pub(crate) fn status_error(provider: &str, status: reqwest::StatusCode) -> ProviderError {
+    match status.as_u16() {
+        401 | 403 => ProviderError::AuthFailed(format!("{provider} returned {status}")),
+        402 => ProviderError::AuthFailed(format!(
+            "{provider} returned {status}: the account has no remaining credit"
+        )),
+        400 | 413 | 422 => ProviderError::Rejected(format!("{provider} returned {status}")),
+        _ => ProviderError::Unreachable(format!("{provider} returned {status}")),
+    }
 }
 
 /// Every reqwest client must be built through this: reqwest is compiled
@@ -114,7 +139,9 @@ pub(crate) fn provider_client() -> reqwest::Client {
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(120))
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        // Never fall back to `Client::new()`: it has no timeout, so one stalled connection would
+        // hold the pipeline forever. Building only fails when TLS setup does, which is fatal anyway.
+        .expect("provider HTTP client could not be built")
 }
 
 impl ProviderError {
@@ -125,6 +152,7 @@ impl ProviderError {
             ProviderError::RateLimited { .. } => ErrorCode::ProviderRateLimited,
             ProviderError::Unreachable(_) => ErrorCode::ProviderUnreachable,
             ProviderError::BadResponse(_) => ErrorCode::ProviderUnreachable,
+            ProviderError::Rejected(_) => ErrorCode::ProviderUnreachable,
         }
     }
 }
@@ -407,6 +435,22 @@ fn flagged_moments_prompt(moments: &[FlaggedMoment]) -> String {
     format!(
         " The user flagged these moments as important while the call was happening (time from the start): {lines}. The transcript is in chronological order, so use the time hints to find what was being discussed, and make sure the summary or action items cover those topics."
     )
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn unhandled_statuses_are_classified_by_who_can_fix_them() {
+        let status = |code| reqwest::StatusCode::from_u16(code).unwrap();
+        assert!(matches!(status_error("p", status(403)), ProviderError::AuthFailed(_)));
+        assert!(matches!(status_error("p", status(402)), ProviderError::AuthFailed(_)));
+        assert!(status_error("p", status(400)).is_permanent());
+        assert!(status_error("p", status(413)).is_permanent());
+        assert!(!status_error("p", status(500)).is_permanent());
+        assert!(matches!(status_error("p", status(503)), ProviderError::Unreachable(_)));
+    }
 }
 
 #[cfg(test)]

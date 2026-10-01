@@ -91,4 +91,13 @@ describe("purgeWorkspace", () => {
     expect(await prisma.user.findUnique({ where: { id: b } })).not.toBeNull();
     expect(await prisma.workspace.findUnique({ where: { id: other } })).not.toBeNull();
   });
+
+  it("reports a failed delete transaction as a normal error and leaves the workspace in place", async () => {
+    const a = await makeUser("tx");
+    const workspaceId = await makeWorkspace("tx-fails", [{ userId: a, role: "owner" }]);
+    vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(new Error("Transaction already closed (P2028)"));
+    const result = await purgeWorkspace(workspaceId);
+    expect(result.ok).toBe(false);
+    expect(await prisma.workspace.findUnique({ where: { id: workspaceId } })).not.toBeNull();
+  });
 });

@@ -87,7 +87,7 @@ export async function connectGoogleDrive(
     ...(clientSecret ? { clientSecret } : {}),
     accessToken: tokens.access_token,
     ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
-    expiresAt: Date.now() + tokens.expires_in * 1000,
+    expiresAt: Date.now() + (Number.isFinite(tokens.expires_in) && tokens.expires_in > 0 ? tokens.expires_in : 3600) * 1000,
   };
 }
 
@@ -110,7 +110,7 @@ async function refreshAccessToken(connection: DriveConnection, fetchImpl: typeof
     const tokens = (await response.json()) as TokenResponse;
     if (!tokens.access_token) return null;
     connection.accessToken = tokens.access_token;
-    connection.expiresAt = Date.now() + tokens.expires_in * 1000;
+    connection.expiresAt = Date.now() + (Number.isFinite(tokens.expires_in) && tokens.expires_in > 0 ? tokens.expires_in : 3600) * 1000;
     return tokens.access_token;
   } catch {
     return null;

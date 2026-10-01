@@ -191,8 +191,10 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
         summary: storedSummary,
       },
       update: {
-        title,
-        mode: input.mode ?? "general",
+        // A registration retry carries no title or mode of its own: keep what the user
+        // already renamed or chose instead of resetting it to the placeholder.
+        ...(preserveExistingContent && !input.title ? {} : { title }),
+        ...(preserveExistingContent && !input.mode ? {} : { mode: input.mode ?? "general" }),
         ...(input.captureSource ? { captureSource } : {}),
         ...(input.processingMode ? { processingMode } : {}),
         startedAt: storedStartedAt,

@@ -220,6 +220,18 @@ describe("template-aware processing and regeneration", () => {
     expect(await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId } })).toMatchObject({ notesRegenerations: 0, summary: "Old summary", mode: "general" });
   });
 
+  it("does not overwrite a hand edit made while the new notes were being written", async () => {
+    const meetingId = await meeting();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      // The user saves an edit during the (slow) provider call.
+      await prisma.meeting.update({ where: { id: meetingId }, data: { summary: "Edited by hand", summaryEditedAt: new Date() } });
+      return openAiResponse(SALES_SUMMARY);
+    });
+    const result = await regenerateNotes({ workspaceId, userId }, meetingId, "sales");
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("edited") });
+    expect(await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId } })).toMatchObject({ summary: "Edited by hand", notesRegenerations: 0 });
+  });
+
   it("never shows a server setting name to the user when a credential is missing", async () => {
     const meetingId = await meeting();
     delete process.env.MANAGED_OPENAI_API_KEY;

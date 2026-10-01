@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
-import { ManagedWorkerError, nextManagedJob, runManagedJob } from "@/lib/managedWorker";
+import { isBenignJobRace, nextManagedJob, runManagedJob } from "@/lib/managedWorker";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { isValidWorkerToken } from "@/lib/secureCompare";
 
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     // and the conditional claim. That is normal multi-instance contention,
     // not a failed job; return idle so the scheduler does not treat it as a
     // provider/server failure and immediately hammer the same row.
-    if (error instanceof ManagedWorkerError && error.message === "job not found or already running") {
+    if (isBenignJobRace(error)) {
       return new NextResponse(null, { status: 204, headers: { "x-request-id": requestId } });
     }
     console.error("managed worker polling request failed", {

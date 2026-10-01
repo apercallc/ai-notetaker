@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requestIdFrom } from "@/lib/apiErrors";
-import { runManagedJob } from "@/lib/managedWorker";
+import { isBenignJobRace, runManagedJob } from "@/lib/managedWorker";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { isValidWorkerToken } from "@/lib/secureCompare";
 import { captureServerError } from "@/lib/observability";
@@ -18,6 +18,10 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
     await runManagedJob(workspaceId, jobId);
     return NextResponse.json({ jobId, status: "complete" }, { headers: { "x-request-id": requestId } });
   } catch (error) {
+    // The poller (jobs/next) may have claimed this job first. That is contention, not a failure.
+    if (isBenignJobRace(error)) {
+      return NextResponse.json({ jobId, status: "already-running" }, { status: 409, headers: { "x-request-id": requestId } });
+    }
     console.error("managed job request failed", {
       requestId,
       workspaceId,

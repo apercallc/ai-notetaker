@@ -49,18 +49,28 @@ export async function purgeWorkspace(workspaceId: string): Promise<PurgeWorkspac
     ...meeting.uploads.flatMap((upload) => [upload.objectKey, ...upload.chunks.map((chunk) => chunk.objectKey)]),
   ]).filter((key): key is string => Boolean(key));
 
-  await prisma.$transaction(async (tx) => {
-    // Deletes cascade from the workspace row to membership/subscription/
-    // upload/job/share rows, but legacy meetings have no Workspace relation,
-    // so they are removed explicitly — inside the same transaction.
-    await tx.meeting.deleteMany({ where: { workspaceId } });
-    await tx.workspace.delete({ where: { id: workspaceId } });
-    // An account whose last workspace is gone can never sign in again and
-    // would squat its email address — remove it.
-    for (const userId of memberUserIds) {
-      await tx.user.deleteMany({ where: { id: userId, memberships: { none: {} } } });
-    }
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Deletes cascade from the workspace row to membership/subscription/
+      // upload/job/share rows, but legacy meetings have no Workspace relation,
+      // so they are removed explicitly — inside the same transaction.
+      await tx.meeting.deleteMany({ where: { workspaceId } });
+      await tx.workspace.delete({ where: { id: workspaceId } });
+      // An account whose last workspace is gone can never sign in again and
+      // would squat its email address — remove it.
+      for (const userId of memberUserIds) {
+        await tx.user.deleteMany({ where: { id: userId, memberships: { none: {} } } });
+      }
+      // A large workspace cascades many rows; the default 5 s interactive limit would time out
+      // after billing is already cancelled.
+    }, { timeout: 60_000, maxWait: 10_000 });
+  } catch (error) {
+    console.error("workspace deletion failed after cancelling billing", {
+      workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false, error: "Billing was cancelled, but we couldn't finish deleting the workspace. Nothing else was removed; try deleting it again in a moment." };
+  }
 
   const cleanup = await Promise.allSettled(objectKeys.map((key) => deleteObject(key)));
   const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");

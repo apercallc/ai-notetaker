@@ -55,6 +55,9 @@ function objectBackend(): ObjectBackend | null {
     region,
     ...(endpoint ? { endpoint } : {}),
     forcePathStyle,
+    // Bound connect and socket-idle time so a stalled object store cannot hang a job (and its
+    // lease heartbeat) forever.
+    requestHandler: { connectionTimeout: 10_000, requestTimeout: 120_000 },
     ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
   });
   const backend: ObjectBackend = { client, bucket, prefix, provider };

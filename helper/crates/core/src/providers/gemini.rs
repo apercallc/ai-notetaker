@@ -110,9 +110,7 @@ impl SummarizationProvider for GeminiProvider {
             });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!(
-                "gemini returned {status}"
-            )));
+            return Err(super::status_error("gemini", status));
         }
 
         let body: Value = response

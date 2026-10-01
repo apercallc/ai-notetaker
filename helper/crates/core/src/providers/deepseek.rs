@@ -91,9 +91,7 @@ impl SummarizationProvider for DeepSeekProvider {
             });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!(
-                "deepseek returned {status}"
-            )));
+            return Err(super::status_error("deepseek", status));
         }
 
         let body: Value = response

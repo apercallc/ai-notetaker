@@ -152,6 +152,14 @@ function waitForProviderRetry(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+/**
+ * Normal multi-worker contention, not a failed job: another worker claimed the
+ * row first, or the job/meeting was deleted while it ran.
+ */
+export function isBenignJobRace(error: unknown): boolean {
+  return error instanceof ManagedWorkerError && (error.message === "job not found or already running" || error.message === "managed job lease was lost");
+}
+
 export interface ProviderRequestOptions {
   timeoutMs?: number;
   /**
@@ -181,8 +189,14 @@ export async function providerRequest(input: string, init: RequestInit, label: s
       await waitForProviderRetry(providerRetryDelay(undefined, attempt));
       continue;
     }
+    if (response.ok) {
+      // Leave the deadline armed: callers read the body after this returns, and a provider
+      // that sends headers then stalls must not hang the job (and its lease) forever.
+      // Aborting an already-consumed response is a no-op.
+      timer.unref?.();
+      return response;
+    }
     clearTimeout(timer);
-    if (response.ok) return response;
     if (!providerRetryable(response.status) || attempt === PROVIDER_MAX_ATTEMPTS - 1) {
       throw new ManagedWorkerError(`${label} provider returned ${response.status}`);
     }
@@ -800,8 +814,13 @@ export async function summarize(utterances: ManagedUtterance[], meetingDate: str
 export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
   // The worker is the always-on managed process, so use its poll as the
   // bounded cleanup heartbeat for abandoned private audio uploads as well.
-  await expireManagedUploads();
-  await expireManagedMeetings();
+  // Every maintenance step is isolated: a storage hiccup in one of them must never
+  // stop the poll from claiming a job (a 500 here starves the whole queue).
+  const maintenanceFailed = (step: string) => (error: unknown) => {
+    console.error(`${step} failed`, { error: error instanceof Error ? error.message : String(error) });
+  };
+  await expireManagedUploads().catch(maintenanceFailed("upload expiry"));
+  await expireManagedMeetings().catch(maintenanceFailed("meeting retention"));
   await purgeExpiredAuditEvents().catch((error: unknown) => {
     console.error("audit purge failed", { error: error instanceof Error ? error.message : String(error) });
   });
@@ -811,9 +830,9 @@ export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
   await runIntegrationMaintenance().catch((error: unknown) => {
     console.error("integration retries failed", { error: error instanceof Error ? error.message : String(error) });
   });
-  await sweepOrphanedAudio();
+  await sweepOrphanedAudio().catch(maintenanceFailed("orphaned audio sweep"));
   const staleBefore = new Date(Date.now() - MANAGED_JOB_LEASE_MS);
-  await failExhaustedJobs(staleBefore);
+  await failExhaustedJobs(staleBefore).catch(maintenanceFailed("exhausted job sweep"));
   const job = await prisma.processingJob.findFirst({
     where: {
       OR: [
@@ -910,6 +929,8 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
   const heartbeat = setInterval(() => {
     void prisma.processingJob
       .updateMany({ where: { id: job.id, workspaceId, status: "processing", leaseToken }, data: { startedAt: new Date() } })
+      // The lease is gone (job finished, failed or reclaimed): stop pretending to own it.
+      .then((result) => { if (result.count !== 1) clearInterval(heartbeat); })
       .catch(() => undefined);
   }, MANAGED_JOB_HEARTBEAT_MS);
   heartbeat.unref?.();
@@ -989,7 +1010,9 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
       if (summary?.actionItems.length) {
         await tx.actionItem.createMany({ data: summary.actionItems.map((item) => ({ meetingId: job.meetingId, userId: job.meeting.userId, text: item.text, owner: item.owner ?? null, dueAt: item.dueAt ?? null })) });
       }
-    });
+      // A long transcript is thousands of rows after provider spend: the default 5 s
+      // interactive limit would throw the paid result away.
+    }, { timeout: 30_000, maxWait: 10_000 });
     // The hosted library keeps text notes only. Remove the staged recording as
     // soon as the provider result and transcript have committed successfully.
     await deleteManagedUploadAudio(job.uploadId).catch((error: unknown) => {

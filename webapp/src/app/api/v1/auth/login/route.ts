@@ -22,10 +22,20 @@ export async function POST(request: Request) {
     const context = contextFromRequest(request);
     const result = await authenticateCredentials({ email, password, ip: context.ip });
     if (!result.ok) {
-      return NextResponse.json({ error: "invalid credentials" }, { status: 401, headers: { "x-request-id": requestId } });
+      if (result.reason === "throttled") {
+        return NextResponse.json(
+          { error: "too many sign-in attempts, try again later", requestId },
+          { status: 429, headers: { "x-request-id": requestId, "retry-after": String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))) } },
+        );
+      }
+      // Only reachable once the password is proven, so naming the problem reveals nothing to a guesser.
+      if (result.reason === "unverified") {
+        return NextResponse.json({ error: "Confirm your email address first. Check your inbox for the verification link.", code: "email-unverified", requestId }, { status: 403, headers: { "x-request-id": requestId } });
+      }
+      return NextResponse.json({ error: "invalid credentials", requestId }, { status: 401, headers: { "x-request-id": requestId } });
     }
     const user = result.user;
-    if (user.mustChangePassword) return NextResponse.json({ error: "Change your temporary password in the web app before connecting the extension." }, { status: 403 });
+    if (user.mustChangePassword) return NextResponse.json({ error: "Change your temporary password in the web app before connecting the extension.", requestId }, { status: 403, headers: { "x-request-id": requestId } });
 
     const workspaceId = await getUserDefaultWorkspaceId(user.id);
     if (!workspaceId) return NextResponse.json({ error: "account has no workspace" }, { status: 403, headers: { "x-request-id": requestId } });

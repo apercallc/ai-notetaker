@@ -78,7 +78,7 @@ impl SummarizationProvider for ClaudeProvider {
     ) -> Result<Summary, ProviderError> {
         let body = json!({
             "model": MODEL,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "system": summary_system_prompt(options),
             "messages": [{ "role": "user", "content": render_transcript(transcript) }]
         });
@@ -111,9 +111,7 @@ impl SummarizationProvider for ClaudeProvider {
             });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!(
-                "claude returned {status}"
-            )));
+            return Err(super::status_error("claude", status));
         }
 
         let body: Value = response
@@ -125,6 +123,13 @@ impl SummarizationProvider for ClaudeProvider {
 }
 
 fn parse_response(body: &Value) -> Result<Summary, ProviderError> {
+    // A reply cut off at the output limit is truncated JSON; say so instead of reporting a
+    // confusing parse error that then gets retried with identical input.
+    if body.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
+        return Err(ProviderError::Rejected(
+            "the summary was longer than the model could write".into(),
+        ));
+    }
     let text = body
         .pointer("/content/0/text")
         .and_then(Value::as_str)
@@ -162,6 +167,12 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ProviderError::AuthFailed(_)));
+    }
+
+    #[test]
+    fn a_reply_cut_off_at_the_output_limit_is_permanent_not_a_parse_error() {
+        let body = json!({ "stop_reason": "max_tokens", "content": [{ "text": "{\"summary\": \"cut" }] });
+        assert!(parse_response(&body).unwrap_err().is_permanent());
     }
 
     #[test]

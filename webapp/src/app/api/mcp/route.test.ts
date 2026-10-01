@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "./route";
 import { API_TOKEN_SCOPE, READ_TOKEN_SCOPE, createApiToken, resolveApiToken, resolveReadToken } from "@/lib/apiTokens";
 import { getSessionUser } from "@/lib/sessions";
@@ -76,6 +76,15 @@ describe("MCP endpoint", () => {
     expect(bad.status).toBe(400);
     expect((await bad.json()).error.code).toBe(-32700);
     expect((await post(null, bearer(readToken), JSON.stringify({ pad: "x".repeat(70_000) }))).status).toBe(413);
+  });
+
+  it("answers a database failure with a JSON-RPC internal error instead of a bare 500 page", async () => {
+    vi.spyOn(prisma.workspaceMembership, "findUnique").mockRejectedValueOnce(new Error("connection lost"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await post(rpc("ping"), bearer(readToken));
+    expect(response.status).toBe(500);
+    expect((await response.json()).error.code).toBe(-32603);
+    vi.restoreAllMocks();
   });
 
   it("answers GET with 405 because there is no server-initiated stream", async () => {

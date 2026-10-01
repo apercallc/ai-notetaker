@@ -458,12 +458,19 @@ export async function expireManagedMeetings(now = new Date()): Promise<number> {
       take: 100,
       select: { id: true },
     });
+    let removedHere = 0;
     for (const meeting of meetings) {
-      await deleteMeeting(workspace.id, meeting.id);
-      removed += 1;
+      // One undeletable meeting must not stop the rest of the sweep.
+      try {
+        await deleteMeeting(workspace.id, meeting.id);
+        removedHere += 1;
+      } catch (error) {
+        console.error("retention delete failed", { meetingId: meeting.id, error: error instanceof Error ? error.message : String(error) });
+      }
     }
-    if (meetings.length > 0) {
-      await recordAudit({ workspaceId: workspace.id, action: "meeting.retention_delete", targetType: "workspace", targetId: workspace.id, metadata: { count: meetings.length, retentionDays: workspace.retentionDays } });
+    removed += removedHere;
+    if (removedHere > 0) {
+      await recordAudit({ workspaceId: workspace.id, action: "meeting.retention_delete", targetType: "workspace", targetId: workspace.id, metadata: { count: removedHere, retentionDays: workspace.retentionDays } });
     }
   }
   return removed;

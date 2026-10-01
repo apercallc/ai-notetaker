@@ -126,15 +126,16 @@ impl StreamingSession for DeepgramStreamingSession {
         // Drain with a deadline instead of a blind fixed sleep: 300ms was
         // long enough to add latency to every stop yet short enough to
         // discard trailing finals whenever the provider took longer to
-        // flush, cutting off the last words of the meeting. Poll for up to
-        // 2s and return as soon as results stop arriving.
+        // flush, cutting off the last words of the meeting. Wait up to 2s for
+        // the provider to close the stream (it does once it has flushed its
+        // trailing finals). An empty poll right after CloseStream is normal and
+        // must not end the wait: that used to drop the final words on most stops.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
         let mut trailing = Vec::new();
         loop {
-            let received = self.try_recv_segments().await;
-            let got_any = !received.is_empty();
-            trailing.extend(received);
-            if !got_any || tokio::time::Instant::now() >= deadline {
+            let finished = self.closed.load(Ordering::Relaxed);
+            trailing.extend(self.try_recv_segments().await);
+            if finished || tokio::time::Instant::now() >= deadline {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -174,7 +175,13 @@ impl TranscriptionProvider for DeepgramProvider {
         );
         let (ws_stream, _) = tokio_tungstenite::connect_async(request)
             .await
-            .map_err(|e| ProviderError::Unreachable(e.to_string()))?;
+            .map_err(|e| match &e {
+                // The upgrade is refused with a plain HTTP status when the key is bad.
+                tokio_tungstenite::tungstenite::Error::Http(response) => {
+                    super::status_error("deepgram", response.status())
+                }
+                _ => ProviderError::Unreachable(e.to_string()),
+            })?;
         let (write, mut read) = ws_stream.split();
         let (tx, rx) = mpsc::unbounded_channel();
         let closed = Arc::new(AtomicBool::new(false));
@@ -244,9 +251,7 @@ impl TranscriptionProvider for DeepgramProvider {
             });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!(
-                "deepgram returned {status}"
-            )));
+            return Err(super::status_error("deepgram", status));
         }
 
         let body: Value = response

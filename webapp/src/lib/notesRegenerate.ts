@@ -19,6 +19,8 @@ const fail = (error: string): RegenerateResult => ({ ok: false, error });
  * Action items are never deleted (people tick them off and set due dates):
  * new ones are added only when their text is not already present.
  */
+class RegenerateConflictError extends Error {}
+
 export async function regenerateNotes(
   session: { workspaceId: string; userId: string },
   meetingId: string,
@@ -38,6 +40,8 @@ export async function regenerateNotes(
       startedAt: true,
       processingMode: true,
       notesRegenerations: true,
+      summary: true,
+      summaryEditedAt: true,
       transcript: { orderBy: { order: "asc" }, select: { speaker: true, text: true, timestamp: true } },
       speakers: { select: { speakerKey: true, displayName: true } },
       processingJobs: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true } },
@@ -80,22 +84,35 @@ export async function regenerateNotes(
     return fail(userSafe ? detail : "Couldn't regenerate the notes. Try again in a moment.");
   }
 
-  await prisma.$transaction(async (tx) => {
-    // Keep what was there once, so a regeneration can be undone like a hand edit.
-    const current = await tx.meeting.findUniqueOrThrow({ where: { id: meeting.id }, select: { summary: true } });
-    await tx.meeting.update({
-      where: { id: meeting.id },
-      data: { summary: formatSummaryText(summary), mode: templateId, previousSummary: current.summary, summaryEditedAt: null },
-    });
-    const existing = await tx.actionItem.findMany({ where: { meetingId: meeting.id }, select: { text: true } });
-    const known = new Set(existing.map((item) => item.text.trim().toLowerCase()));
-    const fresh = summary.actionItems.filter((item) => !known.has(item.text.trim().toLowerCase()));
-    if (fresh.length > 0) {
-      await tx.actionItem.createMany({
-        data: fresh.map((item) => ({ meetingId: meeting.id, userId: meeting.userId, text: item.text, owner: item.owner ?? null, dueAt: item.dueAt ?? null })),
+  // A regeneration can take a while; the user may edit the note meanwhile. Never overwrite
+  // a newer hand edit with notes written from older text.
+  const refund = () => prisma.meeting.updateMany({ where: { id: meeting.id, notesRegenerations: { gt: 0 } }, data: { notesRegenerations: { decrement: 1 } } }).catch(() => undefined);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const current = await tx.meeting.findUniqueOrThrow({ where: { id: meeting.id }, select: { summary: true, summaryEditedAt: true } });
+      if (current.summary !== meeting.summary || current.summaryEditedAt?.getTime() !== meeting.summaryEditedAt?.getTime()) {
+        throw new RegenerateConflictError();
+      }
+      // Keep what was there once, so a regeneration can be undone like a hand edit.
+      await tx.meeting.update({
+        where: { id: meeting.id },
+        data: { summary: formatSummaryText(summary), mode: templateId, previousSummary: current.summary, summaryEditedAt: null },
       });
-    }
-  });
+      const existing = await tx.actionItem.findMany({ where: { meetingId: meeting.id }, select: { text: true } });
+      const known = new Set(existing.map((item) => item.text.trim().toLowerCase()));
+      const fresh = summary.actionItems.filter((item) => !known.has(item.text.trim().toLowerCase()));
+      if (fresh.length > 0) {
+        await tx.actionItem.createMany({
+          data: fresh.map((item) => ({ meetingId: meeting.id, userId: meeting.userId, text: item.text, owner: item.owner ?? null, dueAt: item.dueAt ?? null })),
+        });
+      }
+    }, { timeout: 15_000 });
+  } catch (error) {
+    await refund();
+    if (error instanceof RegenerateConflictError) return fail("This note was edited while the new version was being written, so nothing was changed. Try again.");
+    console.error("notes regeneration could not be saved", { meetingId: meeting.id, error: error instanceof Error ? error.message : String(error) });
+    return fail("Couldn't save the regenerated notes. Try again in a moment.");
+  }
   await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "meeting.regenerate_notes", targetType: "meeting", targetId: meeting.id, metadata: { template: templateId } });
   return { ok: true, template: templateId, remaining: Math.max(0, MAX_NOTES_REGENERATIONS - meeting.notesRegenerations - 1) };
 }

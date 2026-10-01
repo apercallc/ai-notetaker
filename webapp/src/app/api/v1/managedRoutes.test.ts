@@ -149,7 +149,7 @@ describe("managed upload routes", () => {
   it("applies the shared database login throttle to extension/API sign-in", async () => {
     const email = "throttled-api-login@example.com";
     await prisma.loginThrottle.create({
-      data: { emailKey: email, failures: 10, firstFailureAt: new Date(), updatedAt: new Date() },
+      data: { emailKey: `login:email:${email}`, failures: 20, firstFailureAt: new Date(), updatedAt: new Date() },
     });
 
     const response = await managedLogin(new Request("http://localhost/api/v1/auth/login", {
@@ -157,9 +157,9 @@ describe("managed upload routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email, password: "wrong password" }),
     }));
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual(expect.objectContaining({ error: "invalid credentials" }));
-    await prisma.loginThrottle.delete({ where: { emailKey: email } });
+    expect(response.status).toBe(429);
+    expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);
+    await prisma.loginThrottle.delete({ where: { emailKey: `login:email:${email}` } });
   });
 
   it("returns workspace-scoped entitlements for a managed client preflight", async () => {
@@ -532,6 +532,11 @@ describe("managed upload routes", () => {
       body: JSON.stringify({ message: "boom", surface: "made-up-surface" }),
     }));
     expect(badSurface.status).toBe(400);
+
+    for (const body of ["null", "5", '"x"', "[]"]) {
+      const notAnObject = await reportClientError(new Request("http://localhost/api/v1/client-errors", { method: "POST", headers: auth(sessionId), body }));
+      expect(notAnObject.status, body).toBe(400);
+    }
 
     const unauthenticated = await reportClientError(new Request("http://localhost/api/v1/client-errors", {
       method: "POST",

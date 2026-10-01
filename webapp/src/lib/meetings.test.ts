@@ -165,6 +165,18 @@ describe("upsertMeeting", () => {
     expect(detail?.summary).toBe("Updated summary after re-sync.");
   });
 
+  it("keeps a renamed title and chosen template when a managed registration is retried", async () => {
+    const registration = sampleMeeting({ title: undefined, summary: "", transcript: [], actionItems: [], processingMode: "managed", mode: "sales" });
+    await upsertMeeting(registration, WORKSPACE_ID);
+    await renameMeeting(WORKSPACE_ID, registration.id, "Renamed by the user");
+
+    await upsertMeeting({ ...registration, mode: undefined }, WORKSPACE_ID);
+
+    const row = await prisma.meeting.findUniqueOrThrow({ where: { id: registration.id } });
+    expect(row.title).toBe("Renamed by the user");
+    expect(row.mode).toBe("sales");
+  });
+
   it("replaces transcript/action items on re-upsert rather than appending", async () => {
     const input = sampleMeeting();
     await upsertMeeting(input, WORKSPACE_ID);

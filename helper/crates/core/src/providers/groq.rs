@@ -103,9 +103,7 @@ impl TranscriptionProvider for GroqProvider {
             });
         }
         if !status.is_success() {
-            return Err(ProviderError::Unreachable(format!(
-                "groq returned {status}"
-            )));
+            return Err(super::status_error("groq", status));
         }
 
         let body: Value = response

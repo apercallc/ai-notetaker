@@ -25,7 +25,9 @@ export async function POST(request: Request) {
   }
   try {
     const body = await readManagedJson(request);
-    if (typeof body !== "object" || body === null) return apiErrorResponse(new Error("invalid body"), { requestId, fallbackMessage: "invalid report" });
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return NextResponse.json({ error: "invalid report", requestId }, { status: 400, headers: { "x-request-id": requestId } });
+    }
     const result = recordClientError(session, body as Record<string, unknown>);
     if (!result.ok) {
       return NextResponse.json({ error: result.error, requestId }, { status: 400, headers: { "x-request-id": requestId } });

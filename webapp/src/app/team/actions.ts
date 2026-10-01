@@ -70,7 +70,19 @@ export async function addMember(formData: FormData): Promise<AddMemberResult> {
 export type TeamActionResult = { ok: true; link?: string; message: string } | { ok: false; error: string };
 
 export async function manageTeam(formData: FormData): Promise<TeamActionResult> {
+  // requireSession signals "sign in" by throwing a redirect, so it stays outside the try.
   const session = await requireSession();
+  try {
+    return await manageTeamAs(session, formData);
+  } catch (error) {
+    // An unexpected failure (database, mail transport) would otherwise reach the
+    // client as Next's masked "server error" with no usable message.
+    console.error("team management failed", { error: error instanceof Error ? error.message : String(error) });
+    return { ok: false, error: "Something went wrong. Nothing was lost; try again in a moment." };
+  }
+}
+
+async function manageTeamAs(session: Awaited<ReturnType<typeof requireSession>>, formData: FormData): Promise<TeamActionResult> {
   if (session.role !== "owner") return { ok: false, error: "Only owners can manage this workspace." };
   const operation = String(formData.get("operation") ?? "");
   const id = String(formData.get("id") ?? "");
@@ -86,9 +98,10 @@ export async function manageTeam(formData: FormData): Promise<TeamActionResult> 
       where: { purpose: "invite", invitedById: session.userId, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
     });
     if (sentToday >= MAX_INVITES_PER_OWNER_PER_DAY) return { ok: false, error: "You've reached today's invitation limit. Try again tomorrow." };
-    await recordEmailRequest("invite", email, { ip: context.ip });
     const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: session.workspaceId } });
     const result = await sendInviteEmail({ workspaceId: workspace.id, workspaceName: workspace.name, email, role: "member", invitedById: session.userId, invitedByEmail: session.email, context });
+    // Counted once the invitation actually went out, so a failed send does not burn the owner's quota.
+    await recordEmailRequest("invite", email, { ip: context.ip });
     await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "member.invite", targetType: "invite", metadata: { email, role: "member", delivered: result.delivered } });
     revalidatePath("/team");
     return { ok: true, message: result.delivered ? "Invitation sent." : "Share this invitation privately with the intended teammate.", ...(!result.delivered ? { link: result.link } : {}) };

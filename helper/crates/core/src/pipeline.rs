@@ -9,7 +9,7 @@
 
 use crate::native_messaging::{ActionItem, ErrorCode, HelperToExtension};
 use crate::providers::{
-    AudioChannel, AudioChunk, FlaggedMoment, StreamingSession, SummarizationProvider,
+    AudioChannel, AudioChunk, FlaggedMoment, StreamingSession, SummarizationProvider, Summary,
     SummaryOptions, TranscriptionProvider,
 };
 use crate::resilience::RetryQueue;
@@ -72,6 +72,40 @@ pub struct Pipeline {
     /// the previous one dropped). `None` means fully caught up.
     mic_stream_gap_start: Option<usize>,
     speaker_stream_gap_start: Option<usize>,
+    /// Failed live-connection attempts in a row, and the earliest next attempt, per channel.
+    /// Without this every audio frame (~100/s) tried a fresh connection while the pipeline lock
+    /// was held, starving stop and the retry worker during a provider outage.
+    mic_stream_connect: StreamConnectState,
+    speaker_stream_connect: StreamConnectState,
+    /// Retry jobs whose transcript is already saved but whose queue entry could not be
+    /// removed. They must never append their segments a second time.
+    completed_jobs: std::collections::HashSet<Uuid>,
+}
+
+#[derive(Default)]
+struct StreamConnectState {
+    failures: u32,
+    not_before: Option<std::time::Instant>,
+}
+
+impl StreamConnectState {
+    fn backoff(&self) -> std::time::Duration {
+        std::time::Duration::from_secs((1u64 << self.failures.min(5)).min(30))
+    }
+}
+
+const STREAM_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// PCM sample rates outside this range are corrupt metadata, not audio.
+const MIN_SAMPLE_RATE_HZ: u32 = 8_000;
+const MAX_SAMPLE_RATE_HZ: u32 = 192_000;
+const FALLBACK_SAMPLE_RATE_HZ: u32 = 48_000;
+
+fn sane_sample_rate(rate: u32) -> u32 {
+    if (MIN_SAMPLE_RATE_HZ..=MAX_SAMPLE_RATE_HZ).contains(&rate) {
+        rate
+    } else {
+        FALLBACK_SAMPLE_RATE_HZ
+    }
 }
 
 impl Pipeline {
@@ -94,6 +128,9 @@ impl Pipeline {
             speaker_session: None,
             mic_stream_gap_start: None,
             speaker_stream_gap_start: None,
+            mic_stream_connect: StreamConnectState::default(),
+            speaker_stream_connect: StreamConnectState::default(),
+            completed_jobs: std::collections::HashSet::new(),
         }
     }
 
@@ -245,7 +282,7 @@ impl Pipeline {
         });
         pending_audio.pcm16.extend_from_slice(pcm16);
 
-        let batch_bytes = sample_rate_hz
+        let batch_bytes = sane_sample_rate(sample_rate_hz)
             .saturating_mul(2)
             .saturating_mul(TRANSCRIPTION_BATCH_SECONDS as u32) as usize;
         if pending_audio.pcm16.len() >= batch_bytes {
@@ -283,19 +320,57 @@ impl Pipeline {
 
         let mut messages = Vec::new();
 
+        let connect = match channel {
+            AudioChannel::Mic => &mut self.mic_stream_connect,
+            AudioChannel::Speaker => &mut self.speaker_stream_connect,
+        };
         if session.is_none() || session.as_ref().is_some_and(|s| s.is_closed()) {
             *session = None;
             gap_start.get_or_insert(existing_len);
-            match self
-                .transcription_provider
-                .open_streaming_session(channel, sample_rate_hz)
-                .await
+            if connect
+                .not_before
+                .is_some_and(|until| std::time::Instant::now() < until)
             {
-                Ok(new_session) => *session = Some(new_session),
-                Err(_) => {
+                // Still backing off from a failed connection; the audio is on disk and the gap grows.
+                return vec![];
+            }
+            let opened = tokio::time::timeout(
+                STREAM_CONNECT_TIMEOUT,
+                self.transcription_provider
+                    .open_streaming_session(channel, sample_rate_hz),
+            )
+            .await;
+            match opened {
+                Ok(Ok(new_session)) => {
+                    *session = Some(new_session);
+                    connect.failures = 0;
+                    connect.not_before = None;
+                }
+                failure => {
                     // Stay disconnected; audio keeps accumulating on disk
                     // (already persisted above) and the gap keeps growing
-                    // until a future call successfully reopens a session.
+                    // until a later attempt reopens a session.
+                    let first_of_streak = connect.failures == 0;
+                    connect.not_before = Some(std::time::Instant::now() + connect.backoff());
+                    connect.failures = connect.failures.saturating_add(1);
+                    if first_of_streak {
+                        // Once per streak: a revoked key or an unreachable provider is otherwise
+                        // invisible until the call ends.
+                        let (code, reason) = match failure {
+                            Ok(Err(error)) => (error.to_error_code(), error.to_string()),
+                            _ => (
+                                ErrorCode::ProviderUnreachable,
+                                "connection timed out".into(),
+                            ),
+                        };
+                        return vec![HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code,
+                            message: format!(
+                                "live transcription could not connect ({reason}); the audio is still being saved and will be transcribed afterwards"
+                            ),
+                        }];
+                    }
                     return vec![];
                 }
             }
@@ -312,9 +387,7 @@ impl Pipeline {
                 let trailing = old.close().await;
                 for (segment, utterance_id) in trailing {
                     if segment.is_final {
-                        let _ = self
-                            .store
-                            .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
+                        Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages);
                     }
                     messages.push(HelperToExtension::TranscriptPartial {
                         meeting_id,
@@ -422,11 +495,10 @@ impl Pipeline {
         let received = session.try_recv_segments().await;
         let mut saw_final = false;
         for (segment, utterance_id) in received {
-            if segment.is_final {
+            if segment.is_final
+                && Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages)
+            {
                 saw_final = true;
-                let _ = self
-                    .store
-                    .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
             }
             messages.push(HelperToExtension::TranscriptPartial {
                 meeting_id,
@@ -444,15 +516,35 @@ impl Pipeline {
         messages
     }
 
+    /// Saves a final streamed segment. A failed save (corrupt `transcript.json`, full disk) is
+    /// reported rather than swallowed, because the live view would otherwise show text that the
+    /// saved transcript never contains. Returns whether the segment is now durable.
+    fn save_streamed_final(
+        store: &MeetingStore,
+        meeting_id: Uuid,
+        segment: &crate::providers::TranscriptSegment,
+        messages: &mut Vec<HelperToExtension>,
+    ) -> bool {
+        match store.append_transcript_segments(meeting_id, std::slice::from_ref(segment)) {
+            Ok(()) => true,
+            Err(error) => {
+                messages.push(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: error.error_code(),
+                    message: format!("a transcript line could not be saved: {error}"),
+                });
+                false
+            }
+        }
+    }
+
     /// Flushes any sub-threshold audio before final summarization.
     pub async fn flush_pending_audio(&mut self, meeting_id: Uuid) -> Vec<HelperToExtension> {
         let mut messages = Vec::new();
         if let Some(mut session) = self.mic_session.take() {
             for (segment, utterance_id) in session.close().await {
                 if segment.is_final {
-                    let _ = self
-                        .store
-                        .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
+                    Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages);
                 }
                 messages.push(HelperToExtension::TranscriptPartial {
                     meeting_id,
@@ -466,9 +558,7 @@ impl Pipeline {
         if let Some(mut session) = self.speaker_session.take() {
             for (segment, utterance_id) in session.close().await {
                 if segment.is_final {
-                    let _ = self
-                        .store
-                        .append_transcript_segments(meeting_id, std::slice::from_ref(&segment));
+                    Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages);
                 }
                 messages.push(HelperToExtension::TranscriptPartial {
                     meeting_id,
@@ -610,7 +700,10 @@ impl Pipeline {
                         let _ = self
                             .store
                             .mark_audio_transcribed(meeting_id, channel_file, end);
-                        let _ = self.retry_queue.record_success(retry_job_id);
+                        if let Err(error) = self.retry_queue.record_success(retry_job_id) {
+                            tracing::warn!(%error, "could not remove a finished retry job");
+                            self.completed_jobs.insert(retry_job_id);
+                        }
                         for (index, segment) in segments.iter().enumerate() {
                             messages.push(HelperToExtension::TranscriptPartial {
                                 meeting_id,
@@ -670,10 +763,26 @@ impl Pipeline {
         meeting_id: Uuid,
     ) -> Result<Vec<HelperToExtension>, PipelineError> {
         self.accepting_audio = false;
-        self.store.mark_stopped(meeting_id, Utc::now())?;
-        self.store.mark_summary_pending(meeting_id)?;
+        // Whatever happens to the metadata below, the user pressed stop: the UI must hear
+        // RecordingStopped (an early `?` here used to leave it hanging) and the buffered
+        // audio must still be handed to the provider.
         let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
+        let marked = self
+            .store
+            .mark_stopped(meeting_id, Utc::now())
+            .and_then(|()| self.store.mark_summary_pending(meeting_id));
         messages.extend(self.flush_pending_audio(meeting_id).await);
+        if let Err(error) = marked {
+            // The meeting stays in its previous state, so a restart still offers it for recovery.
+            messages.push(HelperToExtension::Error {
+                meeting_id: Some(meeting_id),
+                code: error.error_code(),
+                message: format!(
+                    "could not finalize the recording; it can be resumed later: {error}"
+                ),
+            });
+            return Ok(messages);
+        }
 
         if self.has_pending_retries(meeting_id)
             || self.mic_stream_gap_start.is_some()
@@ -691,6 +800,17 @@ impl Pipeline {
         Ok(messages)
     }
 
+    /// Offers every transcription range that ran out of attempts one more full set. Called when
+    /// the user resumes a recording, typically after fixing the provider key.
+    pub fn requeue_exhausted_transcription(&mut self) -> usize {
+        self.retry_queue
+            .requeue_dead(Utc::now())
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "could not requeue exhausted transcription jobs");
+                0
+            })
+    }
+
     pub async fn recover_recording(
         &mut self,
         meeting_id: Uuid,
@@ -698,9 +818,11 @@ impl Pipeline {
         self.accepting_audio = false;
         let meta = self.store.load_meta(meeting_id)?;
         self.summary_options = meta.summary_options.clone();
-        self.store.mark_stopped(meeting_id, Utc::now())?;
-        self.store.mark_summary_pending(meeting_id)?;
-        let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
+        // The meeting stays in `Recording` until its audio tail has been read and handed on: if
+        // that fails part-way, a restart still offers it for recovery instead of marking it
+        // finished with part of the call never transcribed.
+        self.requeue_exhausted_transcription();
+        let mut messages = Vec::new();
 
         for (channel, channel_file, start, sample_rate_hz) in [
             (
@@ -716,12 +838,17 @@ impl Pipeline {
                 meta.speaker_sample_rate_hz,
             ),
         ] {
-            let end = std::fs::metadata(self.store.audio_path(meeting_id, channel_file))
-                .map(|meta| meta.len() as usize)
-                .unwrap_or(start);
+            let end = match std::fs::metadata(self.store.audio_path(meeting_id, channel_file)) {
+                Ok(meta) => meta.len() as usize,
+                // No file means no audio on this channel; any other failure (permissions, a
+                // locked file) must not be mistaken for an empty channel and marked processed.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => start,
+                Err(error) => return Err(crate::storage::StorageError::Io(error).into()),
+            };
             if end <= start {
                 continue;
             }
+            let sample_rate_hz = sane_sample_rate(sample_rate_hz);
             let batch_size = (sample_rate_hz as usize)
                 .saturating_mul(2)
                 .saturating_mul(TRANSCRIPTION_BATCH_SECONDS);
@@ -755,6 +882,10 @@ impl Pipeline {
                 offset = batch_end;
             }
         }
+
+        self.store.mark_stopped(meeting_id, Utc::now())?;
+        self.store.mark_summary_pending(meeting_id)?;
+        messages.insert(0, HelperToExtension::RecordingStopped { meeting_id });
 
         if !self.has_pending_retries(meeting_id) {
             messages.extend(self.process_pending_summary(meeting_id).await);
@@ -790,11 +921,22 @@ impl Pipeline {
                 }]
             }
         };
-        match self
-            .summarization_provider
-            .summarize(&transcript, &meta.summary_options)
-            .await
+        // A silent recording has nothing to summarize: calling a paid provider with an empty
+        // transcript invites an invented summary, or an empty reply that loops through retries.
+        let summarized = if transcript
+            .iter()
+            .all(|segment| segment.text.trim().is_empty())
         {
+            Ok(Summary {
+                summary: "No speech was detected in this recording.".into(),
+                action_items: Vec::new(),
+            })
+        } else {
+            self.summarization_provider
+                .summarize(&transcript, &meta.summary_options)
+                .await
+        };
+        match summarized {
             Ok(summary) => {
                 if let Err(error) = self.store.write_summary(meeting_id, &summary) {
                     return vec![HelperToExtension::Error {
@@ -855,8 +997,9 @@ impl Pipeline {
     }
 
     fn has_pending_retries(&self, meeting_id: Uuid) -> bool {
-        self.retry_queue
-            .any(|job| job.payload.meeting_id == meeting_id)
+        self.retry_queue.any(|job| {
+            job.payload.meeting_id == meeting_id && !self.completed_jobs.contains(&job.id)
+        })
     }
 
     /// Consume retry jobs whose backoff has elapsed. The audio range was
@@ -875,6 +1018,14 @@ impl Pipeline {
         let mut messages = Vec::new();
 
         for (job_id, job) in jobs {
+            if self.completed_jobs.contains(&job_id) {
+                // Its transcript is already saved; only the queue entry is stale. Appending again
+                // would duplicate the text, so just finish removing the entry.
+                if self.retry_queue.record_success(job_id).is_ok() {
+                    self.completed_jobs.remove(&job_id);
+                }
+                continue;
+            }
             let RetryAudioRef::FileRange {
                 channel_file,
                 start,
@@ -887,12 +1038,18 @@ impl Pipeline {
                 {
                     Ok(bytes) => bytes,
                     Err(error) => {
-                        let _ = self.retry_queue.record_failure(job_id, now);
+                        let exhausted =
+                            matches!(self.retry_queue.record_failure(job_id, now), Ok(Some(_)));
                         messages.push(HelperToExtension::Error {
                             meeting_id: Some(job.meeting_id),
                             code: ErrorCode::StorageError,
                             message: format!("retry could not read saved audio: {error}"),
                         });
+                        if exhausted {
+                            // Same as any other given-up range: without this the summary stays
+                            // pending forever because nothing re-checks the meeting.
+                            messages.extend(self.summarize_after_giving_up(job.meeting_id).await);
+                        }
                         continue;
                     }
                 };
@@ -923,7 +1080,12 @@ impl Pipeline {
                                     utterance_id: (*end as u32).wrapping_add(index as u32),
                                 });
                             }
-                            let _ = self.retry_queue.record_success(job_id);
+                            if let Err(error) = self.retry_queue.record_success(job_id) {
+                                // The segments are saved; remember that so the next tick does not
+                                // append them again while the queue file is unwritable.
+                                tracing::warn!(%error, "could not remove a finished retry job");
+                                self.completed_jobs.insert(job_id);
+                            }
                             if !self.has_pending_retries(job.meeting_id) {
                                 if let Some(summary_message) =
                                     self.resummarize_if_finalized(job.meeting_id).await
@@ -950,7 +1112,12 @@ impl Pipeline {
                     }
                 }
                 Err(error) => {
-                    if let Ok(Some(_exhausted)) = self.retry_queue.record_failure(job_id, now) {
+                    let outcome = if error.is_permanent() {
+                        self.retry_queue.give_up(job_id)
+                    } else {
+                        self.retry_queue.record_failure(job_id, now)
+                    };
+                    if let Ok(Some(_exhausted)) = outcome {
                         messages.push(HelperToExtension::Error {
                             meeting_id: Some(job.meeting_id),
                             code: error.to_error_code(),
@@ -1225,10 +1392,33 @@ mod tests {
         let (_dir, mut pipeline) = build_pipeline(0);
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
+        pipeline
+            .store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "hello".into(),
+                    is_final: true,
+                },
+            )
+            .unwrap();
         let messages = pipeline.stop_recording(id).await.unwrap();
         assert!(messages.iter().any(|message| matches!(
             message,
             HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
+    }
+
+    #[tokio::test]
+    async fn a_silent_recording_gets_a_plain_note_without_calling_the_summarizer() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        let messages = pipeline.stop_recording(id).await.unwrap();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary.contains("No speech")
         )));
     }
 
@@ -1674,6 +1864,17 @@ mod tests {
         );
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
+        pipeline
+            .store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "hello".into(),
+                    is_final: true,
+                },
+            )
+            .unwrap();
         let messages = pipeline.stop_recording(id).await.unwrap();
 
         assert!(messages

@@ -78,12 +78,95 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
             if bytes.is_empty() {
                 vec![]
             } else {
-                serde_json::from_slice(&bytes)?
+                Self::parse_tolerant(&path, &bytes)
             }
         } else {
             vec![]
         };
         Ok(Self { path, jobs })
+    }
+
+    /// Reads the queue one job at a time. A corrupt or truncated file (a crash mid-write on a
+    /// filesystem without atomic rename, a hand edit, a format from another version) must not
+    /// make every start and settings refresh fail forever, and one bad entry must not discard
+    /// its neighbours. Unreadable content is moved aside as `<file>.corrupt` for inspection.
+    fn parse_tolerant(path: &std::path::Path, bytes: &[u8]) -> Vec<RetryJob<T>> {
+        let entries: Vec<serde_json::Value> = match serde_json::from_slice(bytes) {
+            Ok(entries) => entries,
+            Err(error) => {
+                tracing::warn!(?path, %error, "retry queue is unreadable; quarantining it");
+                Self::quarantine(path);
+                return vec![];
+            }
+        };
+        let mut jobs = Vec::with_capacity(entries.len());
+        let mut skipped = false;
+        for entry in entries {
+            match serde_json::from_value::<RetryJob<T>>(entry) {
+                Ok(job) => jobs.push(job),
+                Err(error) => {
+                    skipped = true;
+                    tracing::warn!(?path, %error, "dropping an unreadable retry job");
+                }
+            }
+        }
+        if skipped {
+            // Keep the original so the dropped jobs can be inspected, then rewrite what survived.
+            let _ = fs::copy(path, Self::corrupt_path(path));
+        }
+        jobs
+    }
+
+    fn corrupt_path(path: &std::path::Path) -> PathBuf {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".corrupt");
+        PathBuf::from(name)
+    }
+
+    fn quarantine(path: &std::path::Path) {
+        let _ = fs::rename(path, Self::corrupt_path(path));
+    }
+
+    fn dead_path(&self) -> PathBuf {
+        let mut name = self.path.as_os_str().to_owned();
+        name.push(".dead");
+        PathBuf::from(name)
+    }
+
+    /// Jobs that ran out of attempts are parked here instead of vanishing, so the work they
+    /// stand for (a transcription range whose audio is still on disk) can be offered again,
+    /// for example when the user resumes the recording after fixing the provider key.
+    fn bury(&self, job: &RetryJob<T>) -> Result<(), RetryQueueError> {
+        let path = self.dead_path();
+        let mut dead: Vec<serde_json::Value> = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        dead.push(serde_json::to_value(job)?);
+        crate::storage::atomic_write(&path, &serde_json::to_vec_pretty(&dead)?)?;
+        Ok(())
+    }
+
+    /// Puts every parked job back in the queue with a fresh attempt budget; returns how many.
+    pub fn requeue_dead(&mut self, now: DateTime<Utc>) -> Result<usize, RetryQueueError> {
+        let path = self.dead_path();
+        let Ok(bytes) = fs::read(&path) else {
+            return Ok(0);
+        };
+        let dead: Vec<RetryJob<T>> = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|value| serde_json::from_value(value).ok())
+            .collect();
+        let count = dead.len();
+        for mut job in dead {
+            job.attempts = 0;
+            job.next_retry_at = now;
+            self.jobs.push(job);
+        }
+        self.persist()?;
+        let _ = fs::remove_file(path);
+        Ok(count)
     }
 
     fn persist(&self) -> Result<(), RetryQueueError> {
@@ -131,6 +214,8 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
         job.attempts += 1;
         if job.attempts >= MAX_ATTEMPTS {
             let exhausted = job.clone();
+            // Park it before removing it: if parking fails the job stays queued rather than lost.
+            self.bury(&exhausted)?;
             self.jobs.retain(|j| j.id != job_id);
             self.persist()?;
             return Ok(Some(exhausted));
@@ -138,6 +223,18 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
         job.next_retry_at = now + jittered_backoff(job.attempts);
         self.persist()?;
         Ok(None)
+    }
+
+    /// Parks a job right away, without spending its remaining attempts. For failures that
+    /// retrying can never fix (the provider refused the request itself).
+    pub fn give_up(&mut self, job_id: Uuid) -> Result<Option<RetryJob<T>>, RetryQueueError> {
+        let Some(job) = self.jobs.iter().find(|j| j.id == job_id).cloned() else {
+            return Ok(None);
+        };
+        self.bury(&job)?;
+        self.jobs.retain(|j| j.id != job_id);
+        self.persist()?;
+        Ok(Some(job))
     }
 
     pub fn record_success(&mut self, job_id: Uuid) -> Result<(), RetryQueueError> {
@@ -281,5 +378,45 @@ mod tests {
         let mut queue: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
         let result = queue.record_failure(Uuid::new_v4(), Utc::now()).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn a_corrupt_queue_file_is_quarantined_instead_of_failing_every_load() {
+        let (_dir, path) = temp_queue_path();
+        std::fs::write(&path, b"{ not json").unwrap();
+        let queue: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
+        assert_eq!(queue.len(), 0);
+        assert!(!path.exists());
+        assert!(path.with_extension("json.corrupt").exists());
+    }
+
+    #[test]
+    fn one_unreadable_job_does_not_discard_its_neighbours() {
+        let (_dir, path) = temp_queue_path();
+        let good = RetryJob {
+            id: Uuid::new_v4(),
+            payload: "ok".to_string(),
+            attempts: 1,
+            next_retry_at: Utc::now(),
+        };
+        let file = serde_json::json!([serde_json::to_value(&good).unwrap(), { "id": 5 }]);
+        std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+        let queue: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn exhausted_jobs_are_parked_and_can_be_requeued() {
+        let (_dir, path) = temp_queue_path();
+        let now = Utc::now();
+        let mut queue: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
+        let id = queue.enqueue("range".to_string(), now).unwrap();
+        for _ in 0..MAX_ATTEMPTS {
+            queue.record_failure(id, now).unwrap();
+        }
+        assert!(queue.is_empty());
+        assert_eq!(queue.requeue_dead(now).unwrap(), 1);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.requeue_dead(now).unwrap(), 0);
     }
 }
