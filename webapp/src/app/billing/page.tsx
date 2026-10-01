@@ -2,6 +2,8 @@ import Link from "next/link";
 import { requireSession } from "@/lib/currentUser";
 import { prisma } from "@/lib/db";
 import { getEntitlements } from "@/lib/usageLedger";
+import { getChatEntitlement } from "@/lib/chatQuota";
+import { PLAN_AUDIO_HOUR_LIMITS, PLAN_CHAT_QUESTION_LIMITS } from "@/lib/plans";
 import { getPlanCatalog, hasLiveSubscription } from "@/lib/billing";
 import { planLabel, statusLabel } from "@/lib/plans";
 import { managedHostingEnabled } from "@/lib/managedAuth";
@@ -41,8 +43,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       </div>
     );
   }
-  const [entitlements, subscription, catalog] = await Promise.all([
+  const [entitlements, chat, subscription, catalog] = await Promise.all([
     getEntitlements(session.workspaceId),
+    getChatEntitlement(session.workspaceId),
     prisma.workspaceSubscription.findUnique({ where: { workspaceId: session.workspaceId } }),
     getPlanCatalog(),
   ]);
@@ -113,6 +116,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           </p>
         )}
 
+        {chat.limit > 0 && (
+          <p className="muted-copy">{chat.used} of {chat.limit} Ask-your-notes questions used</p>
+        )}
+
         {entitlements.warning === "exhausted" && (
           <p className="error-text" role="alert">
             {entitlements.audio.warning === "exhausted"
@@ -153,7 +160,8 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
                 <p><strong>{offer.priceLabel ?? "Price shown at checkout"}</strong></p>
                 <p>{offer.id === "hosted_pro" ? "For individual users who want hosted transcription and summaries." : "For shared workspaces with higher volume and team history."}</p>
                 <ul>
-                  <li>Up to {offer.meetingLimit.toLocaleString("en-US")} meetings per month</li>
+                  <li>Up to {offer.meetingLimit.toLocaleString("en-US")} meetings or {PLAN_AUDIO_HOUR_LIMITS[offer.id]} meeting hours per month</li>
+                  <li>Ask your notes: {PLAN_CHAT_QUESTION_LIMITS[offer.id].toLocaleString("en-US")} questions per month</li>
                   <li>{offer.id === "hosted_pro" ? "Encrypted upload and durable job retries" : "Workspace members and shared history"}</li>
                   <li>{offer.id === "hosted_pro" ? "Searchable workspace history" : "Stripe-managed invoices and cancellation"}</li>
                 </ul>

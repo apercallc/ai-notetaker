@@ -1,5 +1,22 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## UX overhaul (2026-09-30)
+
+Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowers/specs/2026-09-30-ux-overhaul-design.md).
+
+- [x] Webapp: icon nav with phone bottom tab bar, sectioned Settings
+      (`/account?tab=`), calmer Team page, date-range filter on Meetings.
+- [x] Ask your notes (`/ask`): keyword retrieval inside one workspace, cited
+      answers, Hosted Pro/Team only, monthly question cap (`PLAN_CHAT_QUESTION_LIMITS`)
+      reserved before provider spend and released on failure.
+- [x] Extension popup: live search, paged results, one-click "Browse all meetings".
+- [x] Marketing: Ask-your-notes section, plan bullets, FAQ and llms.txt.
+- [ ] Verify the new layouts in a real browser at 375/768/1280 px and on
+      iOS Safari and Android Chrome; run the design-review pass.
+- [ ] Decide chat pricing from measured per-question cost (no cost ledger for
+      chat yet) and consider pgvector retrieval once usage data exists.
+- [ ] Chat history is intentionally not persisted; revisit with a retention-aware design.
+
 ## Scale and reliability audit (2026-09-30)
 
 - [x] Prevent concurrent cross-workspace meeting-ID overwrite and upload retry

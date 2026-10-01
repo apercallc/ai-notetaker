@@ -7,7 +7,7 @@ export type { ManagedPlan } from "./plans";
 
 const UNITS_KIND = "meeting_processing";
 
-type SubscriptionLike = {
+export type SubscriptionLike = {
   plan: string;
   status: string;
   graceEndsAt: Date | null;
@@ -15,7 +15,7 @@ type SubscriptionLike = {
   currentPeriodEnd: Date | null;
 } | null;
 
-function hasProcessingAccess(subscription: SubscriptionLike, now = new Date()): boolean {
+export function hasProcessingAccess(subscription: SubscriptionLike, now = new Date()): boolean {
   return subscription?.status === "active" || subscription?.status === "trialing" ||
     (subscription?.status === "past_due" && Boolean(subscription.graceEndsAt && subscription.graceEndsAt >= now));
 }

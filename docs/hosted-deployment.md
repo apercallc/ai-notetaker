@@ -52,6 +52,11 @@ uploading it for processing. Hosted audio is temporary staging only.
   `MANAGED_SUMMARY_PROVIDER=anthropic` is selected. The summary model defaults
   to the selected provider's model; set `MANAGED_SUMMARY_MODEL` only to
   override it with a model supported by that provider.
+- Ask your notes runs in the webapp service (not the worker) with the same summary
+  provider key and model. Set `MANAGED_CHAT_MODEL` on the webapp service only to
+  give chat a different model. Its monthly question caps are
+  `PLAN_CHAT_QUESTION_LIMITS` in `webapp/src/lib/plans.ts`; chat has no cost
+  ledger yet, so watch provider spend before raising them.
 - Stripe secret/webhook/price configuration when paid plans are enabled.
 
 The default Groq transcription profile is cheaper and does not identify

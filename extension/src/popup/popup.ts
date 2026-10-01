@@ -6,11 +6,14 @@ import { escapeHtml } from "../lib/html";
 import { getExtensionOnboardingUrl } from "../lib/install";
 import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
 import { takePendingMeetStart } from "../meet/pendingStart";
+import { HISTORY_PAGE_SIZE, HISTORY_RECENT_COUNT, SEARCH_DEBOUNCE_MS, historyHeading, pageOf, resultsSummary } from "./historyModel";
 import { providerHostPermissions, requestOptionalPermission } from "../lib/optionalPermissions";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
 let historyQuery = "";
+/** True once the person asks to browse the whole archive instead of the newest few. */
+let historyAll = false;
 /** Set when the person says they are recording a desktop call (Zoom, Teams, Slack) rather than Google Meet. */
 let desktopChosen = false;
 /** Why the last start did not begin; shown in place, since the popup has no other channel for it. */
@@ -360,7 +363,7 @@ async function resumePendingStart(intent: { tabId: number; meetingMode?: string;
 
 /** The popup's idle view knows where the person is: on a Meet call, it is one button. */
 async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
-  const meetings = await listMeetings(historyQuery ? undefined : 5, historyQuery || undefined);
+  const meetings = await listMeetings(historyQuery || historyAll ? undefined : HISTORY_RECENT_COUNT, historyQuery || undefined);
   const meetTab = await activeMeetTab();
   lastActiveMeetTab = meetTab && typeof meetTab.id === "number" ? { id: meetTab.id } : null;
   const onMeet = meetTab !== undefined;
@@ -407,22 +410,88 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
     <div class="record-controls">${controls}</div>
     <div class="history-section">
       <div class="history-heading">
-        <h2 tabindex="-1" data-view-heading>${historyQuery ? "Search results" : "Recent meetings"}</h2>
-        <button type="button" class="text-link" id="open-action-inbox">Action inbox</button>
+        <h2 tabindex="-1" data-view-heading id="history-title"></h2>
+        <button type="button" class="text-link" id="open-action-inbox">Actions</button>
       </div>
       <form class="meeting-search" id="meeting-search" role="search">
         <label class="sr-only" for="meeting-search-input">Search meetings</label>
-        <input id="meeting-search-input" type="search" maxlength="200" placeholder="Search all meetings…" value="${escapeHtml(historyQuery)}" />
-        <button type="submit" class="secondary">Search</button>
-        ${historyQuery ? `<button type="button" class="text-link" id="clear-meeting-search">Clear</button>` : ""}
+        <input id="meeting-search-input" type="search" maxlength="200" placeholder="Search all meetings…" value="${escapeHtml(historyQuery)}" autocomplete="off" />
+        <button type="button" class="text-link" id="clear-meeting-search"${historyQuery ? "" : " hidden"}>Clear</button>
       </form>
-      ${
-        meetings.length > 0
-          ? meetings.map(renderHistoryItem).join("")
-          : `<p class="empty-state">${historyQuery ? `No meetings match “${escapeHtml(historyQuery)}”.` : "No meetings yet. Your notes will show up here."}</p>`
-      }
+      <p class="field-hint text-secondary" id="history-summary" role="status" aria-live="polite"></p>
+      <div id="history-results"></div>
+      <button type="button" class="secondary history-more" id="history-more" hidden></button>
     </div>
   `;
+
+  let results = meetings;
+  let shown = HISTORY_PAGE_SIZE;
+  let searchSeq = 0;
+  const searchInput = document.getElementById("meeting-search-input") as HTMLInputElement;
+
+  function paintHistory(): void {
+    const { visible, remaining } = pageOf(results, shown);
+    document.getElementById("history-title")!.textContent = historyHeading(historyQuery, historyAll);
+    document.getElementById("history-summary")!.textContent = resultsSummary(results.length, historyQuery);
+    document.getElementById("clear-meeting-search")!.hidden = !historyQuery;
+    document.getElementById("history-results")!.innerHTML = visible.length
+      ? visible.map(renderHistoryItem).join("")
+      : `<p class="empty-state">${historyQuery ? `No meetings match “${escapeHtml(historyQuery)}”.` : "No meetings yet. Your notes will show up here."}</p>`;
+    for (const button of document.querySelectorAll<HTMLButtonElement>(".history-item")) {
+      button.addEventListener("click", () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(button.dataset.meetingId!)}`) });
+      });
+    }
+    const more = document.getElementById("history-more") as HTMLButtonElement;
+    // Without a search or browse-all, the list is just the newest few; offer the rest in one click.
+    const canBrowse = !historyQuery && !historyAll && results.length >= HISTORY_RECENT_COUNT;
+    more.hidden = remaining === 0 && !canBrowse;
+    more.textContent = remaining > 0 ? `Show ${Math.min(remaining, HISTORY_PAGE_SIZE)} more` : "Browse all meetings";
+  }
+
+  /** Re-query without re-rendering the page, so typing keeps focus; stale answers are dropped. */
+  async function refreshHistory(): Promise<void> {
+    const seq = ++searchSeq;
+    const list = await listMeetings(historyQuery || historyAll ? undefined : HISTORY_RECENT_COUNT, historyQuery || undefined);
+    if (seq !== searchSeq) return;
+    results = list;
+    shown = HISTORY_PAGE_SIZE;
+    paintHistory();
+  }
+  paintHistory();
+
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  searchInput.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      historyQuery = searchInput.value.trim();
+      void refreshHistory();
+    }, SEARCH_DEBOUNCE_MS);
+  });
+  document.getElementById("history-more")?.addEventListener("click", () => {
+    if (results.length > shown) {
+      const firstNew = shown;
+      shown += HISTORY_PAGE_SIZE;
+      paintHistory();
+      // Keep a keyboard user's place: land on the first newly revealed row.
+      document.querySelectorAll<HTMLButtonElement>(".history-item")[firstNew]?.focus();
+    } else {
+      historyAll = true;
+      void refreshHistory();
+    }
+  });
+  document.getElementById("meeting-search")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    clearTimeout(searchTimer);
+    historyQuery = searchInput.value.trim();
+    void refreshHistory();
+  });
+  document.getElementById("clear-meeting-search")?.addEventListener("click", () => {
+    searchInput.value = "";
+    historyQuery = "";
+    void refreshHistory();
+    searchInput.focus();
+  });
 
   // A start that never began is reported by the background as a broadcast, and
   // only this idle view can show it.
@@ -500,22 +569,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   document.getElementById("open-action-inbox")?.addEventListener("click", () => {
     chrome.tabs.create({ url: chrome.runtime.getURL("actions/actions.html") });
   });
-  document.getElementById("meeting-search")?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    historyQuery = (document.getElementById("meeting-search-input") as HTMLInputElement).value.trim();
-    void renderSafely();
-  });
-  document.getElementById("clear-meeting-search")?.addEventListener("click", () => {
-    historyQuery = "";
-    void renderSafely();
-  });
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
-  for (const button of document.querySelectorAll<HTMLButtonElement>(".history-item")) {
-    button.addEventListener("click", () => {
-      const id = button.dataset.meetingId!;
-      chrome.tabs.create({ url: chrome.runtime.getURL(`meeting/meeting.html?id=${encodeURIComponent(id)}`) });
-    });
-  }
   if (desktop) void renderAudioStatus(helperStatus);
 }
 

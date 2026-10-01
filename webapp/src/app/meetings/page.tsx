@@ -14,6 +14,7 @@ import { OnboardingCard, type OnboardingPlan } from "@/components/OnboardingCard
 import { ProcessingBadge } from "@/components/ProcessingBadge";
 import { RetryProcessing } from "@/components/RetryProcessing";
 import { highlightParts } from "@/lib/snippet";
+import { MEETING_RANGES, parseMeetingRange, rangeStart } from "@/lib/dateRange";
 import { SearchForm } from "./SearchForm";
 
 const PAGE_SIZE = 50;
@@ -21,7 +22,7 @@ const PAGE_SIZE = 50;
 // issuing an expensive, guaranteed-to-fail query for a crafted page number.
 const MAX_PAGE = 2_000;
 
-type SearchParams = Promise<{ q?: string; page?: string; error?: string }>;
+type SearchParams = Promise<{ q?: string; page?: string; range?: string; error?: string }>;
 
 function cleanQuery(raw: string | undefined): string | undefined {
   // Keep a pasted or hand-crafted URL from turning a normal page view into a
@@ -43,32 +44,38 @@ async function serviceOrigin(): Promise<string> {
 
 export default async function MeetingsPage({ searchParams }: { searchParams: SearchParams }) {
   const { userId, workspaceId } = await requireSession();
-  const { q: rawQuery, page: rawPage, error } = await searchParams;
+  const { q: rawQuery, page: rawPage, range: rawRange, error } = await searchParams;
   const q = cleanQuery(rawQuery);
+  const range = parseMeetingRange(rawRange);
+  const since = rangeStart(range);
   const parsedPage = Number(rawPage ?? "1");
   const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 && parsedPage <= MAX_PAGE ? parsedPage : 1;
-  let result = await listMeetings(workspaceId, { query: q, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  let result = await listMeetings(workspaceId, { query: q, since, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
   const { total } = result;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   if (currentPage !== page) {
-    result = await listMeetings(workspaceId, { query: q, limit: PAGE_SIZE, offset: (currentPage - 1) * PAGE_SIZE });
+    result = await listMeetings(workspaceId, { query: q, since, limit: PAGE_SIZE, offset: (currentPage - 1) * PAGE_SIZE });
   }
   const { meetings } = result;
 
-  function pageHref(nextPage: number): string {
+  function hrefFor(next: { range?: string; page?: number }): string {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
-    params.set("page", String(nextPage));
-    return `/meetings?${params.toString()}`;
+    if (next.range) params.set("range", next.range);
+    if (next.page && next.page > 1) params.set("page", String(next.page));
+    const qs = params.toString();
+    return qs ? `/meetings?${qs}` : "/meetings";
   }
+  const pageHref = (nextPage: number) => hrefFor({ range, page: nextPage });
 
-  const countText = q
+  const rangeLabel = MEETING_RANGES.find((item) => item.id === range)?.label.toLowerCase();
+  const countText = (q
     ? `${total} ${total === 1 ? "result" : "results"} for “${q}”`
-    : `${total} ${total === 1 ? "meeting" : "meetings"}`;
+    : `${total} ${total === 1 ? "meeting" : "meetings"}`) + (rangeLabel ? `, ${rangeLabel}` : "");
 
   let onboarding: React.ReactNode = null;
-  if (total === 0 && !q) {
+  if (total === 0 && !q && !range) {
     const managed = managedHostingEnabled();
     const [user, entitlements] = await Promise.all([
       prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
@@ -88,7 +95,13 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         <p className="total-count" role="status" aria-live="polite">{countText}</p>
       </div>
 
-      <SearchForm initialQuery={q ?? ""} />
+      <SearchForm initialQuery={q ?? ""} range={range} />
+      <nav className="filter-chips" aria-label="Filter by date">
+        <Link href={hrefFor({})} aria-current={range ? undefined : "true"}>All time</Link>
+        {MEETING_RANGES.map((item) => (
+          <Link key={item.id} href={hrefFor({ range: item.id })} aria-current={range === item.id ? "true" : undefined}>{item.label}</Link>
+        ))}
+      </nav>
 
       {error && (
         <p className="error-text" role="alert">
@@ -99,8 +112,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       {meetings.length === 0 ? (
         onboarding ?? (
           <div className="empty-state">
-            <p>No meetings match “{q}”.</p>
-            <Link href="/meetings">Clear search</Link>
+            <p>{q ? `No meetings match “${q}”${rangeLabel ? ` in the ${rangeLabel}` : ""}.` : "No meetings in this period."}</p>
+            <Link href="/meetings">Clear filters</Link>
           </div>
         )
       ) : (

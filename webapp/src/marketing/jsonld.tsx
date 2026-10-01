@@ -90,8 +90,8 @@ export function softwareNode(origin: string): Node {
         url: url(origin, "/how-it-works"),
         availability: "https://schema.org/InStock",
       },
-      monthlyOffer(origin, "Hosted Pro", FALLBACK_PRICE_AMOUNTS.hosted_pro, `Hosted AI for one person: up to ${LIMITS.pro} meetings or ${LIMITS.proHours} meeting hours a month.`),
-      monthlyOffer(origin, "Hosted Team", FALLBACK_PRICE_AMOUNTS.hosted_team, `Hosted AI for a shared workspace: up to ${LIMITS.team} meetings or ${LIMITS.teamHours} meeting hours a month.`),
+      monthlyOffer(origin, "Hosted Pro", FALLBACK_PRICE_AMOUNTS.hosted_pro, `Hosted AI for one person: up to ${LIMITS.pro} meetings or ${LIMITS.proHours} meeting hours a month, plus ${LIMITS.proQuestions} Ask-your-notes questions a month.`),
+      monthlyOffer(origin, "Hosted Team", FALLBACK_PRICE_AMOUNTS.hosted_team, `Hosted AI for a shared workspace: up to ${LIMITS.team} meetings or ${LIMITS.teamHours} meeting hours a month, plus ${LIMITS.teamQuestions} Ask-your-notes questions a month.`),
     ],
   };
 }

@@ -225,6 +225,11 @@ export function PricingView({ context, prices }: { context: ShellContext; prices
                 {LIMITS.teamHours} hours. Both reset each billing period, and the extension tells you before a meeting
                 starts if you have no meetings or hours left.
               </li>
+              <li>
+                Ask your notes is a Pro and Team perk: {LIMITS.proQuestions.toLocaleString("en-US")} questions a month on
+                Pro and {LIMITS.teamQuestions.toLocaleString("en-US")} on Team. Questions are counted separately from
+                meeting hours, reset each billing period, and are not part of the free trial or your-own-keys mode.
+              </li>
               <li>Cancel from the billing page. Your plan stays active until the end of the period you paid for.</li>
               <li>If a payment fails, you keep access for a short grace period while Stripe retries.</li>
               <li>Your recordings are always saved on your device first, whatever your plan.</li>
@@ -421,7 +426,8 @@ export function CompareView({ context }: { context: ShellContext }) {
 
 const SUBPROCESSORS: { name: string; role: string; data: string }[] = [
   { name: "Groq", role: "Transcription in Hosted AI", data: "Meeting audio, while it is being transcribed" },
-  { name: "OpenAI", role: "Summaries in Hosted AI", data: "Transcript text, while the summary is written" },
+  { name: "OpenAI", role: "Summaries and Ask your notes in Hosted AI", data: "Transcript text while the summary is written, and your question plus the note excerpts relevant to it while an answer is written" },
+  { name: "Anthropic", role: "Alternative provider for summaries and Ask your notes, used only if the service is switched to it", data: "The same text OpenAI would receive: transcript text for summaries, and your question with relevant note excerpts for answers" },
   { name: "Railway", role: "Hosting, database and temporary audio staging", data: "Account records, notes, and audio until processing finishes" },
   { name: "Stripe", role: "Payments and billing portal", data: "Your email and payment details, which Stripe collects directly" },
   { name: "Resend", role: "Sign-up and password-reset email", data: "Your email address" },
@@ -463,13 +469,37 @@ export function PrivacyView() {
             <ul>
               <li><strong>Account:</strong> your email address, a salted and hashed password, and your workspace and membership details.</li>
               <li><strong>Notes:</strong> the transcripts, summaries, decisions and action items generated from your meetings, stored in your workspace.</li>
-              <li><strong>Usage and billing:</strong> how many meetings you have processed this period, and your plan status. Stripe holds your payment details, not us.</li>
+              <li><strong>Usage and billing:</strong> how many meetings, meeting hours and Ask-your-notes questions you have used this period, and your plan status. Stripe holds your payment details, not us.</li>
+              <li><strong>Ask your notes:</strong> when you ask a question, the service searches only your workspace and sends your question with the matching excerpts of your notes to the summary provider to write the answer. Questions and answers are not saved; we keep only a count for your allowance.</li>
+              <li><strong>Sign-in and security records:</strong> when you sign in we record a description of your device, your IP address and timestamps. We use them to show your signed-in devices, let you revoke them, limit repeated failed sign-ins, and investigate abuse. A session or extension token ends when you sign out, revoke it, or it expires.</li>
               <li><strong>Audio:</strong> uploaded to private, temporary storage only so it can be transcribed. It is deleted as soon as processing succeeds, and uploads that never finish are removed within 24 hours. We do not keep recordings, and there is no playback or download of audio in the hosted library.</li>
             </ul>
             <p>
               Every workspace is isolated from the others. Provider credentials for Hosted AI live on our servers and are
               never sent to your browser or extension. Server logs use workspace-safe identifiers and failure
               categories, not audio, transcript text, keys or tokens.
+            </p>
+
+            <h2>Who is responsible for your notes</h2>
+            <p>
+              The people in your meetings are people too. When you record a call, the notes contain what they said. For
+              the notes and recordings in your workspace, you (or the organization that owns the workspace) decide what is
+              recorded and why, and we process that content only on your behalf to provide the service. For your account,
+              sign-in, billing and security records, we decide how the data is used, as described here. If your
+              organization needs a data processing agreement, contact us.
+            </p>
+            <p>
+              We do not sell your personal information, do not share it for advertising, and do not use your recordings,
+              transcripts or notes to train AI models. The providers below receive content only to perform the task we
+              send them and handle it under their own terms, which may include limited safety or abuse-monitoring
+              retention.
+            </p>
+
+            <h2>Sensitive information</h2>
+            <p>
+              Do not record or upload information that law or contract requires a special regime for, such as protected
+              health information, payment card data, or government identification numbers, unless you have confirmed that
+              this service is suitable for it. Hosted AI is not offered as a HIPAA-compliant service.
             </p>
 
             <h2>Who processes data for Hosted AI</h2>
@@ -496,7 +526,12 @@ export function PrivacyView() {
             </table>
           </div>
           <div className="mk-prose">
-            <p className="mk-mt-s">Each provider handles the data it receives under its own terms and privacy policy.</p>
+            <p className="mk-mt-s">
+              Each provider handles the data it receives under its own terms and privacy policy. Providers and the
+              servers that run the service may be located in the United States and other countries, so your data can be
+              processed outside the country where you live. We may add or replace providers and will update this table
+              when we do.
+            </p>
 
             <h2 id="google">Google sign-in and Drive</h2>
             <p>
@@ -527,8 +562,33 @@ export function PrivacyView() {
             <ul>
               <li>Delete any meeting from the app. In Hosted AI this removes its transcript and summary.</li>
               <li>Workspace owners choose how long hosted notes are kept, and you can export your data from the account page.</li>
+              <li>We keep account data while your account exists. After you delete an account or workspace, its notes and account records are removed, and copies in system backups are overwritten on the normal backup schedule. We keep records that the law or our tax and fraud-prevention duties require, such as billing records held by Stripe, for as long as they require.</li>
               <li>Deleting the extension does not delete files the helper saved on your device, provider account data, exported files, or data on a server you set up. Delete those where they live.</li>
             </ul>
+
+            <h2>Your rights</h2>
+            <p>
+              Depending on where you live, you may have the right to access, correct, delete, export or restrict the use
+              of your personal information, to object to some uses, to withdraw consent you gave, and to complain to your
+              data protection authority. Most of this you can do yourself: export from the account page, delete
+              meetings, disconnect Google, revoke devices, or delete your account. For anything else, contact us. We
+              will not treat you worse for exercising a privacy right. If you are a participant in someone else&apos;s
+              meeting, ask the person or organization that recorded it first, because they control that recording; we
+              will help where we can.
+            </p>
+
+            <h2>Children</h2>
+            <p>
+              AI Notetaker is not for anyone under 16, and we do not knowingly collect personal information from children.
+              If you believe a child has an account, contact us and we will delete it.
+            </p>
+
+            <h2>Security incidents</h2>
+            <p>
+              We protect data with access controls, workspace isolation, encryption in transit, and encrypted storage of
+              Google tokens, but no system is perfectly secure. If an incident affects your personal information, we
+              will notify you and the authorities where the law requires it.
+            </p>
 
             <h2>Meeting participants</h2>
             <p>{NOT_LEGAL_ADVICE}</p>
@@ -539,7 +599,7 @@ export function PrivacyView() {
               <a href={SITE.securityUrl}>security policy</a>. For questions about this notice,{" "}
               {contact ? <>email <a href={`mailto:${contact}`}>{contact}</a> or </> : null}open an issue on the{" "}
               <a href={SITE.supportUrl}>project&apos;s issue tracker</a>, and never post keys, recordings or transcripts
-              there. We will show a new effective date whenever this notice changes.
+              there. We will show a new effective date whenever this notice changes, and tell signed-in users about material changes in the app or by email before they take effect.
             </p>
           </div>
         </div>
@@ -574,16 +634,20 @@ export function TermsView() {
 
             <h2>Hosted AI accounts</h2>
             <ul>
+              <li>You must be at least 16 years old, and able to form a binding contract, to use Hosted AI. If you use it for an organization, you confirm you may bind it to these terms.</li>
               <li>Give us a real email address and keep your password private. You are responsible for activity in your account and workspace.</li>
               <li>Workspace owners manage members and are responsible for what their members record and store.</li>
-              <li>You keep ownership of your recordings and notes. You give us permission to process them, using the providers listed in the privacy notice, only to provide the service to you.</li>
-              <li>Do not use the service to break the law, to record people unlawfully, to attack or overload it, or to try to access another workspace&apos;s data.</li>
+              <li>You keep ownership of your recordings and notes. You give us a limited license to store, process, transmit to the providers listed in the privacy notice, and display them, and to create summaries, action items and answers from them, solely to provide the service to you. We do not use them to train AI models.</li>
+              <li>You are responsible for your content, for having the right to record and process it, and for the consent of the people in it. You must not upload content you have no right to use.</li>
+              <li>Do not use the service to break the law or anyone&apos;s rights, to record people unlawfully, to process regulated sensitive data described in the privacy notice, to attack, overload, scrape or reverse engineer the hosted service, to get around plan limits, to resell access, or to try to access another workspace&apos;s data.</li>
+              <li>If your use of the service, including a recording made without a required consent, results in a claim against us, you agree to cover our reasonable losses from that claim to the extent the law allows.</li>
             </ul>
 
             <h2>Plans and billing</h2>
             <ul>
-              <li>Hosted Pro and Hosted Team are monthly subscriptions billed in US dollars through Stripe. Each includes the monthly meeting and meeting-hours allowance shown on the pricing page.</li>
-              <li>Your first {LIMITS.trial} hosted meetings are a free one-time allowance. When an allowance is used up, processing stops until the next period or a plan change.</li>
+              <li>Hosted Pro and Hosted Team are monthly subscriptions billed in US dollars through Stripe. Each includes the monthly meeting, meeting-hours and Ask-your-notes question allowances shown on the pricing page.</li>
+              <li>Your first {LIMITS.trial} hosted meetings are a free one-time allowance, and Ask your notes is not included in it. When an allowance is used up, that feature stops until the next period or a plan change.</li>
+              <li>Ask your notes answers are generated by AI from your notes and can be incomplete or wrong. Check the linked notes before you rely on an answer.</li>
               <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for, and it does not renew.</li>
               <li>
                 Fees for a billing period that has started are not refunded, except where the law requires it or we
@@ -591,6 +655,7 @@ export function TermsView() {
                 we will review it and refund what was charged in error.
               </li>
               <li>If a payment fails, access continues for a short grace period while Stripe retries, and then processing stops.</li>
+              <li>Allowances are fair-use limits that exist to keep the service affordable. We may rate-limit requests or the number of simultaneous questions to protect it. We may change prices, plans and allowances for future billing periods, and will tell subscribers in advance; a change does not affect a period you have already paid for.</li>
             </ul>
 
             <h2>Your data, export and deletion</h2>
@@ -598,14 +663,27 @@ export function TermsView() {
               You can download all of a workspace&apos;s meetings from the Account page at any time. Deleting your
               account, or a workspace you own, permanently removes its meetings and cancels any active subscription
               first; audio staged for processing is deleted after processing or within 24 hours. Deleted data cannot be
-              recovered. We may suspend or end an account that breaks these terms or puts the service or other people at
-              risk, and will tell you why where we can.
+              recovered, apart from copies in system backups that are overwritten on the normal schedule. You can stop using the service at
+              any time. We may suspend or end an account that breaks these terms, is unpaid, or puts the service or other people at
+              risk, and will tell you why where we can. If we end your account without cause, we will give you a reasonable chance to export
+              your data first. Sections that by their nature should continue after an account ends, such as ownership, liability and disputes,
+              continue.
             </p>
 
             <h2>AI output and your own keys</h2>
             <p>
-              Transcripts and summaries are produced by AI and can contain mistakes. Check anything important before you
-              rely on it. In local mode you are responsible for your provider accounts, keys, fees and their terms.
+              Transcripts, summaries, action items and answers are produced by AI and can be incomplete, wrong or
+              misleading, including misattributing who said something. Check anything important against the recording or the
+              source note before you rely on it. They are not legal, medical, financial or other professional advice, and
+              you are responsible for decisions you make using them. In local mode you are responsible for your provider
+              accounts, keys, fees and their terms.
+            </p>
+
+            <h2>Third-party services</h2>
+            <p>
+              The service depends on providers such as hosting, transcription, language-model, payment and email
+              services. We are not responsible for their outages, changes or acts, and your use of a provider you choose
+              yourself, such as in local mode or Google Drive, is under that provider&apos;s terms.
             </p>
 
             <h2>Downloads</h2>
@@ -617,10 +695,13 @@ export function TermsView() {
 
             <h2>Liability</h2>
             <p>
-              The Hosted AI service is provided as is. To the extent the law allows, we are not liable for indirect or
-              consequential losses, and our total liability for the Hosted AI service is limited to the amount you paid
-              for it in the 12 months before the claim. This does not limit liability that the law does not allow to be
-              limited.
+              The Hosted AI service is provided &ldquo;as is&rdquo; and &ldquo;as available&rdquo;. To the extent the law
+              allows, we give no warranty that it will be uninterrupted, error-free or that its output will be accurate,
+              and we disclaim implied warranties such as merchantability and fitness for a particular purpose. To the same
+              extent, we are not liable for indirect, incidental, special or consequential losses, lost profits, lost
+              data, or losses from a recording made without a required consent or from your reliance on AI output, and
+              our total liability for the Hosted AI service is limited to the amount you paid for it in the 12 months
+              before the claim. This does not limit liability that the law does not allow to be limited.
             </p>
             {law && (
               <>
@@ -629,11 +710,26 @@ export function TermsView() {
               </>
             )}
 
+            <h2>Disputes</h2>
+            <p>
+              Before starting a formal claim, contact us and give us 30 days to try to resolve it informally.
+            </p>
+
             <h2>Availability and changes</h2>
             <p>
               We work to keep the service running but do not promise uninterrupted availability or a support response
-              time. Features, limits and prices can change, and we will show a new effective date when these terms
-              change. Nothing here removes a right or protection that the law does not allow to be excluded.
+              time. Features, limits and prices can change. We will show a new effective date when these terms change,
+              and tell signed-in users about material changes in the app or by email before they take effect; if you
+              keep using the service afterwards, you accept the updated terms, and if you do not agree you can stop and
+              delete your account. Nothing here removes a right or protection that the law does not allow to be excluded.
+            </p>
+
+            <h2>General</h2>
+            <p>
+              These terms, the privacy notice and the software license are the whole agreement about the service. If part
+              of these terms cannot be enforced, the rest still applies. Not enforcing a term is not a waiver of it. You
+              may not transfer your account to someone else, and we may transfer ours to a successor operator of the
+              service.
             </p>
 
             <h2>Contact</h2>

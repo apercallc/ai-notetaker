@@ -28,6 +28,18 @@ export const PLAN_AUDIO_HOUR_LIMITS: Record<ManagedPlan, number> = {
   hosted_team: 200,
 };
 
+/**
+ * Monthly "Ask your notes" questions per plan. Chat is a paid-plan feature:
+ * the free trial and local modes get none. Each question costs one bounded
+ * provider call (see notesChat.ts), so the cap bounds worst-case spend.
+ */
+export const PLAN_CHAT_QUESTION_LIMITS: Record<ManagedPlan, number> = {
+  local: 0,
+  hosted_trial: 0,
+  hosted_pro: 300,
+  hosted_team: 2_000,
+};
+
 /** Two channels of 48 kHz 16-bit mono PCM; a one-channel upload counts as half. */
 export const AUDIO_BYTES_PER_SECOND = 2 * 48_000 * 2;
 

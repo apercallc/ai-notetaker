@@ -1,4 +1,4 @@
-import { HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS, PLAN_MEETING_LIMITS } from "@/lib/plans";
+import { HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS, PLAN_CHAT_QUESTION_LIMITS, PLAN_MEETING_LIMITS } from "@/lib/plans";
 
 /**
  * One source of truth for every product fact the marketing site states: the
@@ -34,6 +34,8 @@ export const LIMITS = {
   trialHours: PLAN_AUDIO_HOUR_LIMITS.hosted_trial,
   proHours: PLAN_AUDIO_HOUR_LIMITS.hosted_pro,
   teamHours: PLAN_AUDIO_HOUR_LIMITS.hosted_team,
+  proQuestions: PLAN_CHAT_QUESTION_LIMITS.hosted_pro,
+  teamQuestions: PLAN_CHAT_QUESTION_LIMITS.hosted_team,
 } as const;
 
 const n = (value: number): string => value.toLocaleString("en-US");
@@ -62,7 +64,12 @@ export const FAQS: Faq[] = [
   {
     question: "How much does AI Notetaker cost?",
     topics: ["pricing"],
-    answer: `Using your own AI keys is free (the providers you choose bill you directly). Hosted AI includes ${LIMITS.trial} free meetings with no card. After that, Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for up to ${n(LIMITS.pro)} meetings or ${n(LIMITS.proHours)} meeting hours a month, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace with up to ${n(LIMITS.team)} meetings or ${n(LIMITS.teamHours)} meeting hours a month. Cancel any time from the billing page.`,
+    answer: `Using your own AI keys is free (the providers you choose bill you directly). Hosted AI includes ${LIMITS.trial} free meetings with no card. After that, Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for up to ${n(LIMITS.pro)} meetings or ${n(LIMITS.proHours)} meeting hours a month, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace with up to ${n(LIMITS.team)} meetings or ${n(LIMITS.teamHours)} meeting hours a month. Both include Ask your notes (${n(LIMITS.proQuestions)} and ${n(LIMITS.teamQuestions)} questions a month). Cancel any time from the billing page.`,
+  },
+  {
+    question: "Can I ask questions about my past meetings?",
+    topics: ["pricing"],
+    answer: `Yes. Ask your notes is included with Hosted Pro (${n(LIMITS.proQuestions)} questions a month) and Hosted Team (${n(LIMITS.teamQuestions)} a month); the free trial and bring-your-own-keys mode do not include it. Answers come only from your own meeting notes and link to the notes they used. Questions do not use up meeting hours, the allowance resets each billing period, and your questions and answers are not stored.`,
   },
   {
     question: "Can I cancel any time?",

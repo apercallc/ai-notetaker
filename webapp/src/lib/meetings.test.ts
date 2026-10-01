@@ -276,6 +276,15 @@ describe("listMeetings", () => {
     expect(meetings[0].id).toBe("22222222-2222-2222-2222-222222222222");
   });
 
+  it("filters to meetings that started on or after `since`", async () => {
+    await upsertMeeting(sampleMeeting({ id: "11111111-1111-1111-1111-111111111111", startedAt: "2026-09-01T10:00:00.000Z", endedAt: "2026-09-01T10:30:00.000Z" }), WORKSPACE_ID);
+    await upsertMeeting(sampleMeeting({ id: "22222222-2222-2222-2222-222222222222", startedAt: "2026-09-21T10:00:00.000Z", endedAt: "2026-09-21T10:30:00.000Z" }), WORKSPACE_ID);
+
+    const { meetings, total } = await listMeetings(WORKSPACE_ID, { since: new Date("2026-09-15T00:00:00.000Z") });
+    expect(total).toBe(1);
+    expect(meetings.map((meeting) => meeting.id)).toEqual(["22222222-2222-2222-2222-222222222222"]);
+  });
+
   it("full-text searches title, summary, transcript, and action items", async () => {
     await upsertMeeting(
       sampleMeeting({ id: "11111111-1111-1111-1111-111111111111", title: "Roadmap planning", summary: "Discussed Q4 roadmap and blockers." }),

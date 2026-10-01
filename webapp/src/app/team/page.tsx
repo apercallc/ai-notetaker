@@ -36,47 +36,65 @@ export default async function TeamPage() {
 
   return (
     <div className="container">
-      <Link href="/meetings" className="back-link">
-        ← Meetings
-      </Link>
       <div className="page-header">
         <h1>Team</h1>
+        <p className="total-count">{members.length} {members.length === 1 ? "member" : "members"}</p>
       </div>
 
-      <ul className="meeting-list">
+      <section className="settings-card team-invite" aria-labelledby="invite-title">
+        <h2 id="invite-title">Invite a teammate</h2>
+        <p className="muted-copy">They can create an account or join with their existing one.</p>
+        <TeamForm operation="invite"><label>Email <input name="email" type="email" className="text-input" required autoComplete="off" /></label><button className="button button-primary" type="submit">Send invite</button></TeamForm>
+      </section>
+
+      <h2 className="section-title">Members</h2>
+      <ul className="team-members">
         {members.map((membership) => (
-          <li key={membership.id} className="meeting-card static-row">
-            <div className="title">{membership.user.email}</div>
-            <div className="meta">
-              {membership.role} · joined {formatDate(membership.createdAt)}
-            </div>
-            <TeamForm operation="role" id={membership.id}>
-              <label>Role <select name="role" defaultValue={membership.role}><option value="member">Member</option><option value="owner">Owner</option></select></label>
-              <button className="button" type="submit">Update role</button>
-            </TeamForm>
-            <TeamForm operation="reset" id={membership.id}><button className="button" type="submit">Send password reset</button></TeamForm>
-            <TeamForm operation="remove" id={membership.id}><button className="button button-danger" type="submit">Remove member</button></TeamForm>
+          <li key={membership.id}>
+            <details className="team-member">
+              <summary>
+                <span className="team-member-email">{membership.user.email}</span>
+                <span className={`role-badge${membership.role === "owner" ? " role-badge--owner" : ""}`}>{membership.role}</span>
+                <span className="team-member-joined">Joined {formatDate(membership.createdAt)}</span>
+              </summary>
+              <div className="team-member-actions">
+                <TeamForm operation="role" id={membership.id}>
+                  <label>Role <select name="role" defaultValue={membership.role}><option value="member">Member</option><option value="owner">Owner</option></select></label>
+                  <button className="button" type="submit">Update role</button>
+                </TeamForm>
+                <TeamForm operation="reset" id={membership.id}><button className="button" type="submit">Send password reset</button></TeamForm>
+                <TeamForm operation="remove" id={membership.id}><button className="button button-danger" type="submit">Remove member</button></TeamForm>
+              </div>
+            </details>
           </li>
         ))}
       </ul>
 
-      <h2 className="section-title">Add a teammate</h2>
-      <p className="muted-copy">
-        Invite a teammate by email. They can create an account or join with their existing account.
-      </p>
-      <TeamForm operation="invite"><label>Email <input name="email" type="email" className="text-input" required /></label><button className="button button-primary" type="submit">Invite teammate</button></TeamForm>
-      {invites.length > 0 && <><h2>Pending invitations</h2><ul>{invites.map(invite => <li key={invite.id}>{invite.email} · expires {formatDate(invite.expiresAt)}<TeamForm operation="revoke-invite" id={invite.id}><button className="button" type="submit">Revoke invitation</button></TeamForm></li>)}</ul></>}
-
-      {managedHostingEnabled() ? (
+      {invites.length > 0 && (
         <>
-          <h2 className="section-title">Hosted retention</h2>
+          <h2 className="section-title">Pending invitations</h2>
+          <ul className="team-members">
+            {invites.map((invite) => (
+              <li key={invite.id} className="team-member">
+                <div className="team-member-actions">
+                  <span className="team-member-email">{invite.email}</span>
+                  <span className="team-member-joined">Expires {formatDate(invite.expiresAt)}</span>
+                  <TeamForm operation="revoke-invite" id={invite.id}><button className="button" type="submit">Revoke invitation</button></TeamForm>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {managedHostingEnabled() && (
+        <section className="settings-card">
+          <h2>Retention</h2>
           <p className="muted-copy">
             Set how long hosted meeting notes and transcripts remain. Uploaded audio is temporary processing data and is deleted after success or at its 24-hour expiry.
           </p>
           <RetentionPolicyForm retentionDays={workspace.retentionDays} />
-        </>
-      ) : (
-        <p className="muted-copy">Hosted retention controls are available only on the project-operated managed service.</p>
+        </section>
       )}
     </div>
   );
