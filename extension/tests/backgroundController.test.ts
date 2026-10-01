@@ -316,6 +316,33 @@ describe("BackgroundController", () => {
     expect(poll).toHaveBeenCalledWith(managedService, "job-1", expect.any(Function));
   });
 
+  it("keeps the accepted hosted job when polling fails, and asks the user to sign in on a 401", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    await saveMeeting({
+      id: "expired-poll-meet",
+      title: "Expired poll Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "processing",
+      captureSource: "meet",
+      processingMode,
+      managedProcessing: { uploadId: "upload-1", jobId: "job-1", status: "queued" },
+    });
+    vi.spyOn(managedClient, "getManagedJob").mockRejectedValue(new managedClient.ManagedAuthError("managed session required"));
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", meetingId: "expired-poll-meet", recovery: "sign_in" })));
+    expect((await getMeeting("expired-poll-meet"))?.managedProcessing).toMatchObject({ jobId: "job-1", status: "processing" });
+  });
+
   it("does not replay a pending managed Meet into another workspace", async () => {
     const originalMode = { kind: "managed", accountId: "acct-old", workspaceId: "workspace-old", plan: "hosted_pro" } as const;
     await (await import("../src/lib/storage")).saveMeeting({

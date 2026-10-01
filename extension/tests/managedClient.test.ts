@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, loginManaged, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl, registerManagedMeeting, uploadManagedMeeting } from "../src/lib/managedClient";
+import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, loginManaged, ManagedAuthError, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl, registerManagedMeeting, uploadManagedMeeting } from "../src/lib/managedClient";
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -67,6 +67,8 @@ describe("managedClient", () => {
     const unauthorized = vi.fn().mockResolvedValue(response({ error: "managed session required" }, 401));
     await expect(getManagedEntitlements(config, unauthorized)).rejects.toThrow("managed session required");
     expect(unauthorized).toHaveBeenCalledTimes(1);
+    const unauthorizedAgain = vi.fn().mockImplementation(async () => response({ error: "managed session required" }, 401));
+    await expect(getManagedEntitlements(config, unauthorizedAgain)).rejects.toBeInstanceOf(ManagedAuthError);
   }, 10_000);
 
   it("keeps the request timeout active while parsing the response body and retries timed-out bodies", async () => {

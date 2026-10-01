@@ -19,7 +19,7 @@ import { exportMeetingToDrive } from "./drive";
 import { clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
 import { managedAudioChunkSource } from "../meet/managedAudioChunks";
-import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
+import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedJob, ManagedAuthError, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { reportManagedError } from "./errorReport";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment, type LiveTranscriptStatus } from "../types";
 
@@ -67,7 +67,8 @@ const RETRYABLE_HELPER_ERROR_PREFIXES = [
   "summarization failed:",
 ] as const;
 
-class HostedPollTimeoutError extends Error {}
+/** The hosted job itself failed (not the polling): its upload cannot be reused. */
+class HostedJobFailedError extends Error {}
 
 const MANAGED_JOB_POLL_ATTEMPTS = 300; // x 2 s = 10 minutes
 
@@ -89,15 +90,32 @@ export class BackgroundController {
     private client: NativeClientLike,
     private broadcast: (message: BackgroundToUiMessage) => void,
   ) {
-    this.client.on("transcript_partial", (msg) => void this.handleTranscriptPartial(msg));
-    this.client.on("summary_ready", (msg) => void this.handleSummaryReady(msg));
-    this.client.on("managed_job_status", (msg) => void this.handleManagedJobStatus(msg));
-    this.client.on("error", (msg) => void this.handleError(msg));
+    this.client.on("transcript_partial", (msg) => this.guardHelperEvent("transcript_partial", msg.meetingId, this.handleTranscriptPartial(msg)));
+    this.client.on("summary_ready", (msg) => this.guardHelperEvent("summary_ready", msg.meetingId, this.handleSummaryReady(msg)));
+    this.client.on("managed_job_status", (msg) => this.guardHelperEvent("managed_job_status", msg.meetingId, this.handleManagedJobStatus(msg)));
+    this.client.on("error", (msg) => this.guardHelperEvent("error", msg.meetingId, this.handleError(msg)));
     this.client.on("recording_started", (msg) => this.handleRecordingStarted(msg));
-    this.client.on("recording_stopped", (msg) => void this.handleRecordingStopped(msg));
+    this.client.on("recording_stopped", (msg) => this.guardHelperEvent("recording_stopped", msg.meetingId, this.handleRecordingStopped(msg)));
     this.client.on("helper_info", (msg) => this.handleHelperInfo(msg));
     this.client.on("recovered_recording", (msg) => this.handleRecoveredRecording(msg));
     this.client.onStatusChange((status) => this.handleStatusChange(status));
+  }
+
+  /**
+   * Helper events are handled fire-and-forget. A storage failure inside a handler
+   * (quota, a closed database) must not become an unhandled rejection that leaves
+   * the meeting looking healthy: log it and tell open views.
+   */
+  private guardHelperEvent(type: string, meetingId: string | null | undefined, handling: Promise<unknown> | void): void {
+    if (!handling) return;
+    void handling.catch((error: unknown) => {
+      console.warn(`Handling helper event ${type} failed`, error);
+      this.broadcast({
+        type: "RECORDING_ERROR",
+        meetingId: meetingId ?? null,
+        message: "Notetaker could not save an update from the helper. Your recording is safe; reopen the extension if this keeps happening.",
+      });
+    });
   }
 
   /** Test-only seam: real usage always uses the global fetch. */
@@ -198,8 +216,10 @@ export class BackgroundController {
   }
 
   async saveSettings(settings: NotetakerSettings): Promise<void> {
-    this.settings = settings;
+    // Persist before adopting: if the write fails, memory must not run ahead of disk
+    // (the helper would record with settings that vanish on the next worker restart).
     await saveSettings(settings);
+    this.settings = settings;
     this.pushCurrentSettings();
     // Open widgets learn about a toggled setting from here; the content script
     // has no storage access to watch it itself.
@@ -432,14 +452,13 @@ export class BackgroundController {
   }
 
   async stopRecording(meetingId: string): Promise<void> {
-    const meeting = await getMeeting(meetingId);
+    const existing = await getMeeting(meetingId);
     // A late or duplicate stop (stale popup, tab-close race) must not reopen a finished meeting for reprocessing.
-    if (meeting && meeting.status !== "recording") return;
-    if (meeting) {
-      meeting.status = "processing";
-      meeting.endedAt ??= new Date().toISOString();
-      await saveMeeting(meeting);
-    }
+    if (existing && existing.status !== "recording") return;
+    // Through the per-meeting queue, so a live-transcript or bookmark write in flight is not overwritten.
+    const meeting = existing
+      ? await updateMeeting(meetingId, (current) => ({ ...current, status: "processing", endedAt: current.endedAt ?? new Date().toISOString() }))
+      : null;
     if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
     if (meeting?.captureSource === "meet") {
       // Writing the notes can take a minute; let every open view move on from
@@ -506,6 +525,7 @@ export class BackgroundController {
   private async runBrowserMeetFinish(meetingId: string, meeting: MeetingRecord): Promise<void> {
     const pending = this.meetChunkWrites.get(meetingId);
     if (pending) await pending.catch(() => undefined);
+    let jobAccepted = false;
     try {
       if (!this.settings) throw new Error("Meet settings are not loaded");
       // The mode is part of the recording's durable identity. Settings may
@@ -531,6 +551,7 @@ export class BackgroundController {
         const existing = meeting.managedProcessing;
         if (existing?.uploadId && existing.jobId && existing.status !== "error") {
           upload = { uploadId: existing.uploadId, jobId: existing.jobId };
+          jobAccepted = true;
         } else {
           const source = await managedAudioChunkSource(() => streamBrowserMeetChunks(meetingId));
           const endedAt = new Date().toISOString();
@@ -546,6 +567,7 @@ export class BackgroundController {
             status: "processing",
             managedProcessing: { uploadId: upload.uploadId, jobId: upload.jobId, status: "queued" },
           }));
+          jobAccepted = true;
         }
         for (let attempt = 0; attempt < MANAGED_JOB_POLL_ATTEMPTS; attempt += 1) {
           const job = await getManagedJob(managed, upload.jobId, this.fetchImpl);
@@ -567,10 +589,10 @@ export class BackgroundController {
             await this.clearCompletedMeetChunks(meetingId);
             return;
           }
-          if (job.status === "error") throw new Error(job.message ?? "Hosted processing failed");
+          if (job.status === "error") throw new HostedJobFailedError(job.message ?? "Hosted processing failed");
           await new Promise((resolve) => setTimeout(resolve, 2_000));
         }
-        throw new HostedPollTimeoutError("Hosted processing is taking longer than expected. It keeps running on the server; retry from the meeting details to check again.");
+        throw new Error("Hosted processing is taking longer than expected. It keeps running on the server; retry from the meeting details to check again.");
       }
       const localSettings: NotetakerSettings = {
         ...this.settings,
@@ -615,17 +637,23 @@ export class BackgroundController {
         errorMessage: `${message} Saved Meet audio is available for retry.`,
         ...(current.processingMode?.kind === "managed"
           ? {
-              // Only a poll timeout leaves the server job alive: keep it "processing" so a retry
-              // polls it instead of uploading the recording again. Any other failure re-uploads.
+              // Once the server accepted the upload, any failure other than the job itself failing
+              // (timeout, network blip, expired session) leaves the job alive: keep it "processing" so
+              // a retry polls it instead of uploading (and billing) the recording again.
               managedProcessing: {
                 ...(current.managedProcessing ?? {}),
-                status: error instanceof HostedPollTimeoutError ? ("processing" as const) : ("error" as const),
+                status: jobAccepted && !(error instanceof HostedJobFailedError) ? ("processing" as const) : ("error" as const),
                 errorMessage: message,
               },
             }
           : {}),
       }));
-      this.broadcast({ type: "RECORDING_ERROR", meetingId, message: `${message} Saved Meet audio is available for retry.` });
+      this.broadcast({
+        type: "RECORDING_ERROR",
+        meetingId,
+        message: `${message} Saved Meet audio is available for retry.`,
+        ...(error instanceof ManagedAuthError ? { recovery: "sign_in" as const } : {}),
+      });
     }
   }
 
@@ -858,7 +886,11 @@ export class BackgroundController {
     // Only a live capture needs the transition; a meeting the user already
     // stopped (status processing/error/complete) must not be moved backward
     // into "processing" — that would erase an error the user should still see.
-    if (meeting.status !== "recording") return;
+    if (meeting.status !== "recording") {
+      // The helper says it stopped; do not keep presenting this meeting as the live one.
+      if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
+      return;
+    }
     await updateMeeting(meetingId, (current) =>
       current.status === "recording"
         ? { ...current, status: "processing", endedAt: current.endedAt ?? new Date().toISOString() }

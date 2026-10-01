@@ -45,6 +45,14 @@ function requestTimeoutMs(body: RequestInit["body"]): number {
   return REQUEST_TIMEOUT_MS + Math.ceil((bytes / MIN_UPLOAD_BYTES_PER_SECOND) * 1_000);
 }
 
+/** The hosted session is no longer accepted (expired or revoked). Only signing in again fixes it. */
+export class ManagedAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManagedAuthError";
+  }
+}
+
 function retryableStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -163,6 +171,9 @@ async function requestJson(
     }
     if (!response) throw new Error("Managed service request failed");
     if (response.ok) return body;
+    if (response.status === 401) {
+      throw new ManagedAuthError(typeof body.error === "string" ? body.error : "Your hosted session has expired. Sign in again, then retry.");
+    }
     if (!retryableStatus(response.status) || attempt === REQUEST_MAX_ATTEMPTS - 1) {
       throw new Error(typeof body.error === "string" ? body.error : `Managed service request failed (${response.status})`);
     }
