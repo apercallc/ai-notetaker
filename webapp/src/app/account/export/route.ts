@@ -1,17 +1,22 @@
 import { prisma } from "@/lib/db";
+import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
 import { exportFileName, exportHeader, streamWorkspaceMeetings } from "../exportData";
 
 /**
  * Downloads every meeting in the caller's active workspace as one JSON file.
+ * Owner-only (a bulk copy of everyone's notes) and recorded in the audit log.
  * Membership comes from the session (requireSession re-checks it), never from
  * a query parameter, so there is no way to ask for another tenant's data.
  * The body is streamed one batch at a time so a large archive stays bounded.
  */
 export async function GET() {
   const session = await requireSession({ allowPasswordChange: false });
+  if (session.role !== "owner") return new Response("Only the workspace owner can export every note.", { status: 403 });
   const workspace = await prisma.workspace.findUnique({ where: { id: session.workspaceId }, select: { id: true, name: true } });
   if (!workspace) return new Response("Not found", { status: 404 });
+
+  await recordAudit({ workspaceId: workspace.id, actorUserId: session.userId, action: "workspace.export", targetType: "workspace", targetId: workspace.id });
 
   const now = new Date();
   const encoder = new TextEncoder();

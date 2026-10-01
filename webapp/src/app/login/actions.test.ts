@@ -69,6 +69,15 @@ describe("bootstrap", () => {
     expect((await getSessionUser(sessionId))?.id).toBe(user.id);
   });
 
+  it("stops accepting setup-code guesses after repeated failures, even a correct one", async () => {
+    const attempt = (token: string) =>
+      bootstrap(formData({ setupToken: token, email: "owner@example.com", password: "correct horse battery", confirmPassword: "correct horse battery" }));
+    for (let guess = 0; guess < 25; guess += 1) await expect(attempt("wrong-guess")).rejects.toThrow("REDIRECT:/login?error=bootstrap");
+
+    await expect(attempt(SETUP_TOKEN)).rejects.toThrow("REDIRECT:/login?error=bootstrap");
+    expect(await prisma.user.count()).toBe(0);
+  });
+
   it("refuses to bootstrap a second account once one exists", async () => {
     await prisma.user.create({ data: { email: "existing@example.com", passwordHash: "irrelevant" } });
 

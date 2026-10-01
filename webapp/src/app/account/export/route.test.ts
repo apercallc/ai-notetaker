@@ -6,6 +6,8 @@ const { requireSession, findWorkspace, streamWorkspaceMeetings } = vi.hoisted(()
   streamWorkspaceMeetings: vi.fn(),
 }));
 
+const { recordAudit } = vi.hoisted(() => ({ recordAudit: vi.fn() }));
+vi.mock("@/lib/audit", () => ({ recordAudit }));
 vi.mock("@/lib/currentUser", () => ({ requireSession }));
 vi.mock("@/lib/db", () => ({ prisma: { workspace: { findUnique: findWorkspace } } }));
 vi.mock("../exportData", async (importOriginal) => ({ ...(await importOriginal<typeof import("../exportData")>()), streamWorkspaceMeetings }));
@@ -20,7 +22,7 @@ async function* batches(...groups: string[][]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requireSession.mockResolvedValue({ userId: "u1", workspaceId: "ws-1", role: "member", email: "a@b.test", sessionId: "s1" });
+  requireSession.mockResolvedValue({ userId: "u1", workspaceId: "ws-1", role: "owner", email: "a@b.test", sessionId: "s1" });
   findWorkspace.mockResolvedValue({ id: "ws-1", name: "Acme" });
 });
 
@@ -39,6 +41,17 @@ describe("GET /account/export", () => {
   it("produces valid JSON for an empty workspace", async () => {
     streamWorkspaceMeetings.mockReturnValue(batches());
     expect(JSON.parse(await (await GET()).text()).meetings).toEqual([]);
+  });
+
+  it("refuses a non-owner and audits an owner's export", async () => {
+    requireSession.mockResolvedValue({ userId: "u2", workspaceId: "ws-1", role: "member", email: "m@b.test", sessionId: "s2" });
+    expect((await GET()).status).toBe(403);
+    expect(recordAudit).not.toHaveBeenCalled();
+
+    requireSession.mockResolvedValue({ userId: "u1", workspaceId: "ws-1", role: "owner", email: "a@b.test", sessionId: "s1" });
+    streamWorkspaceMeetings.mockReturnValue(batches());
+    await GET();
+    expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "ws-1", actorUserId: "u1", action: "workspace.export" }));
   });
 
   it("returns 404 if the workspace vanished", async () => {

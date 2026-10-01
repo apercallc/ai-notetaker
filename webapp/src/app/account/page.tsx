@@ -157,10 +157,16 @@ export default async function AccountPage({
 
               <section className="settings-card">
                 <h2>Export</h2>
-                <p className="muted-copy">Download every meeting in {workspace.name} — summary, transcript, and action items — as one JSON file.</p>
-                <a href="/account/export" className="button button-secondary" download>
-                  Export all meetings
-                </a>
+                {session.role === "owner" ? (
+                  <>
+                    <p className="muted-copy">Download every meeting in {workspace.name} — summary, transcript, and action items — as one JSON file.</p>
+                    <a href="/account/export" className="button button-secondary" download>
+                      Export all meetings
+                    </a>
+                  </>
+                ) : (
+                  <p className="muted-copy">Only the workspace owner can export every meeting in {workspace.name}. You can still download any single note from its page.</p>
+                )}
               </section>
 
               <section className="settings-card">

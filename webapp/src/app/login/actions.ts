@@ -7,7 +7,7 @@ import { hashPassword } from "@/lib/passwords";
 import { createSession, deleteSession, setSessionActiveWorkspace } from "@/lib/sessions";
 import { createWorkspaceWithOwner, getDefaultWorkspaceId, resolveActiveWorkspace } from "@/lib/workspaces";
 import { safeNextPath } from "@/lib/navigation";
-import { emailRequestStatus, recordEmailRequest } from "@/lib/loginThrottle";
+import { bootstrapThrottleStatus, emailRequestStatus, recordBootstrapFailure, recordEmailRequest } from "@/lib/loginThrottle";
 import { normalizeEmail } from "@/lib/email";
 import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from "@/lib/sessionCookie";
@@ -65,8 +65,14 @@ export async function bootstrap(formData: FormData): Promise<void> {
   const password = field(formData, "password");
   const confirmPassword = field(formData, "confirmPassword");
 
+  const throttleContext = await getRequestContext();
+  if ((await bootstrapThrottleStatus({ ip: throttleContext.ip })).blocked) redirect("/login?error=bootstrap");
+  if (!isValidSetupToken(setupToken)) {
+    await recordBootstrapFailure({ ip: throttleContext.ip });
+    redirect("/login?error=bootstrap");
+  }
+
   if (
-    !isValidSetupToken(setupToken) ||
     !email ||
     password.length < MIN_PASSWORD_LENGTH ||
     password !== confirmPassword

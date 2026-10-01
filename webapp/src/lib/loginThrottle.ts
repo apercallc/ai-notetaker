@@ -155,6 +155,26 @@ export async function recordSignupAttempt(options: ThrottleOptions = {}): Promis
   await recordThrottleHit(signupRules(options.ip), options.now);
 }
 
+// ------------------------------------------------------ first-run setup
+
+function bootstrapRules(ip: string | null | undefined): ThrottleRule[] {
+  // Guessing the setup code while no account exists yet: a deployment-wide cap
+  // plus a per-IP one, so distributing guesses across addresses still runs dry.
+  const rules: ThrottleRule[] = [
+    { key: "bootstrap:global", free: 20, baseDelayMs: MINUTE, maxDelayMs: 30 * MINUTE, windowMs: 60 * MINUTE },
+  ];
+  if (ip) rules.push({ key: `bootstrap:ip:${ip}`, free: 5, baseDelayMs: 2 * MINUTE, maxDelayMs: 30 * MINUTE, windowMs: 60 * MINUTE });
+  return rules;
+}
+
+export async function bootstrapThrottleStatus(options: ThrottleOptions = {}): Promise<ThrottleStatus> {
+  return throttleStatus(bootstrapRules(options.ip), options.now);
+}
+
+export async function recordBootstrapFailure(options: ThrottleOptions = {}): Promise<void> {
+  await recordThrottleHit(bootstrapRules(options.ip), options.now);
+}
+
 // ------------------------------------------- reset / verification emails
 
 function emailRequestRules(kind: string, email: string, ip: string | null | undefined): ThrottleRule[] {
