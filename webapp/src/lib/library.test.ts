@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "./db";
-import { createFolder, deleteForever, emptyTrash, listFolders, listTrash, moveFolder, moveNotes, purgeExpiredTrash, renameFolder, restoreFromTrash, trashFolder, trashNote, TRASH_RETENTION_DAYS, type LibrarySession } from "./library";
+import { countTrashRoots, createFolder, deleteForever, emptyTrash, listFolders, listTrash, moveFolder, moveNotes, purgeExpiredTrash, renameFolder, restoreFromTrash, trashFolder, trashNote, TRASH_RETENTION_DAYS, type LibrarySession } from "./library";
 import { MAX_FOLDER_DEPTH, flattenFolders, folderPath, folderPathLabel, subtreeHeight, subtreeIds, validateFolderName } from "./libraryTree";
 import { getMeeting, listActionItems, listMeetings, previewText } from "./meetings";
 import { retrieveNotes } from "./notesChat";
@@ -206,6 +206,16 @@ describe("library", () => {
   });
 
   describe("trash", () => {
+    it("counts every trashed root, which listTrash caps", async () => {
+      const first = await note({ title: "One" });
+      const second = await note({ title: "Two" });
+      expect(await countTrashRoots(workspaceId)).toBe(0);
+      await trashNote(owner, first);
+      await trashNote(owner, second);
+      expect(await countTrashRoots(workspaceId)).toBe(2);
+      expect(await countTrashRoots("00000000-0000-0000-0000-00000000dead")).toBe(0);
+    });
+
     it("hides a trashed note from lists, detail, actions, Ask and sharing, and restores it", async () => {
       const id = await note({ title: "Pricing review", summary: "We discussed zebra pricing." });
       await prisma.actionItem.create({ data: { meetingId: id, userId: owner.userId, text: "Send zebra quote" } });

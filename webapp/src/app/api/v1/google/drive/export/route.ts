@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requestIdFrom } from "@/lib/apiErrors";
+import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
 import { exportMeetingToGoogleDrive, GoogleIntegrationError } from "@/lib/googleIntegration";
 import { readManagedJson } from "@/lib/managedJobs";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
@@ -19,8 +19,10 @@ export async function POST(request: Request) {
     const exported = await exportMeetingToGoogleDrive(session.userId, session.workspaceId, meetingId);
     return NextResponse.json(exported, { status: 201, headers: { "x-request-id": requestId } });
   } catch (error) {
-    const status = error instanceof GoogleIntegrationError ? error.status : 500;
-    const message = error instanceof GoogleIntegrationError ? error.publicMessage : "Google Drive export failed. Try again later.";
-    return NextResponse.json({ error: message, requestId }, { status, headers: { "x-request-id": requestId } });
+    if (error instanceof GoogleIntegrationError) {
+      return NextResponse.json({ error: error.publicMessage, requestId }, { status: error.status, headers: { "x-request-id": requestId } });
+    }
+    // Unexpected: logged and sent to error tracking with the request id, like every other managed route.
+    return apiErrorResponse(error, { requestId, fallbackMessage: "Google Drive export failed. Try again later." });
   }
 }

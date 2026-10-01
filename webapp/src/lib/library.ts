@@ -178,6 +178,15 @@ interface TrashRootRow {
   deletedAt: Date;
 }
 
+/** How many items are in the Trash in total (listTrash shows at most 500 folders and 500 notes). */
+export async function countTrashRoots(workspaceId: string): Promise<number> {
+  const [folders, notes] = await Promise.all([
+    prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*) AS "count" FROM "Folder" WHERE "workspaceId" = ${workspaceId} AND "deletedAt" IS NOT NULL AND "trashRootId" = "id"`,
+    prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*) AS "count" FROM "Meeting" WHERE "workspaceId" = ${workspaceId} AND "deletedAt" IS NOT NULL AND "trashRootId" = "id"`,
+  ]);
+  return Number(folders[0]?.count ?? 0) + Number(notes[0]?.count ?? 0);
+}
+
 /** Items the user deleted directly (not the contents that went with a folder), newest first. */
 export async function listTrash(workspaceId: string, now = new Date()): Promise<TrashItem[]> {
   const [folders, notes] = await Promise.all([
