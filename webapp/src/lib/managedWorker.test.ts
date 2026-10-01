@@ -364,7 +364,7 @@ describe("managed worker pipeline", () => {
     vi.restoreAllMocks();
   });
 
-  function mockProviders(handlers: { deepgram?: (call: number, url: string) => unknown; groq?: (call: number, init?: RequestInit) => Response; openai?: () => Response }) {
+  function mockProviders(handlers: { deepgram?: (call: number, url: string, init?: RequestInit) => unknown; groq?: (call: number, init?: RequestInit) => Response; openai?: () => Response }) {
     const calls: { url: string; init?: RequestInit }[] = [];
     let deepgramCalls = 0;
     let groqCalls = 0;
@@ -373,7 +373,7 @@ describe("managed worker pipeline", () => {
       calls.push({ url, init });
       if (url.includes("api.deepgram.com")) {
         deepgramCalls += 1;
-        return new Response(JSON.stringify(handlers.deepgram?.(deepgramCalls, url) ?? {}), { status: 200 });
+        return new Response(JSON.stringify(await handlers.deepgram?.(deepgramCalls, url, init) ?? {}), { status: 200 });
       }
       if (url.includes("api.groq.com") && handlers.groq) return handlers.groq(++groqCalls, init);
       if (url.includes("api.openai.com/v1/responses") && handlers.openai) return handlers.openai();
@@ -413,10 +413,12 @@ describe("managed worker pipeline", () => {
 
   it("stores chronological diarized utterances, the recording duration, a generated title, structured notes and cost", async () => {
     await setup();
+    await putObject(`uploads/${workspaceId}/${uploadId}/0-pipeline-mic.chunk`, new Uint8Array([1, 1]));
+    await putObject(`uploads/${workspaceId}/${uploadId}/1-pipeline-speaker.chunk`, new Uint8Array([2, 2]));
     const calls = mockProviders({
-      // Channel order in the worker is mic then speaker, but calls resolve concurrently:
-      // distinguish by the request's audio via the call order recorded below.
-      deepgram: (call) => call === 1
+      // Spend reservations and network calls can reorder concurrent channels.
+      // Identify each response by its audio, never by request arrival order.
+      deepgram: async (_call, _url, init) => new Uint8Array(await new Response(init?.body).arrayBuffer())[0] === 1
         ? { metadata: { duration: 65 }, results: { utterances: [{ start: 12, end: 15, transcript: "I will send the draft" }, { start: 61, end: 64, transcript: "Thanks everyone" }] } }
         : { metadata: { duration: 64 }, results: { utterances: [{ start: 2, end: 8, transcript: "Welcome, let's start", speaker: 0 }, { start: 20, end: 25, transcript: "Please send it by Friday", speaker: 1 }] } },
       openai: () => new Response(JSON.stringify({
