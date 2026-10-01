@@ -1064,7 +1064,9 @@ export class BackgroundController {
         // them in `retryable_errors_keep_the_wording_the_extension_matches_on`
         // — change a string here and you must change it there too, or a
         // retryable warning starts reading as a dead meeting.
-        if (RETRYABLE_HELPER_ERROR_PREFIXES.some((prefix) => msg.message.startsWith(prefix))) {
+        // A channel that went quiet (device unplugged, source ended) is a warning: the helper keeps
+        // recording and re-attaches when it can, so the meeting stays live and stoppable.
+        if (msg.code === "capture_lost" || RETRYABLE_HELPER_ERROR_PREFIXES.some((prefix) => msg.message.startsWith(prefix))) {
           this.broadcast({ type: "PROCESSING_WARNING", meetingId: msg.meetingId, message: msg.message, recovery });
           return;
         }

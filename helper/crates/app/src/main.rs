@@ -286,6 +286,15 @@ async fn managed_service_from_state(state: &AppState) -> Result<ManagedServiceCo
     {
         return Err("hosted service URL or session is missing".into());
     }
+    // The bearer token and raw call audio go to this URL: never over plain http
+    // (loopback is allowed for local development).
+    let base_url = service.base_url.to_ascii_lowercase();
+    let loopback = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
+        .iter()
+        .any(|prefix| base_url.starts_with(prefix));
+    if !base_url.starts_with("https://") && !loopback {
+        return Err("hosted service URL must use https".into());
+    }
     if service.account_id != account_id || service.workspace_id != workspace_id {
         return Err(
             "managed processing identity does not match the hosted service workspace".into(),
@@ -1172,6 +1181,9 @@ async fn handle_message(
             let state_for_audio = state.clone();
             let audio_processing_for_audio = audio_processing.clone();
             let audio_errors = out_tx.clone();
+            // One error per failure streak, not one per ~10 ms frame: a full
+            // disk would otherwise flood the extension with ~100 errors/s.
+            let storage_error_reported = AtomicBool::new(false);
             let result = audio
                 .start_capture(Box::new(move |frame| {
                     // Backends deliver frames on one dispatcher thread. Persist
@@ -1184,13 +1196,18 @@ async fn handle_message(
                         &frame.pcm16,
                         frame.sample_rate_hz,
                     ) {
-                        Ok(existing_len) => existing_len,
-                        Err(message) => {
-                            let _ = audio_errors.send(HelperToExtension::Error {
-                                meeting_id: Some(meeting_id),
-                                code: ErrorCode::StorageError,
-                                message,
-                            });
+                        Ok(existing_len) => {
+                            storage_error_reported.store(false, Ordering::Relaxed);
+                            existing_len
+                        }
+                        Err((code, message)) => {
+                            if !storage_error_reported.swap(true, Ordering::Relaxed) {
+                                let _ = audio_errors.send(HelperToExtension::Error {
+                                    meeting_id: Some(meeting_id),
+                                    code,
+                                    message,
+                                });
+                            }
                             return;
                         }
                     };
@@ -1205,6 +1222,12 @@ async fn handle_message(
 
             match result {
                 Ok(()) => {
+                    spawn_capture_health_forwarder(
+                        state.clone(),
+                        meeting_id,
+                        audio.subscribe_health(),
+                        out_tx.clone(),
+                    );
                     state.active.lock().await.insert(
                         meeting_id,
                         ActiveRecording {
@@ -1288,12 +1311,12 @@ async fn handle_message(
                 sample_rate_hz,
             ) {
                 Ok(existing_len) => existing_len,
-                Err(message) => {
-                    // A failed disk write is a storage failure, not a missing
-                    // audio device.
+                Err((code, message)) => {
+                    // A failed disk write is a storage failure (or a full
+                    // disk), not a missing audio device.
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::StorageError,
+                        code,
                         message,
                     });
                     return true;
@@ -1818,13 +1841,48 @@ fn spawn_audio_processing_queue(
     })
 }
 
+/// Tells the extension when a capture channel goes quiet (headset unplugged,
+/// `parec` exited, endpoint invalidated), so the UI does not claim a healthy
+/// recording while one side records silence. Ends once the meeting stops being
+/// active or the capture drops its health hub.
+fn spawn_capture_health_forwarder(
+    state: Arc<AppState>,
+    meeting_id: Uuid,
+    mut health: tokio::sync::broadcast::Receiver<notetaker_audio::CaptureHealthEvent>,
+    out_tx: tokio::sync::mpsc::UnboundedSender<HelperToExtension>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    tokio::spawn(async move {
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_secs(30), health.recv()).await {
+                Ok(Ok(event)) => {
+                    if event.kind.is_degraded() {
+                        let _ = out_tx.send(HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code: ErrorCode::CaptureLost,
+                            message: event.message,
+                        });
+                    }
+                }
+                Ok(Err(RecvError::Lagged(_))) => continue,
+                Ok(Err(RecvError::Closed)) => break,
+                Err(_) => {
+                    if !state.active.lock().await.contains_key(&meeting_id) {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+}
+
 fn persist_audio_frame(
     store: &MeetingStore,
     meeting_id: Uuid,
     channel: notetaker_core::providers::AudioChannel,
     pcm16: &[u8],
     sample_rate_hz: u32,
-) -> Result<usize, String> {
+) -> Result<usize, (ErrorCode, String)> {
     let channel_file = match channel {
         notetaker_core::providers::AudioChannel::Mic => notetaker_core::storage::MIC_FILE,
         notetaker_core::providers::AudioChannel::Speaker => notetaker_core::storage::SPEAKER_FILE,
@@ -1834,10 +1892,20 @@ fn persist_audio_frame(
         .unwrap_or(0);
     store
         .append_audio(meeting_id, channel_file, pcm16)
-        .map_err(|error| format!("failed to persist audio to disk: {error}"))?;
+        .map_err(|error| {
+            (
+                error.error_code(),
+                format!("failed to persist audio to disk: {error}"),
+            )
+        })?;
     store
         .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz)
-        .map_err(|error| format!("failed to persist audio metadata: {error}"))?;
+        .map_err(|error| {
+            (
+                error.error_code(),
+                format!("failed to persist audio metadata: {error}"),
+            )
+        })?;
     Ok(existing_len)
 }
 

@@ -862,6 +862,20 @@ describe("BackgroundController", () => {
     expect(controller.getState().activeMeeting).toEqual({ id: meetingId });
   });
 
+  it("keeps the meeting recording when the helper reports a capture channel went quiet", async () => {
+    const client = createFakeClient();
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
+    await controller.init();
+    const meetingId = await controller.startRecording();
+
+    client.emit("error", { meetingId, code: "capture_lost", message: "Microphone disconnected" });
+
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "PROCESSING_WARNING", meetingId, message: "Microphone disconnected" })));
+    expect((await getMeeting(meetingId))?.status).toBe("recording");
+    expect(controller.getState().activeMeeting).toEqual({ id: meetingId });
+  });
+
   it("ignores a late duplicate stop instead of reopening a finished meeting", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
