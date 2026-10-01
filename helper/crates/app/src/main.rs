@@ -1012,6 +1012,23 @@ async fn handle_message(
             capture_source,
             processing_mode,
         } => {
+            // One desktop capture session at a time: starting a second would stop the first's
+            // capture (the session is shared) while it still looks active, silently losing its audio.
+            if capture_source != CaptureSource::Meet
+                && state
+                    .active
+                    .lock()
+                    .await
+                    .iter()
+                    .any(|(id, active)| *id != meeting_id && active.audio.is_some())
+            {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::DeviceNotFound,
+                    message: "Another desktop recording is already in progress. Stop it before starting a new one.".into(),
+                });
+                return true;
+            }
             subscribe_meeting(&state, meeting_id, out_tx.clone());
             let settings_guard = state.settings.lock().await;
             let Some(settings) = settings_guard.clone() else {
