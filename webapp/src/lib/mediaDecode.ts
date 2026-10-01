@@ -121,12 +121,19 @@ function runTool(binary: string, args: string[], options: ToolOptions): Promise<
 
 let toolsAvailable: Promise<boolean> | undefined;
 
-/** Whether ffmpeg and ffprobe can run here. Cached: the answer cannot change without a redeploy. */
+/**
+ * Whether ffmpeg and ffprobe can run here. A positive answer is cached for good (it cannot change
+ * without a redeploy). A negative one is re-checked after 30 s: a single slow probe during a cold
+ * start must not switch imports off until the next restart.
+ */
 export function mediaToolsAvailable(): Promise<boolean> {
   toolsAvailable ??= Promise.all([
     runTool(ffmpegBinary(), ["-version"], { timeoutMs: 10_000 }),
     runTool(ffprobeBinary(), ["-version"], { timeoutMs: 10_000 }),
-  ]).then(([ffmpeg, ffprobe]) => ffmpeg.code === 0 && ffprobe.code === 0, () => false);
+  ]).then(([ffmpeg, ffprobe]) => ffmpeg.code === 0 && ffprobe.code === 0, () => false).then((available) => {
+    if (!available) setTimeout(() => { toolsAvailable = undefined; }, 30_000).unref?.();
+    return available;
+  });
   return toolsAvailable;
 }
 

@@ -297,21 +297,26 @@ export async function purgeExpiredTrash(now = new Date(), force = false): Promis
   lastPurgeAt = now.getTime();
   const cutoff = new Date(now.getTime() - TRASH_RETENTION_DAYS * DAY_MS);
   const [folders, notes] = await Promise.all([
-    prisma.$queryRaw<Array<{ id: string; workspaceId: string }>>`SELECT "id", "workspaceId" FROM "Folder" WHERE "deletedAt" < ${cutoff} AND "trashRootId" = "id" LIMIT ${PURGE_BATCH}`,
-    prisma.$queryRaw<Array<{ id: string; workspaceId: string | null }>>`SELECT "id", "workspaceId" FROM "Meeting" WHERE "deletedAt" < ${cutoff} AND "trashRootId" = "id" AND "workspaceId" IS NOT NULL LIMIT ${PURGE_BATCH}`,
+    prisma.$queryRaw<Array<{ id: string; workspaceId: string }>>`SELECT "id", "workspaceId" FROM "Folder" WHERE "deletedAt" < ${cutoff} AND "trashRootId" = "id" ORDER BY "deletedAt" ASC LIMIT ${PURGE_BATCH}`,
+    prisma.$queryRaw<Array<{ id: string; workspaceId: string | null }>>`SELECT "id", "workspaceId" FROM "Meeting" WHERE "deletedAt" < ${cutoff} AND "trashRootId" = "id" AND "workspaceId" IS NOT NULL ORDER BY "deletedAt" ASC LIMIT ${PURGE_BATCH}`,
   ]);
   const perWorkspace = new Map<string, number>();
   let removed = 0;
-  for (const folder of folders) {
-    await purgeRoot(folder.workspaceId, "folder", folder.id);
-    perWorkspace.set(folder.workspaceId, (perWorkspace.get(folder.workspaceId) ?? 0) + 1);
+  // One root that cannot be deleted (a storage hiccup on its audio, say) must not abort the batch:
+  // the rest still go, and the oldest-first order means it is retried first next time.
+  const purgeOne = async (workspaceId: string, kind: "folder" | "note", id: string) => {
+    try {
+      await purgeRoot(workspaceId, kind, id);
+    } catch (error) {
+      console.error("trash purge failed for one item", { workspaceId, kind, id, error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    perWorkspace.set(workspaceId, (perWorkspace.get(workspaceId) ?? 0) + 1);
     removed += 1;
-  }
+  };
+  for (const folder of folders) await purgeOne(folder.workspaceId, "folder", folder.id);
   for (const note of notes) {
-    if (!note.workspaceId) continue;
-    await purgeRoot(note.workspaceId, "note", note.id);
-    perWorkspace.set(note.workspaceId, (perWorkspace.get(note.workspaceId) ?? 0) + 1);
-    removed += 1;
+    if (note.workspaceId) await purgeOne(note.workspaceId, "note", note.id);
   }
   for (const [workspaceId, items] of perWorkspace) {
     await recordAudit({ workspaceId, action: "trash.purge", targetType: "workspace", targetId: workspaceId, metadata: { items, retentionDays: TRASH_RETENTION_DAYS } });

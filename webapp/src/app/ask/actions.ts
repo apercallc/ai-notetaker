@@ -27,6 +27,8 @@ export async function askNotesAction(question: string, folderId?: string | null)
       console.error("notes chat provider failure", error.message);
       return { ok: false, error: "The assistant is unavailable right now. You were not charged a question; try again shortly." };
     }
-    throw error;
+    // An unexpected failure (database blip, bug) must not reach the client as Next's masked, blank error.
+    console.error("notes chat failed", error instanceof Error ? error.message : String(error));
+    return { ok: false, error: "Something went wrong answering that. Try again in a moment." };
   }
 }

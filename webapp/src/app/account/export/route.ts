@@ -29,7 +29,16 @@ export async function GET() {
       controller.enqueue(encoder.encode(`${header},"meetings":[`));
     },
     async pull(controller) {
-      const next = await meetings.next();
+      let next: Awaited<ReturnType<typeof meetings.next>>;
+      try {
+        next = await meetings.next();
+      } catch (error) {
+        // Headers (200) are already sent. Closing normally would hand the user a truncated file
+        // that looks like a finished backup; erroring the stream makes the download fail visibly.
+        console.error("workspace export failed mid-stream", { workspaceId: workspace.id, error: error instanceof Error ? error.message : String(error) });
+        controller.error(error);
+        return;
+      }
       if (next.done) {
         controller.enqueue(encoder.encode("]}\n"));
         controller.close();

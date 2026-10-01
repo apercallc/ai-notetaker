@@ -92,16 +92,20 @@ export type CreateApiTokenState =
   | { ok: true; token: string; expiresAt: string }
   | { ok: false; error: string };
 
+const MAX_TOKEN_LABEL_LENGTH = 80;
+
 export async function createApiTokenAction(formData: FormData): Promise<CreateApiTokenState> {
   const session = await requireSession();
   const context = await getRequestContext();
   const readOnly = field(formData, "purpose") === "mcp";
+  // The label is shown in lists and audit rows: bound it so a pasted wall of text cannot bloat them.
+  const label = (field(formData, "label").trim().slice(0, MAX_TOKEN_LABEL_LENGTH)) || (readOnly ? "AI assistant (read-only)" : "Extension sign-in");
   const created = await createApiToken(session.userId, {
-    label: field(formData, "label") || (readOnly ? "AI assistant (read-only)" : "Extension sign-in"),
+    label,
     userAgent: context.userAgent,
     ...(readOnly ? { scope: READ_TOKEN_SCOPE } : {}),
   });
-  await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "api_token.create", targetType: "api_token", metadata: { label: field(formData, "label") || (readOnly ? "AI assistant (read-only)" : "Extension sign-in"), scope: readOnly ? "notes_read" : "managed" } });
+  await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "api_token.create", targetType: "api_token", metadata: { label, scope: readOnly ? "notes_read" : "managed" } });
   revalidatePath("/account");
   return { ok: true, token: created.token, expiresAt: created.expiresAt.toISOString() };
 }

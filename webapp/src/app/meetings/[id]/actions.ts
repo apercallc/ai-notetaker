@@ -129,12 +129,27 @@ export async function updateActionItemAction(formData: FormData): Promise<Action
   return { status: "saved" };
 }
 
+/**
+ * Next masks an error thrown from a server action with a generic message, which the
+ * note screens render as a blank failure. Log the real cause and hand back a state
+ * the UI can show.
+ */
+async function failSoft<T>(label: string, meetingId: string, work: () => Promise<T>, message: string): Promise<T | { status: "error"; message: string }> {
+  try {
+    return await work();
+  } catch (error) {
+    console.error(label, { meetingId, error: error instanceof Error ? error.message : String(error) });
+    return { status: "error", message };
+  }
+}
+
 export type RetryState = { status: "started" } | { status: "error"; message: string };
 
 export async function retryProcessingAction(formData: FormData): Promise<RetryState> {
   const { workspaceId } = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
-  const result = await retryMeetingProcessing(workspaceId, meetingId);
+  const result = await failSoft("retry processing failed", meetingId, () => retryMeetingProcessing(workspaceId, meetingId), "Couldn't restart processing. Try again.");
+  if ("status" in result) return result;
   if (!result.ok) return { status: "error", message: result.error };
   revalidatePath("/meetings");
   revalidatePath(`/meetings/${meetingId}`);
@@ -146,7 +161,13 @@ export type RegenerateState = { status: "done"; remaining: number } | { status: 
 export async function regenerateNotesAction(formData: FormData): Promise<RegenerateState> {
   const session = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
-  const result = await regenerateNotes(session, meetingId, String(formData.get("template") ?? ""), { summaryLanguage: String(formData.get("summaryLanguage") ?? "") });
+  const result = await failSoft(
+    "regenerate notes failed",
+    meetingId,
+    () => regenerateNotes(session, meetingId, String(formData.get("template") ?? ""), { summaryLanguage: String(formData.get("summaryLanguage") ?? "") }),
+    "Couldn't regenerate the notes. Try again.",
+  );
+  if ("status" in result) return result;
   if (!result.ok) return { status: "error", message: result.error };
   revalidatePath("/meetings");
   revalidatePath(`/meetings/${meetingId}`);
@@ -178,7 +199,13 @@ export type SaveBodyState = { status: "saved"; version: string } | { status: "co
 export async function saveNoteBodyAction(formData: FormData): Promise<SaveBodyState> {
   const session = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
-  const result = await updateNoteBody(session, meetingId, String(formData.get("body") ?? ""), String(formData.get("version") ?? ""));
+  const result = await failSoft(
+    "saving note body failed",
+    meetingId,
+    () => updateNoteBody(session, meetingId, String(formData.get("body") ?? ""), String(formData.get("version") ?? "")),
+    "Couldn't save your edit. Your text is still on screen; try again.",
+  );
+  if ("status" in result) return result;
   if (!result.ok) return { status: "conflict" in result ? "conflict" : "error", message: result.error };
   revalidatePath(`/meetings/${meetingId}`);
   revalidatePath("/meetings");
@@ -188,7 +215,8 @@ export async function saveNoteBodyAction(formData: FormData): Promise<SaveBodySt
 export async function restorePreviousBodyAction(formData: FormData): Promise<SaveBodyState> {
   const session = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
-  const result = await restorePreviousBody(session, meetingId);
+  const result = await failSoft("restoring previous body failed", meetingId, () => restorePreviousBody(session, meetingId), "Couldn't restore the previous version. Try again.");
+  if ("status" in result) return result;
   if (!result.ok) return { status: "error", message: result.error };
   revalidatePath(`/meetings/${meetingId}`);
   revalidatePath("/meetings");

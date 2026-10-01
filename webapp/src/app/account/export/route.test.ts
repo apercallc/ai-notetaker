@@ -54,6 +54,18 @@ describe("GET /account/export", () => {
     expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "ws-1", actorUserId: "u1", action: "workspace.export" }));
   });
 
+  it("fails the download instead of delivering a truncated file when the database errors mid-stream", async () => {
+    async function* broken() {
+      yield [meeting("a")];
+      throw new Error("connection lost");
+    }
+    streamWorkspaceMeetings.mockReturnValue(broken());
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await GET();
+    await expect(response.text()).rejects.toThrow("connection lost");
+    log.mockRestore();
+  });
+
   it("returns 404 if the workspace vanished", async () => {
     findWorkspace.mockResolvedValue(null);
     expect((await GET()).status).toBe(404);
