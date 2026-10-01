@@ -42,8 +42,8 @@ export async function addMember(formData: FormData): Promise<AddMemberResult> {
   }
 
   const email = normalizeEmail(String(formData.get("email") ?? ""));
-  if (!email) {
-    return { ok: false, error: "Enter an email address." };
+  if (!isPlausibleEmail(email)) {
+    return { ok: false, error: "Enter a valid email address." };
   }
 
   const temporaryPassword = generateTemporaryPassword();

@@ -89,7 +89,17 @@ describe("addMember", () => {
 
     const result = await addMember(formData({ email: "   " }));
 
-    expect(result).toEqual({ ok: false, error: "Enter an email address." });
+    expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
+    expect(await prisma.user.count()).toBe(1);
+  });
+
+  it("rejects a malformed address instead of creating an unusable pre-verified account", async () => {
+    const { userId: ownerId } = await createWorkspaceWithOwner("owner@example.com", "hash");
+    await sessionCookieFor(ownerId);
+
+    const result = await addMember(formData({ email: "not-an-email" }));
+
+    expect(result).toEqual({ ok: false, error: "Enter a valid email address." });
     expect(await prisma.user.count()).toBe(1);
   });
 });
