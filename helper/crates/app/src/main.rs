@@ -1275,10 +1275,10 @@ async fn handle_message(
                             &frame.pcm16,
                             frame.sample_rate_hz,
                         );
-                    let existing_len = match written {
-                        Ok(existing_len) => {
+                    let (existing_len, written_len, written_rate) = match written {
+                        Ok(frame) => {
                             storage_error_reported.store(false, Ordering::Relaxed);
-                            existing_len
+                            (frame.start, frame.len, frame.sample_rate_hz)
                         }
                         Err((code, message)) => {
                             if code == ErrorCode::DiskFull
@@ -1310,9 +1310,9 @@ async fn handle_message(
                     };
                     let _ = audio_processing_for_audio.enqueue(PersistedAudioChunk {
                         channel: frame.channel,
-                        sample_rate_hz: frame.sample_rate_hz,
+                        sample_rate_hz: written_rate,
                         existing_len,
-                        end: existing_len + frame.pcm16.len(),
+                        end: existing_len + written_len,
                     });
                 }))
                 .await;
@@ -2016,10 +2016,46 @@ fn spawn_capture_health_forwarder(
 /// audio; a process crash loses nothing, because every frame is already in the file.
 struct LiveAudioWriter {
     appender: notetaker_core::storage::AudioAppender,
+    /// The rate each channel file holds, fixed when the channel's first frame arrives.
     sample_rates: [Option<u32>; 2],
 }
 
+/// What one frame became on disk: where it starts, how many bytes, and at what rate.
+struct WrittenFrame {
+    start: usize,
+    len: usize,
+    sample_rate_hz: u32,
+}
+
 const LIVE_AUDIO_SYNC_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Linear-interpolation resample of little-endian PCM16. Used when a device switch changes the
+/// capture rate mid-call: the file holds one rate (the metadata records one), so later frames are
+/// converted to it rather than leaving a file whose first half plays at the wrong speed.
+fn resample_pcm16(pcm16: &[u8], from_hz: u32, to_hz: u32) -> Vec<u8> {
+    let samples: Vec<i16> = pcm16
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| i16::from_le_bytes(*pair))
+        .collect();
+    if from_hz == to_hz || samples.is_empty() || from_hz == 0 || to_hz == 0 {
+        return pcm16.to_vec();
+    }
+    let out_len = ((samples.len() as u64 * u64::from(to_hz)) / u64::from(from_hz)).max(1) as usize;
+    let step = f64::from(from_hz) / f64::from(to_hz);
+    let mut out = Vec::with_capacity(out_len * 2);
+    for index in 0..out_len {
+        let position = index as f64 * step;
+        let left = (position.floor() as usize).min(samples.len() - 1);
+        let right = (left + 1).min(samples.len() - 1);
+        let fraction = position - position.floor();
+        let value =
+            f64::from(samples[left]) * (1.0 - fraction) + f64::from(samples[right]) * fraction;
+        out.extend_from_slice(&(value.round() as i16).to_le_bytes());
+    }
+    out
+}
 
 impl LiveAudioWriter {
     fn new(appender: notetaker_core::storage::AudioAppender) -> Self {
@@ -2029,7 +2065,7 @@ impl LiveAudioWriter {
         }
     }
 
-    /// Appends one frame and returns the offset it starts at.
+    /// Appends one frame (converted to the channel file's rate when the device rate changed).
     fn write(
         &mut self,
         store: &MeetingStore,
@@ -2037,36 +2073,67 @@ impl LiveAudioWriter {
         channel: notetaker_core::providers::AudioChannel,
         pcm16: &[u8],
         sample_rate_hz: u32,
-    ) -> Result<usize, (ErrorCode, String)> {
+    ) -> Result<WrittenFrame, (ErrorCode, String)> {
         let (channel_file, slot) = match channel {
             notetaker_core::providers::AudioChannel::Mic => (notetaker_core::storage::MIC_FILE, 0),
             notetaker_core::providers::AudioChannel::Speaker => {
                 (notetaker_core::storage::SPEAKER_FILE, 1)
             }
         };
-        let start = self.appender.append(channel_file, pcm16).map_err(|error| {
+        let storage_error = |error: notetaker_core::storage::StorageError, what: &str| {
             (
                 error.error_code(),
-                format!("failed to persist audio to disk: {error}"),
+                format!("failed to persist audio {what}: {error}"),
             )
-        })?;
-        if self.sample_rates[slot] != Some(sample_rate_hz) {
-            store
-                .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz)
-                .map_err(|error| {
-                    (
-                        error.error_code(),
-                        format!("failed to persist audio metadata: {error}"),
-                    )
-                })?;
-            self.sample_rates[slot] = Some(sample_rate_hz);
-        }
+        };
+        let established = match self.sample_rates[slot] {
+            Some(rate) => rate,
+            None => {
+                // First frame of this channel in this session. A resumed meeting already has audio
+                // at some rate: keep it. A new one takes the rate of its first frame.
+                let has_audio = store.audio_len(meeting_id, channel_file).unwrap_or(0) > 0;
+                let rate = if has_audio {
+                    store
+                        .load_meta(meeting_id)
+                        .map(|meta| {
+                            if slot == 0 {
+                                meta.mic_sample_rate_hz
+                            } else {
+                                meta.speaker_sample_rate_hz
+                            }
+                        })
+                        .unwrap_or(sample_rate_hz)
+                } else {
+                    sample_rate_hz
+                };
+                store
+                    .mark_audio_sample_rate(meeting_id, channel_file, rate)
+                    .map_err(|error| storage_error(error, "metadata"))?;
+                self.sample_rates[slot] = Some(rate);
+                rate
+            }
+        };
+        let converted;
+        let data: &[u8] = if sample_rate_hz == established {
+            pcm16
+        } else {
+            converted = resample_pcm16(pcm16, sample_rate_hz, established);
+            &converted
+        };
+        let start = self
+            .appender
+            .append(channel_file, data)
+            .map_err(|error| storage_error(error, "to disk"))?;
         // A failed flush is reported like any storage failure, but the frame itself is in the
         // file, so it still goes on to transcription.
         if let Err(error) = self.appender.sync_if_due(LIVE_AUDIO_SYNC_INTERVAL) {
             tracing::warn!(%error, "audio flush failed");
         }
-        Ok(start)
+        Ok(WrittenFrame {
+            start,
+            len: data.len(),
+            sample_rate_hz: established,
+        })
     }
 }
 
@@ -2454,24 +2521,21 @@ mod tests {
         store.create_meeting(id, chrono::Utc::now()).unwrap();
         let mut writer = LiveAudioWriter::new(store.open_audio_appender(id));
 
+        let first = writer
+            .write(&store, id, AudioChannel::Mic, &[1, 2], 48_000)
+            .unwrap();
         assert_eq!(
-            writer
-                .write(&store, id, AudioChannel::Mic, &[1, 2], 48_000)
-                .unwrap(),
-            0
+            (first.start, first.len, first.sample_rate_hz),
+            (0, 2, 48_000)
         );
-        assert_eq!(
-            writer
-                .write(&store, id, AudioChannel::Speaker, &[9, 9], 44_100)
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            writer
-                .write(&store, id, AudioChannel::Mic, &[3, 4, 5, 6], 48_000)
-                .unwrap(),
-            2
-        );
+        let speaker = writer
+            .write(&store, id, AudioChannel::Speaker, &[9, 9], 44_100)
+            .unwrap();
+        assert_eq!((speaker.start, speaker.sample_rate_hz), (0, 44_100));
+        let second = writer
+            .write(&store, id, AudioChannel::Mic, &[3, 4, 5, 6], 48_000)
+            .unwrap();
+        assert_eq!(second.start, 2);
         // Readers see the bytes immediately (they are in the file), before any flush is due.
         assert_eq!(
             store
@@ -2484,6 +2548,72 @@ mod tests {
         let meta = store.load_meta(id).unwrap();
         assert_eq!(meta.mic_sample_rate_hz, 48_000);
         assert_eq!(meta.speaker_sample_rate_hz, 44_100);
+    }
+
+    #[test]
+    fn a_device_switch_mid_call_keeps_the_channel_file_at_one_rate() {
+        use notetaker_core::providers::AudioChannel;
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, chrono::Utc::now()).unwrap();
+        let mut writer = LiveAudioWriter::new(store.open_audio_appender(id));
+
+        let one_second_48k = vec![0u8; 48_000 * 2];
+        let first = writer
+            .write(&store, id, AudioChannel::Mic, &one_second_48k, 48_000)
+            .unwrap();
+        // The headset changes: the same second now arrives at 16 kHz.
+        let one_second_16k = vec![0u8; 16_000 * 2];
+        let second = writer
+            .write(&store, id, AudioChannel::Mic, &one_second_16k, 16_000)
+            .unwrap();
+
+        assert_eq!(second.sample_rate_hz, 48_000, "stays at the file's rate");
+        assert_eq!(
+            second.len,
+            one_second_48k.len(),
+            "one second is still one second"
+        );
+        assert_eq!(second.start, first.len);
+        assert_eq!(store.load_meta(id).unwrap().mic_sample_rate_hz, 48_000);
+    }
+
+    #[test]
+    fn a_resumed_meeting_keeps_the_rate_already_on_disk() {
+        use notetaker_core::providers::AudioChannel;
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, chrono::Utc::now()).unwrap();
+        {
+            let mut before = LiveAudioWriter::new(store.open_audio_appender(id));
+            before
+                .write(&store, id, AudioChannel::Mic, &vec![0u8; 960], 48_000)
+                .unwrap();
+        }
+        let mut after = LiveAudioWriter::new(store.open_audio_appender(id));
+        let resumed = after
+            .write(&store, id, AudioChannel::Mic, &vec![0u8; 320], 16_000)
+            .unwrap();
+        assert_eq!(resumed.sample_rate_hz, 48_000);
+        assert_eq!(resumed.len, 960);
+    }
+
+    #[test]
+    fn resampling_preserves_duration_and_endpoints() {
+        let ramp: Vec<u8> = (0..100i16)
+            .flat_map(|value| (value * 100).to_le_bytes())
+            .collect();
+        let up = resample_pcm16(&ramp, 16_000, 48_000);
+        assert_eq!(up.len(), 300 * 2);
+        let first = i16::from_le_bytes([up[0], up[1]]);
+        assert_eq!(first, 0);
+        let down = resample_pcm16(&up, 48_000, 16_000);
+        assert_eq!(down.len(), ramp.len());
+        assert_eq!(resample_pcm16(&[], 16_000, 48_000), Vec::<u8>::new());
+        assert_eq!(resample_pcm16(&ramp, 16_000, 16_000), ramp);
+        assert_eq!(resample_pcm16(&ramp, 0, 48_000), ramp);
     }
 
     #[test]
