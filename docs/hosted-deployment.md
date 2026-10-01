@@ -99,6 +99,36 @@ The filesystem backend is suitable for a single-node self-hosted or Docker
 deployment with the `ai-notetaker-objects` volume; it is not a substitute for
 a shared bucket in a multi-instance hosted deployment.
 
+## Notes platform release: deploy notes
+
+Migrations since v0.12.0 are additive and apply on start (`docker-entrypoint.mjs`
+or `npm run db:migrate`): `file_import`, `audit_events`, `notes_regenerations`,
+`meeting_speakers`, `library_folders_trash`, `integrations`, `languages_vocabulary`.
+
+New environment variables:
+
+- `INTEGRATIONS_ENCRYPTION_KEY` (32 random bytes, base64: `openssl rand -base64 32`)
+  is **required** when `MANAGED_HOSTING=true`. The app refuses to store integration
+  secrets without it and does not fall back to `AUTH_TOKEN`. Keep it stable:
+  changing it makes saved destinations unreadable. `INTEGRATIONS_ALLOW_PRIVATE_NETWORKS`
+  is ignored on managed hosting.
+- `MANAGED_IMPORT_TRANSCRIPTION_PROVIDER` is optional (see above).
+
+`ffmpeg` and `ffprobe` must exist on the **web** service (import decodes inside the
+web process). The Dockerfile installs them. `webapp/railway.json` and
+`webapp/railway-worker.json` still select the Nixpacks builder, which does not
+provide them: either switch the web service to the Dockerfile builder, or add
+`ffmpeg` to the Nixpacks build. Check `/import` after the deploy; it says import is
+unavailable when the binaries are missing. Neither option was run on Railway here.
+
+What was checked locally on 2026-09-30 for the Docker image (`docker build` in
+`webapp/`): it builds; ffmpeg/ffprobe 5.1.9 run as the non-root `node` user; the
+exact probe and decode flags from `mediaDecode.ts` (`-protocol_whitelist file`,
+`prlimit`, 16 kHz mono PCM) decode an mp3 and an mp4 with a video track to the
+expected byte counts; the container applies all 26 migrations against a fresh
+Postgres 16 and answers `/api/health` with 200. Not checked: a Railway build, real
+providers, large files, or scratch-disk use on a Railway volume.
+
 ## Environment and security
 
 Start from `webapp/.env.example`. Generate long random values for
