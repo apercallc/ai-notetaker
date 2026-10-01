@@ -44,7 +44,11 @@ jobs:
           if (release.version !== extension.version || release.version !== webapp.version || release.version !== helperVersion) {
             throw new Error(`version mismatch: release=${release.version}, extension=${extension.version}, webapp=${webapp.version}, helper=${helperVersion}`);
           }
-          if (release.protocol.version !== 3) throw new Error(`unexpected protocol version ${release.protocol.version}`);
+          const rustProtocol = Number(fs.readFileSync('helper/crates/core/src/native_messaging.rs', 'utf8').match(/PROTOCOL_VERSION:\s*u32\s*=\s*(\d+)/u)?.[1]);
+          const extensionProtocol = Number(fs.readFileSync('extension/src/lib/backgroundController.ts', 'utf8').match(/protocolVersion === (\d+)/u)?.[1]);
+          if (release.protocol.version !== rustProtocol || release.protocol.version !== extensionProtocol) {
+            throw new Error(`protocol mismatch: release=${release.protocol.version}, helper=${rustProtocol}, extension=${extensionProtocol}`);
+          }
           NODE
 
   extension:
