@@ -1051,15 +1051,21 @@ export class BackgroundController {
     const managedGoogle = this.settings?.processingMode.kind === "managed" ? this.settings.managedService : null;
     const connection = this.settings?.drive;
     if (!managedGoogle && !connection) return;
-    await updateMeeting(meeting.id, (current) => ({
-      ...current,
-      driveExport: { status: "pending" },
-    }));
-    this.broadcast({ type: "DRIVE_EXPORT", meetingId: meeting.id, status: "pending" });
     try {
+      await updateMeeting(meeting.id, (current) => ({
+        ...current,
+        driveExport: { status: "pending" },
+      }));
+      this.broadcast({ type: "DRIVE_EXPORT", meetingId: meeting.id, status: "pending" });
+      const tokenBefore = connection?.accessToken;
       const result = managedGoogle
         ? await exportManagedMeetingToGoogleDrive(managedGoogle, meeting.id, this.fetchImpl)
         : await exportMeetingToDrive(meeting, connection!, this.fetchImpl);
+      // A refresh mutates the connection in memory; keep the new token so the next export (or
+      // a worker restart) does not start from an expired one.
+      if (connection && this.settings && connection.accessToken !== tokenBefore) {
+        await saveSettings(this.settings).catch(() => undefined);
+      }
       await updateMeeting(meeting.id, (current) => ({
         ...current,
         driveExport: {

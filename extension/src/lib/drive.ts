@@ -150,6 +150,8 @@ async function withAccessToken<T>(
     if (error instanceof Error && error.message === "Drive request failed: 401") {
       const refreshed = await refreshAccessToken(connection, fetchImpl);
       if (refreshed) return operation(refreshed);
+      // No refresh token, or Google revoked it: only reconnecting helps, and the user should be told so.
+      throw new Error("Google Drive access expired. Reconnect Drive in Settings, then retry the export.");
     }
     throw error;
   }
@@ -192,11 +194,17 @@ export async function exportMeetingToDrive(
     });
     const file = (await created.json()) as DriveFile;
     if (!file.id) throw new Error("Google Drive did not return the meeting document id");
-    await request(`${DOCS_ENDPOINT}/${encodeURIComponent(file.id)}:batchUpdate`, token, fetchImpl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: formatMeetingNotes(meeting) } }] }),
-    });
+    try {
+      await request(`${DOCS_ENDPOINT}/${encodeURIComponent(file.id)}:batchUpdate`, token, fetchImpl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: formatMeetingNotes(meeting) } }] }),
+      });
+    } catch (error) {
+      // Do not leave an empty document behind: every retry would otherwise add another one.
+      await request(`${DRIVE_FILES_ENDPOINT}/${encodeURIComponent(file.id)}`, token, fetchImpl, { method: "DELETE" }).catch(() => undefined);
+      throw error;
+    }
     return { fileId: file.id, ...(file.webViewLink ? { webViewLink: file.webViewLink } : {}) };
   });
 }

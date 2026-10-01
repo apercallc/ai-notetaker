@@ -97,4 +97,23 @@ describe("Google Drive export", () => {
       expiresAt: Date.now() + 60_000,
     }, fetchImpl)).rejects.toThrow("Drive request failed: 403");
   });
+
+  it("deletes the empty document when writing the notes fails, so a retry does not stack duplicates", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: [{ id: "folder-a" }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "doc-3" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("server error", { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(exportMeetingToDrive(meeting, { clientId: "c", accessToken: "access", expiresAt: Date.now() + 60_000 }, fetchImpl)).rejects.toThrow("Drive request failed: 500");
+
+    const deleteCall = fetchImpl.mock.calls[3];
+    expect(deleteCall?.[0]).toContain("/doc-3");
+    expect(deleteCall?.[1]?.method).toBe("DELETE");
+  });
+
+  it("tells the user to reconnect when the access token is rejected and cannot be refreshed", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response("unauthorized", { status: 401 }));
+    await expect(exportMeetingToDrive(meeting, { clientId: "c", accessToken: "stale", expiresAt: Date.now() + 60_000 }, fetchImpl)).rejects.toThrow("Reconnect Drive in Settings");
+  });
 });
