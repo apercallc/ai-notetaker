@@ -249,6 +249,7 @@ function meetingModeOptions(selected: MeetingMode): string {
     ["sales", "Sales call"],
     ["one_on_one", "1:1"],
     ["interview", "Interview"],
+    ["lecture", "Lecture"],
     ["custom", "Custom template"],
   ] as const;
   return options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");

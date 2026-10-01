@@ -21,6 +21,7 @@ const MODES: Array<[MeetingMode, string]> = [
   ["sales", "Sales call"],
   ["one_on_one", "1:1"],
   ["interview", "Interview"],
+  ["lecture", "Lecture"],
   ["custom", "Custom template"],
 ];
 

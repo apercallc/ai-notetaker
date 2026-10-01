@@ -343,6 +343,9 @@ pub fn summary_system_prompt(options: &SummaryOptions) -> String {
         MeetingMode::Interview => {
             "interview: emphasize evidence, strengths, risks, and unanswered questions"
         }
+        MeetingMode::Lecture => {
+            "lecture: emphasize key concepts, definitions, examples, and questions for review"
+        }
         MeetingMode::Custom => "custom meeting format; follow the additional instructions closely",
     };
     let vocabulary = if options.vocabulary.is_empty() {
@@ -451,6 +454,17 @@ mod tests {
         assert!(prompt.contains("Acme, QBR"));
         assert!(prompt.contains("Call out objections separately."));
         assert!(!prompt.contains("flagged"));
+    }
+
+    #[test]
+    fn summary_prompt_has_a_lecture_mode_and_its_wire_name_is_snake_case() {
+        let prompt = summary_system_prompt(&SummaryOptions {
+            mode: MeetingMode::Lecture,
+            ..SummaryOptions::default()
+        });
+        assert!(prompt.contains("lecture: emphasize key concepts"));
+        let parsed: MeetingMode = serde_json::from_str("\"lecture\"").unwrap();
+        assert_eq!(parsed, MeetingMode::Lecture);
     }
 
     #[test]

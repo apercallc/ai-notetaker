@@ -73,7 +73,7 @@ file on Unix-like systems.
   "summarizationProvider": "claude" | "gemini" | "deepseek",
   "apiKeys": { "deepgram": "...", "claude": "...", "groq": "...", "gemini": "...", "deepseek": "..." },
   "webapp": { "url": "https://...", "token": "..." }, // optional, null if not configured
-  "defaultMeetingMode": "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom",
+  "defaultMeetingMode": "general" | "standup" | "sales" | "one_on_one" | "interview" | "lecture" | "custom",
   "customVocabulary": ["product name", "customer acronym"],
   "customSummaryInstructions": "Optional additional summary guidance.",
   "processingMode": { "kind": "local_byok" } | {

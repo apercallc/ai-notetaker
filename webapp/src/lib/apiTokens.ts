@@ -19,6 +19,12 @@ import { prisma } from "./db";
 export const API_TOKEN_PREFIX = "ant_";
 export const API_TOKEN_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 export const API_TOKEN_SCOPE = "managed";
+/**
+ * Read-only access to a person's notes for AI assistants over MCP. A token of
+ * this scope cannot sign in to the managed API (uploads, billing, ...) and a
+ * managed token cannot call the MCP endpoint: each resolver accepts exactly one scope.
+ */
+export const READ_TOKEN_SCOPE = "notes_read";
 const TOUCH_INTERVAL_MS = 60 * 60 * 1000;
 
 export function hashToken(secret: string): string {
@@ -37,7 +43,7 @@ export interface CreatedApiToken {
 
 export async function createApiToken(
   userId: string,
-  options: { label?: string | null; userAgent?: string | null; now?: number } = {},
+  options: { label?: string | null; userAgent?: string | null; now?: number; scope?: typeof API_TOKEN_SCOPE | typeof READ_TOKEN_SCOPE } = {},
 ): Promise<CreatedApiToken> {
   const now = options.now ?? Date.now();
   const token = `${API_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
@@ -46,7 +52,7 @@ export async function createApiToken(
     data: {
       userId,
       tokenHash: hashToken(token),
-      scope: API_TOKEN_SCOPE,
+      scope: options.scope ?? API_TOKEN_SCOPE,
       label: options.label?.trim().slice(0, 80) || null,
       userAgent: options.userAgent?.slice(0, 300) ?? null,
       lastUsedAt: new Date(now),
@@ -66,13 +72,13 @@ export interface ApiTokenUser {
  * Resolves a bearer secret to its user, or null when it is unknown, revoked,
  * expired, or its account must first change a temporary password.
  */
-export async function resolveApiToken(secret: string, now: number = Date.now()): Promise<ApiTokenUser | null> {
+export async function resolveApiToken(secret: string, now: number = Date.now(), scope: string = API_TOKEN_SCOPE): Promise<ApiTokenUser | null> {
   if (!looksLikeApiToken(secret) || secret.length > 200) return null;
   const row = await prisma.apiToken.findUnique({
     where: { tokenHash: hashToken(secret) },
     include: { user: { select: { id: true, email: true, mustChangePassword: true } } },
   });
-  if (!row || row.revokedAt || row.scope !== API_TOKEN_SCOPE) return null;
+  if (!row || row.revokedAt || row.scope !== scope) return null;
   if (row.expiresAt.getTime() <= now) {
     await prisma.apiToken.deleteMany({ where: { id: row.id } });
     return null;
@@ -108,6 +114,11 @@ export async function listApiTokens(userId: string, now: number = Date.now()) {
   return prisma.apiToken.findMany({
     where: { userId, revokedAt: null, expiresAt: { gt: new Date(now) } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-    select: { id: true, label: true, userAgent: true, createdAt: true, lastUsedAt: true, expiresAt: true },
+    select: { id: true, label: true, scope: true, userAgent: true, createdAt: true, lastUsedAt: true, expiresAt: true },
   });
+}
+
+/** Resolves a read-only (MCP) token; managed sign-in tokens are refused here. */
+export function resolveReadToken(secret: string, now: number = Date.now()): Promise<ApiTokenUser | null> {
+  return resolveApiToken(secret, now, READ_TOKEN_SCOPE);
 }

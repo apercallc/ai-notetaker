@@ -167,8 +167,17 @@ export function isSerializationConflict(error: unknown): boolean {
 /** Serializable conflicts are expected when several uploads for one workspace reserve at once. */
 const RESERVATION_ATTEMPTS = 8;
 
-export async function reserveMeetingProcessing(workspaceId: string, idempotencyKey: string, audioBytes = 0): Promise<{ alreadyReserved: boolean }> {
-  const audioSeconds = audioSecondsForBytes(audioBytes);
+export interface ReserveOptions {
+  /**
+   * Exact audio seconds to reserve instead of deriving them from the byte
+   * count. File imports pass their real duration, because the live-capture
+   * byte formula assumes two channels and would bill a mono hour as half.
+   */
+  audioSeconds?: number;
+}
+
+export async function reserveMeetingProcessing(workspaceId: string, idempotencyKey: string, audioBytes = 0, options: ReserveOptions = {}): Promise<{ alreadyReserved: boolean }> {
+  const audioSeconds = options.audioSeconds ?? audioSecondsForBytes(audioBytes);
   // The entitlement check and ledger insert must share a serializable
   // transaction. A check-then-insert sequence lets two simultaneous uploads
   // both observe the same remaining unit and oversubscribe a plan.
@@ -247,4 +256,43 @@ export async function releaseMeetingProcessing(workspaceId: string, idempotencyK
     where: { workspaceId, idempotencyKey, kind: UNITS_KIND, units: { gt: 0 } },
     data: { units: 0, releasedAt: new Date() },
   });
+}
+
+/**
+ * Replaces a live reservation's audio seconds with the measured value. The
+ * import worker calls this after probing a file, before any provider spend, so
+ * a client that under-declared a duration cannot get more than its plan allows:
+ * growth past the cap throws AudioBudgetError and the caller fails the job.
+ * Returns false when no live reservation exists (released or never made).
+ */
+export async function adjustReservedAudioSeconds(workspaceId: string, idempotencyKey: string, audioSeconds: number): Promise<boolean> {
+  const seconds = Math.max(0, Math.ceil(audioSeconds));
+  for (let attempt = 0; attempt < RESERVATION_ATTEMPTS; attempt += 1) {
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          const entry = await tx.usageLedgerEntry.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } } });
+          if (!entry || entry.units <= 0 || entry.kind !== UNITS_KIND) return false;
+          if (seconds > entry.audioSeconds) {
+            const subscription = await tx.workspaceSubscription.findUnique({ where: { workspaceId } });
+            const others = await tx.usageLedgerEntry.aggregate({
+              where: { ...liveUsageWhere(workspaceId, usageWindow(subscription)), NOT: { id: entry.id } },
+              _sum: { audioSeconds: true },
+            });
+            if ((others._sum.audioSeconds ?? 0) + seconds > planAudioSeconds(subscription?.plan ?? "local")) throw new AudioBudgetError();
+          }
+          await tx.usageLedgerEntry.update({ where: { id: entry.id }, data: { audioSeconds: seconds } });
+          return true;
+        },
+        { isolationLevel: "Serializable" },
+      );
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < RESERVATION_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1) + Math.random() * 20));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("audio reservation adjustment could not be completed");
 }

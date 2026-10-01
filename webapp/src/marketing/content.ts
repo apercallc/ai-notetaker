@@ -72,6 +72,12 @@ export const FAQS: Faq[] = [
     answer: `Yes. Ask your notes is included with Hosted Pro (${n(LIMITS.proQuestions)} questions a month) and Hosted Team (${n(LIMITS.teamQuestions)} a month); the free trial and bring-your-own-keys mode do not include it. Answers come only from your own meeting notes and link to the notes they used. Questions do not use up meeting hours, the allowance resets each billing period, and your questions and answers are not stored.`,
   },
   {
+    question: "Will I lose my notes if I clear my browser history?",
+    topics: ["setup"],
+    answer:
+      "No. Clearing history, cookies or cache does not delete notes. With Hosted AI your notes are stored in your workspace, so only a sign-in is needed again. In local mode they are stored in the extension on your device: they stay unless you uninstall the extension, delete the Chrome profile, or lose the device, and we hold no copy. Sync to Hosted AI or your own history server, or export the notes you want to keep.",
+  },
+  {
     question: "Can I cancel any time?",
     topics: ["pricing"],
     answer:
@@ -115,7 +121,7 @@ export const FAQS: Faq[] = [
   {
     question: "Can I delete my meetings and data?",
     answer:
-      "Yes. You can delete any meeting, workspace owners can set how long hosted notes are kept, and you can export your data from your account page. Deleting a meeting from the hosted library removes its transcript and summary.",
+      "Yes. You can delete any meeting, workspace owners can set how long hosted notes are kept, and you can export your data from your account page. Deleting a meeting or folder from the hosted library moves it to Trash, where you can restore it for 30 days before it is removed for good; delete it from Trash to remove its transcript and summary immediately.",
   },
   {
     question: "Which browsers are supported?",

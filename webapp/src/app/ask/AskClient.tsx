@@ -32,9 +32,10 @@ function Answer({ text, sources }: { text: string; sources: Source[] }) {
   );
 }
 
-export function AskClient({ maxLength }: { maxLength: number }) {
+export function AskClient({ maxLength, folders }: { maxLength: number; folders: { id: string; label: string }[] }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
+  const [folderId, setFolderId] = useState("");
   const [pending, startTransition] = useTransition();
   const nextId = useRef(1);
   const router = useRouter();
@@ -51,7 +52,7 @@ export function AskClient({ maxLength }: { maxLength: number }) {
     startTransition(async () => {
       let result: AskResult;
       try {
-        result = await askNotesAction(text);
+        result = await askNotesAction(text, folderId || null);
       } catch {
         result = { ok: false, error: "Something went wrong. Try again." };
       }
@@ -121,6 +122,16 @@ export function AskClient({ maxLength }: { maxLength: number }) {
         ))}
         <div ref={end} />
       </div>
+
+      {folders.length > 0 && (
+        <div className="ask-scope">
+          <label htmlFor="ask-folder">Ask in</label>
+          <select id="ask-folder" className="text-input" value={folderId} onChange={(event) => setFolderId(event.target.value)}>
+            <option value="">All notes</option>
+            {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label}</option>)}
+          </select>
+        </div>
+      )}
 
       <form className="ask-form" onSubmit={onSubmit}>
         <label className="sr-only" htmlFor="ask-input">Your question</label>

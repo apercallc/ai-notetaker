@@ -560,9 +560,18 @@ export function PrivacyView() {
 
             <h2>Keeping, deleting and exporting your data</h2>
             <ul>
-              <li>Delete any meeting from the app. In Hosted AI this removes its transcript and summary.</li>
+              <li>Delete any meeting or folder from the app. In Hosted AI it moves to Trash, where you can restore it for 30 days; after that, or when you delete it from Trash, its transcript and summary are removed.</li>
               <li>Workspace owners choose how long hosted notes are kept, and you can export your data from the account page.</li>
               <li>We keep account data while your account exists. After you delete an account or workspace, its notes and account records are removed, and copies in system backups are overwritten on the normal backup schedule. We keep records that the law or our tax and fraud-prevention duties require, such as billing records held by Stripe, for as long as they require.</li>
+              <li>
+                <strong>Clearing your browser history does not delete your notes.</strong> Hosted AI notes live in your
+                workspace on our servers, so they are unaffected by anything you do in your browser; if you clear cookies
+                you only need to sign in again. In local mode, notes are stored in the extension on your device, and
+                clearing history, cookies or cache leaves them alone. They are removed if you uninstall the extension,
+                delete the Chrome profile, or reset or lose the device, and nothing is stored on our servers to restore
+                them. A self-hosted history server keeps its own copy of what was synced to it. To keep local notes
+                safe, sync them to Hosted AI or your own history server, or export the ones you need.
+              </li>
               <li>Deleting the extension does not delete files the helper saved on your device, provider account data, exported files, or data on a server you set up. Delete those where they live.</li>
             </ul>
 

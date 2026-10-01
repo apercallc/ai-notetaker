@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
 import { getAppUrl } from "@/lib/deploymentConfig";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
+import { recordAudit } from "@/lib/audit";
 import { createMeetingShare, SharingValidationError } from "@/lib/sharing";
 
 /**
@@ -21,6 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ meetin
       return NextResponse.json({ error: "meetingId is required", requestId }, { status: 400, headers: { "x-request-id": requestId } });
     }
     const share = await createMeetingShare(session.workspaceId, meetingId);
+    await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "share.create", targetType: "meeting", targetId: meetingId, metadata: { via: "extension" } });
     return NextResponse.json(
       {
         shareId: share.id,

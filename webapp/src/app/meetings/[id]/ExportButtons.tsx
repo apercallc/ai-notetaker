@@ -26,7 +26,7 @@ function markdownFor(meeting: MeetingDetailResponse): string {
       : ["_None_"]),
     "",
     "## Transcript",
-    ...meeting.transcript.map((segment) => `**${speakerLabel(segment.speaker)}:** ${segment.text}`),
+    ...meeting.transcript.map((segment) => `**${speakerLabel(segment.speaker, meeting.speakerNames)}:** ${segment.text}`),
   ].join("\n");
 }
 
@@ -46,8 +46,13 @@ function plainTextFor(meeting: MeetingDetailResponse): string {
       : ["None"]),
     "",
     "TRANSCRIPT",
-    ...meeting.transcript.map((segment) => `${speakerLabel(segment.speaker)}: ${segment.text}`),
+    ...meeting.transcript.map((segment) => `${speakerLabel(segment.speaker, meeting.speakerNames)}: ${segment.text}`),
   ].join("\n");
+}
+
+/** A hand-written note exports as itself: a title and its text, with no meeting scaffolding. */
+function manualMarkdown(meeting: MeetingDetailResponse): string {
+  return `# ${meeting.title}\n\n${meeting.summary}\n`;
 }
 
 function download(meeting: MeetingDetailResponse, contents: string, extension: string, type: string): void {
@@ -62,13 +67,13 @@ function download(meeting: MeetingDetailResponse, contents: string, extension: s
   }, 0);
 }
 
-export function ExportButtons({ meeting }: { meeting: MeetingDetailResponse }) {
+export function ExportButtons({ meeting, manual = false }: { meeting: MeetingDetailResponse; manual?: boolean }) {
   return (
     <div className="export-actions" aria-label="Export meeting">
-      <button type="button" className="button button-secondary" onClick={() => download(meeting, markdownFor(meeting), "md", "text/markdown")}>
+      <button type="button" className="button button-secondary" onClick={() => download(meeting, manual ? manualMarkdown(meeting) : markdownFor(meeting), "md", "text/markdown")}>
         Markdown
       </button>
-      <button type="button" className="button button-secondary" onClick={() => download(meeting, plainTextFor(meeting), "txt", "text/plain")}>
+      <button type="button" className="button button-secondary" onClick={() => download(meeting, manual ? manualMarkdown(meeting) : plainTextFor(meeting), "txt", "text/plain")}>
         Plain text
       </button>
       <button type="button" className="button button-secondary" onClick={() => window.print()}>

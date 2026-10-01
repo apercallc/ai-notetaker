@@ -108,6 +108,7 @@ export function SessionList({ sessions }: { sessions: SessionRow[] }) {
 export interface TokenRow {
   id: string;
   label: string | null;
+  readOnly?: boolean;
   device: string | null;
   createdAt: string;
   lastUsedAt: string | null;
@@ -121,6 +122,11 @@ export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
       <form action={formAction} className="login-form">
         <label htmlFor="token-label">Label</label>
         <input id="token-label" name="label" type="text" className="text-input" placeholder="Chrome extension" maxLength={80} />
+        <label htmlFor="token-purpose">Use</label>
+        <select id="token-purpose" name="purpose" className="text-input" defaultValue="extension">
+          <option value="extension">Sign in the extension or helper</option>
+          <option value="mcp">Read-only, for AI assistants (MCP)</option>
+        </select>
         <button type="submit" className="button button-primary" disabled={pending} aria-busy={pending}>
           {pending ? "Creating…" : "Create sign-in token"}
         </button>
@@ -140,7 +146,7 @@ export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
         <ul className="meeting-list">
           {tokens.map((token) => (
             <li key={token.id} className="meeting-card static-row">
-              <div className="title">{token.label ?? "Sign-in token"}</div>
+              <div className="title">{token.label ?? "Sign-in token"}{token.readOnly && <span className="file-type">Read-only</span>}</div>
               <div className="meta">
                 {token.device ? `${token.device} · ` : ""}created {token.createdAt} · last used{" "}
                 {token.lastUsedAt ?? "never"} · expires {token.expiresAt}

@@ -99,7 +99,7 @@ describe("managed worker response parsing", () => {
     expect(parseSummary({ summary: "legacy shape", actionItems: [{ text: "follow up", owner: "Sam" }] })).toMatchObject({ overview: "legacy shape", actionItems: [{ text: "follow up", owner: "Sam" }] });
     expect(() => parseSummary({ actionItems: [] })).toThrow(ManagedWorkerError);
     expect(() => parseSummary("nope")).toThrow(ManagedWorkerError);
-    expect(formatSummaryText(parsed)).toBe("We agreed on Friday.\n\nKey points\n- one\n\nDecisions\n- ship Friday");
+    expect(formatSummaryText(parsed)).toBe("We agreed on Friday.\n\n## Key points\n- one\n\n## Decisions\n- ship Friday");
   });
 
   it("reads the tool call, then JSON text, then raw text from a model response", () => {
@@ -443,7 +443,7 @@ describe("managed worker pipeline", () => {
     const meeting = await prisma.meeting.findUniqueOrThrow({ where: { id: meetingId }, include: { transcript: { orderBy: { order: "asc" } }, actionItems: true } });
     expect(meeting).toMatchObject({
       title: "Draft review and Friday deadline",
-      summary: "The draft is due Friday.\n\nKey points\n- Draft owed by Friday\n\nDecisions\n- Ship on Friday",
+      summary: "The draft is due Friday.\n\n## Key points\n- Draft owed by Friday\n\n## Decisions\n- Ship on Friday",
       processingMode: "managed",
     });
     // endedAt is startedAt + recording duration, not the processing wall clock.

@@ -99,7 +99,7 @@ export default async function SharedMeetingPage({ params }: { params: Promise<{ 
             {turns.map((turn, index) => (
               <li key={index} className="turn">
                 <div className="turn-head">
-                  <span className={`speaker${turn.speaker === "you" ? " is-you" : ""}`}>{speakerLabel(turn.speaker)}</span>
+                  <span className={`speaker${turn.speaker === "you" ? " is-you" : ""}`}>{speakerLabel(turn.speaker, meeting.speakerNames)}</span>
                   {turn.offsetSeconds !== null && <span className="offset">{formatOffset(turn.offsetSeconds)}</span>}
                 </div>
                 <p>{turn.lines.join(" ")}</p>

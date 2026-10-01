@@ -2,10 +2,15 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { deleteMeeting, renameMeeting, updateActionItem, ValidationError } from "@/lib/meetings";
+import { renameMeeting, updateActionItem, ValidationError } from "@/lib/meetings";
+import { trashNote } from "@/lib/library";
+import { restorePreviousBody, updateNoteBody } from "@/lib/noteEditing";
+import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
 import { createMeetingShare, revokeMeetingShare, SharingValidationError } from "@/lib/sharing";
 import { retryMeetingProcessing } from "@/lib/meetingProcessing";
+import { regenerateNotes } from "@/lib/notesRegenerate";
+import { renameSpeaker } from "@/lib/speakers";
 import { isValidDateOnly } from "@/lib/actionItems";
 
 export type ShareActionResult =
@@ -13,11 +18,12 @@ export type ShareActionResult =
   | { ok: false; error: string };
 
 export async function createMeetingShareAction(formData: FormData): Promise<ShareActionResult> {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, userId } = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
   const expiresInDays = Number(formData.get("expiresInDays") ?? "7");
   try {
     const share = await createMeetingShare(workspaceId, meetingId, expiresInDays);
+    await recordAudit({ workspaceId, actorUserId: userId, action: "share.create", targetType: "meeting", targetId: meetingId, metadata: { expiresInDays } });
     revalidatePath(`/meetings/${meetingId}`);
     return { ok: true, id: share.id, token: share.token, expiresAt: share.expiresAt.toISOString() };
   } catch (error) {
@@ -28,7 +34,7 @@ export async function createMeetingShareAction(formData: FormData): Promise<Shar
 }
 
 export async function revokeMeetingShareAction(formData: FormData): Promise<boolean> {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, userId } = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
   let revoked = false;
   try {
@@ -36,23 +42,28 @@ export async function revokeMeetingShareAction(formData: FormData): Promise<bool
   } catch (error) {
     if (!(error instanceof SharingValidationError)) throw error;
   }
+  if (revoked) await recordAudit({ workspaceId, actorUserId: userId, action: "share.revoke", targetType: "meeting", targetId: meetingId });
   if (meetingId) revalidatePath(`/meetings/${meetingId}`);
   return revoked;
 }
 
 export async function deleteMeetingAction(formData: FormData): Promise<void> {
-  const { workspaceId } = await requireSession();
+  const session = await requireSession();
   const id = String(formData.get("id") ?? "");
   if (!id) {
     redirect("/meetings?error=invalid-delete");
   }
+  let denied: string | null = null;
   try {
-    await deleteMeeting(workspaceId, id);
+    // Deleting a note moves it to the Trash, where it can be restored for 30 days.
+    const result = await trashNote(session, id);
+    if (!result.ok) denied = result.error;
   } catch (error) {
     console.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
     redirect("/meetings?error=delete-failed");
   }
-  redirect("/meetings");
+  if (denied) redirect(`/meetings/${id}?error=${encodeURIComponent(denied)}`);
+  redirect("/meetings?notice=trashed");
 }
 
 export type RenameState = { status: "saved"; title: string } | { status: "error"; message: string };
@@ -120,4 +131,58 @@ export async function retryProcessingAction(formData: FormData): Promise<RetrySt
   revalidatePath("/meetings");
   revalidatePath(`/meetings/${meetingId}`);
   return { status: "started" };
+}
+
+export type RegenerateState = { status: "done"; remaining: number } | { status: "error"; message: string };
+
+export async function regenerateNotesAction(formData: FormData): Promise<RegenerateState> {
+  const session = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const result = await regenerateNotes(session, meetingId, String(formData.get("template") ?? ""), { summaryLanguage: String(formData.get("summaryLanguage") ?? "") });
+  if (!result.ok) return { status: "error", message: result.error };
+  revalidatePath("/meetings");
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/actions");
+  return { status: "done", remaining: result.remaining };
+}
+
+export type SpeakerRenameState = { status: "saved"; label: string } | { status: "error"; message: string };
+
+export async function renameSpeakerAction(formData: FormData): Promise<SpeakerRenameState> {
+  const { workspaceId } = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  let result;
+  try {
+    result = await renameSpeaker(workspaceId, meetingId, String(formData.get("speakerKey") ?? ""), String(formData.get("name") ?? ""));
+  } catch (error) {
+    console.error("speaker rename failed", { meetingId, error: error instanceof Error ? error.message : String(error) });
+    return { status: "error", message: "Couldn't save the name. Try again." };
+  }
+  if (!result.ok) return { status: "error", message: result.error };
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/meetings");
+  revalidatePath("/actions");
+  return { status: "saved", label: result.label };
+}
+
+export type SaveBodyState = { status: "saved"; version: string } | { status: "conflict" | "error"; message: string };
+
+export async function saveNoteBodyAction(formData: FormData): Promise<SaveBodyState> {
+  const session = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const result = await updateNoteBody(session, meetingId, String(formData.get("body") ?? ""), String(formData.get("version") ?? ""));
+  if (!result.ok) return { status: "conflict" in result ? "conflict" : "error", message: result.error };
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/meetings");
+  return { status: "saved", version: result.version };
+}
+
+export async function restorePreviousBodyAction(formData: FormData): Promise<SaveBodyState> {
+  const session = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const result = await restorePreviousBody(session, meetingId);
+  if (!result.ok) return { status: "error", message: result.error };
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/meetings");
+  return { status: "saved", version: result.version };
 }

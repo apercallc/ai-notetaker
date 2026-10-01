@@ -8,6 +8,9 @@ import { ApiTokenPanel, ChangePasswordForm, DeleteAccountForm, DeleteWorkspaceFo
 import { googleConnectionStatus } from "@/lib/googleIntegration";
 import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
 import { ACCOUNT_TABS, resolveAccountTab } from "./tabs";
+import { listIntegrations, listRecentDeliveries } from "@/lib/integrations";
+import { NotesDeliveryPanel } from "./NotesDeliveryPanel";
+import { LanguageSettingsForm } from "./LanguageSettingsForm";
 
 export const metadata = { title: "Settings", referrer: "no-referrer", robots: { index: false, follow: false } };
 
@@ -33,10 +36,13 @@ export default async function AccountPage({
     listApiTokens(session.userId),
     prisma.workspace.findUniqueOrThrow({
       where: { id: session.workspaceId },
-      select: { name: true, retentionDays: true },
+      select: { name: true, retentionDays: true, vocabulary: true, summaryLanguage: true },
     }),
     googleConnectionStatus(session.userId),
   ]);
+  const [integrations, deliveries] = session.role === "owner"
+    ? await Promise.all([listIntegrations(session.workspaceId), listRecentDeliveries(session.workspaceId)])
+    : [[], []];
   const params = await searchParams;
   const { required, google: googleNotice, googleError } = params;
   const tab = resolveAccountTab(params);
@@ -105,11 +111,30 @@ export default async function AccountPage({
                   tokens={tokens.map((token) => ({
                     id: token.id,
                     label: token.label,
+                    readOnly: token.scope === "notes_read",
                     device: token.userAgent ? describeUserAgent(token.userAgent) : null,
                     createdAt: formatDate(token.createdAt),
                     lastUsedAt: token.lastUsedAt ? formatDateTime(token.lastUsedAt) : null,
                     expiresAt: formatDate(token.expiresAt),
                   }))}
+                />
+              </section>
+
+              <section id="notes-delivery" className="settings-card">
+                <h2>Send notes elsewhere</h2>
+                <NotesDeliveryPanel
+                  canManage={session.role === "owner"}
+                  rows={integrations.map((integration) => ({
+                    id: integration.id,
+                    kind: integration.kind,
+                    name: integration.name,
+                    enabled: integration.enabled,
+                    hint: integration.hint,
+                    status: integration.lastStatus,
+                    error: integration.lastError,
+                    lastDelivered: integration.lastDeliveredAt ? formatDateTime(integration.lastDeliveredAt) : null,
+                  }))}
+                  deliveries={deliveries.map((delivery) => ({ id: delivery.id, name: delivery.integration.name, event: delivery.event, status: delivery.status, attempts: delivery.attempts, error: delivery.lastError, when: formatDateTime(delivery.createdAt) }))}
                 />
               </section>
 
@@ -125,6 +150,11 @@ export default async function AccountPage({
 
           {tab === "data" && (
             <>
+              <section className="settings-card">
+                <h2>Language and vocabulary</h2>
+                <LanguageSettingsForm vocabulary={workspace.vocabulary} summaryLanguage={workspace.summaryLanguage ?? ""} canEdit={session.role === "owner"} />
+              </section>
+
               <section className="settings-card">
                 <h2>Export</h2>
                 <p className="muted-copy">Download every meeting in {workspace.name} — summary, transcript, and action items — as one JSON file.</p>

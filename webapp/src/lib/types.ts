@@ -16,8 +16,8 @@ export interface ActionItemInput {
   completedAt?: string | null;
 }
 
-export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
-export type CaptureSource = "desktop" | "meet";
+export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "lecture" | "custom";
+export type CaptureSource = "desktop" | "meet" | "import";
 export type ProcessingMode = "local_byok" | "managed";
 
 export interface CreateMeetingRequest {
@@ -51,8 +51,13 @@ export interface MeetingSummaryResponse {
  * the same transform at every display/export site rather than showing the
  * wire value directly.
  */
-export function speakerLabel(speaker: string): string {
+export function speakerLabel(speaker: string, names?: Readonly<Record<string, string>>): string {
+  const chosen = names?.[speaker];
+  if (chosen) return chosen;
   if (speaker === "you") return "You";
+  // Imported files have no mic/speaker split, so voices are plain "Speaker N".
+  const speakerMatch = /^speaker(?:-(\d+))?$/.exec(speaker);
+  if (speakerMatch) return speakerMatch[1] ? `Speaker ${speakerMatch[1]}` : "Speaker";
   const match = /^them-(\d+)$/.exec(speaker);
   return match ? `Them ${match[1]}` : "Them";
 }
@@ -64,6 +69,8 @@ export interface MeetingDetailResponse {
   endedAt: string;
   summary: string;
   mode: MeetingMode;
+  /** Person-chosen names by speaker key ("you", "them-1", ...); absent keys use the default label. */
+  speakerNames?: Record<string, string>;
   transcript: { speaker: string; text: string; timestamp: string }[];
   actionItems: {
     id: string;

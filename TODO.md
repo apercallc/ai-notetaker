@@ -1,5 +1,90 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## File import: transcribe and summarize an audio/video file (2026-09-30)
+
+Spec: [`docs/superpowers/specs/2026-09-30-file-import-design.md`](docs/superpowers/specs/2026-09-30-file-import-design.md).
+
+- [x] Phase 1, hosted webapp: `/import` page, cookie-session `/api/import*`
+      routes with CSRF checks, sandboxed ffmpeg decode in the managed job,
+      full-duration usage metering (reserve, true-up before provider spend,
+      refund on failure), `Speaker N` labels, stage progress on the meeting.
+      Verified: 533 webapp tests, build, and a real-browser upload (201/201/202,
+      1 unit + 75 s reserved, 375 px layout).
+- [ ] Deploy: migration `20260930230000_file_import` (additive columns), and
+      confirm the production build provides `ffmpeg`/`ffprobe` (the Docker
+      image does; a Nixpacks build needs them added). Until then `/import`
+      says import is unavailable rather than failing.
+- [ ] Live acceptance: import a long real recording (an hour of mp3 and an mp4)
+      on production and check the true-up, provider cost
+      (`ProcessingJob.providerCostMicros`) and scratch-disk use.
+- [ ] Phase 2, Local BYOK: extension popup and helper "Import file" (Symphonia
+      decode, user's ffmpeg for video), saved as `captureSource = "import"`,
+      `processingMode = "local_byok"`. Covers self-hosted without managed mode.
+- [ ] Decide whether Deepgram diarization for imports becomes a paid-tier perk
+      (`MANAGED_IMPORT_TRANSCRIPTION_PROVIDER`) once measured cost is known.
+- [ ] Import extras: language hint, notes templates, import from a link.
+- [ ] Add a design-review pass for `/import` and a marketing line (site,
+      `llms.txt`, pricing FAQ) once it is live.
+
+## Notes platform series (2026-09-30)
+
+Order: audit foundation, templates, speakers, library, integrations, MCP,
+multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
+
+- [x] Audit-event foundation (`lib/audit.ts`, `AuditEvent`; viewer is the last slice).
+- [x] Notes templates: six hosted templates with sections, regenerate (3 per
+      meeting), Lecture mode in the extension and helper. Spec:
+      [`docs/superpowers/specs/2026-09-30-notes-templates-design.md`](docs/superpowers/specs/2026-09-30-notes-templates-design.md).
+- [ ] Templates follow-ups: sections for local BYOK summaries, a cost ledger
+      for regenerations, user-defined templates, template choice on the live
+      Meet widget's hosted path, and a design-review pass.
+- [x] Rename speakers: per-meeting names, click-to-rename in the transcript,
+      rewrites summary text and action-item owners, used in exports, shares,
+      Drive export, Ask and regenerated notes. Spec:
+      [`docs/superpowers/specs/2026-09-30-speaker-names-design.md`](docs/superpowers/specs/2026-09-30-speaker-names-design.md).
+- [ ] Speaker-name follow-ups: merge two speakers into one, include names in
+      the account data export, and suggest names from the calendar attendees.
+- [x] Library, Drive-style: nested folders, notes as `.md` text, text-only editor
+      (body only, transcript read-only, undo), Trash with 30-day restore,
+      folder-scoped search and Ask, upload `.md`/`.txt`. Spec:
+      [`docs/superpowers/specs/2026-09-30-library-design.md`](docs/superpowers/specs/2026-09-30-library-design.md).
+- [ ] Library follow-ups: per-person private folders and folder permissions,
+      drag-and-drop and multi-select move, autosave and fuller version history,
+      folder-level retention, include folders in the account data export, and a
+      design-review pass. Update the public privacy page wording if its deletion
+      text is kept separate from the FAQ.
+- [x] Export and integrations: signed webhooks (Zapier/Make/n8n), Slack, Notion, with
+      encrypted secrets, SSRF-hardened sending and retries. Spec:
+      [`docs/superpowers/specs/2026-09-30-integrations-design.md`](docs/superpowers/specs/2026-09-30-integrations-design.md).
+- [ ] Integration follow-ups: Slack/Notion OAuth installs, per-folder routing, a
+      delivery-log page, more event types, and a design-review pass.
+- [x] MCP server over a user's own notes: read-only `notes_read` tokens, a stateless
+      Streamable HTTP endpoint at `/api/mcp` (five read tools) and a stdio bridge
+      package in `mcp/`. Spec: [`docs/superpowers/specs/2026-09-30-mcp-design.md`](docs/superpowers/specs/2026-09-30-mcp-design.md).
+- [ ] MCP follow-ups: publish `ai-notetaker-mcp` to npm, OAuth sign-in instead of pasted
+      tokens, write tools behind explicit scopes, resources/prompts, and an Ask-your-notes tool.
+- [x] Multilingual: custom vocabulary, spoken-language hint/detection, summary language
+      (workspace default and per regenerate). Spec:
+      [`docs/superpowers/specs/2026-09-30-multilingual-design.md`](docs/superpowers/specs/2026-09-30-multilingual-design.md).
+- [ ] Multilingual follow-ups: verify the Deepgram/Whisper language and vocabulary parameters
+      against the live providers, keep a second-language copy of a summary, right-to-left review.
+- [x] Audit-log viewer for Team: owner-only page, category/actor filters, keyset paging, CSV
+      export. Spec: [`docs/superpowers/specs/2026-09-30-audit-log-design.md`](docs/superpowers/specs/2026-09-30-audit-log-design.md).
+- [ ] Audit follow-ups: date filters and search, sign-in events, "who viewed" for shared
+      notes, SIEM export, and a browser/design-review pass (the page is not yet visually checked).
+
+## Competitive features, ranked by value over cost (2026-09-30)
+
+- [ ] Notes templates (1:1, sales call, standup, interview, lecture) picked per
+      meeting, applied to live and imported audio.
+- [ ] Rename speakers once and apply across transcript and summary.
+- [ ] Export and integrations: Notion, Slack post, and a webhook / Zapier
+      trigger on "notes ready".
+- [ ] MCP server over a user's own notes (strong open-source differentiator).
+- [ ] Team library: folders, shared search scope, per-workspace retention.
+- [ ] Multilingual: auto-detect, translated summary, custom vocabulary.
+- [ ] Team admin: audit log, then SSO.
+
 ## UX overhaul (2026-09-30)
 
 Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowers/specs/2026-09-30-ux-overhaul-design.md).

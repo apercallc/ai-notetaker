@@ -176,7 +176,7 @@ describe("acceptance: Google Drive export, disconnect and reconnect", () => {
     // The Doc is created from text that carries every part of the notes.
     expect(doc.text).toContain("We agreed to ship the launch on Friday.");
     expect(doc.text).toContain("Send the launch email (Sam)");
-    expect(doc.text).toContain("you: Let's ship on Friday.");
+    expect(doc.text).toContain("You: Let's ship on Friday.");
 
     await exportOnce();
     expect(google.files.filter((file) => file.mimeType === "application/vnd.google-apps.folder")).toHaveLength(1);

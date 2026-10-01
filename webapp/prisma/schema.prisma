@@ -25,6 +25,24 @@ model Meeting {
   captureSource String  @default("desktop")
   processingMode String @default("local_byok")
   recordingObjectKey String?
+  // Times notes were regenerated from the stored transcript (each is a paid summary call).
+  notesRegenerations Int @default(0)
+  // Library placement. Null folderId is the top level.
+  folderId    String?
+  // Trash: a note with deletedAt set is hidden everywhere until restored or
+  // purged. trashRootId names the item (a folder or this note) whose deletion
+  // took it, so restoring a folder brings back exactly what went with it.
+  deletedAt   DateTime?
+  trashRootId String?
+  // Set when the user edits the note body by hand; the replaced text is kept
+  // once in previousSummary so an edit or a regeneration can be undone.
+  summaryEditedAt DateTime?
+  previousSummary String? @db.Text
+  // Set once when "note ready" was announced to the workspace's integrations,
+  // so a note triggers its deliveries a single time.
+  readyNotifiedAt DateTime?
+  // ISO 639-1 code of the spoken language: chosen at import, else detected by the transcriber.
+  language    String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -33,7 +51,11 @@ model Meeting {
   uploads     ManagedUpload[]
   processingJobs ProcessingJob[]
   shareTokens MeetingShareToken[]
+  speakers    MeetingSpeaker[]
+  folder      Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
+  @@index([workspaceId, folderId, startedAt])
+  @@index([workspaceId, deletedAt])
   @@index([userId, startedAt])
   @@index([workspaceId, startedAt])
 }
@@ -121,6 +143,10 @@ model Workspace {
   name      String
   isDefault Boolean  @default(false)
   retentionDays Int?
+  // Names and terms the transcriber and summarizer should spell correctly, one per line.
+  vocabulary    String   @default("")
+  // Language notes are written in; null means the language of the conversation.
+  summaryLanguage String?
   createdAt DateTime @default(now())
 
   memberships WorkspaceMembership[]
@@ -129,6 +155,9 @@ model Workspace {
   usageEntries UsageLedgerEntry[]
   subscription WorkspaceSubscription?
   shareTokens MeetingShareToken[]
+  auditEvents AuditEvent[]
+  folders     Folder[]
+  integrations Integration[]
 
   // Exactly one workspace has isDefault = true — the ingestion target for
   // every meeting synced via the AUTH_TOKEN Bearer contract, and the
@@ -178,6 +207,13 @@ model ManagedUpload {
   totalBytes     Int
   status         String   @default("created")
   objectKey      String?
+  // "capture" is live mic/speaker PCM; "import" is one user-supplied audio or
+  // video file that the worker decodes before transcription.
+  kind           String   @default("capture")
+  sourceFormat   String?
+  // Client-measured duration of an imported file. Only an estimate for the
+  // first usage reservation; the worker's probe is authoritative.
+  declaredDurationSeconds Int?
   createdAt      DateTime @default(now())
   expiresAt      DateTime
   completedAt    DateTime?
@@ -214,6 +250,8 @@ model ProcessingJob {
   uploadId       String
   idempotencyKey String
   status         String   @default("queued")
+  // Coarse progress label for imports ("decoding", "transcribing", "summarizing").
+  stage          String?
   errorMessage   String?  @db.Text
   providerCostMicros Int  @default(0)
   createdAt      DateTime @default(now())
@@ -354,4 +392,116 @@ model AuthToken {
   @@index([userId, purpose])
   @@index([workspaceId, purpose])
   @@index([expiresAt])
+}
+
+// Append-only trail of who changed what in a workspace. Holds ids and small,
+// non-sensitive facts only: never transcript or note text, secrets or tokens
+// (see lib/audit.ts, which enforces this). Purged after AUDIT_RETENTION_DAYS.
+model AuditEvent {
+  id          String   @id @default(uuid())
+  workspaceId String
+  // Null for system actions (retention sweeps, background jobs).
+  actorUserId String?
+  action      String
+  targetType  String?
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, action, createdAt])
+  @@index([createdAt])
+}
+
+// A person-chosen name for one speaker of one meeting. The transcript keeps its
+// stable keys ("you", "them-1", "speaker-2"); this table only maps a key to the
+// name shown everywhere. `appliedLabel` is the exact text currently written
+// into the summary and action items for that speaker, so the next rename
+// replaces precisely that text.
+model MeetingSpeaker {
+  id           String   @id @default(uuid())
+  meetingId    String
+  speakerKey   String
+  displayName  String
+  appliedLabel String
+  updatedAt    DateTime @updatedAt
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, speakerKey])
+}
+
+// A library folder. Folders nest (depth is capped in lib/library.ts) and hold
+// notes; they are workspace-wide, like the notes themselves. Names are unique
+// per parent ignoring case among live folders (a partial unique index created
+// in the migration, which Prisma cannot express). Deleting a folder trashes it
+// together with everything inside; see Meeting.trashRootId.
+model Folder {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  parentId        String?
+  name            String
+  createdByUserId String?
+  deletedAt       DateTime?
+  trashRootId     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    Folder?   @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[]  @relation("FolderTree")
+  meetings  Meeting[]
+
+  @@index([workspaceId, parentId])
+  @@index([workspaceId, deletedAt])
+}
+
+// An outbound destination for "note ready" events: a signed webhook (which is
+// also how Zapier and n8n connect), a Slack incoming webhook, or a Notion page.
+// `configCipher` is the destination's secret config encrypted at rest
+// (lib/secretBox.ts); it never leaves the server after it is saved.
+model Integration {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  kind            String
+  name            String
+  enabled         Boolean   @default(true)
+  configCipher    String    @db.Text
+  createdByUserId String?
+  lastStatus      String?
+  lastError       String?
+  lastDeliveredAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries IntegrationDelivery[]
+
+  @@index([workspaceId])
+}
+
+// One attempt series to one integration for one event. Holds ids and status
+// only; the payload is rebuilt from the note when sent, so note text is never
+// duplicated here. Old rows are purged after 14 days.
+model IntegrationDelivery {
+  id            String    @id @default(uuid())
+  integrationId String
+  workspaceId   String
+  event         String
+  meetingId     String?
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  responseStatus Int?
+  createdAt     DateTime  @default(now())
+  deliveredAt   DateTime?
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([integrationId, createdAt])
+  @@index([createdAt])
 }

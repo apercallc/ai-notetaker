@@ -1,0 +1,11 @@
+{
+  "name": "ai-notetaker-mcp",
+  "version": "1.0.0",
+  "description": "MCP server that gives AI assistants read-only access to your AI Notetaker notes (stdio bridge to your instance).",
+  "type": "module",
+  "bin": { "ai-notetaker-mcp": "bin/ai-notetaker-mcp.mjs" },
+  "files": ["bin", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test test/bridge.test.mjs" },
+  "license": "MIT"
+}

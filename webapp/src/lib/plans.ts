@@ -40,6 +40,39 @@ export const PLAN_CHAT_QUESTION_LIMITS: Record<ManagedPlan, number> = {
   hosted_team: 2_000,
 };
 
+/**
+ * Longest single imported recording per plan. Imports also draw from the same
+ * monthly audio-hour cap as live meetings, so this only bounds one file.
+ */
+export const PLAN_IMPORT_MAX_SECONDS: Record<ManagedPlan, number> = {
+  local: 0,
+  hosted_trial: 1 * 3_600,
+  hosted_pro: 4 * 3_600,
+  hosted_team: 6 * 3_600,
+};
+
+/** Assumed bitrate (128 kbit/s) when the browser cannot read a file's duration. */
+const IMPORT_FALLBACK_BYTES_PER_SECOND = 16_000;
+/**
+ * A file cannot hold more audio than its size allows at lossless rates, so a
+ * client claiming a tiny duration for a huge file still reserves a floor. The
+ * worker's probe replaces the reservation with the real duration afterwards.
+ */
+const IMPORT_FLOOR_BYTES_PER_SECOND = 2_000_000;
+
+/**
+ * Audio seconds reserved when an import starts, before the worker has probed
+ * the file. Imports are billed at full duration (one second of file is one
+ * second of quota), unlike the two-channel-equivalent live-capture formula.
+ */
+export function estimateImportSeconds(totalBytes: number, declaredSeconds?: number | null): number {
+  const floor = Math.max(1, Math.ceil(totalBytes / IMPORT_FLOOR_BYTES_PER_SECOND));
+  const declared = typeof declaredSeconds === "number" && Number.isFinite(declaredSeconds) && declaredSeconds > 0
+    ? Math.ceil(declaredSeconds)
+    : Math.ceil(totalBytes / IMPORT_FALLBACK_BYTES_PER_SECOND);
+  return Math.max(floor, declared);
+}
+
 /** Two channels of 48 kHz 16-bit mono PCM; a one-channel upload counts as half. */
 export const AUDIO_BYTES_PER_SECOND = 2 * 48_000 * 2;
 

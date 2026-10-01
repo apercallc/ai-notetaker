@@ -12,7 +12,7 @@ const LIVE_SEARCH_DELAY_MS = 350;
  * short pause (useDeferredValue keeps typing responsive while the server
  * render is in flight) and Enter searches immediately.
  */
-export function SearchForm({ initialQuery, range }: { initialQuery: string; range?: string }) {
+export function SearchForm({ initialQuery, range, folderId, scope }: { initialQuery: string; range?: string; folderId?: string; scope?: string }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
   const [seenInitial, setSeenInitial] = useState(initialQuery);
@@ -32,8 +32,10 @@ export function SearchForm({ initialQuery, range }: { initialQuery: string; rang
     const params = new URLSearchParams();
     const trimmed = value.trim();
     setLastSent(trimmed);
+    if (folderId) params.set("folder", folderId);
     if (trimmed) params.set("q", trimmed);
     if (range) params.set("range", range);
+    if (scope) params.set("scope", scope);
     const href = params.size ? `/meetings?${params.toString()}` : "/meetings";
     startTransition(() => (mode === "push" ? router.push(href) : router.replace(href)));
   }
@@ -61,7 +63,9 @@ export function SearchForm({ initialQuery, range }: { initialQuery: string; rang
   return (
     <form method="get" action="/meetings" role="search" onSubmit={submit}>
       {range && <input type="hidden" name="range" value={range} />}
-      <label className="sr-only" htmlFor="meeting-search">Search meetings</label>
+      {folderId && <input type="hidden" name="folder" value={folderId} />}
+      {scope && <input type="hidden" name="scope" value={scope} />}
+      <label className="sr-only" htmlFor="meeting-search">Search notes</label>
       <div className="search-row">
         <div className="search-field">
           <input
@@ -71,7 +75,7 @@ export function SearchForm({ initialQuery, range }: { initialQuery: string; rang
             name="q"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search titles, summaries and transcripts"
+            placeholder={folderId && scope !== "all" ? "Search this folder" : "Search titles, notes and transcripts"}
             className="search-input"
             maxLength={MAX_SEARCH_LENGTH}
             autoComplete="off"
