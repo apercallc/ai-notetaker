@@ -32,13 +32,15 @@ export function FolderRow({
   subtree: string[];
 }) {
   const library = useLibrary();
-  const [renaming, setRenaming] = useState(false);
+  const [localRenaming, setRenaming] = useState(false);
   const link = useRef<HTMLAnchorElement>(null);
   const closeRename = () => {
     setRenaming(false);
+    library.requestRename(null);
     requestAnimationFrame(() => link.current?.focus());
   };
   const item: LibItem = { kind: "folder", id, name, parentId, subtree };
+  const renaming = localRenaming || library.renameKey === `${item.kind}:${item.id}`;
   const selected = library.isSelected(item);
   const subject = selected && library.selected.size > 1 ? `${library.selected.size} selected items` : name;
   const drop = useDropTarget(id);

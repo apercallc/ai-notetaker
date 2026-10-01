@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderInput, Trash2, X } from "lucide-react";
+import { FolderInput, Pencil, Trash2, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createFolderAction, moveItemsAction, restoreItemsAction, trashItemsAction, type BulkResult } from "./libraryActions";
@@ -16,7 +16,7 @@ export interface LibItem {
   subtree?: string[];
 }
 
-const keyOf = (item: LibItem) => `${item.kind}:${item.id}`;
+export const keyOf = (item: LibItem) => `${item.kind}:${item.id}`;
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 interface Toast {
@@ -39,6 +39,9 @@ interface LibraryContextValue {
   openMove: (items: LibItem[]) => void;
   trash: (items: LibItem[]) => void;
   moveTo: (items: LibItem[], destinationId: string | null, fromDialog?: boolean) => void;
+  /** Set by the selection bar so a single selected row can be renamed in place. */
+  renameKey: string | null;
+  requestRename: (item: LibItem | null) => void;
   creatingFolder: boolean;
   setCreatingFolder: (value: boolean) => void;
   notify: (message: string, tone?: "info" | "error") => void;
@@ -119,6 +122,7 @@ export function LibraryProvider({ folders, currentFolderId, children }: { folder
   const [dragging, setDragging] = useState<LibItem[] | null>(null);
   const [moveItems, setMoveItems] = useState<LibItem[] | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [renameKey, setRenameKey] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -265,13 +269,15 @@ export function LibraryProvider({ folders, currentFolderId, children }: { folder
     openMove: (items) => { setDialogError(null); setMoveItems(items); },
     trash,
     moveTo,
+    renameKey,
+    requestRename: (item) => setRenameKey(item ? keyOf(item) : null),
     creatingFolder,
     setCreatingFolder,
     notify,
     dragging,
     setDragging,
     canDrop,
-  }), [folders, currentFolderId, busy, selected, toggle, clearSelection, targetsFor, trash, moveTo, creatingFolder, notify, dragging, canDrop]);
+  }), [folders, currentFolderId, busy, selected, toggle, clearSelection, targetsFor, trash, moveTo, renameKey, creatingFolder, notify, dragging, canDrop]);
 
   const selection = [...selected.values()];
   const moveExclude = (moveItems ?? []).flatMap((item) => (item.kind === "folder" ? item.subtree ?? [item.id] : []));
@@ -285,6 +291,11 @@ export function LibraryProvider({ folders, currentFolderId, children }: { folder
       {selection.length > 0 && (
         <div className="selection-bar" role="region" aria-label="Selected items">
           <span className="selection-count" role="status">{selection.length} selected</span>
+          {selection.length === 1 && (
+            <button type="button" className="button button-secondary button-small" onClick={() => { setRenameKey(keyOf(selection[0]!)); clearSelection(); }} disabled={busy}>
+              <Pencil size={16} strokeWidth={1.75} aria-hidden="true" /> Rename
+            </button>
+          )}
           <button type="button" className="button button-secondary button-small" onClick={() => { setDialogError(null); setMoveItems(selection); }} disabled={busy}>
             <FolderInput size={16} strokeWidth={1.75} aria-hidden="true" /> Move to…
           </button>

@@ -145,6 +145,10 @@ Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowe
       reserved before provider spend and released on failure.
 - [x] Extension popup: live search, paged results, one-click "Browse all meetings".
 - [x] Marketing: Ask-your-notes section, plan bullets, FAQ and llms.txt.
+- [x] Mobile and tablet pass (2026-10-01): every page audited under phone (390 px) and tablet
+      (820 px) touch emulation: no horizontal overflow, 44 px touch targets, 16 px form text (no iOS
+      zoom), compact marketing header, phone library with selection bar, action-item rows styled.
+      Emulation is not a device: real-device checks stay below.
 - [x] Layouts verified in headless Chromium at 375/768/1280 px (no horizontal overflow on 27
       page/width combinations; fixed a tablet header overflow and a phone audit table) and
       design-reviewed, 2026-09-30.

@@ -2821,3 +2821,301 @@ a.meeting-card:hover,
     transition: none;
   }
 }
+
+/* ---- Touch and small screens -------------------------------------------
+   One rule set for any coarse pointer (phones AND tablets, at any width) and
+   for narrow windows: 44px targets, and 16px form text so iOS Safari does not
+   zoom the page when a field is focused. */
+@media (pointer: coarse), (max-width: 760px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea,
+  .text-input,
+  .select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  textarea {
+    min-height: 96px;
+  }
+
+  .button,
+  .button-small,
+  button.button,
+  a.button,
+  .ask-chip,
+  .speaker-button {
+    min-height: 44px;
+  }
+
+  .app-nav a,
+  .brand,
+  .back-link,
+  .breadcrumbs a,
+  .filter-chips a,
+  .card-link,
+  .folder-link,
+  .text-link-muted,
+  nav[aria-label="Account"] a,
+  .settings-tabs a,
+  summary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .breadcrumbs span[aria-current] {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .app-signout .text-link-muted {
+    padding-inline: 12px;
+  }
+
+  /* The action-item tick boxes are 13px natively: give them a real hit area. */
+  .action-checkbox {
+    position: relative;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .action-checkbox input,
+  input.action-check {
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    accent-color: var(--color-accent);
+  }
+
+  .speaker-button {
+    padding-block: 10px;
+  }
+
+  details > summary {
+    cursor: pointer;
+  }
+}
+
+/* iPad-sized touch screens keep the roomy desktop layout but need the header to breathe. */
+@media (pointer: coarse) and (min-width: 761px) {
+  .app-nav a {
+    min-height: 44px;
+  }
+}
+
+/* ---- Phone library: compact toolbar, rows without per-row icon buttons (the selection bar carries them) ---- */
+.lbl-short {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .library-toolbar-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .library-toolbar-row > form {
+    display: contents;
+  }
+
+  .library-toolbar-row .button {
+    justify-content: center;
+    padding-inline: 8px;
+    font-size: 14px;
+  }
+
+  .lbl-long {
+    display: none;
+  }
+
+  .lbl-short {
+    display: inline;
+  }
+}
+
+@media (max-width: 760px) {
+  .lib-row .row-actions {
+    display: none;
+  }
+
+  .lib-card .title,
+  .folder-row .folder-link {
+    padding-block: 2px;
+  }
+
+  .folder-row {
+    align-items: center;
+  }
+}
+
+.folder-link svg {
+  flex: 0 0 auto;
+}
+
+/* Tablet and desktop: card tools sit at the top-right (touch tablets always show them); titles leave room. */
+@media (min-width: 761px) {
+  .lib-card .card-actions {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .lib-card .title {
+    padding-right: 140px;
+  }
+}
+
+/* Touch floor. These win over older per-component heights on purpose. */
+.action-check-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+@media (pointer: coarse), (max-width: 760px) {
+  .action-check-hit {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  button:not(.icon-button),
+  .button,
+  a.button,
+  nav a,
+  .filter-links a,
+  .filter-chips a,
+  .back-link,
+  .breadcrumbs a,
+  summary {
+    min-height: 44px !important;
+  }
+
+  nav a,
+  .filter-links a,
+  .back-link,
+  .breadcrumbs a,
+  .pagination a {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .filter-links a,
+  .pagination a {
+    padding-inline: 8px;
+  }
+
+  .app-signout .text-link-muted {
+    padding-inline: 12px;
+  }
+}
+
+/* The note page's title row was missing from the heading rules and inherited the body's roomy line-height. */
+.title-row h1 {
+  font-size: clamp(1.6rem, 6vw, 2.2rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Action item rows (the markup in components/ActionItemRow.tsx had no styles) ---- */
+.action-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.action-row .action-check {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.action-row.is-done .action-text {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.action-row .action-text {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.action-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.action-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.action-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.action-due input {
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+
+.action-side .save-status {
+  min-width: 52px;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.action-side .save-status.is-error {
+  color: var(--color-danger);
+}
+
+@media (max-width: 760px) {
+  .action-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .action-side {
+    grid-column: 2;
+    justify-content: space-between;
+  }
+
+  .action-due input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .action-due {
+    flex: 1;
+  }
+}

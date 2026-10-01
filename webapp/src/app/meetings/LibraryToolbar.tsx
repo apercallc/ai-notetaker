@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FilePlus, FolderPlus, Trash2, Upload } from "lucide-react";
+import { FilePlus, FileAudio, FolderPlus, Trash2, Upload } from "lucide-react";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
@@ -56,10 +56,10 @@ export function LibraryToolbar({ folderId, canImport, canCreateFolder, showHint 
           <FolderPlus size={16} strokeWidth={1.75} aria-hidden="true" /> New folder
         </button>
         <button type="button" className="button button-secondary button-small" onClick={() => fileInput.current?.click()} disabled={pending}>
-          <Upload size={16} strokeWidth={1.75} aria-hidden="true" /> {pending ? "Working…" : "Upload .md or .txt"}
+          <Upload size={16} strokeWidth={1.75} aria-hidden="true" /> {pending ? "Working…" : <><span className="lbl-long">Upload .md or .txt</span><span className="lbl-short">Upload</span></>}
         </button>
         <input ref={fileInput} className="sr-only" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" tabIndex={-1} aria-hidden="true" onChange={(event) => void onFile(event.target.files?.[0])} />
-        {canImport && <Link className="button button-secondary button-small" href="/import">Import a recording</Link>}
+        {canImport && <Link className="button button-secondary button-small" href="/import"><FileAudio size={16} strokeWidth={1.75} aria-hidden="true" /> <span className="lbl-long">Import a recording</span><span className="lbl-short">Import</span></Link>}
         <Link className="button button-secondary button-small" href="/trash"><Trash2 size={16} strokeWidth={1.75} aria-hidden="true" /> Trash</Link>
       </div>
       {showHint && <p className="lib-hint muted-copy">Drag notes and folders onto a folder to move them · press F2 (or the pencil) to rename · Ctrl/⌘-click to select several</p>}

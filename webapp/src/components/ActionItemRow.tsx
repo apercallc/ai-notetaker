@@ -80,13 +80,15 @@ export function ActionItemRow({
 
   return (
     <li className={`action-row${done ? " is-done" : ""}`}>
-      <input
-        type="checkbox"
-        className="action-check"
-        checked={done}
-        onChange={(event) => save({ done: event.target.checked, due })}
-        aria-label={`Mark “${text}” ${done ? "not done" : "done"}`}
-      />
+      <label className="action-check-hit">
+        <input
+          type="checkbox"
+          className="action-check"
+          checked={done}
+          onChange={(event) => save({ done: event.target.checked, due })}
+          aria-label={`Mark “${text}” ${done ? "not done" : "done"}`}
+        />
+      </label>
       <div className="action-body">
         <div className="action-text">{text}</div>
         <div className="action-meta">

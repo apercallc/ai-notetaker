@@ -29,13 +29,15 @@ export function NoteRow({
   children: ReactNode;
 }) {
   const library = useLibrary();
-  const [renaming, setRenaming] = useState(false);
+  const [localRenaming, setRenaming] = useState(false);
   const link = useRef<HTMLAnchorElement>(null);
   const closeRename = () => {
     setRenaming(false);
+    library.requestRename(null);
     requestAnimationFrame(() => link.current?.focus());
   };
   const item: LibItem = { kind: "note", id, name: title, parentId: folderId };
+  const renaming = localRenaming || library.renameKey === `${item.kind}:${item.id}`;
   const selected = library.isSelected(item);
   const subject = selected && library.selected.size > 1 ? `${library.selected.size} selected items` : title;
   const beingDragged = library.dragging?.some((entry) => entry.kind === "note" && entry.id === id) ?? false;
