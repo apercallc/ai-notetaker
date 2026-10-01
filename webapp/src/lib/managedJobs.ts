@@ -6,6 +6,7 @@ import { AudioBudgetError, EntitlementError } from "./entitlementError";
 import { ValidationError } from "./meetings";
 import { deleteObject, getObject } from "./objectStorage";
 import { deleteMeeting } from "./meetings";
+import { recordAudit } from "./audit";
 
 export class ManagedValidationError extends ValidationError {}
 
@@ -460,6 +461,9 @@ export async function expireManagedMeetings(now = new Date()): Promise<number> {
     for (const meeting of meetings) {
       await deleteMeeting(workspace.id, meeting.id);
       removed += 1;
+    }
+    if (meetings.length > 0) {
+      await recordAudit({ workspaceId: workspace.id, action: "meeting.retention_delete", targetType: "workspace", targetId: workspace.id, metadata: { count: meetings.length, retentionDays: workspace.retentionDays } });
     }
   }
   return removed;

@@ -129,6 +129,7 @@ model Workspace {
   usageEntries UsageLedgerEntry[]
   subscription WorkspaceSubscription?
   shareTokens MeetingShareToken[]
+  auditEvents AuditEvent[]
 
   // Exactly one workspace has isDefault = true — the ingestion target for
   // every meeting synced via the AUTH_TOKEN Bearer contract, and the
@@ -363,4 +364,25 @@ model AuthToken {
   @@index([userId, purpose])
   @@index([workspaceId, purpose])
   @@index([expiresAt])
+}
+
+// Append-only trail of who changed what in a workspace. Holds ids and small,
+// non-sensitive facts only: never transcript or note text, secrets or tokens
+// (see lib/audit.ts, which enforces this). Purged after AUDIT_RETENTION_DAYS.
+model AuditEvent {
+  id          String   @id @default(uuid())
+  workspaceId String
+  // Null for system actions (retention sweeps, background jobs).
+  actorUserId String?
+  action      String
+  targetType  String?
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, action, createdAt])
+  @@index([createdAt])
 }

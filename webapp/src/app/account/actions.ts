@@ -10,6 +10,7 @@ import { clearSessionCookie } from "@/lib/sessionCookie";
 import { changePassword } from "@/lib/accounts";
 import { formatRetryAfter } from "@/lib/loginThrottle";
 import { passwordProblemMessage } from "@/lib/passwordPolicy";
+import { recordAudit } from "@/lib/audit";
 import { createApiToken, revokeApiToken, revokeAllApiTokens } from "@/lib/apiTokens";
 import { deleteObject } from "@/lib/objectStorage";
 import { deleteUserSessions, revokeUserSession, setSessionActiveWorkspace } from "@/lib/sessions";
@@ -98,6 +99,7 @@ export async function createApiTokenAction(formData: FormData): Promise<CreateAp
     label: field(formData, "label") || "Extension sign-in",
     userAgent: context.userAgent,
   });
+  await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "api_token.create", targetType: "api_token", metadata: { label: field(formData, "label") || "Extension sign-in" } });
   revalidatePath("/account");
   return { ok: true, token: created.token, expiresAt: created.expiresAt.toISOString() };
 }
@@ -106,7 +108,9 @@ export async function revokeApiTokenAction(formData: FormData): Promise<void> {
   const session = await requireSession({ allowPasswordChange: true });
   const tokenId = field(formData, "tokenId");
   if (!tokenId) return;
-  await revokeApiToken(session.userId, tokenId);
+  if (await revokeApiToken(session.userId, tokenId)) {
+    await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "api_token.revoke", targetType: "api_token", targetId: tokenId });
+  }
   revalidatePath("/account");
 }
 
@@ -152,6 +156,7 @@ export async function leaveWorkspaceAction(formData: FormData): Promise<LeaveWor
   if (!membership) return { ok: false, error: "You are no longer a member of this workspace." };
 
   const result = await removeWorkspaceMember(session.workspaceId, membership.id);
+  if (result.ok) await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "member.leave", targetType: "user", targetId: session.userId });
   if (!result.ok && result.reason === "last-owner") {
     return { ok: false, error: "You're the last owner — promote another member before leaving." };
   }

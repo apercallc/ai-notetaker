@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { recordAudit } from "./audit";
 import { getEntitlements } from "./usageLedger";
 import { completeManagedUpload, createManagedUpload, enqueueManagedJob, getUpload, ManagedValidationError } from "./managedJobs";
 import { dispatchManagedJob } from "./managedDispatch";
@@ -115,6 +116,9 @@ export async function startImport(session: ManagedSession, input: StartImportInp
       });
     }
     throw error;
+  }
+  if (!existed) {
+    await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "meeting.import", targetType: "meeting", targetId: input.meetingId, metadata: { format } });
   }
   return {
     uploadId: upload.id,

@@ -12,6 +12,7 @@ import { sendInviteEmail, sendPasswordResetEmail } from "@/lib/authEmails";
 import { getRequestContext } from "@/lib/requestContext";
 import { changeMemberRole, removeWorkspaceMember, getWorkspaceMembership, userBelongsOnlyTo } from "@/lib/workspaces";
 import { revokeInvites } from "@/lib/authTokens";
+import { recordAudit } from "@/lib/audit";
 import { emailRequestStatus, formatRetryAfter, recordEmailRequest } from "@/lib/loginThrottle";
 
 const MAX_INVITES_PER_OWNER_PER_DAY = 50;
@@ -47,8 +48,9 @@ export async function addMember(formData: FormData): Promise<AddMemberResult> {
 
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await hashPassword(temporaryPassword);
+  let added: Awaited<ReturnType<typeof addWorkspaceMember>>;
   try {
-    await addWorkspaceMember(session.workspaceId, email, passwordHash, { mustChangePassword: true });
+    added = await addWorkspaceMember(session.workspaceId, email, passwordHash, { mustChangePassword: true });
   } catch (error) {
     // P2002 is the unique constraint on User.email.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -60,6 +62,7 @@ export async function addMember(formData: FormData): Promise<AddMemberResult> {
     return { ok: false, error: "Could not add that member. Try again." };
   }
 
+  await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "member.add", targetType: "user", targetId: added.userId, metadata: { email } });
   revalidatePath("/team");
   return { ok: true, email, temporaryPassword };
 }
@@ -86,16 +89,19 @@ export async function manageTeam(formData: FormData): Promise<TeamActionResult> 
     await recordEmailRequest("invite", email, { ip: context.ip });
     const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: session.workspaceId } });
     const result = await sendInviteEmail({ workspaceId: workspace.id, workspaceName: workspace.name, email, role: "member", invitedById: session.userId, invitedByEmail: session.email, context });
+    await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "member.invite", targetType: "invite", metadata: { email, role: "member", delivered: result.delivered } });
     revalidatePath("/team");
     return { ok: true, message: result.delivered ? "Invitation sent." : "Share this invitation privately with the intended teammate.", ...(!result.delivered ? { link: result.link } : {}) };
   }
   if (operation === "revoke-invite") {
     await revokeInvites(session.workspaceId, id);
+    await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "member.invite_revoke", targetType: "invite", targetId: id });
   } else {
     const membership = await getWorkspaceMembership(session.workspaceId, id);
     if (!membership) return { ok: false, error: "This member is no longer available." };
     if (operation === "reset") {
       const result = await sendPasswordResetEmail({ userId: membership.user.id, email: membership.user.email, issuedByOwner: true, context: await getRequestContext() });
+      await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "member.password_reset", targetType: "user", targetId: membership.user.id, metadata: { delivered: result.delivered } });
       // A reset link controls the whole account, including other tenants.
       // Only the mailbox may receive it for a cross-workspace account.
       const canShow = !result.delivered && await userBelongsOnlyTo(membership.user.id, session.workspaceId);
@@ -104,6 +110,15 @@ export async function manageTeam(formData: FormData): Promise<TeamActionResult> 
     const result = operation === "remove" ? await removeWorkspaceMember(session.workspaceId, id) : operation === "role" ? await changeMemberRole(session.workspaceId, id, formData.get("role") === "owner" ? "owner" : "member") : null;
     if (!result) return { ok: false, error: "Unknown action." };
     if (!result.ok) return { ok: false, error: result.reason === "last-owner" ? "Keep at least one owner in the workspace." : "This member is no longer available." };
+    const newRole = formData.get("role") === "owner" ? "owner" : "member";
+    await recordAudit({
+      workspaceId: session.workspaceId,
+      actorUserId: session.userId,
+      action: operation === "remove" ? "member.remove" : "member.role_change",
+      targetType: "user",
+      targetId: membership.user.id,
+      ...(operation === "role" ? { metadata: { role: newRole } } : {}),
+    });
   }
   revalidatePath("/team");
   return { ok: true, message: "Saved." };
@@ -125,6 +140,7 @@ export async function updateRetentionPolicy(formData: FormData): Promise<Retenti
 
   try {
     await updateWorkspaceRetentionDays(session.workspaceId, retentionDays);
+    await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "workspace.retention_update", targetType: "workspace", targetId: session.workspaceId, metadata: { retentionDays } });
   } catch (error) {
     console.error("retention policy update failed", { error: error instanceof Error ? error.message : String(error) });
     return { ok: false, error: "Could not save the retention policy. Try again." };

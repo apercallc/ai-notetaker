@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { deleteMeeting, renameMeeting, updateActionItem, ValidationError } from "@/lib/meetings";
+import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
 import { createMeetingShare, revokeMeetingShare, SharingValidationError } from "@/lib/sharing";
 import { retryMeetingProcessing } from "@/lib/meetingProcessing";
@@ -13,11 +14,12 @@ export type ShareActionResult =
   | { ok: false; error: string };
 
 export async function createMeetingShareAction(formData: FormData): Promise<ShareActionResult> {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, userId } = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
   const expiresInDays = Number(formData.get("expiresInDays") ?? "7");
   try {
     const share = await createMeetingShare(workspaceId, meetingId, expiresInDays);
+    await recordAudit({ workspaceId, actorUserId: userId, action: "share.create", targetType: "meeting", targetId: meetingId, metadata: { expiresInDays } });
     revalidatePath(`/meetings/${meetingId}`);
     return { ok: true, id: share.id, token: share.token, expiresAt: share.expiresAt.toISOString() };
   } catch (error) {
@@ -28,7 +30,7 @@ export async function createMeetingShareAction(formData: FormData): Promise<Shar
 }
 
 export async function revokeMeetingShareAction(formData: FormData): Promise<boolean> {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, userId } = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
   let revoked = false;
   try {
@@ -36,18 +38,20 @@ export async function revokeMeetingShareAction(formData: FormData): Promise<bool
   } catch (error) {
     if (!(error instanceof SharingValidationError)) throw error;
   }
+  if (revoked) await recordAudit({ workspaceId, actorUserId: userId, action: "share.revoke", targetType: "meeting", targetId: meetingId });
   if (meetingId) revalidatePath(`/meetings/${meetingId}`);
   return revoked;
 }
 
 export async function deleteMeetingAction(formData: FormData): Promise<void> {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, userId } = await requireSession();
   const id = String(formData.get("id") ?? "");
   if (!id) {
     redirect("/meetings?error=invalid-delete");
   }
   try {
     await deleteMeeting(workspaceId, id);
+    await recordAudit({ workspaceId, actorUserId: userId, action: "meeting.delete", targetType: "meeting", targetId: id });
   } catch (error) {
     console.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
     redirect("/meetings?error=delete-failed");
