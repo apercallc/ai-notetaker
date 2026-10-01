@@ -55,6 +55,14 @@ describe("managedClient", () => {
     expect(driveFetch).toHaveBeenCalledWith("https://notes.example.com/api/v1/google/drive/export", expect.objectContaining({ method: "POST", body: JSON.stringify({ meetingId: "meeting-1" }) }));
   });
 
+  it("explains an unreachable service and a throttled sign-in in plain words", async () => {
+    const offline = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(loginManaged("https://notes.example.com", "a@b.test", "pw", offline)).rejects.toThrow("Could not reach the hosted service");
+
+    const throttled = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "too many sign-in attempts, try again later" }), { status: 429, headers: { "retry-after": "600" } }));
+    await expect(loginManaged("https://notes.example.com", "a@b.test", "pw", throttled)).rejects.toThrow("Try again in 10 minutes");
+  });
+
   it("retries transient hosted failures but does not retry authentication failures", async () => {
     const config = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" };
     const fetchImpl = vi.fn()

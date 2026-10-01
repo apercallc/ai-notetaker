@@ -260,12 +260,14 @@ export function updateMeeting(
 
 export async function deleteMeeting(id: string): Promise<void> {
   return enqueueMeetingMutation(id, async () => {
+    // Remove the record first. If that fails, the meeting is still listed and the user can retry;
+    // the other order orphaned a record (with its transcript) that no screen could reach or delete.
+    await storageRemove(KEYS.meetingPrefix + id);
     await withMeetingsIndexLock(async () => {
       const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
       await storageSet({ [KEYS.meetingsIndex]: index.filter((existingId) => existingId !== id) });
     });
     await removeWebappSyncOutbox(id);
-    await storageRemove(KEYS.meetingPrefix + id);
   });
 }
 

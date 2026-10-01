@@ -251,7 +251,11 @@ export class NativeMessagingClient {
     this.reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
     this.setStatus("connected");
     if (raw.type === "paired") {
-      void savePairingToken(raw.pairingToken);
+      // Losing the token means a re-pair on the next start, so a failed save must not be silent.
+      void savePairingToken(raw.pairingToken).catch((error) => {
+        console.warn("Could not save the helper pairing token", error);
+        this.setStatus("needs_pairing");
+      });
     }
     if (raw.type === "error" && raw.code === "helper_not_paired") {
       // The helper refuses to re-mint its token for a browser that lost its
@@ -262,7 +266,7 @@ export class NativeMessagingClient {
       // a manual retry (after the user picks "Pair New Browser" in the tray,
       // which deletes the helper-side token) pairs cleanly via the
       // first-ever-pairing branch.
-      void clearPairingToken();
+      void clearPairingToken().catch((error) => console.warn("Could not clear the stale pairing token", error));
       this.setStatus("needs_pairing");
       this.cancelReconnect();
       return;

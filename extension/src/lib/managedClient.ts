@@ -30,6 +30,7 @@ export interface ManagedDriveExportResult {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
+const LOGIN_TIMEOUT_MS = 20_000;
 const REQUEST_MAX_ATTEMPTS = 3;
 const REQUEST_RETRY_BASE_MS = 250;
 
@@ -190,11 +191,23 @@ export async function loginManaged(
 ): Promise<ManagedLoginResult> {
   const normalizedBaseUrl = serviceUrl(baseUrl);
   await requestServiceOriginPermission(normalizedBaseUrl);
-  const response = await fetchImpl(`${normalizedBaseUrl}/api/v1/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+  let response: Response;
+  try {
+    response = await fetchImpl(`${normalizedBaseUrl}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ email, password }),
+      signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
+    });
+  } catch {
+    // Offline, a stalled server, or a blocked host: say so, instead of "Failed to fetch".
+    throw new Error("Could not reach the hosted service. Check your connection and try again.");
+  }
+  if (response.status === 429) {
+    const seconds = Number(response.headers.get("retry-after"));
+    const wait = Number.isFinite(seconds) && seconds > 0 ? ` Try again in ${seconds >= 120 ? `${Math.ceil(seconds / 60)} minutes` : "a minute"}.` : " Try again later.";
+    throw new Error(`Too many sign-in attempts.${wait}`);
+  }
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok || typeof body.accessToken !== "string" || typeof body.accountId !== "string" || typeof body.workspaceId !== "string") {
     throw new Error(typeof body.error === "string" ? body.error : "Managed service sign-in failed");
