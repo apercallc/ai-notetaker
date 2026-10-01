@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -83,8 +83,18 @@ jobs:
 
       - name: Bump versions in lockstep
         id: bump
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
         run: |
-          version=$(node scripts/bump-version.mjs "${{ inputs.bump || 'auto' }}")
+          # Release only the source that passed the checks above. A queued run
+          # may be superseded while CI is running; the newer push has its own run.
+          git fetch origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "version=none" >> "$GITHUB_OUTPUT"
+            echo "Main advanced during CI; skipping this superseded release."
+            exit 0
+          fi
+          version=$(node scripts/bump-version.mjs "$BUMP")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ "$version" = "none" ]; then echo "Nothing releasable since the last tag."; fi
 
@@ -105,7 +115,7 @@ jobs:
           git add -A
           git commit -m "chore(release): v${VERSION}"
           git tag -a "v${VERSION}" -m "AI Notetaker v${VERSION}"
-          git push origin HEAD:main "v${VERSION}"
+          git push --atomic origin HEAD:main "v${VERSION}"
           # Pushes made with GITHUB_TOKEN do not start other workflows, so
           # dispatch the build on the new tag explicitly (github.ref becomes the
           # tag, which is what the publish job keys on).

@@ -28,15 +28,20 @@ web would never sleep), or shrinking the volume.
   trial 3, Pro 60, Team 200), metered from the upload size (two-channel
   equivalent, 192 KB per second) in `usageLedger.ts`. It is checked when an
   upload starts (so nothing is staged for a refused recording) and again,
-  serializably, when the job is queued; a failed job gives its hours back. Worst
-  case Pro cost is about $7 of a $11 net price; typical use is a few dollars.
+  serializably, when the job is queued; a failed job gives its hours back.
+  The [scale and profitability model](scale-and-profitability.md) supersedes
+  the earlier worst-case estimate: staging and provider upload incur two
+  Railway egress hops, and refunded jobs can still incur provider bills.
+  At full allowance utilization, current Pro and Team contribution margins
+  are thin under the documented retail-rate assumptions.
   Change the numbers in one place. Marketing copy and the billing page read
   them from there.
-- **Egress to providers.** The worker sends 48 kHz PCM to Groq, about 0.7 GB per
-  two-channel hour, roughly $0.035 at $0.05 per GB. Sending 16 kHz would cut that
-  about 3x (saving about $0.02 per hour) at a small audio-quality risk, because
-  the resampling filter matters. Low value; not done.
+- **Audio transfer.** Two-channel 48 kHz PCM is 0.6912 decimal GB/hour.
+  Proxy staging (web→R2) plus provider upload (worker→Groq) total about
+  $0.069/hour at $0.05/GB, before retries. Direct private object uploads and
+  evaluated compression/resampling are prioritized in the scale plan.
 - **Object storage.** Staged audio is transient (deleted after each job; a
-  48-hour worker sweep catches strays), so storage cost is near zero. A
-  Cloudflare R2 bucket with a 1-day lifecycle rule is an optional second safety
-  net, not a requirement.
+  48-hour worker sweep catches strays). Storage and operation charges still
+  grow with volume and residence time. Lifecycle expiration is a second safety
+  net; choose its cutoff beyond permitted live upload/job leases and test it
+  against recovery before enabling it.

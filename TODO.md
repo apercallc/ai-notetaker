@@ -1,5 +1,39 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Scale and reliability audit (2026-09-30)
+
+- [x] Prevent concurrent cross-workspace meeting-ID overwrite and upload retry
+      cleanup deleting another request's committed audio; Postgres/filesystem
+      regressions cover both races.
+- [x] Retry failed legacy processing jobs with their replacement packed upload,
+      retaining stable processing quota and rejecting meeting-identity conflicts.
+- [x] Deduplicate durable Meet audio retries, bound live socket backlog, and
+      reject recording starts from a different call tab.
+- [x] Pack Hosted Meet frames into deterministic 4 MiB per-channel uploads,
+      reducing hourly chunk requests from ~14,400 to ~166 without changing PCM.
+- [x] Store helper processing backlog as durable disk ranges and bound streaming
+      reconnect backfill instead of retaining full outage audio in memory;
+      Stop queues offline gaps durably and defers summary until retries finish.
+- [x] Keep meeting error/retry and Drive completion feedback current; fix Meet
+      popup routing/captions and stale onboarding provider-key test responses.
+- [x] Aggregate quota counters in one query, show audio quota warnings, bound
+      cleanup queries/deletion concurrency, continue paginated orphan sweeps,
+      and add global worker/expiry database indexes.
+- [x] Tie automated releases to the CI-checked commit and atomically push its
+      version commit and tag.
+- [x] Document unit economics, workload scenarios and staged acceptance gates
+      in [the scale and profitability plan](docs/launch/scale-and-profitability.md)
+      with a reproducible `scripts/scale-cost-model.mjs`.
+- [ ] Before broad Hosted AI launch: implement irreversible provider-attempt
+      spend ledger, global/trial budgets, durable scheduled cleanup and measured
+      cohort contribution dashboards as specified in the scale plan.
+- [ ] Decide new-plan pricing/allowances from measured full-use cost; existing
+      commitments remain honored. Evaluate direct private uploads and audio
+      transport compression with quality and tenant-isolation acceptance.
+- [ ] Deploy the new indexes through normal migration/release flow. Large
+      production tables require an online index rollout; no deployment or
+      100M-user load certification is claimed by this local audit.
+
 This tracks the current implementation baseline, the approved dual-mode
 product migration, and the remaining production gates. The current target
 architecture is
