@@ -7,6 +7,7 @@ import { isManagedCorsOrigin, managedCorsHeaders } from "./lib/cors";
 import { requestIdFrom } from "./lib/requestId";
 import { getSessionUser } from "./lib/sessions";
 import { MARKETING_HEADER, isMarketingPath } from "./marketing/paths";
+import { directUploadOrigin } from "./lib/directUploadConfig";
 
 // Proxy files (Next.js 16's replacement for middleware.ts) always run on
 // the Node.js runtime, which is exactly why we moved off middleware.ts in
@@ -62,7 +63,7 @@ export function contentSecurityPolicy(nonce: string, development = process.env.N
     `img-src 'self' data: blob:${sentry ? ` ${sentry}` : ""}`,
     "font-src 'self' data:",
     "media-src 'self' blob:",
-    `connect-src 'self'${sentry ? ` ${sentry}` : ""}${development ? " ws: wss:" : ""}`,
+    `connect-src 'self'${sentry ? ` ${sentry}` : ""}${directUploadOrigin() ? ` ${directUploadOrigin()}` : ""}${development ? " ws: wss:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self' https://checkout.stripe.com https://billing.stripe.com https://accounts.google.com",

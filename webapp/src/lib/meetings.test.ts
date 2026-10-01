@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterAll, vi } from "vitest";
 import { prisma } from "./db";
-import { getObject, putObject } from "./objectStorage";
+import { drainObjectDeletions, getObject, putObject } from "./objectStorage";
 import {
   upsertMeeting,
   listMeetings,
@@ -390,6 +390,42 @@ describe("getMeeting", () => {
 });
 
 describe("deleteMeeting", () => {
+  it("retains pending signed objects after metadata deletion and cleans them after capability expiry", async () => {
+    const input = sampleMeeting();
+    await upsertMeeting(input, WORKSPACE_ID);
+    const objectKey = `test-delete/${input.id}-pending_chunk`;
+    const audio = new TextEncoder().encode("recording");
+    await putObject(objectKey, audio);
+    const upload = await prisma.managedUpload.create({
+      data: {
+        workspaceId: WORKSPACE_ID,
+        meetingId: input.id,
+        idempotencyKey: `pending-delete-${input.id}`,
+        totalChunks: 1,
+        totalBytes: audio.byteLength,
+        expiresAt: new Date(Date.now() + 3_600_000),
+        directTickets: { create: {
+          chunkIndex: 0, channel: "mic", byteLength: audio.byteLength,
+          checksum: "test", objectKey, signedUntil: new Date(Date.now() + 240_000),
+        } },
+      },
+    });
+    try {
+      await deleteMeeting(WORKSPACE_ID, input.id);
+      expect(await getMeeting(WORKSPACE_ID, input.id)).toBeNull();
+      expect(await prisma.directUploadTicket.count({ where: { uploadId: upload.id } })).toBe(0);
+      expect(await prisma.deferredObjectDeletion.count({ where: { objectKey } })).toBe(1);
+      await drainObjectDeletions();
+      await expect(getObject(objectKey)).resolves.toEqual(audio);
+      await prisma.deferredObjectDeletion.updateMany({ where: { objectKey }, data: { nextAttemptAt: new Date(0) } });
+      await drainObjectDeletions();
+      await expect(getObject(objectKey)).rejects.toThrow();
+      expect(await prisma.deferredObjectDeletion.count({ where: { objectKey } })).toBe(0);
+    } finally {
+      await prisma.deferredObjectDeletion.deleteMany({ where: { objectKey } });
+    }
+  });
+
   it("deletes a meeting and cascades its transcript/action items", async () => {
     const input = sampleMeeting();
     await upsertMeeting(input, WORKSPACE_ID);

@@ -7,6 +7,8 @@ import { ValidationError } from "./meetings";
 import { deleteObject, getObject } from "./objectStorage";
 import { deleteMeeting } from "./meetings";
 import { recordAudit } from "./audit";
+import { readMaintenanceCursor, writeMaintenanceCursor } from "./maintenanceCursor";
+import { assertProviderAdmission } from "./providerSpend";
 
 export class ManagedValidationError extends ValidationError {}
 
@@ -174,6 +176,7 @@ export async function createManagedUpload(
   // the staging cap for 24 hours and only be refused after the upload.
   const entitlements = await getEntitlements(workspaceId);
   if (!entitlements.canProcess) throw new EntitlementError();
+  await assertProviderAdmission(workspaceId, entitlements.plan);
   if (kind === "import") {
     const maxSeconds = isManagedPlan(entitlements.plan) ? PLAN_IMPORT_MAX_SECONDS[entitlements.plan] : 0;
     const estimate = estimateImportSeconds(input.totalBytes, input.declaredDurationSeconds);
@@ -299,7 +302,10 @@ export async function completeManagedUpload(workspaceId: string, uploadId: strin
  * retryable cleanup record for the next worker heartbeat.
  */
 export async function deleteManagedUploadAudio(uploadId: string): Promise<boolean> {
-  const chunks = await prisma.uploadChunk.findMany({ where: { uploadId }, select: { id: true, objectKey: true } });
+  const registered = await prisma.uploadChunk.findMany({ where: { uploadId }, select: { id: true, objectKey: true, signedUntil: true } });
+  const tickets = await prisma.directUploadTicket.findMany({ where: { uploadId }, select: { id: true, objectKey: true, signedUntil: true } });
+  const chunks = [...registered, ...tickets];
+  if (chunks.some((chunk) => chunk.signedUntil && chunk.signedUntil > new Date())) return false;
   if (chunks.length === 0) return true;
   // Large recordings can have 10,000 objects; cap simultaneous requests so
   // cleanup does not exhaust sockets or starve provider uploads in the worker.
@@ -316,7 +322,8 @@ export async function deleteManagedUploadAudio(uploadId: string): Promise<boolea
     });
     return false;
   }
-  await prisma.uploadChunk.deleteMany({ where: { uploadId, id: { in: chunks.map((chunk) => chunk.id) } } });
+  await prisma.uploadChunk.deleteMany({ where: { uploadId, id: { in: registered.map((chunk) => chunk.id) } } });
+  await prisma.directUploadTicket.deleteMany({ where: { uploadId, id: { in: tickets.map((ticket) => ticket.id) } } });
   return true;
 }
 
@@ -325,10 +332,10 @@ export async function deleteManagedUploadAudio(uploadId: string): Promise<boolea
  * purged immediately. Abandoned/failed uploads remain available for retry
  * only until their fixed 24-hour expiry; stale jobs are failed before cleanup.
  */
-let uploadSweepAfter: { expiresAt: Date; id: string } | undefined;
-let legacySweepAfter: string | undefined;
-
 export async function expireManagedUploads(now = new Date()): Promise<number> {
+  const saved = await readMaintenanceCursor("upload-expiry");
+  const parsed = saved ? JSON.parse(saved) as { expiresAt: string; id: string } : undefined;
+  const uploadSweepAfter = parsed ? { expiresAt: new Date(parsed.expiresAt), id: parsed.id } : undefined;
   const uploads = await prisma.managedUpload.findMany({
     where: {
       ...(uploadSweepAfter ? { AND: [{ OR: [
@@ -336,9 +343,9 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
         { expiresAt: uploadSweepAfter.expiresAt, id: { gt: uploadSweepAfter.id } },
       ] }] } : {}),
       OR: [
-        { jobs: { some: { status: "complete" } }, chunks: { some: {} } },
+        { jobs: { some: { status: "complete" } }, OR: [{ chunks: { some: {} } }, { directTickets: { some: {} } }] },
         { expiresAt: { lte: now }, status: { not: "expired" } },
-        { expiresAt: { lte: now }, status: "expired", chunks: { some: {} } },
+        { expiresAt: { lte: now }, status: "expired", OR: [{ chunks: { some: {} } }, { directTickets: { some: {} } }] },
       ],
     },
     select: {
@@ -356,7 +363,7 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
   // Progress even when individual deletions fail; otherwise 100 poison
   // records at the front would permanently hide all later private audio.
   const lastUpload = uploads.at(-1);
-  uploadSweepAfter = uploads.length === 100 && lastUpload ? { expiresAt: lastUpload.expiresAt, id: lastUpload.id } : undefined;
+  const nextUpload = uploads.length === 100 && lastUpload ? JSON.stringify({ expiresAt: lastUpload.expiresAt, id: lastUpload.id }) : undefined;
   let cleaned = 0;
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1_000);
   for (const upload of uploads) {
@@ -364,6 +371,9 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
     const activeJobs = upload.jobs.filter((job) =>
       job.status === "queued" || (job.status === "processing" && (!job.startedAt || job.startedAt > staleBefore)),
     );
+    // Do not delete audio beneath a live provider call, even when the original
+    // upload deadline passes. The 48-hour object backstop remains absolute.
+    if (!successful && activeJobs.some((job) => job.status === "processing" && job.startedAt && job.startedAt > staleBefore)) continue;
     if (!successful && upload.expiresAt > now && activeJobs.length > 0) continue;
 
     if (!successful && upload.expiresAt <= now) {
@@ -412,13 +422,14 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
   // Remove audio written by the earlier durable-recording implementation as
   // part of the same managed-worker sweep. The field remains in Prisma only
   // so existing rows can be cleaned safely during rollout.
+  await writeMaintenanceCursor("upload-expiry", nextUpload);
+  const legacySweepAfter = await readMaintenanceCursor("legacy-recordings");
   const legacyRecordings = await prisma.meeting.findMany({
     where: { processingMode: "managed", recordingObjectKey: { not: null }, ...(legacySweepAfter ? { id: { gt: legacySweepAfter } } : {}) },
     select: { id: true, recordingObjectKey: true },
     orderBy: { id: "asc" },
     take: 100,
   });
-  legacySweepAfter = legacyRecordings.length === 100 ? legacyRecordings.at(-1)?.id : undefined;
   for (const meeting of legacyRecordings) {
     if (!meeting.recordingObjectKey) continue;
     try {
@@ -435,14 +446,17 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
       });
     }
   }
+  await writeMaintenanceCursor("legacy-recordings", legacyRecordings.length === 100 ? legacyRecordings.at(-1)?.id : undefined);
   return cleaned;
 }
 
 /** Delete managed meeting history according to each workspace's policy. */
 export async function expireManagedMeetings(now = new Date()): Promise<number> {
+  const after = await readMaintenanceCursor("retention-workspaces");
   const workspaces = await prisma.workspace.findMany({
-    where: { retentionDays: { not: null } },
+    where: { retentionDays: { not: null }, ...(after ? { id: { gt: after } } : {}) },
     select: { id: true, retentionDays: true },
+    orderBy: { id: "asc" }, take: 20,
   });
   let removed = 0;
   for (const workspace of workspaces) {
@@ -473,6 +487,7 @@ export async function expireManagedMeetings(now = new Date()): Promise<number> {
       await recordAudit({ workspaceId: workspace.id, action: "meeting.retention_delete", targetType: "workspace", targetId: workspace.id, metadata: { count: removedHere, retentionDays: workspace.retentionDays } });
     }
   }
+  await writeMaintenanceCursor("retention-workspaces", workspaces.length === 20 ? workspaces.at(-1)?.id : undefined);
   return removed;
 }
 

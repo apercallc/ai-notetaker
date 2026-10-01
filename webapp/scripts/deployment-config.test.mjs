@@ -15,7 +15,10 @@ describe("deployment process configuration", () => {
 
     expect(webapp.deploy.startCommand).toBe("npm run db:migrate && npm run start");
     expect(worker.deploy.startCommand).toBe("npm run managed:worker");
-    expect(packageJson.scripts["managed:worker"]).toBe("node scripts/managed-worker.mjs");
+    expect(packageJson.scripts["managed:worker"]).toBe("tsx scripts/managed-runtime.ts");
+    expect(packageJson.scripts["managed:cleaner"]).toBe("tsx scripts/managed-runtime.ts --cleaner");
+    const cleaner = await readJson("railway-cleaner.json");
+    expect(cleaner.deploy.startCommand).toBe("npm run managed:cleaner");
     expect(worker.deploy.startCommand).not.toBe(webapp.deploy.startCommand);
   });
 });

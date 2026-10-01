@@ -6,6 +6,23 @@ function response(body: unknown, status = 200): Response {
 }
 
 describe("managedClient", () => {
+  it("uploads directly without sharing credentials and verifies ambiguous PUT completion", async () => {
+    const config = { baseUrl: "https://notes.example.com", accessToken: "secret-session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({ uploadId: "u", directUpload: true }))
+      .mockResolvedValueOnce(response({ url: "https://private.example.com/key?signature=signed", replayed: false }))
+      .mockResolvedValueOnce(new Response(null, { status: 412 }))
+      .mockResolvedValueOnce(response({ replayed: false }))
+      .mockResolvedValueOnce(response({ status: "complete" }))
+      .mockResolvedValueOnce(response({ jobId: "j" }));
+    await expect(uploadManagedMeeting(config, "meeting", [{ index: 0, channel: "mic", bytes: new Uint8Array([1, 2]) }], fetchImpl)).resolves.toMatchObject({ jobId: "j" });
+    const storageInit = fetchImpl.mock.calls[2]![1] as RequestInit;
+    expect(storageInit.credentials).toBe("omit");
+    expect(storageInit.redirect).toBe("error");
+    expect(storageInit.headers).toEqual({ "Content-Type": "application/octet-stream", "If-None-Match": "*" });
+    expect(fetchImpl.mock.calls[3]![0]).toContain("/chunks/0/direct");
+    expect(fetchImpl.mock.calls[3]![1]!.body).toBe(JSON.stringify({ operation: "complete" }));
+  });
   it("builds a safe hosted signup URL", () => {
     expect(managedSignupUrl("https://notes.example.com/")).toBe("https://notes.example.com/login?tab=signup");
     expect(() => managedSignupUrl("http://notes.example.com")).toThrow("HTTPS");

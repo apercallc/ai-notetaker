@@ -2,6 +2,11 @@ import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectC
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { directUploadOrigin } from "./directUploadConfig";
+import { readMaintenanceCursor, writeMaintenanceCursor } from "./maintenanceCursor";
+import { prisma } from "./db";
+import type { Prisma } from "@prisma/client";
 
 const MAX_OBJECT_KEY_LENGTH = 300;
 
@@ -10,6 +15,7 @@ interface ObjectBackend {
   bucket: string;
   prefix: string;
   provider: "r2" | "s3";
+  identity: string;
   sweepContinuationToken?: string;
 }
 
@@ -53,6 +59,7 @@ function objectBackend(): ObjectBackend | null {
 
   const client = new S3Client({
     region,
+    requestChecksumCalculation: "WHEN_REQUIRED",
     ...(endpoint ? { endpoint } : {}),
     forcePathStyle,
     // Bound connect and socket-idle time so a stalled object store cannot hang a job (and its
@@ -60,7 +67,7 @@ function objectBackend(): ObjectBackend | null {
     requestHandler: { connectionTimeout: 10_000, requestTimeout: 120_000 },
     ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
   });
-  const backend: ObjectBackend = { client, bucket, prefix, provider };
+  const backend: ObjectBackend = { client, bucket, prefix, provider, identity: `${provider}:${bucket}:${prefix}:${endpoint}` };
   cachedObjectBackend = { fingerprint, backend };
   return backend;
 }
@@ -112,6 +119,45 @@ export async function deleteObject(key: string): Promise<void> {
   await rm(path.join(/*turbopackIgnore: true*/ storageRoot(), normalized), { force: true });
 }
 
+function deletionBackendId(): string {
+  return createHash("sha256").update(objectBackend()?.identity ?? `filesystem:${storageRoot()}`).digest("hex");
+}
+
+export async function queueObjectDeletion(key: string, notBefore = new Date(), tx: Prisma.TransactionClient = prisma): Promise<void> {
+  const objectKey = safeKey(key);
+  const backendId = deletionBackendId();
+  const id = createHash("sha256").update(`${backendId}:${objectKey}`).digest("hex");
+  await tx.deferredObjectDeletion.upsert({ where: { id }, create: { id, backendId, objectKey, nextAttemptAt: notBefore }, update: { nextAttemptAt: notBefore } });
+}
+
+export async function queueObjectDeletions(objects: Array<{ objectKey: string; signedUntil: Date | null }>, tx: Prisma.TransactionClient): Promise<void> {
+  const backendId = deletionBackendId();
+  const valid = objects.filter((object) => {
+    try { safeKey(object.objectKey); return true; } catch { return false; }
+  });
+  for (let offset = 0; offset < valid.length; offset += 500) {
+    await tx.deferredObjectDeletion.createMany({ skipDuplicates: true, data: valid.slice(offset, offset + 500).map((object) => {
+      const objectKey = safeKey(object.objectKey);
+      return { id: createHash("sha256").update(`${backendId}:${objectKey}`).digest("hex"), backendId, objectKey, nextAttemptAt: object.signedUntil ?? new Date() };
+    }) });
+  }
+}
+
+/** Bounded durable retries; poison objects cannot hold up fresh listing pages. */
+export async function drainObjectDeletions(): Promise<void> {
+  const rows = await prisma.deferredObjectDeletion.findMany({ where: { backendId: deletionBackendId(), nextAttemptAt: { lte: new Date() } }, orderBy: { nextAttemptAt: "asc" }, take: 100 });
+  for (let offset = 0; offset < rows.length; offset += 16) {
+    await Promise.all(rows.slice(offset, offset + 16).map(async (row) => {
+      try {
+        await deleteObject(row.objectKey);
+        await prisma.deferredObjectDeletion.deleteMany({ where: { id: row.id } });
+      } catch {
+        await prisma.deferredObjectDeletion.updateMany({ where: { id: row.id }, data: { attempts: { increment: 1 }, nextAttemptAt: new Date(Date.now() + Math.min(3_600_000, 60_000 * 2 ** Math.min(row.attempts, 6))) } });
+      }
+    }));
+  }
+}
+
 export async function getObject(key: string): Promise<Uint8Array> {
   const normalized = safeKey(key);
   const backend = objectBackend();
@@ -124,6 +170,23 @@ export async function getObject(key: string): Promise<Uint8Array> {
     return new Uint8Array(await response.Body.transformToByteArray());
   }
   return new Uint8Array(await readFile(path.join(/*turbopackIgnore: true*/ storageRoot(), normalized)));
+}
+
+export function directUploadsEnabled(): boolean {
+  return process.env.MANAGED_DIRECT_UPLOADS === "true" && Boolean(directUploadOrigin()) && objectBackend() !== null;
+}
+
+/** Single-use immutable PUT; size and conditional header are signed. */
+export async function signDirectUpload(key: string, byteLength: number, expiresIn: number): Promise<{ url: string; headers: Record<string, string> }> {
+  const backend = objectBackend();
+  if (!backend || !directUploadsEnabled()) throw new Error("direct uploads are disabled");
+  const command = new PutObjectCommand({ Bucket: backend.bucket, Key: backendKey(backend, safeKey(key)),
+    ContentLength: byteLength, ContentType: "application/octet-stream", IfNoneMatch: "*" });
+  const url = await getSignedUrl(backend.client, command, {
+    expiresIn, signableHeaders: new Set(["content-length", "content-type", "if-none-match"]),
+  });
+  if (new URL(url).origin !== directUploadOrigin()) throw new Error("signed upload origin differs from MANAGED_OBJECT_UPLOAD_ORIGIN");
+  return { url, headers: { "Content-Type": "application/octet-stream", "If-None-Match": "*" } };
 }
 
 /** Staged audio is legitimately kept 24 hours at most; anything older is an orphan. */
@@ -143,7 +206,8 @@ export async function sweepStaleStagedObjects(now = new Date(), maxAgeMs = STALE
   const backend = objectBackend();
   if (backend) {
     let deleted = 0;
-    let token = backend.sweepContinuationToken;
+    const cursorId = `object-sweep:${backend.provider}:${backend.bucket}:${backend.prefix}`;
+    let token = await readMaintenanceCursor(cursorId);
     for (let page = 0; page < SWEEP_LIST_PAGES; page += 1) {
       const listing = await backend.client.send(new ListObjectsV2Command({
         Bucket: backend.bucket,
@@ -152,8 +216,13 @@ export async function sweepStaleStagedObjects(now = new Date(), maxAgeMs = STALE
       }));
       for (const object of listing.Contents ?? []) {
         if (!object.Key || !object.LastModified || object.LastModified.getTime() > cutoff) continue;
-        await backend.client.send(new DeleteObjectCommand({ Bucket: backend.bucket, Key: object.Key }));
-        deleted += 1;
+        try {
+          await backend.client.send(new DeleteObjectCommand({ Bucket: backend.bucket, Key: object.Key }));
+          deleted += 1;
+        } catch {
+          const relative = backend.prefix ? object.Key.slice(backend.prefix.length + 1) : object.Key;
+          await queueObjectDeletion(relative);
+        }
       }
       // Keep progress across bounded worker passes, including pages with only
       // fresh objects. Otherwise the first few thousand keys can indefinitely
@@ -161,6 +230,7 @@ export async function sweepStaleStagedObjects(now = new Date(), maxAgeMs = STALE
       // deletions on this page succeed, so failed cleanup is retried.
       token = listing.IsTruncated ? listing.NextContinuationToken : undefined;
       backend.sweepContinuationToken = token;
+      await writeMaintenanceCursor(cursorId, token);
       if (!token) break;
     }
     return deleted;

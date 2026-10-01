@@ -17,10 +17,24 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    environment:
+    environment: &managed-environment
       DATABASE_URL: postgresql://${POSTGRES_USER:-notetaker}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Docker Compose}@db:5432/${POSTGRES_DB:-ainotetaker}
       AUTH_TOKEN: ${AUTH_TOKEN:?Set AUTH_TOKEN before starting Docker Compose}
       MANAGED_HOSTING: ${MANAGED_HOSTING:-false}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-5}
+      MANAGED_WORKER_CONCURRENCY: ${MANAGED_WORKER_CONCURRENCY:-2}
+      MANAGED_DAILY_SPEND_MICROS: ${MANAGED_DAILY_SPEND_MICROS:-}
+      MANAGED_WORKSPACE_DAILY_SPEND_MICROS: ${MANAGED_WORKSPACE_DAILY_SPEND_MICROS:-}
+      MANAGED_TRIAL_DAILY_SPEND_MICROS: ${MANAGED_TRIAL_DAILY_SPEND_MICROS:-}
+      MANAGED_TRIAL_DAILY_GRANTS: ${MANAGED_TRIAL_DAILY_GRANTS:-}
+      MANAGED_WORKER_MODE: standalone
+      MANAGED_DIRECT_UPLOADS: ${MANAGED_DIRECT_UPLOADS:-false}
+      MANAGED_OBJECT_UPLOAD_ORIGIN: ${MANAGED_OBJECT_UPLOAD_ORIGIN:-}
+      MANAGED_OPENAI_INPUT_MICROS_PER_TOKEN: ${MANAGED_OPENAI_INPUT_MICROS_PER_TOKEN:-}
+      MANAGED_OPENAI_OUTPUT_MICROS_PER_TOKEN: ${MANAGED_OPENAI_OUTPUT_MICROS_PER_TOKEN:-}
+      MANAGED_ANTHROPIC_INPUT_MICROS_PER_TOKEN: ${MANAGED_ANTHROPIC_INPUT_MICROS_PER_TOKEN:-}
+      MANAGED_ANTHROPIC_OUTPUT_MICROS_PER_TOKEN: ${MANAGED_ANTHROPIC_OUTPUT_MICROS_PER_TOKEN:-}
+      INTEGRATIONS_ENCRYPTION_KEY: ${INTEGRATIONS_ENCRYPTION_KEY:-}
       APP_URL: ${APP_URL:-http://localhost:3000}
       WORKER_URL: ${WORKER_URL:-}
       LEGACY_INGEST_ENABLED: ${LEGACY_INGEST_ENABLED:-false}
@@ -69,6 +83,8 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
+      <<: *managed-environment
+      MANAGED_HOSTING: "true"
       DATABASE_URL: postgresql://${POSTGRES_USER:-notetaker}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Docker Compose}@db:5432/${POSTGRES_DB:-ainotetaker}
       AUTH_TOKEN: ${AUTH_TOKEN:?Set AUTH_TOKEN before starting Docker Compose}
       MANAGED_WORKER_TOKEN: ${MANAGED_WORKER_TOKEN:?Set MANAGED_WORKER_TOKEN for the managed worker}
@@ -82,12 +98,32 @@ services:
       MANAGED_OPENAI_API_KEY: ${MANAGED_OPENAI_API_KEY:-}
       MANAGED_ANTHROPIC_API_KEY: ${MANAGED_ANTHROPIC_API_KEY:-}
       MANAGED_SUMMARY_MODEL: ${MANAGED_SUMMARY_MODEL:-}
-    command: ["node", "scripts/managed-worker.mjs"]
+    command: ["npm", "run", "managed:worker"]
+    volumes:
+      - ai-notetaker-objects:/app/.data
     depends_on:
       db:
         condition: service_healthy
       webapp:
         condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  cleaner:
+    profiles: ["managed"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      <<: *managed-environment
+      MANAGED_HOSTING: "true"
+    command: ["npm", "run", "managed:cleaner"]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ai-notetaker-objects:/app/.data
     healthcheck:
       disable: true
     restart: unless-stopped

@@ -38,7 +38,8 @@ vi.mock("@aws-sdk/client-s3", () => ({
   },
 }));
 
-import { deleteObject, getObject, putObject, sweepStaleStagedObjects } from "./objectStorage";
+import { deleteObject, drainObjectDeletions, getObject, putObject, queueObjectDeletion, sweepStaleStagedObjects } from "./objectStorage";
+import { prisma } from "./db";
 
 const originalS3 = {
   bucket: process.env.S3_BUCKET,
@@ -91,6 +92,27 @@ function restoreR2Env(): void {
 }
 
 describe("object storage backends", () => {
+  it("backs off failed durable deletions and retries after recovery", async () => {
+    process.env.R2_BUCKET = "";
+    process.env.S3_BUCKET = "deletion-retry-fixture";
+    process.env.S3_PREFIX = "";
+    const objectKey = "uploads/durable-retry-fixture";
+    await prisma.deferredObjectDeletion.deleteMany({ where: { objectKey } });
+    try {
+      await queueObjectDeletion(objectKey);
+      deleteFailureKey = objectKey;
+      await drainObjectDeletions();
+      const row = await prisma.deferredObjectDeletion.findFirstOrThrow({ where: { objectKey } });
+      expect(row.attempts).toBe(1);
+      expect(row.nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
+      deleteFailureKey = undefined;
+      await prisma.deferredObjectDeletion.update({ where: { id: row.id }, data: { nextAttemptAt: new Date(0) } });
+      await drainObjectDeletions();
+      expect(await prisma.deferredObjectDeletion.count({ where: { objectKey } })).toBe(0);
+    } finally {
+      await prisma.deferredObjectDeletion.deleteMany({ where: { objectKey } });
+    }
+  });
   afterEach(() => {
     sent.length = 0;
     clients.length = 0;
@@ -211,10 +233,10 @@ describe("object storage backends", () => {
       };
     };
     deleteFailureKey = "uploads/page-1";
-    await expect(sweepStaleStagedObjects(now)).rejects.toThrow("storage unavailable");
+    await expect(sweepStaleStagedObjects(now)).resolves.toBe(2);
     deleteFailureKey = undefined;
     sent.length = 0;
-    await expect(sweepStaleStagedObjects(now)).resolves.toBe(2);
-    expect(sent.filter(({ kind }) => kind === "list").map(({ input }) => input.ContinuationToken)).toEqual(["1", "2"]);
+    await expect(sweepStaleStagedObjects(now)).resolves.toBe(3);
+    expect(sent.filter(({ kind }) => kind === "list").map(({ input }) => input.ContinuationToken)).toEqual([undefined, "1", "2"]);
   });
 });

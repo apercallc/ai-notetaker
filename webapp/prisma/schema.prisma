@@ -222,6 +222,7 @@ model ManagedUpload {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   chunks    UploadChunk[]
+  directTickets DirectUploadTicket[]
   jobs      ProcessingJob[]
 
   @@unique([workspaceId, idempotencyKey])
@@ -238,9 +239,24 @@ model UploadChunk {
   checksum  String
   objectKey String
   createdAt DateTime @default(now())
+  signedUntil DateTime?
 
   upload ManagedUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 
+  @@unique([uploadId, chunkIndex])
+}
+
+model DirectUploadTicket {
+  id String @id @default(uuid())
+  uploadId String
+  chunkIndex Int
+  channel String
+  byteLength Int
+  checksum String
+  objectKey String
+  createdAt DateTime @default(now())
+  signedUntil DateTime?
+  upload ManagedUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
   @@unique([uploadId, chunkIndex])
 }
 
@@ -337,6 +353,56 @@ model BillingEvent {
   type        String
   eventCreatedAt Int?
   processedAt DateTime @default(now())
+}
+
+// Financial audit records deliberately have no cascade relation to customer
+// content: refunds/deletions cannot erase irreversible provider spend.
+model ProviderSpendBucket {
+  id String @id
+  day String
+  committedMicros BigInt @default(0)
+  @@index([day])
+}
+
+model MaintenanceCursor {
+  id String @id
+  value String?
+  leaseToken String?
+  leaseUntil DateTime?
+  updatedAt DateTime @updatedAt
+}
+
+model TrialGrantDay {
+  day String @id
+  grants Int @default(0)
+}
+
+// Survives content/account cascades and preserves failed storage deletions.
+model DeferredObjectDeletion {
+  id String @id
+  backendId String
+  objectKey String
+  nextAttemptAt DateTime
+  attempts Int @default(0)
+  createdAt DateTime @default(now())
+  @@index([backendId, nextAttemptAt])
+}
+
+model ProviderSpendAttempt {
+  id String @id @default(uuid())
+  workspaceId String
+  operationId String
+  provider String
+  day String
+  reservedMicros BigInt
+  chargedMicros BigInt
+  bucketIds String[]
+  status String @default("reserved")
+  httpStatus Int?
+  createdAt DateTime @default(now())
+  settledAt DateTime?
+  @@index([workspaceId, createdAt])
+  @@index([day, provider])
 }
 
 // Shared failed-login budget for managed hosting. Keeping this in Postgres

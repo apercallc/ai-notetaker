@@ -1,5 +1,6 @@
 import { speakerLabel } from "./types";
 import { prisma } from "./db";
+import { withProviderSpend } from "./providerSpend";
 import { ManagedWorkerError, managedSummaryModel, managedSummaryProvider, providerRequest } from "./managedWorker";
 import { releaseChatQuestion, reserveChatQuestion } from "./chatQuota";
 import { MAX_QUESTION_LENGTH, buildContext, buildUserPrompt, chatSystemPrompt, citedNumbers, extractTerms, newBoundaryTag, type NoteSource } from "./notesChatContext";
@@ -206,7 +207,7 @@ export async function askNotes(workspaceId: string, rawQuestion: string, folderI
   if ((inFlight.get(workspaceId) ?? 0) >= MAX_IN_FLIGHT_PER_WORKSPACE) throw new ChatBusyError();
   inFlight.set(workspaceId, (inFlight.get(workspaceId) ?? 0) + 1);
   try {
-    return await answer(workspaceId, question, folderIds);
+    return await withProviderSpend(workspaceId, `chat:${crypto.randomUUID()}`, () => answer(workspaceId, question, folderIds));
   } finally {
     const left = (inFlight.get(workspaceId) ?? 1) - 1;
     if (left <= 0) inFlight.delete(workspaceId);

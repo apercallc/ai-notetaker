@@ -126,12 +126,37 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
     if (!busy) void choose(event.dataTransfer.files[0]);
   }
 
-  async function putChunk(uploadId: string, file: File, index: number, chunkBytes: number, signal: AbortSignal) {
+  async function putChunk(uploadId: string, file: File, index: number, chunkBytes: number, signal: AbortSignal, directUpload = false) {
     const blob = file.slice(index * chunkBytes, Math.min(file.size, (index + 1) * chunkBytes));
     const buffer = await blob.arrayBuffer();
     const checksum = await sha256Hex(buffer);
     for (let attempt = 0; ; attempt += 1) {
       try {
+        if (directUpload) {
+          const path = `/api/import/${uploadId}/chunks/${index}/direct`;
+          const prepared = await fetch(path, { method: "POST", headers: { ...BROWSER_HEADERS, "content-type": "application/json" }, signal,
+            body: JSON.stringify({ checksum, byteLength: buffer.byteLength, channel: "speaker" }) });
+          if (!prepared.ok) {
+            if (prepared.status < 500 && prepared.status !== 429 && prepared.status !== 408) throw await errorFrom(prepared);
+            throw new Error("upload preparation failed");
+          }
+          const ticket = await prepared.json() as { replayed: boolean; url?: string };
+          if (ticket.replayed) return;
+          if (!ticket.url || new URL(ticket.url).protocol !== "https:") throw new ImportError("We couldn't upload your file. Try again to continue where it stopped.");
+          const uploaded = await fetch(ticket.url, { method: "PUT", headers: { "content-type": "application/octet-stream", "if-none-match": "*" },
+            body: buffer, signal, credentials: "omit", redirect: "error" });
+          if (!uploaded.ok && uploaded.status !== 412) {
+            if (uploaded.status < 500 && uploaded.status !== 429 && uploaded.status !== 408) throw new ImportError("We couldn't upload your file. Try again to continue where it stopped.");
+            throw new Error("audio upload failed");
+          }
+          const completed = await fetch(path, { method: "POST", headers: { ...BROWSER_HEADERS, "content-type": "application/json" }, signal,
+            body: JSON.stringify({ operation: "complete" }) });
+          if (!completed.ok) {
+            if (completed.status < 500 && completed.status !== 429 && completed.status !== 408) throw await errorFrom(completed);
+            throw new Error("upload completion failed");
+          }
+          return;
+        }
         const response = await fetch(`/api/import/${uploadId}/chunks/${index}`, {
           method: "PUT",
           headers: { ...BROWSER_HEADERS, "x-chunk-sha256": checksum, "content-type": "application/octet-stream" },
@@ -144,7 +169,7 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
       } catch (cause) {
         if (cause instanceof ImportError || signal.aborted) throw cause;
       }
-      if (attempt + 1 >= CHUNK_ATTEMPTS) throw new ImportError("The connection kept dropping. Check your network and try again to continue where it stopped.");
+      if (attempt + 1 >= CHUNK_ATTEMPTS) throw new ImportError("We couldn't upload your file. Try again to continue where it stopped.");
       await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
     }
   }
@@ -176,7 +201,7 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
         signal: controller.signal,
       });
       if (!begin.ok) throw await errorFrom(begin);
-      const started = (await begin.json()) as { uploadId: string; meetingId: string; totalChunks: number; chunkBytes: number; receivedChunks: number[] };
+      const started = (await begin.json()) as { uploadId: string; meetingId: string; totalChunks: number; chunkBytes: number; receivedChunks: number[]; directUpload?: boolean };
 
       const received = new Set(started.receivedChunks);
       const pending = Array.from({ length: started.totalChunks }, (_, index) => index).filter((index) => !received.has(index));
@@ -186,7 +211,7 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
       const workers = Array.from({ length: Math.min(PARALLEL_CHUNKS, pending.length) }, async () => {
         for (let next = pending.shift(); next !== undefined && !failure; next = pending.shift()) {
           try {
-            await putChunk(started.uploadId, file, next, started.chunkBytes, controller.signal);
+            await putChunk(started.uploadId, file, next, started.chunkBytes, controller.signal, started.directUpload === true);
             done += 1;
             setProgress(done / started.totalChunks);
           } catch (cause) {

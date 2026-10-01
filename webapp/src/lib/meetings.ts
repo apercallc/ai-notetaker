@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { LOCAL_USER_ID } from "./auth";
-import { deleteObject } from "./objectStorage";
+import { deleteObject, queueObjectDeletions } from "./objectStorage";
 import { randomUUID } from "node:crypto";
 import type { CaptureSource, CreateMeetingRequest, MeetingDetailResponse, MeetingMode, MeetingSummaryResponse, ProcessingMode } from "./types";
 import { MAX_SEARCH_LENGTH } from "./meetingConstants";
@@ -576,27 +576,39 @@ export async function renameMeeting(workspaceId: string, id: string, title: stri
 }
 
 export async function deleteMeeting(workspaceId: string, id: string): Promise<void> {
-  const meeting = await prisma.meeting.findFirst({
+  const objects = await prisma.$transaction(async (tx) => {
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Meeting" WHERE "id" = ${id} AND "workspaceId" = ${workspaceId} FOR UPDATE`;
+  if (!locked.length) return [];
+  // Serialize with sign/chunk commits before taking a durable cleanup snapshot.
+  await tx.managedUpload.updateMany({ where: { meetingId: id, workspaceId }, data: { status: "expired" } });
+  const meeting = await tx.meeting.findFirst({
     where: { id, workspaceId },
     select: {
       recordingObjectKey: true,
-      uploads: { select: { objectKey: true, chunks: { select: { objectKey: true } } } },
+      uploads: { select: { objectKey: true, chunks: { select: { objectKey: true, signedUntil: true } }, directTickets: { select: { objectKey: true, signedUntil: true } } } },
     },
   });
-  if (!meeting) return;
+  if (!meeting) return [];
 
-  const objectKeys = [
-    meeting.recordingObjectKey,
-    ...meeting.uploads.flatMap((upload) => [upload.objectKey, ...upload.chunks.map((chunk) => chunk.objectKey)]),
-  ].filter((key): key is string => Boolean(key));
+  const objects = [
+    { objectKey: meeting.recordingObjectKey, signedUntil: null },
+    ...meeting.uploads.flatMap((upload) => [{ objectKey: upload.objectKey, signedUntil: null }, ...upload.chunks, ...upload.directTickets]),
+  ].filter((object): object is { objectKey: string; signedUntil: Date | null } => Boolean(object.objectKey));
+  await queueObjectDeletions(objects, tx);
 
   // Delete the database record first so a successful user-visible delete can
   // never leave a recoverable meeting behind. Object storage is separate from
   // Postgres, so clean it up after the cascading delete and log any orphaned
   // object for operator repair rather than turning a completed delete into a
   // misleading 500 response.
-  await prisma.meeting.deleteMany({ where: { id, workspaceId } });
-  const cleanup = await Promise.allSettled(objectKeys.map((key) => deleteObject(key)));
+  await tx.meeting.deleteMany({ where: { id, workspaceId } });
+  return objects;
+  }, { timeout: 30_000 });
+  const immediate = objects.filter((object) => !object.signedUntil || object.signedUntil <= new Date());
+  const cleanup: PromiseSettledResult<void>[] = [];
+  for (let offset = 0; offset < immediate.length; offset += 16) {
+    cleanup.push(...await Promise.allSettled(immediate.slice(offset, offset + 16).map((object) => deleteObject(object.objectKey))));
+  }
   const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
   if (failures.length) {
     console.error("meeting object cleanup failed", {

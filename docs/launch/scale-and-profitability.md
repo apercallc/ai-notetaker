@@ -125,6 +125,12 @@ must be deployed through the normal migration/release process.
 
 ## Implementation order and acceptance gates
 
+The 2026-10-01 implementation adds the provider-attempt ledger/admission,
+trial grant ceiling, standalone processing and cleanup, durable cleanup cursors
+and deletion retries, connection/worker ceilings, and gated direct uploads
+across all three clients. See [the infrastructure rollout](infrastructure-rollout.md)
+for configuration, rollback and the remaining live/financial acceptance gates.
+
 ### 1. Before opening Hosted AI broadly
 
 1. **Record irreversible provider spend separately from customer quotas.**

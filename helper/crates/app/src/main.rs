@@ -433,6 +433,10 @@ async fn upload_managed_recording(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| "managed service returned no upload id".to_string())?
         .to_owned();
+    let direct_upload = upload_body
+        .get("directUpload")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
 
     // Persist the server-issued upload identity before sending the first
     // chunk. If the helper exits mid-upload, the next worker run reuses the
@@ -465,17 +469,80 @@ async fn upload_managed_recording(
                 .iter()
                 .map(|byte| format!("{byte:02x}"))
                 .collect();
-            let response = client
-                .put(format!("{base}/api/v1/uploads/{upload_id}/chunks/{index}"))
-                .bearer_auth(&service.access_token)
-                .header("x-workspace-id", &service.workspace_id)
-                .header("x-chunk-sha256", &checksum)
-                .header("x-audio-channel", channel)
-                .body(chunk)
-                .send()
-                .await
-                .map_err(|error| format!("managed audio upload failed: {error}"))?;
-            ensure_managed_success(response, "managed audio upload").await?;
+            if direct_upload {
+                let direct_path =
+                    format!("{base}/api/v1/uploads/{upload_id}/chunks/{index}/direct");
+                let response = client.post(&direct_path)
+                    .bearer_auth(&service.access_token)
+                    .header("x-workspace-id", &service.workspace_id)
+                    .json(&serde_json::json!({ "byteLength": chunk.len(), "checksum": checksum, "channel": channel }))
+                    .send().await.map_err(|error| format!("managed upload reservation failed: {error}"))?;
+                let ticket = ensure_managed_success(response, "managed upload reservation").await?;
+                if ticket.get("replayed").and_then(serde_json::Value::as_bool) != Some(true) {
+                    let raw_url = ticket
+                        .get("url")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| {
+                            "managed service returned no storage upload URL".to_string()
+                        })?;
+                    let url = reqwest::Url::parse(raw_url)
+                        .map_err(|_| "invalid storage upload URL".to_string())?;
+                    if url.scheme() != "https"
+                        || !url.username().is_empty()
+                        || url.password().is_some()
+                        || url.fragment().is_some()
+                    {
+                        return Err("invalid storage upload URL".to_string());
+                    }
+                    // Separate client has no account headers/cookies. Never
+                    // follow a storage redirect with a signed upload capability.
+                    let storage_client = reqwest::Client::builder()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .timeout(std::time::Duration::from_secs(180))
+                        .build()
+                        .map_err(|error| format!("storage client failed: {error}"))?;
+                    let uploaded = storage_client
+                        .put(url)
+                        .header("content-type", "application/octet-stream")
+                        .header("if-none-match", "*")
+                        .body(chunk)
+                        .send()
+                        .await
+                        .map_err(|_| {
+                            "managed audio storage upload failed; retry from the local recording"
+                                .to_string()
+                        })?;
+                    if !uploaded.status().is_success()
+                        && uploaded.status() != reqwest::StatusCode::PRECONDITION_FAILED
+                    {
+                        return Err(format!(
+                            "managed audio storage returned {}",
+                            uploaded.status()
+                        ));
+                    }
+                    let response = client
+                        .post(&direct_path)
+                        .bearer_auth(&service.access_token)
+                        .header("x-workspace-id", &service.workspace_id)
+                        .json(&serde_json::json!({ "operation": "complete" }))
+                        .send()
+                        .await
+                        .map_err(|error| format!("managed chunk completion failed: {error}"))?;
+                    ensure_managed_success(response, "managed chunk completion").await?;
+                }
+            } else {
+                let response = client
+                    .put(format!("{base}/api/v1/uploads/{upload_id}/chunks/{index}"))
+                    .bearer_auth(&service.access_token)
+                    .header("x-workspace-id", &service.workspace_id)
+                    .header("x-chunk-sha256", &checksum)
+                    .header("x-audio-channel", channel)
+                    .body(chunk)
+                    .send()
+                    .await
+                    .map_err(|error| format!("managed audio upload failed: {error}"))?;
+                ensure_managed_success(response, "managed audio upload").await?;
+            }
             index += 1;
             next_chunk = index;
             store

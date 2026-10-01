@@ -66,6 +66,9 @@ export async function handleManagedChunkUpload(
           }
           return false;
         }
+        if (await tx.directUploadTicket.findUnique({ where: { uploadId_chunkIndex: { uploadId, chunkIndex } } })) {
+          throw new ManagedValidationError("chunk has a direct upload reservation; finish the direct upload");
+        }
         // The upload-row update above is the per-upload serialization point:
         // concurrent chunk requests lock the same row before summing, so they
         // cannot each observe spare manifest capacity and exceed it together.
@@ -73,7 +76,8 @@ export async function handleManagedChunkUpload(
           where: { uploadId },
           _sum: { byteLength: true },
         });
-        if ((stored._sum.byteLength ?? 0) + bytes.byteLength > upload.totalBytes) {
+        const pending = await tx.directUploadTicket.aggregate({ where: { uploadId }, _sum: { byteLength: true } });
+        if ((stored._sum.byteLength ?? 0) + (pending._sum.byteLength ?? 0) + bytes.byteLength > upload.totalBytes) {
           throw new ManagedValidationError("uploaded chunks exceed the declared upload byte limit");
         }
         await tx.uploadChunk.create({ data: { uploadId, chunkIndex, channel, byteLength: bytes.byteLength, checksum, objectKey } });

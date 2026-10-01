@@ -62,6 +62,12 @@ export function managedConfigurationStatus(env: DeploymentEnv = process.env): Ma
     "STRIPE_PRICE_HOSTED_PRO",
     "STRIPE_PRICE_HOSTED_TEAM",
   ].filter((name) => !hasValue(env, name));
+  if (env.NODE_ENV === "production") {
+    for (const name of ["MANAGED_DAILY_SPEND_MICROS", "MANAGED_WORKSPACE_DAILY_SPEND_MICROS", "MANAGED_TRIAL_DAILY_SPEND_MICROS", "MANAGED_TRIAL_DAILY_GRANTS"]) {
+      const value = env[name];
+      if (!value || !/^\d+$/.test(value) || BigInt(value) > (name.endsWith("GRANTS") ? 100_000n : 1_000_000_000_000n)) missing.push(name);
+    }
+  }
   if (!validAppUrl(env.APP_URL ?? env.NEXT_PUBLIC_APP_URL)) missing.push("APP_URL");
 
   return {

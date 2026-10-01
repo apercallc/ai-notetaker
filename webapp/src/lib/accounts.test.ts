@@ -21,6 +21,10 @@ const validPassword = "River glass orchard 2026!";
 const context = { ip: "198.51.100.222", userAgent: "accounts-test", protocol: "https" as const, host: "notetaker.example.test" };
 
 function managedSignupEnvironment(): void {
+  process.env.MANAGED_DAILY_SPEND_MICROS = "1000000000";
+  process.env.MANAGED_WORKSPACE_DAILY_SPEND_MICROS = "1000000000";
+  process.env.MANAGED_TRIAL_DAILY_SPEND_MICROS = "1000000000";
+  process.env.MANAGED_TRIAL_DAILY_GRANTS = "10000";
   process.env.MANAGED_HOSTING = "true";
   process.env.MANAGED_WORKER_TOKEN = "worker-token";
   process.env.R2_ACCOUNT_ID = "test-account";

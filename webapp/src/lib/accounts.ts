@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { TrialGrantLimitError } from "./trialGrants";
 import { randomBytes } from "node:crypto";
 import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from "./passwords";
 import { isPlausibleEmail, normalizeEmail } from "./email";
@@ -139,6 +140,7 @@ export async function registerHostedAccount(input: {
     return { ok: true, userId, workspaceId, verificationRequired, verification };
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") return { ok: false, error: "email-taken" };
+    if (error instanceof TrialGrantLimitError) return { ok: false, error: "signup-not-ready" };
     throw error;
   }
 }
@@ -218,6 +220,7 @@ export async function resolveGoogleAccount(input: {
     return { ok: true, userId, workspaceId, created: true, mustChangePassword: false };
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") return { ok: false, error: "email-taken" };
+    if (error instanceof TrialGrantLimitError) return { ok: false, error: "signup-not-ready" };
     throw error;
   }
 }

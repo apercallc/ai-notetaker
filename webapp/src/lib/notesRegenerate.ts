@@ -5,6 +5,7 @@ import { ManagedWorkerError, formatSummaryText, summarize, type ManagedUtterance
 import { MAX_NOTES_REGENERATIONS, NOTE_TEMPLATES, PICKABLE_TEMPLATES, isNoteTemplateId, noteTemplateFor } from "./noteTemplates";
 import { hasProcessingAccess } from "./usageLedger";
 import { isLanguageCode, parseVocabulary } from "./languages";
+import { withProviderSpend } from "./providerSpend";
 
 export type RegenerateResult =
   | { ok: true; template: string; remaining: number }
@@ -72,7 +73,7 @@ export async function regenerateNotes(
   try {
     const vocabulary = (await prisma.workspace.findUnique({ where: { id: session.workspaceId }, select: { vocabulary: true } }))?.vocabulary ?? "";
     const speakerNames = Object.fromEntries(meeting.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName]));
-    ({ summary } = await summarize(utterances, meeting.startedAt.toISOString().slice(0, 10), noteTemplateFor(templateId), speakerNames, { language: options.summaryLanguage || null, vocabulary: parseVocabulary(vocabulary) }));
+    ({ summary } = await withProviderSpend(session.workspaceId, `regenerate:${meeting.id}`, () => summarize(utterances, meeting.startedAt.toISOString().slice(0, 10), noteTemplateFor(templateId), speakerNames, { language: options.summaryLanguage || null, vocabulary: parseVocabulary(vocabulary) })));
   } catch (error) {
     // A failed attempt must not use up one of the three.
     await prisma.meeting.updateMany({ where: { id: meeting.id, notesRegenerations: { gt: 0 } }, data: { notesRegenerations: { decrement: 1 } } });

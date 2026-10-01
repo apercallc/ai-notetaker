@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
+import { directUploadsEnabled } from "@/lib/objectStorage";
 import { createManagedUpload, ManagedUploadQuotaError, ManagedValidationError, readManagedJson } from "@/lib/managedJobs";
 
 export async function POST(request: Request) {
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
         totalChunks: upload.totalChunks,
         totalBytes: upload.totalBytes,
         chunks: upload.chunks,
+        directUpload: directUploadsEnabled(),
       },
       { status: 201, headers: { "x-request-id": requestId } },
     );

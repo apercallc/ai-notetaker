@@ -32,6 +32,7 @@ export interface ManagedDriveExportResult {
 const REQUEST_TIMEOUT_MS = 15_000;
 const LOGIN_TIMEOUT_MS = 20_000;
 const REQUEST_MAX_ATTEMPTS = 3;
+const AUDIO_UPLOAD_ERROR = "We couldn't upload your recording. Your audio is saved on this device. Try again.";
 const REQUEST_RETRY_BASE_MS = 250;
 
 // A 4 MiB audio chunk cannot finish in 15 s on a modest uplink. Scale the
@@ -312,10 +313,41 @@ async function putManagedChunk(
   index: number,
   chunk: ManagedChunk,
   fetchImpl: typeof fetch,
+  directUpload = false,
 ): Promise<void> {
   const bytes = chunk.bytes.slice();
   const digest = await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer);
   const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (directUpload) {
+    const path = `/api/v1/uploads/${encodeURIComponent(uploadId)}/chunks/${index}/direct`;
+    const prepared = await requestJson(config, path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ byteLength: bytes.byteLength, checksum, channel: chunk.channel }),
+    }, fetchImpl);
+    if (prepared.replayed === true) return;
+    if (typeof prepared.url !== "string") throw new Error(AUDIO_UPLOAD_ERROR);
+    const url = new URL(prepared.url);
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) throw new Error(AUDIO_UPLOAD_ERROR);
+    // Storage never receives account cookies, workspace tokens or provider keys.
+    // A 412 after an ambiguous PUT means the immutable object already exists;
+    // server completion still independently checks its size and SHA-256.
+    for (let attempt = 0; attempt < REQUEST_MAX_ATTEMPTS; attempt += 1) {
+      let permanent = false;
+      try {
+        const response = await fetchImpl(url.toString(), {
+          method: "PUT", headers: { "Content-Type": "application/octet-stream", "If-None-Match": "*" },
+          body: bytes.buffer as ArrayBuffer, credentials: "omit", redirect: "error",
+          signal: AbortSignal.timeout(requestTimeoutMs(bytes.buffer as ArrayBuffer)),
+        });
+        if (response.ok || response.status === 412) break;
+        permanent = !retryableStatus(response.status);
+        if (permanent || attempt === REQUEST_MAX_ATTEMPTS - 1) throw new Error(AUDIO_UPLOAD_ERROR);
+      } catch { if (permanent || attempt === REQUEST_MAX_ATTEMPTS - 1) throw new Error(AUDIO_UPLOAD_ERROR); }
+      await waitForRetry(retryDelayMs(attempt));
+    }
+    await requestJson(config, path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "complete" }) }, fetchImpl);
+    return;
+  }
   await requestJson(config, `/api/v1/uploads/${encodeURIComponent(uploadId)}/chunks/${index}`, {
     method: "PUT",
     headers: { "Content-Type": "application/octet-stream", "x-chunk-sha256": checksum, "x-audio-channel": chunk.channel },
@@ -353,12 +385,12 @@ export async function uploadManagedMeeting(
       // index; the manifest expects dense 0..N-1 indices in iteration order.
       let index = 0;
       for await (const chunk of source.chunks) {
-        await putManagedChunk(config, uploadId, index, chunk, fetchImpl);
+        await putManagedChunk(config, uploadId, index, chunk, fetchImpl, manifest.directUpload === true);
         index += 1;
       }
     } else {
       for (const chunk of source) {
-        await putManagedChunk(config, uploadId, chunk.index, chunk, fetchImpl);
+        await putManagedChunk(config, uploadId, chunk.index, chunk, fetchImpl, manifest.directUpload === true);
       }
     }
 

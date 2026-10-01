@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { BillingError, cancelWorkspaceSubscription } from "./billing";
-import { deleteObject } from "./objectStorage";
+import { deleteObject, queueObjectDeletions } from "./objectStorage";
 import { disconnectGoogle } from "./googleIntegration";
 
 export type PurgeWorkspaceResult = { ok: true } | { ok: false; error: string };
@@ -40,17 +40,28 @@ export async function purgeWorkspace(workspaceId: string): Promise<PurgeWorkspac
   // Object storage is cleaned up after the commit; a storage failure logs
   // the orphaned keys for operator repair rather than rolling back a
   // deletion the user already confirmed.
-  const meetings = await prisma.meeting.findMany({
-    where: { workspaceId },
-    select: { id: true, recordingObjectKey: true, uploads: { select: { objectKey: true, chunks: { select: { objectKey: true } } } } },
-  });
-  const objectKeys = meetings.flatMap((meeting) => [
-    meeting.recordingObjectKey,
-    ...meeting.uploads.flatMap((upload) => [upload.objectKey, ...upload.chunks.map((chunk) => chunk.objectKey)]),
-  ]).filter((key): key is string => Boolean(key));
+  const immediate: string[] = [];
 
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Workspace" WHERE "id" = ${workspaceId} FOR UPDATE`;
+      await tx.managedUpload.updateMany({ where: { workspaceId }, data: { status: "expired" } });
+      let after: string | undefined;
+      do {
+        const meetings = await tx.meeting.findMany({
+          where: { workspaceId, ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: "asc" }, take: 100,
+          select: { id: true, recordingObjectKey: true, uploads: { select: { objectKey: true, chunks: { select: { objectKey: true, signedUntil: true } }, directTickets: { select: { objectKey: true, signedUntil: true } } } } },
+        });
+        const objects = meetings.flatMap((meeting) => [
+          { objectKey: meeting.recordingObjectKey, signedUntil: null },
+          ...meeting.uploads.flatMap((upload) => [{ objectKey: upload.objectKey, signedUntil: null }, ...upload.chunks, ...upload.directTickets]),
+        ]).filter((object): object is { objectKey: string; signedUntil: Date | null } => Boolean(object.objectKey));
+        await queueObjectDeletions(objects, tx);
+        for (const object of objects) {
+          if (immediate.length < 100 && (!object.signedUntil || object.signedUntil <= new Date())) immediate.push(object.objectKey);
+        }
+        after = meetings.length === 100 ? meetings.at(-1)?.id : undefined;
+      } while (after);
       // Deletes cascade from the workspace row to membership/subscription/
       // upload/job/share rows, but legacy meetings have no Workspace relation,
       // so they are removed explicitly — inside the same transaction.
@@ -72,7 +83,10 @@ export async function purgeWorkspace(workspaceId: string): Promise<PurgeWorkspac
     return { ok: false, error: "Billing was cancelled, but we couldn't finish deleting the workspace. Nothing else was removed; try deleting it again in a moment." };
   }
 
-  const cleanup = await Promise.allSettled(objectKeys.map((key) => deleteObject(key)));
+  const cleanup: PromiseSettledResult<void>[] = [];
+  for (let offset = 0; offset < immediate.length; offset += 16) {
+    cleanup.push(...await Promise.allSettled(immediate.slice(offset, offset + 16).map((key) => deleteObject(key))));
+  }
   const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
   if (failures.length) {
     console.error("workspace deletion object cleanup failed", {

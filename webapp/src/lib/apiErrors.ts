@@ -3,6 +3,7 @@ import { ValidationError } from "./meetings";
 import { AUDIO_BUDGET_PUBLIC_MESSAGE, AudioBudgetError, ENTITLEMENT_PUBLIC_MESSAGE, EntitlementError } from "./entitlementError";
 import { safeRequestId } from "./requestId";
 import { captureServerError } from "./observability";
+import { ProviderBudgetError } from "./providerSpend";
 
 // Keep the existing route import path stable while allowing the proxy to use
 // the dependency-light request-id utility without loading route validation or
@@ -24,6 +25,9 @@ export function apiErrorResponse(
   options: ErrorResponseOptions = {},
 ): NextResponse {
   const requestId = safeRequestId(options.requestId);
+  if (error instanceof ProviderBudgetError) {
+    return NextResponse.json({ error: error.message, code: "provider_budget_unavailable", requestId }, { status: 503, headers: { "x-request-id": requestId, "retry-after": "3600" } });
+  }
   if (error instanceof ValidationError) {
     return NextResponse.json(
       { error: error.message },

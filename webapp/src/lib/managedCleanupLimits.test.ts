@@ -13,9 +13,15 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("./db", () => ({ prisma: {
   uploadChunk: { findMany: state.findChunks, deleteMany: state.deleteRows },
+  directUploadTicket: { findMany: vi.fn(async () => []), deleteMany: vi.fn() },
   managedUpload: { findMany: state.findUploads, updateMany: vi.fn(async () => ({ count: 1 })), deleteMany: vi.fn() },
   meeting: { findMany: state.findMeetings },
 } }));
+const cursors = new Map<string, string>();
+vi.mock("./maintenanceCursor", () => ({
+  readMaintenanceCursor: async (id: string) => cursors.get(id),
+  writeMaintenanceCursor: async (id: string, value?: string) => { if (value) cursors.set(id, value); else cursors.delete(id); },
+}));
 vi.mock("./objectStorage", () => ({
   getObject: vi.fn(),
   deleteObject: async (key: string) => {
@@ -34,6 +40,7 @@ import { deleteManagedUploadAudio, expireManagedUploads } from "./managedJobs";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  cursors.clear();
   state.active = 0;
   state.peak = 0;
   state.failureKey = "";

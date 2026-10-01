@@ -5,11 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { prisma } from "./db";
+import { addProviderLeaseGuard, reserveProviderAttempt, settleProviderAttempt, withProviderSpend } from "./providerSpend";
+import { ManagedCapacityError, withWorkerSlot } from "./maintenanceCursor";
 import { adjustReservedAudioSeconds, releaseMeetingProcessing } from "./usageLedger";
 import { AudioBudgetError } from "./entitlementError";
 import { isManagedPlan, PLAN_IMPORT_MAX_SECONDS } from "./plans";
 import { decodeToPcm, mediaToolsAvailable, MediaDecodeError, type DecodedAudio } from "./mediaDecode";
-import { getObject } from "./objectStorage";
+import { drainObjectDeletions, getObject } from "./objectStorage";
 import { purgeExpiredAuditEvents } from "./audit";
 import { purgeExpiredTrash } from "./library";
 import { notifyNoteReady, runIntegrationMaintenance } from "./integrations";
@@ -157,11 +159,13 @@ function waitForProviderRetry(milliseconds: number): Promise<void> {
  * row first, or the job/meeting was deleted while it ran.
  */
 export function isBenignJobRace(error: unknown): boolean {
-  return error instanceof ManagedWorkerError && (error.message === "job not found or already running" || error.message === "managed job lease was lost");
+  return error instanceof ManagedCapacityError || error instanceof ManagedWorkerError && (error.message === "job not found or already running" || error.message === "managed job lease was lost");
 }
 
 export interface ProviderRequestOptions {
   timeoutMs?: number;
+  spendMicros?: number;
+  reportedCost?: (body: unknown) => number | undefined;
   /**
    * Builds a fresh request body for every attempt. Needed for streamed audio,
    * because a consumed stream cannot be replayed on retry.
@@ -172,7 +176,32 @@ export interface ProviderRequestOptions {
 /** Provider calls are bounded and retried only for transient failures. */
 export async function providerRequest(input: string, init: RequestInit, label: string, options: ProviderRequestOptions = {}): Promise<Response> {
   const timeoutMs = options.timeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS;
+  const anthropic = input.startsWith("https://api.anthropic.com/");
+  const ratePrefix = anthropic ? "MANAGED_ANTHROPIC" : "MANAGED_OPENAI";
+  const customModel = typeof init.body === "string" && (() => {
+    try { const model = (JSON.parse(init.body) as { model?: string }).model; return model && model !== (anthropic ? DEFAULT_ANTHROPIC_SUMMARY_MODEL : DEFAULT_MANAGED_SUMMARY_MODEL); } catch { return false; }
+  })();
+  function rate(kind: "INPUT" | "OUTPUT", fallback: number) {
+    const configured = process.env[`${ratePrefix}_${kind}_MICROS_PER_TOKEN`];
+    if (customModel && !configured && process.env.NODE_ENV === "production" && process.env.MANAGED_HOSTING === "true") throw new ManagedWorkerError("Custom managed model pricing is not configured");
+    if (!configured) return fallback;
+    const value = Number(configured);
+    if (!Number.isFinite(value) || value <= 0 || value > 1_000) throw new ManagedWorkerError("Managed model pricing is invalid");
+    return value;
+  }
+  const inputRate = rate("INPUT", anthropic ? ANTHROPIC_INPUT_MICROS_PER_TOKEN : OPENAI_INPUT_MICROS_PER_TOKEN);
+  const outputRate = rate("OUTPUT", anthropic ? ANTHROPIC_OUTPUT_MICROS_PER_TOKEN : OPENAI_OUTPUT_MICROS_PER_TOKEN);
+  // UTF-8 bytes bound the input token count conservatively; reserve the full
+  // output limit (including reasoning) rather than average summary usage.
+  const summaryEstimate = Math.ceil((typeof init.body === "string" ? Buffer.byteLength(init.body) : 0) * inputRate + 8_192 * outputRate);
+  const reportedCost = options.reportedCost ?? ((body: unknown) => {
+    const usage = (body as { usage?: { input_tokens?: unknown; output_tokens?: unknown } })?.usage;
+    const inputTokens = finiteNumber(usage?.input_tokens);
+    const outputTokens = finiteNumber(usage?.output_tokens);
+    return inputTokens === undefined || outputTokens === undefined ? undefined : Math.ceil(inputTokens * inputRate + outputTokens * outputRate);
+  });
   for (let attempt = 0; attempt < PROVIDER_MAX_ATTEMPTS; attempt += 1) {
+    const spendId = await reserveProviderAttempt(label, options.spendMicros ?? Math.max(1, summaryEstimate));
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
@@ -183,6 +212,7 @@ export async function providerRequest(input: string, init: RequestInit, label: s
       response = await fetch(input, attemptInit);
     } catch (error) {
       clearTimeout(timer);
+      await settleProviderAttempt(spendId);
       if (attempt === PROVIDER_MAX_ATTEMPTS - 1) {
         throw new ManagedWorkerError(error instanceof Error && error.name === "AbortError" ? `${label} provider request timed out` : `${label} provider request failed`);
       }
@@ -194,9 +224,15 @@ export async function providerRequest(input: string, init: RequestInit, label: s
       // that sends headers then stalls must not hang the job (and its lease) forever.
       // Aborting an already-consumed response is a no-op.
       timer.unref?.();
+      if (spendId) {
+        let reported: number | undefined;
+        try { reported = reportedCost(await response.clone().json()); } catch { /* Retain the reservation for incomplete/invalid bodies. */ }
+        await settleProviderAttempt(spendId, reported, response.status);
+      }
       return response;
     }
     clearTimeout(timer);
+    await settleProviderAttempt(spendId, undefined, response.status);
     if (!providerRetryable(response.status) || attempt === PROVIDER_MAX_ATTEMPTS - 1) {
       throw new ManagedWorkerError(`${label} provider returned ${response.status}`);
     }
@@ -612,7 +648,13 @@ async function transcribeDeepgramStream(bodyFactory: () => BodyInit, sampleRate:
     `https://api.deepgram.com/v1/listen?model=nova-3&encoding=linear16&sample_rate=${sampleRate}&channels=1&utterances=true&smart_format=true&diarize=true${deepgramLanguageParams(hints)}`,
     { method: "POST", headers: { Authorization: `Token ${key}`, "Content-Type": "audio/l16", "Content-Length": String(totalBytes) } },
     "transcription",
-    { timeoutMs: DEEPGRAM_TIMEOUT_MS, bodyFactory },
+    { timeoutMs: DEEPGRAM_TIMEOUT_MS, bodyFactory,
+      spendMicros: Math.ceil(Math.max(1, totalBytes / (sampleRate * PCM_BYTES_PER_SAMPLE)) / 60 * DEEPGRAM_MICROS_PER_AUDIO_MINUTE),
+      reportedCost: (body) => {
+        const duration = finiteNumber((body as { metadata?: { duration?: unknown } })?.metadata?.duration);
+        return duration === undefined ? undefined : Math.ceil(duration / 60 * DEEPGRAM_MICROS_PER_AUDIO_MINUTE);
+      },
+    },
   );
   const body = await response.json();
   const parsed = parseDeepgramUtterances(body, channel);
@@ -655,7 +697,13 @@ async function transcribeGroqWindows(windows: AsyncIterable<Buffer>, sampleRate:
       method: "POST",
       headers: { Authorization: `Bearer ${key}` },
       body: form,
-    }, "Groq transcription", { timeoutMs: GROQ_TIMEOUT_MS });
+    }, "Groq transcription", { timeoutMs: GROQ_TIMEOUT_MS,
+      spendMicros: Math.ceil(Math.max(10, usableBytes / bytesPerSecond) / 3_600 * GROQ_MICROS_PER_AUDIO_HOUR),
+      reportedCost: (body) => {
+        const duration = finiteNumber((body as { duration?: unknown })?.duration);
+        return duration === undefined ? undefined : Math.ceil(Math.max(10, duration) / 3_600 * GROQ_MICROS_PER_AUDIO_HOUR);
+      },
+    });
     const body = await response.json();
     detectedLanguage ??= languageCodeFromName((body as { language?: unknown } | null)?.language);
     const parsed = parseGroqUtterances(body, speaker, offsetMs);
@@ -820,27 +868,8 @@ export async function summarize(utterances: ManagedUtterance[], meetingDate: str
  * safe and only one can execute provider calls for a job.
  */
 export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
-  // The worker is the always-on managed process, so use its poll as the
-  // bounded cleanup heartbeat for abandoned private audio uploads as well.
-  // Every maintenance step is isolated: a storage hiccup in one of them must never
-  // stop the poll from claiming a job (a 500 here starves the whole queue).
-  const maintenanceFailed = (step: string) => (error: unknown) => {
-    console.error(`${step} failed`, { error: error instanceof Error ? error.message : String(error) });
-  };
-  await expireManagedUploads().catch(maintenanceFailed("upload expiry"));
-  await expireManagedMeetings().catch(maintenanceFailed("meeting retention"));
-  await purgeExpiredAuditEvents().catch((error: unknown) => {
-    console.error("audit purge failed", { error: error instanceof Error ? error.message : String(error) });
-  });
-  await purgeExpiredTrash().catch((error: unknown) => {
-    console.error("trash purge failed", { error: error instanceof Error ? error.message : String(error) });
-  });
-  await runIntegrationMaintenance().catch((error: unknown) => {
-    console.error("integration retries failed", { error: error instanceof Error ? error.message : String(error) });
-  });
-  await sweepOrphanedAudio().catch(maintenanceFailed("orphaned audio sweep"));
   const staleBefore = new Date(Date.now() - MANAGED_JOB_LEASE_MS);
-  await failExhaustedJobs(staleBefore).catch(maintenanceFailed("exhausted job sweep"));
+  await failExhaustedJobs(staleBefore);
   const job = await prisma.processingJob.findFirst({
     where: {
       OR: [
@@ -853,6 +882,30 @@ export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
     select: { id: true, workspaceId: true },
   });
   return job ? { jobId: job.id, workspaceId: job.workspaceId } : null;
+}
+
+/** Called by the dedicated cleaner, never by every queue poll. */
+export async function runManagedMaintenance(): Promise<void> {
+  // The worker is the always-on managed process, so use its poll as the
+  // bounded cleanup heartbeat for abandoned private audio uploads as well.
+  // Every maintenance step is isolated: a storage hiccup in one of them must never
+  // stop the poll from claiming a job (a 500 here starves the whole queue).
+  const maintenanceFailed = (step: string) => (error: unknown) => {
+    console.error(`${step} failed`, { error: error instanceof Error ? error.message : String(error) });
+  };
+  await drainObjectDeletions().catch(maintenanceFailed("deferred object deletion"));
+  await expireManagedUploads().catch(maintenanceFailed("upload expiry"));
+  await expireManagedMeetings().catch(maintenanceFailed("meeting retention"));
+  await purgeExpiredAuditEvents().catch((error: unknown) => {
+    console.error("audit purge failed", { error: error instanceof Error ? error.message : String(error) });
+  });
+  await purgeExpiredTrash().catch((error: unknown) => {
+    console.error("trash purge failed", { error: error instanceof Error ? error.message : String(error) });
+  });
+  await runIntegrationMaintenance().catch((error: unknown) => {
+    console.error("integration retries failed", { error: error instanceof Error ? error.message : String(error) });
+  });
+  await sweepOrphanedAudio().catch(maintenanceFailed("orphaned audio sweep"));
 }
 
 const ORPHAN_SWEEP_INTERVAL_MS = 30 * 60 * 1_000;
@@ -892,6 +945,13 @@ async function failExhaustedJobs(staleBefore: Date): Promise<void> {
 }
 
 export async function runManagedJob(workspaceId: string, jobId: string): Promise<void> {
+  return withWorkerSlot((assertLease) => withProviderSpend(workspaceId, jobId, () => {
+    addProviderLeaseGuard(assertLease);
+    return executeManagedJob(workspaceId, jobId);
+  }));
+}
+
+async function executeManagedJob(workspaceId: string, jobId: string): Promise<void> {
   // Claim in the database before reading any objects. The request dispatcher,
   // a retry worker, and a second web instance may all observe the same queued
   // job. The advisory lock closes the small race between two transactions
@@ -931,6 +991,10 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
     });
   });
   if (!job) throw new ManagedWorkerError("job not found or already running");
+  addProviderLeaseGuard(async () => {
+    const valid = await prisma.processingJob.count({ where: { id: job.id, workspaceId, status: "processing", leaseToken } });
+    if (!valid) throw new ManagedWorkerError("managed job lease was lost");
+  });
   let costMicros = 0;
   // Renew the lease while we work. Transcribing a long recording can outlast
   // the lease window; without this a second worker would reclaim and redo it.
@@ -956,14 +1020,20 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
       costMicros += result.costMicros;
       channelResults.speaker = result;
     } else {
-      await Promise.all((["mic", "speaker"] as const).map(async (channel) => {
+      let channelFailed = false;
+      addProviderLeaseGuard(async () => { if (channelFailed) throw new ManagedWorkerError("A recording channel failed; retry from the local recording"); });
+      const outcomes = await Promise.allSettled((["mic", "speaker"] as const).map(async (channel) => {
         const chunks = job.upload.chunks.filter((chunk) => chunk.channel === channel);
         const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
         if (totalBytes === 0) return;
-        const result = await transcribe(chunks.map((chunk) => chunk.objectKey), totalBytes, channel === "mic" ? "you" : "them", hints);
+        let result: TranscriptionResult;
+        try { result = await transcribe(chunks.map((chunk) => chunk.objectKey), totalBytes, channel === "mic" ? "you" : "them", hints); }
+        catch (error) { channelFailed = true; throw error; }
         costMicros += result.costMicros;
         channelResults[channel] = result;
       }));
+      const failed = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+      if (failed) throw failed.reason;
     }
     const utterances = mergeUtterances(channelResults.mic?.utterances ?? [], channelResults.speaker?.utterances ?? []);
     // The end time is the recording's own duration. Overwriting it with the

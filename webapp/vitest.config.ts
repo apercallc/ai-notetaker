@@ -10,6 +10,12 @@ export default defineConfig({
     // file's cleanup (`beforeEach` deleting all rows) race a different
     // file's in-flight assertions against the same tables.
     fileParallelism: false,
+    env: {
+      MANAGED_DAILY_SPEND_MICROS: "1000000000000",
+      MANAGED_WORKSPACE_DAILY_SPEND_MICROS: "1000000000000",
+      MANAGED_TRIAL_DAILY_SPEND_MICROS: "1000000000000",
+      MANAGED_TRIAL_DAILY_GRANTS: "10000",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary", "lcov"],

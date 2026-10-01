@@ -3,6 +3,7 @@ import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 import { getBrowserManagedSession, managedUnauthorized } from "@/lib/managedAuth";
 import { ManagedUploadQuotaError, ManagedValidationError, readManagedJson } from "@/lib/managedJobs";
 import { startImport } from "@/lib/fileImport";
+import { directUploadsEnabled } from "@/lib/objectStorage";
 
 /** Browser-only (cookie session) entry point for importing an audio/video file. */
 export async function POST(request: Request) {
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
       ...(typeof value.template === "string" ? { template: value.template } : {}),
       ...(typeof value.language === "string" ? { language: value.language } : {}),
     });
-    return NextResponse.json(started, { status: 201, headers: { "x-request-id": requestId } });
+    return NextResponse.json({ ...started, directUpload: directUploadsEnabled() }, { status: 201, headers: { "x-request-id": requestId } });
   } catch (error) {
     if (error instanceof ManagedUploadQuotaError) return jsonError(error.message, 429, requestId);
     return apiErrorResponse(error, { requestId });

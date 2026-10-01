@@ -74,6 +74,10 @@ describe("signup policy", () => {
   const ready = {
     MANAGED_HOSTING: "true",
     NODE_ENV: "production",
+    MANAGED_DAILY_SPEND_MICROS: "25000000",
+    MANAGED_WORKSPACE_DAILY_SPEND_MICROS: "5000000",
+    MANAGED_TRIAL_DAILY_SPEND_MICROS: "5000000",
+    MANAGED_TRIAL_DAILY_GRANTS: "100",
     APP_URL: "https://notes.example.test",
     MANAGED_WORKER_TOKEN: "worker",
     S3_BUCKET: "bucket",

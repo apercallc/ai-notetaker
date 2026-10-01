@@ -33,6 +33,10 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/scripts/docker-entrypoint.mjs ./scripts/docker-entrypoint.mjs
 COPY --from=builder /app/scripts/managed-worker.mjs ./scripts/managed-worker.mjs
+COPY --from=builder /app/scripts/managed-runtime.ts ./scripts/managed-runtime.ts
+COPY --from=builder /app/scripts/managed-cost-report.ts ./scripts/managed-cost-report.ts
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/next.config.js ./next.config.js
 
 RUN mkdir -p /app/.data && chown -R node:node /app/.data

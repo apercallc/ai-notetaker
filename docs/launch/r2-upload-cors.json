@@ -1,0 +1,8 @@
+[
+  {
+    "AllowedOrigins": ["https://ai-notetaker.apercallc.com", "chrome-extension://jidooookkdbbbhkkdmcajnnnhhphodok"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type", "content-length", "if-none-match"],
+    "MaxAgeSeconds": 600
+  }
+]

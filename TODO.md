@@ -1,5 +1,27 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Infrastructure implementation — 2026-10-01
+
+- [x] Durable provider-attempt accounting independent of customer quota refunds
+      and content deletion; atomic global/workspace/trial daily admission.
+- [x] Shared daily trial grant ceiling covering email and Google signup.
+- [x] Standalone processing runtime with leased cleanup in the existing worker
+      by default, optional separate cleaner, global concurrent
+      job ceiling and bounded per-process Postgres connection pools.
+- [x] Durable upload/retention/object-list cursors and deletion retry records
+      surviving meeting/workspace deletion; bounded cleanup concurrency.
+- [x] Feature-gated immutable signed private uploads for extension Meet,
+      desktop helper and browser imports, with verified stored SHA-256/size.
+- [x] Additive migration tests, real SDK signing tests, local worker/cleaner
+      execution and an isolated local Postgres backup/restore drill.
+- [x] Operator cost-report command, Railway/Docker service configuration and
+      [deployment/rollback runbook](docs/launch/infrastructure-rollout.md).
+
+Pilot budgets are configured on the existing web/worker services. Deployment
+verification, monitoring destinations, provider invoice/throughput proof and
+pricing decisions are tracked in that runbook and below. No extra service,
+replica or capacity is required for this rollout.
+
 ## Only you can do these (updated 2026-09-30)
 
 Everything below needs your accounts, devices, money or a decision. Each item is also
@@ -37,9 +59,13 @@ Moved out of the checklist so that every unchecked box in this file needs you.
 - Audit log: date filters and search, sign-in events, "who viewed" for shared notes, SIEM export. The page is browser-checked at 375/768/1280 px and design-reviewed (2026-09-30).
 - Team admin: SSO.
 - Chat: pgvector retrieval once usage data exists; a retention-aware design for chat history (intentionally not persisted today).
-- Before broad Hosted AI launch: implement irreversible provider-attempt
-      spend ledger, global/trial budgets, durable scheduled cleanup and measured
-      cohort contribution dashboards as specified in the scale plan.
+- Before broad Hosted AI launch: configure and exercise the implemented
+      provider-attempt ledger, global/workspace/trial budgets, trial grant caps,
+      standalone worker/cleaner and private direct uploads. See
+      [infrastructure rollout](docs/launch/infrastructure-rollout.md). Full
+      invoice reconciliation, alert delivery and revenue/cohort contribution
+      dashboards remain engineering follow-ups; live budgets, CORS and restore
+      proof need the deployment accounts. Pricing/allowances remain a decision.
 - Dependencies (waiting on upstream): CPAL 0.17+ once macOS 13 support is preserved (CoreAudio releases need macOS 14.2).
 - Dependencies (waiting on upstream): webapp TypeScript 7 and ESLint 10 once `eslint-config-next` supports them; Dependabot ignores only the blocked majors.
 - Enable live transcription for Hosted AI only after adding server-owned

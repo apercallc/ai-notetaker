@@ -44,6 +44,7 @@ vi.mock("@/lib/db", () => ({
       await previous;
       try {
         return await callback({
+          directUploadTicket: { findUnique: async () => null, aggregate: async () => ({ _sum: { byteLength: 0 } }) },
           managedUpload: { updateMany: async () => ({ count: 1 }) },
           uploadChunk: {
             findUnique: async () => state.row,

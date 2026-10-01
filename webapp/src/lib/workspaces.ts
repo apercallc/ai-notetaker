@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { normalizeEmail } from "./email";
 import { assignHostedTrial } from "./usageLedger";
+import { reserveTrialGrant } from "./trialGrants";
 
 export const MIN_RETENTION_DAYS = 1;
 export const MAX_RETENTION_DAYS = 3_650;
@@ -57,6 +58,7 @@ export async function createHostedWorkspaceWithOwner(
   options: { termsAcceptedAt?: Date; termsVersion?: string; emailVerifiedAt?: Date | null } = {},
 ): Promise<{ userId: string; workspaceId: string }> {
   const user = await prisma.$transaction(async (tx) => {
+    await reserveTrialGrant(tx);
     const workspace = await tx.workspace.create({ data: { name: workspaceName, isDefault: false } });
     const created = await tx.user.create({
       data: {

@@ -17,6 +17,8 @@ import {
   saveRemindedCalls,
   getWidgetPosition,
   saveWidgetPosition,
+  getTranscriptionSegment,
+  saveTranscriptionSegment,
 } from "../src/lib/storage";
 import { DEFAULT_SETTINGS, type MeetingRecord } from "../src/types";
 
@@ -146,6 +148,32 @@ describe("meeting storage", () => {
     actionItems: [{ text: "Follow up with design" }],
     status: "complete",
   };
+
+  it("reuses saved transcription windows until meeting deletion", async () => {
+    expect(await getTranscriptionSegment(meeting.id, "mic-0")).toBeUndefined();
+    await saveTranscriptionSegment(meeting.id, "mic-0", [{ text: "saved" }]);
+    await saveTranscriptionSegment(meeting.id, "speaker-0", []);
+    expect(await getTranscriptionSegment(meeting.id, "mic-0")).toEqual([{ text: "saved" }]);
+    await deleteMeeting(meeting.id);
+    expect(await getTranscriptionSegment(meeting.id, "mic-0")).toBeUndefined();
+  });
+
+  it("recovers meeting, index and outbox write queues after storage failures", async () => {
+    const failWrite = () => chromeMock.storage.local.set.mockImplementationOnce((_items, callback) => {
+      chromeMock.runtime.lastError = { message: "disk full" };
+      callback?.();
+      chromeMock.runtime.lastError = undefined;
+      return Promise.resolve();
+    });
+    failWrite();
+    await expect(saveMeeting(meeting)).rejects.toThrow("disk full");
+    await saveMeeting(meeting);
+    expect(await getMeeting(meeting.id)).toEqual(meeting);
+    failWrite();
+    await expect(queueWebappSync(meeting)).rejects.toThrow("disk full");
+    await queueWebappSync(meeting);
+    expect(await getWebappSyncOutbox()).toEqual([meeting]);
+  });
 
   it("lists no meetings initially", async () => {
     expect(await listMeetings()).toEqual([]);

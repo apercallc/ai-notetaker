@@ -351,6 +351,24 @@ describe("MeetWidget: recording", () => {
     return h;
   }
 
+  it.each([false, true])("copies the attendee notice and shows the result (failure=%s)", async (fails) => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const writeText = fails ? vi.fn().mockRejectedValue(new Error("permission denied")) : vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      harness = await createHarness(baseState({ disclosureNoticeEnabled: true, active: activeMeeting() }));
+      await harness.click("#toggle");
+      await harness.click("#copy-disclosure");
+      expect(writeText).toHaveBeenCalledOnce();
+      expect(harness.$("#copy-disclosure")?.textContent).toContain(fails ? "Copy failed" : "Copied");
+      await new Promise((resolve) => window.setTimeout(resolve, 2_600));
+      expect(harness.$("#copy-disclosure")?.textContent).toBe("Copy notice for chat");
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, "clipboard", descriptor);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
   it("shows an unmistakable recording state with elapsed time and quick actions", async () => {
     harness = await recording();
     const { $ } = harness;
