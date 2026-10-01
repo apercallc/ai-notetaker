@@ -67,6 +67,10 @@ const RETRYABLE_HELPER_ERROR_PREFIXES = [
   "summarization failed:",
 ] as const;
 
+class HostedPollTimeoutError extends Error {}
+
+const MANAGED_JOB_POLL_ATTEMPTS = 300; // x 2 s = 10 minutes
+
 export class BackgroundController {
   private settings: NotetakerSettings | null = null;
   private activeMeetingId: string | null = null;
@@ -515,21 +519,29 @@ export class BackgroundController {
         // browserStorage's own sizing note) is a heap exhaustion mid-upload.
         // Pack frames into bounded channel chunks to avoid one HTTP request,
         // object and database row per AudioWorklet frame.
-        const source = await managedAudioChunkSource(() => streamBrowserMeetChunks(meetingId));
-        const endedAt = new Date().toISOString();
-        await registerManagedMeeting(managed, meeting, endedAt, this.fetchImpl);
-        const upload = await uploadManagedMeeting(
-          managed,
-          meetingId,
-          source,
-          this.fetchImpl,
-        );
-        await updateMeeting(meetingId, (current) => ({
-          ...current,
-          status: "processing",
-          managedProcessing: { uploadId: upload.uploadId, jobId: upload.jobId, status: "queued" },
-        }));
-        for (let attempt = 0; attempt < 90; attempt += 1) {
+        // A retry or worker restart after a completed upload must poll the job the server
+        // already has, never upload the whole recording (and bill it) a second time.
+        let upload: { uploadId: string; jobId: string };
+        const existing = meeting.managedProcessing;
+        if (existing?.uploadId && existing.jobId && existing.status !== "error") {
+          upload = { uploadId: existing.uploadId, jobId: existing.jobId };
+        } else {
+          const source = await managedAudioChunkSource(() => streamBrowserMeetChunks(meetingId));
+          const endedAt = new Date().toISOString();
+          await registerManagedMeeting(managed, meeting, endedAt, this.fetchImpl);
+          upload = await uploadManagedMeeting(
+            managed,
+            meetingId,
+            source,
+            this.fetchImpl,
+          );
+          await updateMeeting(meetingId, (current) => ({
+            ...current,
+            status: "processing",
+            managedProcessing: { uploadId: upload.uploadId, jobId: upload.jobId, status: "queued" },
+          }));
+        }
+        for (let attempt = 0; attempt < MANAGED_JOB_POLL_ATTEMPTS; attempt += 1) {
           const job = await getManagedJob(managed, upload.jobId, this.fetchImpl);
           if (job.status === "complete") {
             const completed = await updateMeeting(meetingId, (current) => ({
@@ -552,7 +564,7 @@ export class BackgroundController {
           if (job.status === "error") throw new Error(job.message ?? "Hosted processing failed");
           await new Promise((resolve) => setTimeout(resolve, 2_000));
         }
-        throw new Error("Hosted processing did not finish within 3 minutes; the saved audio can be retried from the meeting details.");
+        throw new HostedPollTimeoutError("Hosted processing is taking longer than expected. It keeps running on the server; retry from the meeting details to check again.");
       }
       const localSettings: NotetakerSettings = {
         ...this.settings,
@@ -597,9 +609,11 @@ export class BackgroundController {
         errorMessage: `${message} Saved Meet audio is available for retry.`,
         ...(current.processingMode?.kind === "managed"
           ? {
+              // Only a poll timeout leaves the server job alive: keep it "processing" so a retry
+              // polls it instead of uploading the recording again. Any other failure re-uploads.
               managedProcessing: {
                 ...(current.managedProcessing ?? {}),
-                status: "error" as const,
+                status: error instanceof HostedPollTimeoutError ? ("processing" as const) : ("error" as const),
                 errorMessage: message,
               },
             }

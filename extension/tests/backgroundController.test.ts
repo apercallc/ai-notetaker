@@ -284,6 +284,38 @@ describe("BackgroundController", () => {
     expect(uploadCall?.[2]).toMatchObject({ totalChunks: 1, totalBytes: 2 });
   });
 
+  it("polls the existing hosted job instead of uploading again after a poll timeout", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    await saveMeeting({
+      id: "slow-job-meet",
+      title: "Slow job Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "error",
+      captureSource: "meet",
+      processingMode,
+      managedProcessing: { uploadId: "upload-1", jobId: "job-1", status: "processing", errorMessage: "taking longer" },
+    });
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    const register = vi.spyOn(managedClient, "registerManagedMeeting").mockResolvedValue();
+    const upload = vi.spyOn(managedClient, "uploadManagedMeeting");
+    const poll = vi.spyOn(managedClient, "getManagedJob").mockResolvedValue({ status: "complete", meetingId: "slow-job-meet", summary: "Finished", actionItems: [] });
+
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+
+    await vi.waitFor(async () => expect((await getMeeting("slow-job-meet"))?.status).toBe("complete"));
+    expect(upload).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+    expect(poll).toHaveBeenCalledWith(managedService, "job-1", expect.any(Function));
+  });
+
   it("does not replay a pending managed Meet into another workspace", async () => {
     const originalMode = { kind: "managed", accountId: "acct-old", workspaceId: "workspace-old", plan: "hosted_pro" } as const;
     await (await import("../src/lib/storage")).saveMeeting({

@@ -33,6 +33,18 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const REQUEST_MAX_ATTEMPTS = 3;
 const REQUEST_RETRY_BASE_MS = 250;
 
+// A 4 MiB audio chunk cannot finish in 15 s on a modest uplink. Scale the
+// deadline with the payload, assuming at least ~0.5 Mbps (64 KiB/s).
+const MIN_UPLOAD_BYTES_PER_SECOND = 64 * 1024;
+
+function requestTimeoutMs(body: RequestInit["body"]): number {
+  let bytes = 0;
+  if (body instanceof Blob) bytes = body.size;
+  else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) bytes = body.byteLength;
+  else if (typeof body === "string") bytes = body.length;
+  return REQUEST_TIMEOUT_MS + Math.ceil((bytes / MIN_UPLOAD_BYTES_PER_SECOND) * 1_000);
+}
+
 function retryableStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -107,7 +119,7 @@ async function requestJson(
 ): Promise<Record<string, unknown>> {
   for (let attempt = 0; attempt < REQUEST_MAX_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs(init.body));
     let response: Response | undefined;
     let body: Record<string, unknown> = {};
     let requestError: unknown;
