@@ -91,6 +91,36 @@ for every managed upload, processing, and job-status request.
 - `POST /api/v1/billing/webhook` — Stripe-signed subscription updates; event
   ids are stored so Stripe retries are safe.
 
+### File import (`/api/import`, browser only)
+
+The `/import` page uploads one audio or video file for transcription and
+summary. These routes authenticate with the browser's HttpOnly `session`
+cookie, not a Bearer token, so they also require an `Origin` equal to the
+app's own origin and the `x-notetaker-browser: 1` header (a CSRF defence a
+Bearer API does not need). The workspace is the session's active workspace.
+
+- `POST /api/import` — register the meeting and an idempotent `kind=import`
+  upload manifest. Body: `meetingId`, `idempotencyKey`, `fileName`,
+  `totalBytes`, and optional `durationSeconds` (browser-measured estimate),
+  `title`, `recordedAtMs`. Returns `uploadId`, `totalChunks`, `chunkBytes` and
+  `receivedChunks` so a reload resumes. Refused with 402 when the plan cannot
+  cover the estimate, and a refused request leaves no empty meeting behind.
+- `PUT /api/import/:uploadId/chunks/:chunkIndex` — one checksummed 4 MiB slice
+  (`x-chunk-sha256`). Only import uploads in the caller's workspace are
+  accepted here.
+- `POST /api/import/:uploadId/complete` — seal the upload, reserve usage and
+  queue the job.
+
+Usage: an import is one meeting unit plus its **full duration** in audio
+seconds (a mono hour counts as an hour, unlike the two-channel live-capture
+formula). The first reservation uses the browser's duration (with a size-based
+floor); after decoding, the worker replaces it with the measured length
+*before any provider call*, and fails the job and refunds if that exceeds the
+plan's remaining audio hours. Limits per file are `PLAN_IMPORT_MAX_SECONDS` in
+`webapp/src/lib/plans.ts`. Files are decoded by sandboxed `ffmpeg`
+(`webapp/src/lib/mediaDecode.ts`); the staged original is deleted when notes
+are saved or after 24 hours.
+
 The worker-only `POST /api/v1/jobs/:jobId/run` route requires the server-side
 `MANAGED_WORKER_TOKEN` and `x-workspace-id`; it is never called by the
 extension. The process route dispatches this worker automatically when the

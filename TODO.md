@@ -1,5 +1,43 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## File import: transcribe and summarize an audio/video file (2026-09-30)
+
+Spec: [`docs/superpowers/specs/2026-09-30-file-import-design.md`](docs/superpowers/specs/2026-09-30-file-import-design.md).
+
+- [x] Phase 1, hosted webapp: `/import` page, cookie-session `/api/import*`
+      routes with CSRF checks, sandboxed ffmpeg decode in the managed job,
+      full-duration usage metering (reserve, true-up before provider spend,
+      refund on failure), `Speaker N` labels, stage progress on the meeting.
+      Verified: 533 webapp tests, build, and a real-browser upload (201/201/202,
+      1 unit + 75 s reserved, 375 px layout).
+- [ ] Deploy: migration `20260930230000_file_import` (additive columns), and
+      confirm the production build provides `ffmpeg`/`ffprobe` (the Docker
+      image does; a Nixpacks build needs them added). Until then `/import`
+      says import is unavailable rather than failing.
+- [ ] Live acceptance: import a long real recording (an hour of mp3 and an mp4)
+      on production and check the true-up, provider cost
+      (`ProcessingJob.providerCostMicros`) and scratch-disk use.
+- [ ] Phase 2, Local BYOK: extension popup and helper "Import file" (Symphonia
+      decode, user's ffmpeg for video), saved as `captureSource = "import"`,
+      `processingMode = "local_byok"`. Covers self-hosted without managed mode.
+- [ ] Decide whether Deepgram diarization for imports becomes a paid-tier perk
+      (`MANAGED_IMPORT_TRANSCRIPTION_PROVIDER`) once measured cost is known.
+- [ ] Import extras: language hint, notes templates, import from a link.
+- [ ] Add a design-review pass for `/import` and a marketing line (site,
+      `llms.txt`, pricing FAQ) once it is live.
+
+## Competitive features, ranked by value over cost (2026-09-30)
+
+- [ ] Notes templates (1:1, sales call, standup, interview, lecture) picked per
+      meeting, applied to live and imported audio.
+- [ ] Rename speakers once and apply across transcript and summary.
+- [ ] Export and integrations: Notion, Slack post, and a webhook / Zapier
+      trigger on "notes ready".
+- [ ] MCP server over a user's own notes (strong open-source differentiator).
+- [ ] Team library: folders, shared search scope, per-workspace retention.
+- [ ] Multilingual: auto-detect, translated summary, custom vocabulary.
+- [ ] Team admin: audit log, then SSO.
+
 ## UX overhaul (2026-09-30)
 
 Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowers/specs/2026-09-30-ux-overhaul-design.md).

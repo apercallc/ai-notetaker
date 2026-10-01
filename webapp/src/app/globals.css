@@ -1910,3 +1910,84 @@ a.meeting-card:hover,
     display: none;
   }
 }
+
+/* File import */
+.import-form {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 640px;
+}
+
+.import-drop {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  padding: var(--space-4);
+  border: 1.5px dashed var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  text-align: center;
+  cursor: pointer;
+}
+
+.import-drop:hover,
+.import-drop.is-dragging,
+.import-drop:focus-within {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+}
+
+.import-drop.is-disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.import-prompt,
+.import-file {
+  display: grid;
+  gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.import-details {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.import-details p {
+  margin: 0;
+}
+
+.import-progress {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 14px;
+}
+
+.import-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--color-accent);
+}
+
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@media (max-width: 560px) {
+  .import-drop {
+    min-height: 140px;
+    padding: var(--space-3);
+  }
+
+  .import-actions .button {
+    flex: 1 1 100%;
+  }
+}
+
+.page-header {
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}

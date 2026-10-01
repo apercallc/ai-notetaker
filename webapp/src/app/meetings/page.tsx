@@ -93,6 +93,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       <div className="page-header">
         <h1>Meetings</h1>
         <p className="total-count" role="status" aria-live="polite">{countText}</p>
+        {managedHostingEnabled() && <Link className="button button-secondary button-small" href="/import">Import a recording</Link>}
       </div>
 
       <SearchForm initialQuery={q ?? ""} range={range} />

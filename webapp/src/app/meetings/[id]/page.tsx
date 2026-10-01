@@ -115,6 +115,9 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
       {turns.length > 0 && (
         <section aria-labelledby="transcript-heading">
           <h2 id="transcript-heading" className="section-title">Transcript</h2>
+          {turns.every((turn) => turn.speaker === "speaker") && (
+            <p className="muted-copy">Speakers aren’t separated for this recording.</p>
+          )}
           <ol className="transcript">
             {turns.map((turn, index) => (
               <li key={index} className="turn">

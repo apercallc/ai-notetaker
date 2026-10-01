@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
-import { audioSecondsForBytes } from "./plans";
+import { audioSecondsForBytes, estimateImportSeconds, isManagedPlan, PLAN_IMPORT_MAX_SECONDS } from "./plans";
+import { IMPORT_EXTENSIONS } from "./importFormats";
 import { AudioBudgetError, EntitlementError } from "./entitlementError";
 import { ValidationError } from "./meetings";
 import { deleteObject, getObject } from "./objectStorage";
@@ -81,10 +82,39 @@ export async function readManagedJson(request: Request): Promise<unknown> {
   }
 }
 
+export interface ManagedUploadInput {
+  meetingId: string;
+  totalChunks: number;
+  totalBytes: number;
+  idempotencyKey: string;
+  /** Defaults to "capture" (live PCM). "import" is one audio/video file. */
+  kind?: "capture" | "import";
+  sourceFormat?: string;
+  declaredDurationSeconds?: number;
+}
+
+/** Audio seconds an upload reserves against the plan's audio-hour cap. */
+export function uploadAudioSeconds(upload: { kind: string; totalBytes: number; declaredDurationSeconds: number | null }): number {
+  return upload.kind === "import"
+    ? estimateImportSeconds(upload.totalBytes, upload.declaredDurationSeconds)
+    : audioSecondsForBytes(upload.totalBytes);
+}
+
 export async function createManagedUpload(
   workspaceId: string,
-  input: { meetingId: string; totalChunks: number; totalBytes: number; idempotencyKey: string },
+  input: ManagedUploadInput,
 ) {
+  const kind = input.kind ?? "capture";
+  if (kind !== "capture" && kind !== "import") throw new ManagedValidationError("upload kind is invalid");
+  if (kind === "import") {
+    if (!input.sourceFormat || !(IMPORT_EXTENSIONS as readonly string[]).includes(input.sourceFormat)) {
+      throw new ManagedValidationError("this file type is not supported for import");
+    }
+    const declared = input.declaredDurationSeconds;
+    if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 1 || declared > 7 * 24 * 3_600)) {
+      throw new ManagedValidationError("declared duration is out of range");
+    }
+  }
   if (!input.meetingId || !input.idempotencyKey || input.idempotencyKey.length > 200) {
     throw new ManagedValidationError("meetingId and idempotencyKey are required");
   }
@@ -106,7 +136,8 @@ export async function createManagedUpload(
     if (
       existing.meetingId !== input.meetingId ||
       existing.totalChunks !== input.totalChunks ||
-      existing.totalBytes !== input.totalBytes
+      existing.totalBytes !== input.totalBytes ||
+      existing.kind !== kind
     ) {
       throw new ManagedValidationError("idempotency key conflicts with an existing upload");
     }
@@ -142,7 +173,17 @@ export async function createManagedUpload(
   // the staging cap for 24 hours and only be refused after the upload.
   const entitlements = await getEntitlements(workspaceId);
   if (!entitlements.canProcess) throw new EntitlementError();
-  if (audioSecondsForBytes(input.totalBytes) > entitlements.audio.remainingSeconds) throw new AudioBudgetError();
+  if (kind === "import") {
+    const maxSeconds = isManagedPlan(entitlements.plan) ? PLAN_IMPORT_MAX_SECONDS[entitlements.plan] : 0;
+    const estimate = estimateImportSeconds(input.totalBytes, input.declaredDurationSeconds);
+    if (maxSeconds <= 0) throw new EntitlementError();
+    if (input.declaredDurationSeconds !== undefined && input.declaredDurationSeconds > maxSeconds) {
+      throw new ManagedValidationError(`recordings over ${Math.floor(maxSeconds / 3_600)} hours are not supported on your plan`);
+    }
+    if (estimate > entitlements.audio.remainingSeconds) throw new AudioBudgetError();
+  } else if (audioSecondsForBytes(input.totalBytes) > entitlements.audio.remainingSeconds) {
+    throw new AudioBudgetError();
+  }
 
   let created;
   try {
@@ -165,7 +206,8 @@ export async function createManagedUpload(
         if (
           concurrent.meetingId !== input.meetingId ||
           concurrent.totalChunks !== input.totalChunks ||
-          concurrent.totalBytes !== input.totalBytes
+          concurrent.totalBytes !== input.totalBytes ||
+          concurrent.kind !== kind
         ) throw new ManagedValidationError("idempotency key conflicts with an existing upload");
         if (isExpired(concurrent)) throw new ManagedValidationError("expired upload cleanup is still in progress; retry shortly");
         return concurrent;
@@ -200,6 +242,8 @@ export async function createManagedUpload(
           totalChunks: input.totalChunks,
           totalBytes: input.totalBytes,
           idempotencyKey: input.idempotencyKey,
+          kind,
+          ...(kind === "import" ? { sourceFormat: input.sourceFormat, declaredDurationSeconds: input.declaredDurationSeconds ?? null } : {}),
           expiresAt: new Date(Date.now() + MANAGED_UPLOAD_TTL_MS),
         },
         include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
@@ -216,7 +260,7 @@ export async function createManagedUpload(
       include: { chunks: { select: { chunkIndex: true, byteLength: true, checksum: true, objectKey: true } } },
     });
     if (!winner) throw error;
-    if (winner.meetingId !== input.meetingId || winner.totalChunks !== input.totalChunks || winner.totalBytes !== input.totalBytes) {
+    if (winner.meetingId !== input.meetingId || winner.totalChunks !== input.totalChunks || winner.totalBytes !== input.totalBytes || winner.kind !== kind) {
       throw new ManagedValidationError("idempotency key conflicts with an existing upload");
     }
     created = winner;
@@ -299,6 +343,8 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
     select: {
       id: true,
       workspaceId: true,
+      meetingId: true,
+      kind: true,
       status: true,
       expiresAt: true,
       jobs: { select: { id: true, status: true, startedAt: true, idempotencyKey: true } },
@@ -351,6 +397,13 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
     await prisma.managedUpload.updateMany({ where: { id: upload.id, status: { not: "expired" } }, data: { status: "expired" } });
     if (upload.jobs.length === 0) {
       await prisma.managedUpload.deleteMany({ where: { id: upload.id, status: "expired" } });
+      // An abandoned import leaves the empty meeting registered at upload
+      // start. Remove it only while it is still an untouched placeholder.
+      if (upload.kind === "import") {
+        await prisma.meeting.deleteMany({
+          where: { id: upload.meetingId, workspaceId: upload.workspaceId, captureSource: "import", summary: "", processingJobs: { none: {} }, uploads: { none: {} } },
+        });
+      }
     }
     cleaned += 1;
   }
@@ -434,7 +487,7 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
         throw new ManagedValidationError("replacement upload must contain the same recording bytes");
       }
     }
-    await reserveMeetingProcessing(workspaceId, existing.idempotencyKey, upload.totalBytes);
+    await reserveMeetingProcessing(workspaceId, existing.idempotencyKey, upload.totalBytes, { audioSeconds: uploadAudioSeconds(upload) });
     // Guard on status so two concurrent retries cannot reset a job another
     // request already restarted and a worker has begun.
     try {
@@ -443,7 +496,7 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
         // Packing versions can supply a new upload for this same meeting.
         // Claim the replacement atomically with the retry status; never run
         // the failed job against its old expired or purged audio manifest.
-        data: { uploadId, status: "queued", errorMessage: null, startedAt: null, leaseToken: null, completedAt: null, attempts: 0 },
+        data: { uploadId, status: "queued", stage: null, errorMessage: null, startedAt: null, leaseToken: null, completedAt: null, attempts: 0 },
       });
     } catch (error) {
       if ((error as { code?: string }).code !== "P2002") throw error;
@@ -456,7 +509,7 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
     // holds the single reservation, so there is nothing to undo here.
     return prisma.processingJob.findUniqueOrThrow({ where: { id: existing.id } });
   }
-  await reserveMeetingProcessing(workspaceId, idempotencyKey, upload.totalBytes);
+  await reserveMeetingProcessing(workspaceId, idempotencyKey, upload.totalBytes, { audioSeconds: uploadAudioSeconds(upload) });
   try {
     return await prisma.processingJob.create({
       data: { workspaceId, meetingId, uploadId, idempotencyKey, status: "queued" },

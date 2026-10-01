@@ -101,6 +101,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     if (pathname === "/api/google/oauth/connect" || pathname === "/api/google/oauth/callback" || pathname === "/api/google/oauth/start") {
       return NextResponse.next();
     }
+    // The browser import form uploads with its HttpOnly session cookie. Each
+    // route authenticates the cookie itself and enforces same-origin + CSRF
+    // checks (getBrowserManagedSession), so it needs no Bearer token here.
+    if (pathname === "/api/import" || pathname.startsWith("/api/import/")) {
+      return NextResponse.next();
+    }
     if (pathname.startsWith("/api/v1/")) {
       const origin = request.headers.get("origin");
       const corsHeaders = managedCorsHeaders(origin, request.nextUrl.origin);

@@ -47,7 +47,7 @@ function assertValid(input: unknown): CreateMeetingRequest {
   if (body.mode !== undefined && !["general", "standup", "sales", "one_on_one", "interview", "custom"].includes(body.mode as string)) {
     throw new ValidationError("mode is invalid");
   }
-  if (body.captureSource !== undefined && !["desktop", "meet"].includes(body.captureSource as string)) {
+  if (body.captureSource !== undefined && !["desktop", "meet", "import"].includes(body.captureSource as string)) {
     throw new ValidationError("captureSource is invalid");
   }
   if (body.processingMode !== undefined && !["local_byok", "managed"].includes(body.processingMode as string)) {
@@ -236,6 +236,8 @@ export type ProcessingStatus = "processing" | "complete" | "error";
 export interface ProcessingState {
   jobId: string;
   status: ProcessingStatus;
+  /** Progress label for imported files while processing ("decoding", "transcribing", "summarizing"). */
+  stage: string | null;
   errorMessage: string | null;
   updatedAt: string;
 }
@@ -253,10 +255,10 @@ export interface MeetingDetail extends MeetingDetailResponse {
 const LATEST_JOB = {
   orderBy: { createdAt: "desc" as const },
   take: 1,
-  select: { id: true, status: true, errorMessage: true, updatedAt: true },
+  select: { id: true, status: true, stage: true, errorMessage: true, updatedAt: true },
 };
 
-function toProcessingState(jobs: { id: string; status: string; errorMessage: string | null; updatedAt: Date }[]): ProcessingState | null {
+function toProcessingState(jobs: { id: string; status: string; stage: string | null; errorMessage: string | null; updatedAt: Date }[]): ProcessingState | null {
   const job = jobs[0];
   if (!job) return null;
   // queued/processing are one state to the user: work is in flight.
@@ -264,6 +266,7 @@ function toProcessingState(jobs: { id: string; status: string; errorMessage: str
   return {
     jobId: job.id,
     status,
+    stage: status === "processing" ? job.stage : null,
     errorMessage: status === "error" ? job.errorMessage : null,
     updatedAt: job.updatedAt.toISOString(),
   };

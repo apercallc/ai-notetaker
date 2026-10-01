@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdtemp, open, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { Readable } from "node:stream";
 import { prisma } from "./db";
-import { releaseMeetingProcessing } from "./usageLedger";
+import { adjustReservedAudioSeconds, releaseMeetingProcessing } from "./usageLedger";
+import { AudioBudgetError } from "./entitlementError";
+import { isManagedPlan, PLAN_IMPORT_MAX_SECONDS } from "./plans";
+import { decodeToPcm, mediaToolsAvailable, MediaDecodeError, type DecodedAudio } from "./mediaDecode";
+import { getObject } from "./objectStorage";
 import { sweepStaleStagedObjects } from "./objectStorage";
 import { chunksToReadableStream, deleteManagedUploadAudio, expireManagedMeetings, expireManagedUploads, readChunksSequentially } from "./managedJobs";
 
@@ -23,6 +32,18 @@ export function managedTranscriptionProvider(env: Record<string, string | undefi
   throw new ManagedWorkerError("MANAGED_TRANSCRIPTION_PROVIDER must be groq or deepgram");
 }
 
+/**
+ * Provider for imported files. Defaults to the live-capture provider, so an
+ * operator pays Deepgram's higher rate for imports only by opting in. Deepgram
+ * labels speakers on a single mixed track; Groq (the default) does not.
+ */
+export function managedImportTranscriptionProvider(env: Record<string, string | undefined> = process.env): ManagedTranscriptionProvider {
+  const value = env.MANAGED_IMPORT_TRANSCRIPTION_PROVIDER?.trim().toLowerCase();
+  if (!value) return managedTranscriptionProvider(env);
+  if (value === "groq" || value === "deepgram") return value;
+  throw new ManagedWorkerError("MANAGED_IMPORT_TRANSCRIPTION_PROVIDER must be groq or deepgram");
+}
+
 export function managedSummaryProvider(env: Record<string, string | undefined> = process.env): ManagedSummaryProvider {
   const value = env.MANAGED_SUMMARY_PROVIDER?.trim().toLowerCase();
   if (!value || value === "openai") return "openai";
@@ -42,6 +63,9 @@ const GROQ_MICROS_PER_AUDIO_HOUR = 40_000;
 // Four minutes of 48 kHz mono PCM is ~23 MB, under Groq's 25 MB free-tier
 // upload cap after adding the WAV header. Larger account tiers allow more.
 const GROQ_AUDIO_WINDOW_MS = 4 * 60 * 1_000;
+// Imported audio is 16 kHz mono (~19 MB per ten minutes as WAV), so longer
+// windows still fit the same upload cap and need fewer requests.
+const GROQ_IMPORT_WINDOW_MS = 10 * 60 * 1_000;
 const DEEPGRAM_MICROS_PER_AUDIO_MINUTE = 4_300;
 const OPENAI_INPUT_MICROS_PER_TOKEN = 0.1;
 const OPENAI_OUTPUT_MICROS_PER_TOKEN = 0.5;
@@ -204,7 +228,7 @@ export function parseDeepgramUtterances(value: unknown, channel: "you" | "them")
 }
 
 /** Groq's Whisper response has timestamps but no speaker diarization. */
-export function parseGroqUtterances(value: unknown, channel: "you" | "them", offsetMs = 0): ManagedChannelTranscript {
+export function parseGroqUtterances(value: unknown, channel: string, offsetMs = 0): ManagedChannelTranscript {
   if (typeof value !== "object" || value === null) return { utterances: [], durationMs: 0 };
   const root = value as { duration?: unknown; segments?: Array<{ start?: unknown; end?: unknown; text?: unknown }> };
   const utterances = (Array.isArray(root.segments) ? root.segments : []).flatMap((segment): ManagedUtterance[] => {
@@ -218,7 +242,7 @@ export function parseGroqUtterances(value: unknown, channel: "you" | "them", off
   return { utterances, durationMs: duration === undefined ? 0 : Math.round(duration * 1_000) };
 }
 
-function pcmToWav(pcm: Uint8Array): Buffer {
+function pcmToWav(pcm: Uint8Array, sampleRate = PCM_SAMPLE_RATE_HZ): Buffer {
   const dataLength = pcm.byteLength - (pcm.byteLength % PCM_BYTES_PER_SAMPLE);
   const wav = Buffer.allocUnsafe(44 + dataLength);
   wav.write("RIFF", 0);
@@ -228,8 +252,8 @@ function pcmToWav(pcm: Uint8Array): Buffer {
   wav.writeUInt32LE(16, 16);
   wav.writeUInt16LE(1, 20);
   wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(PCM_SAMPLE_RATE_HZ, 24);
-  wav.writeUInt32LE(PCM_SAMPLE_RATE_HZ * PCM_BYTES_PER_SAMPLE, 28);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * PCM_BYTES_PER_SAMPLE, 28);
   wav.writeUInt16LE(PCM_BYTES_PER_SAMPLE, 32);
   wav.writeUInt16LE(8 * PCM_BYTES_PER_SAMPLE, 34);
   wav.write("data", 36);
@@ -239,8 +263,8 @@ function pcmToWav(pcm: Uint8Array): Buffer {
 }
 
 /** Bounded windows keep Groq file uploads below its documented free-tier cap. */
-async function* audioWindows(chunks: AsyncIterable<Uint8Array>): AsyncGenerator<Buffer> {
-  const maxWindowBytes = Math.floor((PCM_SAMPLE_RATE_HZ * PCM_BYTES_PER_SAMPLE * GROQ_AUDIO_WINDOW_MS) / 1_000);
+async function* audioWindows(chunks: AsyncIterable<Uint8Array>, sampleRate = PCM_SAMPLE_RATE_HZ, windowMs = GROQ_AUDIO_WINDOW_MS): AsyncGenerator<Buffer> {
+  const maxWindowBytes = Math.floor((sampleRate * PCM_BYTES_PER_SAMPLE * windowMs) / 1_000);
   let parts: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of chunks) {
@@ -341,6 +365,8 @@ function formatClock(ms: number): string {
 
 function speakerName(speaker: string): string {
   if (speaker === "you") return "You";
+  const imported = /^speaker(?:-(\d+))?$/.exec(speaker);
+  if (imported) return imported[1] ? `Speaker ${imported[1]}` : "Speaker";
   const match = /^them-(\d+)$/.exec(speaker);
   return match ? `Them ${match[1]}` : "Them";
 }
@@ -466,34 +492,43 @@ interface TranscriptionResult extends ManagedChannelTranscript {
 }
 
 async function transcribeDeepgram(objectKeys: string[], totalBytes: number, channel: "you" | "them"): Promise<TranscriptionResult> {
+  return transcribeDeepgramStream(() => chunksToReadableStream(readChunksSequentially(objectKeys)), PCM_SAMPLE_RATE_HZ, totalBytes, channel);
+}
+
+async function transcribeDeepgramStream(bodyFactory: () => BodyInit, sampleRate: number, totalBytes: number, channel: "you" | "them"): Promise<TranscriptionResult> {
   const key = process.env.MANAGED_DEEPGRAM_API_KEY;
   if (!key) throw new ManagedWorkerError("MANAGED_DEEPGRAM_API_KEY is not configured");
   // Audio is streamed chunk by chunk from object storage so a long recording
   // is never fully resident in memory.
   const response = await providerRequest(
-    "https://api.deepgram.com/v1/listen?model=nova-3&encoding=linear16&sample_rate=48000&channels=1&utterances=true&smart_format=true&diarize=true",
+    `https://api.deepgram.com/v1/listen?model=nova-3&encoding=linear16&sample_rate=${sampleRate}&channels=1&utterances=true&smart_format=true&diarize=true`,
     { method: "POST", headers: { Authorization: `Token ${key}`, "Content-Type": "audio/l16", "Content-Length": String(totalBytes) } },
     "transcription",
-    { timeoutMs: DEEPGRAM_TIMEOUT_MS, bodyFactory: () => chunksToReadableStream(readChunksSequentially(objectKeys)) },
+    { timeoutMs: DEEPGRAM_TIMEOUT_MS, bodyFactory },
   );
   const parsed = parseDeepgramUtterances(await response.json(), channel);
-  const audioMs = parsed.durationMs || Math.round((totalBytes / (PCM_SAMPLE_RATE_HZ * PCM_BYTES_PER_SAMPLE)) * 1_000);
+  const audioMs = parsed.durationMs || Math.round((totalBytes / (sampleRate * PCM_BYTES_PER_SAMPLE)) * 1_000);
   const durationMs = parsed.durationMs || audioMs;
   return { utterances: parsed.utterances, durationMs, costMicros: Math.round((audioMs / 60_000) * DEEPGRAM_MICROS_PER_AUDIO_MINUTE) };
 }
 
 async function transcribeGroq(objectKeys: string[], totalBytes: number, channel: "you" | "them"): Promise<TranscriptionResult> {
+  return transcribeGroqWindows(audioWindows(readChunksSequentially(objectKeys)), PCM_SAMPLE_RATE_HZ, totalBytes, channel);
+}
+
+/** Sends already-windowed PCM to Groq Whisper; `speaker` labels every utterance. */
+async function transcribeGroqWindows(windows: AsyncIterable<Buffer>, sampleRate: number, totalBytes: number, speaker: string): Promise<TranscriptionResult> {
   const key = process.env.MANAGED_GROQ_API_KEY;
   if (!key) throw new ManagedWorkerError("MANAGED_GROQ_API_KEY is not configured");
   const utterances: ManagedUtterance[] = [];
   let offsetMs = 0;
   let costMicros = 0;
-  const bytesPerSecond = PCM_SAMPLE_RATE_HZ * PCM_BYTES_PER_SAMPLE;
+  const bytesPerSecond = sampleRate * PCM_BYTES_PER_SAMPLE;
 
-  for await (const pcm of audioWindows(readChunksSequentially(objectKeys))) {
+  for await (const pcm of windows) {
     const usableBytes = pcm.byteLength - (pcm.byteLength % PCM_BYTES_PER_SAMPLE);
     if (usableBytes === 0) continue;
-    const wav = pcmToWav(pcm.subarray(0, usableBytes));
+    const wav = pcmToWav(pcm.subarray(0, usableBytes), sampleRate);
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "meeting-audio.wav");
     form.append("model", "whisper-large-v3-turbo");
@@ -506,7 +541,7 @@ async function transcribeGroq(objectKeys: string[], totalBytes: number, channel:
       headers: { Authorization: `Bearer ${key}` },
       body: form,
     }, "Groq transcription", { timeoutMs: GROQ_TIMEOUT_MS });
-    const parsed = parseGroqUtterances(await response.json(), channel, offsetMs);
+    const parsed = parseGroqUtterances(await response.json(), speaker, offsetMs);
     utterances.push(...parsed.utterances);
 
     const segmentDurationMs = (usableBytes / bytesPerSecond) * 1_000;
@@ -525,6 +560,85 @@ async function transcribe(objectKeys: string[], totalBytes: number, channel: "yo
   return managedTranscriptionProvider() === "deepgram"
     ? transcribeDeepgram(objectKeys, totalBytes, channel)
     : transcribeGroq(objectKeys, totalBytes, channel);
+}
+
+/** Imported audio has no mic/speaker split: Deepgram's "them-N" voices become "speaker-N", Groq's single voice "speaker". */
+export function relabelImportedSpeakers(utterances: ManagedUtterance[]): ManagedUtterance[] {
+  return utterances.map((utterance) => ({ ...utterance, speaker: utterance.speaker.replace(/^them(?=-\d+$|$)/, "speaker") }));
+}
+
+async function transcribeImportedAudio(decoded: DecodedAudio): Promise<TranscriptionResult> {
+  const fileStream = () => createReadStream(decoded.pcmPath, { highWaterMark: 1024 * 1024 });
+  if (managedImportTranscriptionProvider() === "deepgram") {
+    const result = await transcribeDeepgramStream(
+      () => Readable.toWeb(fileStream()) as unknown as BodyInit,
+      decoded.sampleRate,
+      decoded.bytes,
+      "them",
+    );
+    return { ...result, utterances: relabelImportedSpeakers(result.utterances) };
+  }
+  const windows = audioWindows(fileStream() as AsyncIterable<Uint8Array>, decoded.sampleRate, GROQ_IMPORT_WINDOW_MS);
+  return transcribeGroqWindows(windows, decoded.sampleRate, decoded.bytes, "speaker");
+}
+
+/** Reassembles an uploaded file from its staged chunks onto local scratch disk, one chunk in memory at a time. */
+async function writeChunksToFile(objectKeys: string[], filePath: string): Promise<void> {
+  const handle = await open(filePath, "w", 0o600);
+  try {
+    for (const key of objectKeys) await handle.write(await getObject(key));
+  } finally {
+    await handle.close();
+  }
+}
+
+async function setJobStage(jobId: string, workspaceId: string, leaseToken: string, stage: string | null): Promise<void> {
+  await prisma.processingJob.updateMany({ where: { id: jobId, workspaceId, status: "processing", leaseToken }, data: { stage } });
+}
+
+/**
+ * Decodes an imported file and transcribes it. Order matters for billing: the
+ * reservation is trued up to the measured duration after decoding and before
+ * any provider call, so an under-declared file can never run on spend the plan
+ * does not cover.
+ */
+async function transcribeImport(job: { id: string; workspaceId: string; idempotencyKey: string; upload: { chunks: Array<{ objectKey: string }> } }, leaseToken: string): Promise<TranscriptionResult> {
+  if (!(await mediaToolsAvailable())) throw new ManagedWorkerError("File import isn't available on this server.");
+  const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId: job.workspaceId }, select: { plan: true } });
+  const maxSeconds = subscription && isManagedPlan(subscription.plan) ? PLAN_IMPORT_MAX_SECONDS[subscription.plan] : 0;
+  if (maxSeconds <= 0) throw new ManagedWorkerError("Your plan doesn't include file import.");
+
+  const scratch = await mkdtemp(path.join(os.tmpdir(), "ai-notetaker-import-"));
+  try {
+    await setJobStage(job.id, job.workspaceId, leaseToken, "decoding");
+    const sourcePath = path.join(scratch, "source");
+    await writeChunksToFile(job.upload.chunks.map((chunk) => chunk.objectKey), sourcePath);
+    let decoded: DecodedAudio;
+    try {
+      decoded = await decodeToPcm(sourcePath, path.join(scratch, "audio.pcm"), maxSeconds);
+    } catch (error) {
+      if (error instanceof MediaDecodeError) throw new ManagedWorkerError(error.message);
+      throw error;
+    }
+    // The original can be large; the decoded PCM is all that is needed from here.
+    await rm(sourcePath, { force: true });
+
+    try {
+      if (!(await adjustReservedAudioSeconds(job.workspaceId, job.idempotencyKey, decoded.durationSeconds))) {
+        throw new ManagedWorkerError("Your usage reservation for this file is no longer active. Use Retry to try again.");
+      }
+    } catch (error) {
+      if (error instanceof AudioBudgetError) {
+        throw new ManagedWorkerError("This recording is longer than the audio time left on your plan this period.");
+      }
+      throw error;
+    }
+
+    await setJobStage(job.id, job.workspaceId, leaseToken, "transcribing");
+    return await transcribeImportedAudio(decoded);
+  } finally {
+    await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 async function summarize(utterances: ManagedUtterance[], meetingDate: string): Promise<{ summary: ManagedSummary; costMicros: number }> {
@@ -694,15 +808,24 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
   heartbeat.unref?.();
   try {
     const startedAt = job.meeting.startedAt;
+    const isImport = job.upload.kind === "import";
     const channelResults: Record<"mic" | "speaker", TranscriptionResult | null> = { mic: null, speaker: null };
-    await Promise.all((["mic", "speaker"] as const).map(async (channel) => {
-      const chunks = job.upload.chunks.filter((chunk) => chunk.channel === channel);
-      const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-      if (totalBytes === 0) return;
-      const result = await transcribe(chunks.map((chunk) => chunk.objectKey), totalBytes, channel === "mic" ? "you" : "them");
+    if (isImport) {
+      // A file has no channels: one mixed track, ordered by chunk index.
+      const chunks = [...job.upload.chunks].sort((a, b) => a.chunkIndex - b.chunkIndex);
+      const result = await transcribeImport({ id: job.id, workspaceId, idempotencyKey: job.idempotencyKey, upload: { chunks } }, leaseToken);
       costMicros += result.costMicros;
-      channelResults[channel] = result;
-    }));
+      channelResults.speaker = result;
+    } else {
+      await Promise.all((["mic", "speaker"] as const).map(async (channel) => {
+        const chunks = job.upload.chunks.filter((chunk) => chunk.channel === channel);
+        const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+        if (totalBytes === 0) return;
+        const result = await transcribe(chunks.map((chunk) => chunk.objectKey), totalBytes, channel === "mic" ? "you" : "them");
+        costMicros += result.costMicros;
+        channelResults[channel] = result;
+      }));
+    }
     const utterances = mergeUtterances(channelResults.mic?.utterances ?? [], channelResults.speaker?.utterances ?? []);
     // The end time is the recording's own duration. Overwriting it with the
     // processing time would make every meeting look as long as the queue delay.
@@ -712,6 +835,7 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
     const hasSpeech = utterances.some((utterance) => /\S/.test(utterance.text));
     let summary: ManagedSummary | null = null;
     if (hasSpeech) {
+      if (isImport) await setJobStage(job.id, workspaceId, leaseToken, "summarizing");
       const result = await summarize(utterances, startedAt.toISOString().slice(0, 10));
       summary = result.summary;
       costMicros += result.costMicros;
@@ -723,7 +847,7 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
       // reclaimed stale worker cannot overwrite a newer attempt's result.
       const finalized = await tx.processingJob.updateMany({
         where: { id: job.id, workspaceId, status: "processing", leaseToken },
-        data: { status: "complete", completedAt: new Date(), errorMessage: null, providerCostMicros: { increment: costMicros } },
+        data: { status: "complete", stage: null, completedAt: new Date(), errorMessage: null, providerCostMicros: { increment: costMicros } },
       });
       if (finalized.count !== 1) throw new ManagedWorkerError("managed job lease was lost");
       await tx.transcriptSegment.deleteMany({ where: { meetingId: job.meetingId } });
@@ -781,7 +905,7 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
     }
     const failed = await prisma.processingJob.updateMany({
       where: { id: job.id, workspaceId, status: "processing", leaseToken },
-      data: { status: "error", errorMessage: message, providerCostMicros: { increment: costMicros } },
+      data: { status: "error", stage: null, errorMessage: message, providerCostMicros: { increment: costMicros } },
     });
     if (failed.count !== 1) throw new ManagedWorkerError("managed job lease was lost");
     try {

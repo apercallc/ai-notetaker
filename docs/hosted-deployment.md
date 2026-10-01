@@ -57,6 +57,15 @@ uploading it for processing. Hosted audio is temporary staging only.
   give chat a different model. Its monthly question caps are
   `PLAN_CHAT_QUESTION_LIMITS` in `webapp/src/lib/plans.ts`; chat has no cost
   ledger yet, so watch provider spend before raising them.
+- File import decodes uploads with `ffmpeg`/`ffprobe`, which the web Docker image
+  installs. Jobs run in the web process (the worker only triggers them), so any
+  other build (for example Nixpacks) must also provide both binaries or the
+  `/import` page reports that import is unavailable. `FFMPEG_PATH` and
+  `FFPROBE_PATH` override the binary locations. Imports use the live-capture
+  transcription provider; set `MANAGED_IMPORT_TRANSCRIPTION_PROVIDER=deepgram`
+  to label speakers on imported files at Deepgram's higher rate. Decoding uses
+  scratch disk (up to the file size plus ~115 MB per hour of audio) under the
+  system temp directory and removes it when the job ends.
 - Stripe secret/webhook/price configuration when paid plans are enabled.
 
 The default Groq transcription profile is cheaper and does not identify

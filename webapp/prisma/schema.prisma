@@ -178,6 +178,13 @@ model ManagedUpload {
   totalBytes     Int
   status         String   @default("created")
   objectKey      String?
+  // "capture" is live mic/speaker PCM; "import" is one user-supplied audio or
+  // video file that the worker decodes before transcription.
+  kind           String   @default("capture")
+  sourceFormat   String?
+  // Client-measured duration of an imported file. Only an estimate for the
+  // first usage reservation; the worker's probe is authoritative.
+  declaredDurationSeconds Int?
   createdAt      DateTime @default(now())
   expiresAt      DateTime
   completedAt    DateTime?
@@ -214,6 +221,8 @@ model ProcessingJob {
   uploadId       String
   idempotencyKey String
   status         String   @default("queued")
+  // Coarse progress label for imports ("decoding", "transcribing", "summarizing").
+  stage          String?
   errorMessage   String?  @db.Text
   providerCostMicros Int  @default(0)
   createdAt      DateTime @default(now())

@@ -19,8 +19,10 @@ RUN npm run build
 FROM node:22-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
+# ffmpeg decodes imported audio/video files (see src/lib/mediaDecode.ts). The
+# web image doubles as the managed worker image, so it ships here.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && apt-get install -y --no-install-recommends ca-certificates openssl ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/node_modules ./node_modules

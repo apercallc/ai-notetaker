@@ -71,6 +71,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # File-import tests decode real audio and video fixtures with ffmpeg.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        working-directory: .
+
       - name: Test
         run: npm test
 

@@ -17,7 +17,7 @@ export interface ActionItemInput {
 }
 
 export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
-export type CaptureSource = "desktop" | "meet";
+export type CaptureSource = "desktop" | "meet" | "import";
 export type ProcessingMode = "local_byok" | "managed";
 
 export interface CreateMeetingRequest {
@@ -53,6 +53,9 @@ export interface MeetingSummaryResponse {
  */
 export function speakerLabel(speaker: string): string {
   if (speaker === "you") return "You";
+  // Imported files have no mic/speaker split, so voices are plain "Speaker N".
+  const speakerMatch = /^speaker(?:-(\d+))?$/.exec(speaker);
+  if (speakerMatch) return speakerMatch[1] ? `Speaker ${speakerMatch[1]}` : "Speaker";
   const match = /^them-(\d+)$/.exec(speaker);
   return match ? `Them ${match[1]}` : "Them";
 }
