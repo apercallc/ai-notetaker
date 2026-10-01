@@ -92,7 +92,7 @@ chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
 
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === "ai-notetaker-helper-retry") client.retryFromAlarm();
-  if (alarm.name === REMINDER_ALARM) void readyPromise.then(() => runMeetReminders(() => controller.getState().activeMeeting !== null));
+  if (alarm.name === REMINDER_ALARM) void readyPromise.then(() => runMeetReminders(() => controller.getState().activeMeeting !== null)).catch((error) => console.warn("Meet reminder check failed", error));
 });
 
 async function openNotification(notificationId: string): Promise<void> {

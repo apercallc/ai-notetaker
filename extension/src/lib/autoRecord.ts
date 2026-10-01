@@ -28,8 +28,39 @@ export const MEET_AUTO_RECORD_GUIDANCE =
 /** Tabs we already attempted for their current call, so one join = one attempt. */
 const attemptedTabs = new Map<number, string>();
 
+const ATTEMPTS_KEY = "notetaker.autoRecordAttempts";
+let hydrated: Promise<void> | null = null;
+
+/**
+ * The map above lives in worker memory, and MV3 workers restart often. Without persistence, a restart
+ * followed by any URL event on a call the user had just stopped would start recording again. Session
+ * storage survives worker restarts but not the browser session, which is exactly the lifetime wanted.
+ */
+function hydrateAttempts(): Promise<void> {
+  hydrated ??= (async () => {
+    try {
+      const stored = (await chrome.storage.session.get(ATTEMPTS_KEY))[ATTEMPTS_KEY] as Record<string, string> | undefined;
+      for (const [tabId, code] of Object.entries(stored ?? {})) {
+        if (!attemptedTabs.has(Number(tabId))) attemptedTabs.set(Number(tabId), code);
+      }
+    } catch {
+      // No session storage here: in-memory tracking is the fallback.
+    }
+  })();
+  return hydrated;
+}
+
+function persistAttempts(): void {
+  try {
+    void chrome.storage.session.set({ [ATTEMPTS_KEY]: Object.fromEntries(attemptedTabs) }).catch(() => undefined);
+  } catch {
+    // Same fallback.
+  }
+}
+
 export function resetAutoRecordTrackingForTests(): void {
   attemptedTabs.clear();
+  hydrated = null;
 }
 
 function callCodeOfUrl(url: string | undefined): string | null {
@@ -58,11 +89,13 @@ export async function maybeAutoStartMeetRecording(
 ): Promise<boolean> {
   const callCode = callCodeOfUrl(url);
   if (!callCode) return false;
+  await hydrateAttempts();
   if (attemptedTabs.get(tabId) === callCode) return false;
   const settings = await deps.getSettings();
   if (!settings.autoRecordOnMeetJoin || !settings.onboardingComplete || !settings.consentDisclosureAcknowledged) return false;
   if (deps.isRecordingActive()) return false;
   attemptedTabs.set(tabId, callCode);
+  persistAttempts();
   try {
     const meetingId = await deps.startMeetRecording({ tabId });
     return meetingId !== "";
@@ -79,11 +112,11 @@ export async function maybeAutoStartMeetRecording(
 export function clearAutoRecordAttempt(tabId: number, nextUrl?: string): void {
   const nextCode = callCodeOfUrl(nextUrl);
   if (nextCode === null) {
-    attemptedTabs.delete(tabId);
+    if (attemptedTabs.delete(tabId)) persistAttempts();
     return;
   }
   const attempted = attemptedTabs.get(tabId);
-  if (attempted !== undefined && attempted !== nextCode) attemptedTabs.delete(tabId);
+  if (attempted !== undefined && attempted !== nextCode && attemptedTabs.delete(tabId)) persistAttempts();
 }
 
 /** The disclosure text users can paste into Meet chat (meetDisclosureNotice setting). */

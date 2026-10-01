@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAutoRecordAttempt, maybeAutoStartMeetRecording, MEET_AUTO_RECORD_GUIDANCE, resetAutoRecordTrackingForTests } from "../src/lib/autoRecord";
 import { DEFAULT_SETTINGS } from "../src/types";
+import { chromeMock } from "./setup";
 
 const CALL_URL = "https://meet.google.com/abc-defg-hij";
 const OTHER_CALL_URL = "https://meet.google.com/xyz-klmn-pqr";
@@ -16,7 +17,22 @@ function deps(overrides: Partial<Parameters<typeof maybeAutoStartMeetRecording>[
 }
 
 beforeEach(() => {
+  chromeMock.reset();
   resetAutoRecordTrackingForTests();
+});
+
+describe("auto-record attempts survive a service-worker restart", () => {
+  it("does not restart a call the user already stopped after the worker lost its memory", async () => {
+    const first = deps();
+    expect(await maybeAutoStartMeetRecording(7, CALL_URL, first)).toBe(true);
+
+    // The worker restarts: in-memory tracking is gone, session storage is not.
+    await Promise.resolve();
+    resetAutoRecordTrackingForTests();
+    const second = deps();
+    expect(await maybeAutoStartMeetRecording(7, CALL_URL, second)).toBe(false);
+    expect(second.startMeetRecording).not.toHaveBeenCalled();
+  });
 });
 
 describe("maybeAutoStartMeetRecording", () => {
