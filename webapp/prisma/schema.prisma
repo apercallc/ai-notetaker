@@ -189,6 +189,7 @@ model ManagedUpload {
 
   @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, meetingId])
+  @@index([expiresAt, id])
 }
 
 model UploadChunk {
@@ -230,6 +231,9 @@ model ProcessingJob {
   @@unique([workspaceId, idempotencyKey])
   @@unique([uploadId])
   @@index([workspaceId, status, createdAt])
+  // Global workers poll across workspaces, unlike workspace status pages.
+  @@index([status, createdAt])
+  @@index([status, startedAt, attempts])
 }
 
 model UsageLedgerEntry {

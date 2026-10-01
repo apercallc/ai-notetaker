@@ -78,6 +78,29 @@ describe("upsertMeeting", () => {
     expect(await getMeeting(OTHER_WORKSPACE_ID, input.id)).not.toBeNull();
   });
 
+  it("keeps concurrent first-time registrations from taking another workspace's client ID", async () => {
+    // Exercise absent rows, where a normal row lock cannot protect ownership.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const id = `concurrent-tenant-meeting-${attempt}`;
+      const inputs = [
+        sampleMeeting({ id, title: "Workspace A", summary: "A private notes" }),
+        sampleMeeting({ id, title: "Workspace B", summary: "B private notes" }),
+      ];
+      const workspaceIds = [WORKSPACE_ID, OTHER_WORKSPACE_ID];
+      const results = await Promise.allSettled(inputs.map((input, index) => upsertMeeting(input, workspaceIds[index])));
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const loser = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
+      expect(loser.reason).toBeInstanceOf(ValidationError);
+      const winnerIndex = results.findIndex((result) => result.status === "fulfilled");
+      const row = await prisma.meeting.findUniqueOrThrow({ where: { id }, include: { transcript: true, actionItems: true } });
+      expect(row.workspaceId).toBe(workspaceIds[winnerIndex]);
+      expect(row.summary).toBe(inputs[winnerIndex].summary);
+      expect(row.title).toBe(inputs[winnerIndex].title);
+      expect(row.transcript).toHaveLength(2);
+      expect(row.actionItems).toHaveLength(1);
+    }
+  });
+
   it("persists managed Meet metadata and the authenticated owner", async () => {
     const ownerId = "managed-owner";
     const input = sampleMeeting({ captureSource: "meet", processingMode: "managed" });

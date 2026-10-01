@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const sent: Array<{ kind: string; input: Record<string, unknown> }> = [];
 const clients: Array<Record<string, unknown>> = [];
 let listing: Array<{ Key: string; LastModified: Date }> = [];
+let listResponse: ((input: Record<string, unknown>) => unknown) | undefined;
+let deleteFailureKey: string | undefined;
 
 vi.mock("@aws-sdk/client-s3", () => ({
   S3Client: class {
@@ -13,7 +15,8 @@ vi.mock("@aws-sdk/client-s3", () => ({
       if (command.kind === "get") {
         return { Body: { transformToByteArray: async () => new Uint8Array([7, 8, 9]) } };
       }
-      if (command.kind === "list") return { Contents: listing, IsTruncated: false };
+      if (command.kind === "list") return listResponse?.(command.input) ?? { Contents: listing, IsTruncated: false };
+      if (command.kind === "delete" && command.input.Key === deleteFailureKey) throw new Error("storage unavailable");
       return {};
     }
   },
@@ -91,6 +94,9 @@ describe("object storage backends", () => {
   afterEach(() => {
     sent.length = 0;
     clients.length = 0;
+    listing = [];
+    listResponse = undefined;
+    deleteFailureKey = undefined;
     restoreS3Env();
     restoreR2Env();
   });
@@ -166,5 +172,49 @@ describe("object storage backends", () => {
 
   it("rejects traversal-like object keys before touching storage", async () => {
     await expect(putObject("../outside", new Uint8Array([1]))).rejects.toThrow("invalid object key");
+  });
+
+  it("resumes bounded sweeps past fresh pages and starts over after reaching the end", async () => {
+    process.env.S3_BUCKET = "paginated-sweep";
+    delete process.env.R2_BUCKET;
+    const now = new Date("2026-10-01T12:00:00Z");
+    listResponse = (input) => {
+      const page = Number(input.ContinuationToken ?? 0);
+      return {
+        Contents: [{ Key: `uploads/page-${page}`, LastModified: page < 5 ? now : new Date("2026-09-28T12:00:00Z") }],
+        IsTruncated: page < 6,
+        NextContinuationToken: page < 6 ? String(page + 1) : undefined,
+      };
+    };
+
+    await expect(sweepStaleStagedObjects(now)).resolves.toBe(0);
+    expect(sent.filter(({ kind }) => kind === "list")).toHaveLength(5);
+    sent.length = 0;
+    await expect(sweepStaleStagedObjects(now)).resolves.toBe(2);
+    expect(sent.filter(({ kind }) => kind === "list").map(({ input }) => input.ContinuationToken)).toEqual(["5", "6"]);
+    expect(sent.filter(({ kind }) => kind === "delete").map(({ input }) => input.Key)).toEqual(["uploads/page-5", "uploads/page-6"]);
+    sent.length = 0;
+    await sweepStaleStagedObjects(now);
+    expect(sent[0]?.input.ContinuationToken).toBeUndefined();
+  });
+
+  it("retries a failed cleanup page without losing sweep progress", async () => {
+    process.env.S3_BUCKET = "failed-page-sweep";
+    delete process.env.R2_BUCKET;
+    const now = new Date("2026-10-01T12:00:00Z");
+    listResponse = (input) => {
+      const page = Number(input.ContinuationToken ?? 0);
+      return {
+        Contents: [{ Key: `uploads/page-${page}`, LastModified: new Date("2026-09-28T12:00:00Z") }],
+        IsTruncated: page < 2,
+        NextContinuationToken: String(page + 1),
+      };
+    };
+    deleteFailureKey = "uploads/page-1";
+    await expect(sweepStaleStagedObjects(now)).rejects.toThrow("storage unavailable");
+    deleteFailureKey = undefined;
+    sent.length = 0;
+    await expect(sweepStaleStagedObjects(now)).resolves.toBe(2);
+    expect(sent.filter(({ kind }) => kind === "list").map(({ input }) => input.ContinuationToken)).toEqual(["1", "2"]);
   });
 });

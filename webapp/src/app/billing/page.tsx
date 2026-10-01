@@ -99,7 +99,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               aria-valuenow={Math.min(entitlements.used, entitlements.limit)}
               style={{ height: 8, borderRadius: 4, background: "var(--color-border)", overflow: "hidden", maxWidth: 420 }}
             >
-              <div style={{ width: `${usedPercent}%`, height: "100%", background: entitlements.warning === "none" ? "var(--color-accent)" : "var(--color-danger)" }} />
+              <div style={{ width: `${usedPercent}%`, height: "100%", background: entitlements.meetingWarning === "none" ? "var(--color-accent)" : "var(--color-danger)" }} />
             </div>
           </div>
         ) : (
@@ -115,13 +115,17 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
 
         {entitlements.warning === "exhausted" && (
           <p className="error-text" role="alert">
-            {entitlements.isTrial ? "You have used all of your free trial meetings." : "You have used every meeting in this billing period."}{" "}
+            {entitlements.audio.warning === "exhausted"
+              ? entitlements.isTrial ? "You have used all of your free trial meeting hours." : "You have used all meeting hours in this billing period."
+              : entitlements.isTrial ? "You have used all of your free trial meetings." : "You have used every meeting in this billing period."}{" "}
             {isOwner ? "Choose a plan below to keep processing meetings." : "Ask the workspace owner to upgrade the plan."}
           </p>
         )}
         {entitlements.warning === "low" && (
           <p className="muted-copy" role="status">
-            Only {entitlements.remaining} {entitlements.remaining === 1 ? "meeting" : "meetings"} left{entitlements.isTrial ? " in your free trial" : " this period"}.
+            {entitlements.audio.warning === "low"
+              ? `Only ${formatHours(entitlements.audio.remainingSeconds)} meeting hours left`
+              : `Only ${entitlements.remaining} ${entitlements.remaining === 1 ? "meeting" : "meetings"} left`}{entitlements.isTrial ? " in your free trial" : " this period"}.
             {isOwner ? " Upgrade to avoid interruptions." : ""}
           </p>
         )}

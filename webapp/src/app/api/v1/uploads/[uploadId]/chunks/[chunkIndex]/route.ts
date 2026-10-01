@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
@@ -34,7 +34,10 @@ export async function PUT(request: Request, context: { params: Promise<{ uploadI
       return NextResponse.json({ uploadId, chunkIndex, checksum, byteLength: bytes.byteLength, replayed: true }, { headers: { "x-request-id": requestId } });
     }
 
-    const objectKey = chunkObjectKey(session.workspaceId, uploadId, chunkIndex, checksum);
+    // Each request owns its staged object until its row commits. Concurrent
+    // retries can have identical bytes (including silent mic/speaker audio),
+    // so a deterministic shared key lets a losing request delete the winner.
+    const objectKey = `${chunkObjectKey(session.workspaceId, uploadId, chunkIndex, checksum)}-${randomUUID()}`;
     await putObject(objectKey, bytes);
     try {
       const inserted = await prisma.$transaction(async (tx) => {
@@ -69,6 +72,7 @@ export async function PUT(request: Request, context: { params: Promise<{ uploadI
         return true;
       });
       if (!inserted) {
+        await deleteObject(objectKey);
         return NextResponse.json({ uploadId, chunkIndex, checksum, byteLength: bytes.byteLength, replayed: true }, { headers: { "x-request-id": requestId } });
       }
     } catch (error) {
@@ -93,6 +97,7 @@ export async function PUT(request: Request, context: { params: Promise<{ uploadI
       // object. The normal pre-check alone cannot close this race.
       const committed = await prisma.uploadChunk.findUnique({ where: { uploadId_chunkIndex: { uploadId, chunkIndex } } });
       if (committed && committed.checksum === checksum && committed.byteLength === bytes.byteLength && committed.channel === channel) {
+        await deleteObject(objectKey);
         return NextResponse.json({ uploadId, chunkIndex, checksum, byteLength: bytes.byteLength, replayed: true }, { headers: { "x-request-id": requestId } });
       }
       await deleteObject(objectKey).catch((cleanupError) => {

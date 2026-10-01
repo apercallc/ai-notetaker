@@ -133,10 +133,9 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
   // IDs originate on clients. Never let a managed client re-use an ID from a
   // different tenant, and do this check before deleting child rows.
   //
-  // The ownership check and the writes run in ONE interactive transaction:
-  // with the check outside, a meeting created by workspace A after workspace
-  // B's read committed let B's upsert take the update branch — overwriting
-  // A's meeting and cascading deletes onto A's transcript/action-item rows.
+  // Serialize by client ID, including IDs that have no database row yet.
+  // An ownership read in a READ COMMITTED transaction alone cannot protect
+  // a missing row: both tenants could read null before one upsert inserts it.
   const isManagedRegistration = input.processingMode === "managed" && input.summary === "" && input.transcript.length === 0 && input.actionItems.length === 0;
 
   // Client-supplied action-item ids are used as the global primary key. The
@@ -152,6 +151,9 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
   );
 
   await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${input.id}, 0))
+    `;
     const existing = await tx.meeting.findUnique({
       where: { id: input.id },
       select: { workspaceId: true, summary: true, startedAt: true, endedAt: true },

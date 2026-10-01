@@ -470,6 +470,66 @@ describe("managed usage reservations", () => {
 });
 
 describe("managed processing job queue", () => {
+  it("rejects a larger replacement recording before reusing its shorter live reservation", async () => {
+    const meetingId = await createMeeting(WORKSPACE_ID);
+    const createCompleted = async (bytes: number) => {
+      const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: bytes, idempotencyKey: `bytes-${bytes}-${meetingId}` });
+      await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: bytes, checksum: "bytes", objectKey: `bytes/${bytes}` } });
+      await completeManagedUpload(WORKSPACE_ID, upload.id);
+      return upload;
+    };
+    const original = await createCompleted(192_000);
+    const job = await enqueueManagedJob(WORKSPACE_ID, meetingId, original.id, "fixed-bytes");
+    await prisma.processingJob.update({ where: { id: job.id }, data: { status: "error" } });
+    await prisma.managedUpload.update({ where: { id: original.id }, data: { status: "expired" } });
+    const larger = await createCompleted(384_000);
+    await expect(enqueueManagedJob(WORKSPACE_ID, meetingId, larger.id, "fixed-bytes")).rejects.toThrow("same recording bytes");
+    expect(await prisma.processingJob.findUnique({ where: { id: job.id } })).toMatchObject({ uploadId: original.id, status: "error" });
+    expect(await prisma.usageLedgerEntry.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId: WORKSPACE_ID, idempotencyKey: "fixed-bytes" } } })).toMatchObject({ units: 1, audioSeconds: 1 });
+  });
+
+  it("repoints concurrent packed retries to fresh audio while retaining one released legacy reservation", async () => {
+    const meetingId = await createMeeting(WORKSPACE_ID);
+    const key = `meeting:${meetingId}`;
+    const completedUpload = async (layout: string) => {
+      const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 192_000, idempotencyKey: `${key}:${layout}` });
+      await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 192_000, checksum: layout, objectKey: `packed-retry/${layout}` } });
+      await completeManagedUpload(WORKSPACE_ID, upload.id);
+      return upload;
+    };
+    const legacy = await completedUpload("legacy");
+    const job = await enqueueManagedJob(WORKSPACE_ID, meetingId, legacy.id, key);
+    await prisma.processingJob.update({ where: { id: job.id }, data: { status: "error" } });
+    await releaseMeetingProcessing(WORKSPACE_ID, key);
+    await prisma.uploadChunk.deleteMany({ where: { uploadId: legacy.id } });
+    await prisma.managedUpload.update({ where: { id: legacy.id }, data: { status: "expired" } });
+    const packed = await completedUpload("pcm4m-v1");
+    const retries = await Promise.all(Array.from({ length: 3 }, () => enqueueManagedJob(WORKSPACE_ID, meetingId, packed.id, key)));
+    for (const retry of retries) expect(retry).toMatchObject({ id: job.id, uploadId: packed.id, status: "queued" });
+    expect(await prisma.processingJob.count({ where: { workspaceId: WORKSPACE_ID } })).toBe(1);
+    expect(await prisma.usageLedgerEntry.findMany({ where: { workspaceId: WORKSPACE_ID } })).toMatchObject([{ idempotencyKey: key, units: 1, audioSeconds: 1 }]);
+    await prisma.processingJob.update({ where: { id: job.id }, data: { status: "complete" } });
+    const finished = await enqueueManagedJob(WORKSPACE_ID, meetingId, packed.id, key);
+    expect(finished).toMatchObject({ id: job.id, status: "complete" });
+    expect((await getEntitlements(WORKSPACE_ID)).used).toBe(1);
+  });
+
+  it("rejects a processing key owned by a different meeting before reviving or charging it", async () => {
+    const meetings = await Promise.all([createMeeting(WORKSPACE_ID), createMeeting(WORKSPACE_ID)]);
+    const uploads = await Promise.all(meetings.map(async (meetingId) => {
+      const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 2, idempotencyKey: meetingId });
+      await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 2, checksum: "key", objectKey: `key/${meetingId}` } });
+      await completeManagedUpload(WORKSPACE_ID, upload.id);
+      return upload;
+    }));
+    const job = await enqueueManagedJob(WORKSPACE_ID, meetings[0], uploads[0].id, "shared-key");
+    await prisma.processingJob.update({ where: { id: job.id }, data: { status: "error" } });
+    await releaseMeetingProcessing(WORKSPACE_ID, "shared-key");
+    await expect(enqueueManagedJob(WORKSPACE_ID, meetings[1], uploads[1].id, "shared-key")).rejects.toThrow("existing meeting job");
+    expect(await prisma.processingJob.findUnique({ where: { id: job.id } })).toMatchObject({ meetingId: meetings[0], uploadId: uploads[0].id, status: "error" });
+    expect((await getEntitlements(WORKSPACE_ID)).used).toBe(0);
+  });
+
   it("requires a complete meeting upload and revives failed jobs without duplicating usage", async () => {
     const meetingId = await createMeeting(WORKSPACE_ID);
     const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 2, idempotencyKey: `job-upload-${meetingId}` });

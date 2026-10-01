@@ -123,8 +123,7 @@ export async function createManagedUpload(
         include: { chunks: { select: { objectKey: true } } },
       });
       if (expired && expired.status === "expired") {
-        const cleanup = await Promise.allSettled(expired.chunks.map((chunk) => deleteObject(chunk.objectKey)));
-        if (cleanup.some((result) => result.status === "rejected")) {
+        if (!(await deleteManagedUploadAudio(expired.id))) {
           throw new ManagedValidationError("expired upload cleanup is still in progress; retry shortly");
         }
         await prisma.managedUpload.delete({ where: { id: expired.id } });
@@ -257,8 +256,13 @@ export async function completeManagedUpload(workspaceId: string, uploadId: strin
 export async function deleteManagedUploadAudio(uploadId: string): Promise<boolean> {
   const chunks = await prisma.uploadChunk.findMany({ where: { uploadId }, select: { id: true, objectKey: true } });
   if (chunks.length === 0) return true;
-  const results = await Promise.allSettled(chunks.map((chunk) => deleteObject(chunk.objectKey)));
-  const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  // Large recordings can have 10,000 objects; cap simultaneous requests so
+  // cleanup does not exhaust sockets or starve provider uploads in the worker.
+  const failures: PromiseRejectedResult[] = [];
+  for (let offset = 0; offset < chunks.length; offset += 16) {
+    const results = await Promise.allSettled(chunks.slice(offset, offset + 16).map((chunk) => deleteObject(chunk.objectKey)));
+    failures.push(...results.filter((result): result is PromiseRejectedResult => result.status === "rejected"));
+  }
   if (failures.length > 0) {
     console.error("managed temporary audio cleanup failed", {
       uploadId,
@@ -276,9 +280,16 @@ export async function deleteManagedUploadAudio(uploadId: string): Promise<boolea
  * purged immediately. Abandoned/failed uploads remain available for retry
  * only until their fixed 24-hour expiry; stale jobs are failed before cleanup.
  */
+let uploadSweepAfter: { expiresAt: Date; id: string } | undefined;
+let legacySweepAfter: string | undefined;
+
 export async function expireManagedUploads(now = new Date()): Promise<number> {
   const uploads = await prisma.managedUpload.findMany({
     where: {
+      ...(uploadSweepAfter ? { AND: [{ OR: [
+        { expiresAt: { gt: uploadSweepAfter.expiresAt } },
+        { expiresAt: uploadSweepAfter.expiresAt, id: { gt: uploadSweepAfter.id } },
+      ] }] } : {}),
       OR: [
         { jobs: { some: { status: "complete" } }, chunks: { some: {} } },
         { expiresAt: { lte: now }, status: { not: "expired" } },
@@ -292,7 +303,13 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
       expiresAt: true,
       jobs: { select: { id: true, status: true, startedAt: true, idempotencyKey: true } },
     },
+    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+    take: 100,
   });
+  // Progress even when individual deletions fail; otherwise 100 poison
+  // records at the front would permanently hide all later private audio.
+  const lastUpload = uploads.at(-1);
+  uploadSweepAfter = uploads.length === 100 && lastUpload ? { expiresAt: lastUpload.expiresAt, id: lastUpload.id } : undefined;
   let cleaned = 0;
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1_000);
   for (const upload of uploads) {
@@ -342,9 +359,12 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
   // part of the same managed-worker sweep. The field remains in Prisma only
   // so existing rows can be cleaned safely during rollout.
   const legacyRecordings = await prisma.meeting.findMany({
-    where: { processingMode: "managed", recordingObjectKey: { not: null } },
+    where: { processingMode: "managed", recordingObjectKey: { not: null }, ...(legacySweepAfter ? { id: { gt: legacySweepAfter } } : {}) },
     select: { id: true, recordingObjectKey: true },
+    orderBy: { id: "asc" },
+    take: 100,
   });
+  legacySweepAfter = legacyRecordings.length === 100 ? legacyRecordings.at(-1)?.id : undefined;
   for (const meeting of legacyRecordings) {
     if (!meeting.recordingObjectKey) continue;
     try {
@@ -404,17 +424,36 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
     (await prisma.processingJob.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } } })) ??
     (await prisma.processingJob.findFirst({ where: { workspaceId, uploadId }, orderBy: { createdAt: "asc" } }));
   if (existing) {
+    if (existing.meetingId !== meetingId) throw new ManagedValidationError("idempotency key conflicts with an existing meeting job");
     if (existing.status !== "error") return existing;
+    if (existing.uploadId !== uploadId) {
+      const original = await prisma.managedUpload.findUnique({ where: { id: existing.uploadId }, select: { totalBytes: true } });
+      // Layout migrations regroup the same recording; they cannot change its
+      // billable bytes. A live reservation may already hold the old duration.
+      if (!original || original.totalBytes !== upload.totalBytes) {
+        throw new ManagedValidationError("replacement upload must contain the same recording bytes");
+      }
+    }
     await reserveMeetingProcessing(workspaceId, existing.idempotencyKey, upload.totalBytes);
     // Guard on status so two concurrent retries cannot reset a job another
     // request already restarted and a worker has begun.
-    const revived = await prisma.processingJob.updateMany({
-      where: { id: existing.id, status: "error" },
-      data: { status: "queued", errorMessage: null, startedAt: null, leaseToken: null, completedAt: null, attempts: 0 },
-    });
+    try {
+      await prisma.processingJob.updateMany({
+        where: { id: existing.id, status: "error" },
+        // Packing versions can supply a new upload for this same meeting.
+        // Claim the replacement atomically with the retry status; never run
+        // the failed job against its old expired or purged audio manifest.
+        data: { uploadId, status: "queued", errorMessage: null, startedAt: null, leaseToken: null, completedAt: null, attempts: 0 },
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code !== "P2002") throw error;
+      const winner = await prisma.processingJob.findUnique({ where: { uploadId } });
+      if (!winner || winner.meetingId !== meetingId || winner.workspaceId !== workspaceId) throw error;
+      if (winner.idempotencyKey !== existing.idempotencyKey) await releaseMeetingProcessing(workspaceId, existing.idempotencyKey);
+      return winner;
+    }
     // count 0 means another retry won; the shared idempotency key already
     // holds the single reservation, so there is nothing to undo here.
-    void revived;
     return prisma.processingJob.findUniqueOrThrow({ where: { id: existing.id } });
   }
   await reserveMeetingProcessing(workspaceId, idempotencyKey, upload.totalBytes);
@@ -431,6 +470,7 @@ export async function enqueueManagedJob(workspaceId: string, meetingId: string, 
       (await prisma.processingJob.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } } })) ??
       (await prisma.processingJob.findUnique({ where: { uploadId } }));
     if (!replay) throw error;
+    if (replay.meetingId !== meetingId) throw new ManagedValidationError("idempotency key conflicts with an existing meeting job");
     if (replay.idempotencyKey !== idempotencyKey) await releaseMeetingProcessing(workspaceId, idempotencyKey);
     return replay;
   }

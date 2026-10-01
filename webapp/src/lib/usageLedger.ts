@@ -74,8 +74,8 @@ function planAudioSeconds(plan: string): number {
   return isManagedPlan(plan) ? PLAN_AUDIO_HOUR_LIMITS[plan] * 3_600 : 0;
 }
 
-/** Only live reservations count: a released (failed) job gives its hours back. */
-function audioUsageWhere(workspaceId: string, window: UsageWindow) {
+/** Only live reservations count: a released (failed) job gives its quota back. */
+function liveUsageWhere(workspaceId: string, window: UsageWindow) {
   return { ...usageWhere(workspaceId, window), units: { gt: 0 } };
 }
 
@@ -93,13 +93,15 @@ export async function getEntitlements(workspaceId: string) {
   const plan = (subscription?.plan ?? "local") as ManagedPlan;
   const now = new Date();
   const window = usageWindow(subscription, now);
-  const aggregate = await prisma.usageLedgerEntry.aggregate({ where: usageWhere(workspaceId, window), _sum: { units: true } });
+  // Read both quotas from one snapshot, without an extra database round trip.
+  const aggregate = await prisma.usageLedgerEntry.aggregate({ where: liveUsageWhere(workspaceId, window), _sum: { units: true, audioSeconds: true } });
   const used = aggregate._sum.units ?? 0;
-  const audio = await prisma.usageLedgerEntry.aggregate({ where: audioUsageWhere(workspaceId, window), _sum: { audioSeconds: true } });
-  const audioUsedSeconds = audio._sum.audioSeconds ?? 0;
+  const audioUsedSeconds = aggregate._sum.audioSeconds ?? 0;
   const audioLimitSeconds = planAudioSeconds(plan);
   const limit = planLimit(plan);
   const remaining = Math.max(0, limit - used);
+  const meetingWarning = quotaWarning(used, limit);
+  const audioWarning = quotaWarning(audioUsedSeconds, audioLimitSeconds);
   const inPaymentGrace = subscription?.status === "past_due" && Boolean(subscription.graceEndsAt && subscription.graceEndsAt >= now);
   return {
     plan,
@@ -114,6 +116,7 @@ export async function getEntitlements(workspaceId: string) {
       usedSeconds: audioUsedSeconds,
       limitSeconds: audioLimitSeconds,
       remainingSeconds: Math.max(0, audioLimitSeconds - audioUsedSeconds),
+      warning: audioWarning,
     },
     canProcess: hasProcessingAccess(subscription, now) && limit > used && audioLimitSeconds > audioUsedSeconds,
     period: {
@@ -124,7 +127,12 @@ export async function getEntitlements(workspaceId: string) {
     isTrial: plan === "hosted_trial",
     /** Free allowance for new hosted workspaces; null once the workspace has left the trial plan. */
     trial: plan === "hosted_trial" ? { limit, used, remaining } : null,
-    warning: quotaWarning(used, limit),
+    meetingWarning,
+    warning: meetingWarning === "exhausted" || audioWarning === "exhausted"
+      ? "exhausted" as const
+      : meetingWarning === "low" || audioWarning === "low"
+        ? "low" as const
+        : "none" as const,
   };
 }
 
@@ -178,8 +186,8 @@ export async function reserveMeetingProcessing(workspaceId: string, idempotencyK
           const window = usageWindow(subscription);
           const currentPeriodStart = window.entryPeriodStart;
           const used = await tx.usageLedgerEntry.aggregate({
-            where: usageWhere(workspaceId, window),
-            _sum: { units: true },
+            where: liveUsageWhere(workspaceId, window),
+            _sum: { units: true, audioSeconds: true },
           });
           if (
             !hasProcessingAccess(subscription) ||
@@ -188,8 +196,7 @@ export async function reserveMeetingProcessing(workspaceId: string, idempotencyK
             throw new EntitlementError();
           }
           if (audioSeconds > 0) {
-            const usedAudio = await tx.usageLedgerEntry.aggregate({ where: audioUsageWhere(workspaceId, window), _sum: { audioSeconds: true } });
-            if ((usedAudio._sum.audioSeconds ?? 0) + audioSeconds > planAudioSeconds(subscription?.plan ?? "local")) {
+            if ((used._sum.audioSeconds ?? 0) + audioSeconds > planAudioSeconds(subscription?.plan ?? "local")) {
               throw new AudioBudgetError();
             }
           }

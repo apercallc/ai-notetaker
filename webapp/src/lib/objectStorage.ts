@@ -10,6 +10,7 @@ interface ObjectBackend {
   bucket: string;
   prefix: string;
   provider: "r2" | "s3";
+  sweepContinuationToken?: string;
 }
 
 let cachedObjectBackend: { fingerprint: string; backend: ObjectBackend } | null = null;
@@ -139,7 +140,7 @@ export async function sweepStaleStagedObjects(now = new Date(), maxAgeMs = STALE
   const backend = objectBackend();
   if (backend) {
     let deleted = 0;
-    let token: string | undefined;
+    let token = backend.sweepContinuationToken;
     for (let page = 0; page < SWEEP_LIST_PAGES; page += 1) {
       const listing = await backend.client.send(new ListObjectsV2Command({
         Bucket: backend.bucket,
@@ -151,8 +152,13 @@ export async function sweepStaleStagedObjects(now = new Date(), maxAgeMs = STALE
         await backend.client.send(new DeleteObjectCommand({ Bucket: backend.bucket, Key: object.Key }));
         deleted += 1;
       }
-      if (!listing.IsTruncated || !listing.NextContinuationToken) break;
-      token = listing.NextContinuationToken;
+      // Keep progress across bounded worker passes, including pages with only
+      // fresh objects. Otherwise the first few thousand keys can indefinitely
+      // hide older orphaned audio later in the listing. Advance only after all
+      // deletions on this page succeed, so failed cleanup is retried.
+      token = listing.IsTruncated ? listing.NextContinuationToken : undefined;
+      backend.sweepContinuationToken = token;
+      if (!token) break;
     }
     return deleted;
   }

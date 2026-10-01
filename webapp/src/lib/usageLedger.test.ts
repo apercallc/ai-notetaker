@@ -161,14 +161,18 @@ describe("monthly audio-hours cap", () => {
     const cap = PLAN_AUDIO_HOUR_LIMITS.hosted_pro;
     try {
       await reserveMeetingProcessing(workspaceId, "a", hoursToBytes(cap - 1));
+      expect(await getEntitlements(workspaceId)).toMatchObject({ warning: "low", meetingWarning: "none", audio: { warning: "low" } });
       await expect(reserveMeetingProcessing(workspaceId, "b", hoursToBytes(2))).rejects.toBeInstanceOf(AudioBudgetError);
       // Exactly the remaining hour still fits.
       await reserveMeetingProcessing(workspaceId, "c", hoursToBytes(1));
       const entitlements = await getEntitlements(workspaceId);
       expect(entitlements.audio.remainingSeconds).toBe(0);
       expect(entitlements.canProcess).toBe(false);
+      expect(entitlements.warning).toBe("exhausted");
+      expect(entitlements.meetingWarning).toBe("none");
       await releaseMeetingProcessing(workspaceId, "a");
       expect((await getEntitlements(workspaceId)).audio.remainingSeconds).toBe((cap - 1) * 3_600);
+      expect(await getEntitlements(workspaceId)).toMatchObject({ used: 1, warning: "none", audio: { usedSeconds: 3_600, warning: "none" } });
     } finally {
       await prisma.workspace.delete({ where: { id: workspaceId } });
     }
