@@ -7,6 +7,7 @@ import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
 import { createMeetingShare, revokeMeetingShare, SharingValidationError } from "@/lib/sharing";
 import { retryMeetingProcessing } from "@/lib/meetingProcessing";
+import { regenerateNotes } from "@/lib/notesRegenerate";
 import { isValidDateOnly } from "@/lib/actionItems";
 
 export type ShareActionResult =
@@ -124,4 +125,17 @@ export async function retryProcessingAction(formData: FormData): Promise<RetrySt
   revalidatePath("/meetings");
   revalidatePath(`/meetings/${meetingId}`);
   return { status: "started" };
+}
+
+export type RegenerateState = { status: "done"; remaining: number } | { status: "error"; message: string };
+
+export async function regenerateNotesAction(formData: FormData): Promise<RegenerateState> {
+  const session = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const result = await regenerateNotes(session, meetingId, String(formData.get("template") ?? ""));
+  if (!result.ok) return { status: "error", message: result.error };
+  revalidatePath("/meetings");
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/actions");
+  return { status: "done", remaining: result.remaining };
 }

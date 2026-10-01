@@ -18,7 +18,9 @@ import { ProcessingBadge, failureReason } from "@/components/ProcessingBadge";
 import { RetryProcessing } from "@/components/RetryProcessing";
 import { DeleteButton } from "./DeleteButton";
 import { ExportButtons } from "./ExportButtons";
+import { NotesTemplate } from "./NotesTemplate";
 import { ShareMeeting } from "./ShareMeeting";
+import { managedHostingEnabled } from "@/lib/managedAuth";
 import { TitleEditor } from "./TitleEditor";
 
 // generateMetadata and the page both need the meeting; cache() makes that one query.
@@ -43,6 +45,7 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   const mode = modeLabel(meeting.mode);
   const processing = meeting.processing;
   const inFlight = processing?.status === "processing";
+  const canRegenerate = managedHostingEnabled() && meeting.processingMode === "managed" && meeting.transcript.length > 0 && !inFlight && processing?.status !== "error";
 
   return (
     <div className="container">
@@ -62,6 +65,8 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
           <RetryProcessing meetingId={meeting.id} className="button button-secondary" />
         </div>
       )}
+
+      {canRegenerate && <NotesTemplate meetingId={meeting.id} mode={meeting.mode} used={meeting.notesRegenerations} />}
 
       <section aria-labelledby="summary-heading">
         <div className="section-head">

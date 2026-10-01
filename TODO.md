@@ -26,6 +26,29 @@ Spec: [`docs/superpowers/specs/2026-09-30-file-import-design.md`](docs/superpowe
 - [ ] Add a design-review pass for `/import` and a marketing line (site,
       `llms.txt`, pricing FAQ) once it is live.
 
+## Notes platform series (2026-09-30)
+
+Order: audit foundation, templates, speakers, library, integrations, MCP,
+multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
+
+- [x] Audit-event foundation (`lib/audit.ts`, `AuditEvent`; viewer is the last slice).
+- [x] Notes templates: six hosted templates with sections, regenerate (3 per
+      meeting), Lecture mode in the extension and helper. Spec:
+      [`docs/superpowers/specs/2026-09-30-notes-templates-design.md`](docs/superpowers/specs/2026-09-30-notes-templates-design.md).
+- [ ] Templates follow-ups: sections for local BYOK summaries, a cost ledger
+      for regenerations, user-defined templates, template choice on the live
+      Meet widget's hosted path, and a design-review pass.
+- [ ] Rename speakers (per meeting; rewrites transcript labels, summary text
+      and action-item owners).
+- [ ] Library, Drive-style: nested folders, notes as `.md` text files, text-only
+      editor (note body only, transcript read-only), Trash with 30-day restore,
+      folder-scoped search/Ask, upload `.md`/`.txt` as a note, retention UI.
+- [ ] Export and integrations: Slack, Notion, signed webhooks (Zapier).
+- [ ] MCP server over a user's own notes (read-only scoped tokens first).
+- [ ] Multilingual: detect, translated summary, custom vocabulary (the local
+      helper already supports vocabulary; hosted does not).
+- [ ] Audit-log viewer for Team (filters, paging, CSV export).
+
 ## Competitive features, ranked by value over cost (2026-09-30)
 
 - [ ] Notes templates (1:1, sales call, standup, interview, lecture) picked per

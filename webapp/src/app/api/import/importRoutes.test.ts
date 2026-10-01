@@ -162,6 +162,18 @@ describe.skipIf(!HAVE_FFMPEG)("browser import flow", () => {
     expect((await getEntitlements(WORKSPACE_ID)).audio.usedSeconds).toBe(120);
   });
 
+  it("stores the chosen notes template as the meeting's mode and rejects unknown ones", async () => {
+    const body = startBody({ template: "lecture" });
+    expect((await startImport(post("/api/import", body, browserHeaders(sessionId)))).status).toBe(201);
+    expect(await prisma.meeting.findUniqueOrThrow({ where: { id: body.meetingId } })).toMatchObject({ mode: "lecture" });
+
+    for (const template of ["bogus", "custom"]) {
+      const response = await startImport(post("/api/import", startBody({ template }), browserHeaders(sessionId)));
+      expect(response.status).toBe(400);
+    }
+    expect(await prisma.meeting.count({ where: { workspaceId: WORKSPACE_ID } })).toBe(1);
+  });
+
   it("refuses unsupported file types and oversized files", async () => {
     const exe = await startImport(post("/api/import", startBody({ fileName: "setup.exe" }), browserHeaders(sessionId)));
     expect(exe.status).toBe(400);

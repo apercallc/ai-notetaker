@@ -17,6 +17,7 @@ export const AUDIT_ACTIONS = [
   "workspace.retention_update",
   "meeting.delete",
   "meeting.import",
+  "meeting.regenerate_notes",
   "meeting.retention_delete",
   "share.create",
   "share.revoke",

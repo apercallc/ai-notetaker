@@ -8,7 +8,7 @@ import type { CalendarConnection } from "./lib/calendar";
 export type TranscriptionProvider = "deepgram" | "groq";
 export type SummarizationProvider = "claude" | "gemini" | "deepseek";
 export type ProviderKind = TranscriptionProvider | SummarizationProvider;
-export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
+export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "lecture" | "custom";
 export type ErrorRecoveryCategory = "retry" | "check_provider_key" | "check_audio" | "check_billing" | "install_helper" | "update_helper" | "sign_in";
 export type LiveTranscriptStatus = "connecting" | "available" | "unavailable" | "not_supported";
 

@@ -10,6 +10,7 @@ import {
   importAcceptAttribute,
   importFormatFromName,
 } from "@/lib/importFormats";
+import { PICKABLE_TEMPLATES } from "@/lib/noteTemplates";
 
 type Phase = "idle" | "uploading" | "finishing";
 type Chosen = { file: File; durationSeconds: number | null };
@@ -88,6 +89,7 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
   const abort = useRef<AbortController | null>(null);
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const [title, setTitle] = useState("");
+  const [template, setTemplate] = useState("general");
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +167,7 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
           totalBytes: file.size,
           ...(chosen.durationSeconds ? { durationSeconds: Math.ceil(chosen.durationSeconds) } : {}),
           ...(title.trim() ? { title: title.trim() } : {}),
+          template,
           recordedAtMs: file.lastModified,
         }),
         signal: controller.signal,
@@ -244,6 +247,11 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
         <div className="import-details">
           <label htmlFor="import-title">Title <span className="muted-copy">(optional — we’ll write one from the content)</span></label>
           <input id="import-title" className="text-input" type="text" maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy} />
+          <label htmlFor="import-template">Notes template</label>
+          <select id="import-template" className="text-input" value={template} onChange={(event) => setTemplate(event.target.value)} disabled={busy}>
+            {PICKABLE_TEMPLATES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+          <p className="muted-copy">{PICKABLE_TEMPLATES.find((option) => option.id === template)?.description}</p>
           <p className="muted-copy" role="status">
             {tooLong
               ? `This recording is longer than the ${formatImportDuration(maxSeconds)} your plan allows for one file.`

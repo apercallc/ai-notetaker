@@ -16,7 +16,7 @@ export interface ActionItemInput {
   completedAt?: string | null;
 }
 
-export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom";
+export type MeetingMode = "general" | "standup" | "sales" | "one_on_one" | "interview" | "lecture" | "custom";
 export type CaptureSource = "desktop" | "meet" | "import";
 export type ProcessingMode = "local_byok" | "managed";
 

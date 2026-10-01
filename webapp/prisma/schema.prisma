@@ -25,6 +25,8 @@ model Meeting {
   captureSource String  @default("desktop")
   processingMode String @default("local_byok")
   recordingObjectKey String?
+  // Times notes were regenerated from the stored transcript (each is a paid summary call).
+  notesRegenerations Int @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

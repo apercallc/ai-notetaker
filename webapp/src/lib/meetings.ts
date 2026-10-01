@@ -44,7 +44,7 @@ function assertValid(input: unknown): CreateMeetingRequest {
   if (typeof body.summary !== "string") {
     throw new ValidationError("summary is required");
   }
-  if (body.mode !== undefined && !["general", "standup", "sales", "one_on_one", "interview", "custom"].includes(body.mode as string)) {
+  if (body.mode !== undefined && !["general", "standup", "sales", "one_on_one", "interview", "lecture", "custom"].includes(body.mode as string)) {
     throw new ValidationError("mode is invalid");
   }
   if (body.captureSource !== undefined && !["desktop", "meet", "import"].includes(body.captureSource as string)) {
@@ -250,6 +250,9 @@ export interface MeetingListItem extends MeetingSummaryResponse {
 
 export interface MeetingDetail extends MeetingDetailResponse {
   processing: ProcessingState | null;
+  /** "managed" meetings were summarized by the hosted service and can be regenerated. */
+  processingMode: string;
+  notesRegenerations: number;
 }
 
 const LATEST_JOB = {
@@ -413,6 +416,8 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     summary: row.summary,
     mode: row.mode as MeetingMode,
     processing: toProcessingState(row.processingJobs),
+    processingMode: row.processingMode,
+    notesRegenerations: row.notesRegenerations,
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,

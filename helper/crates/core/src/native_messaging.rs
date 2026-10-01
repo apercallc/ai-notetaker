@@ -347,6 +347,7 @@ pub enum MeetingMode {
     Sales,
     OneOnOne,
     Interview,
+    Lecture,
     Custom,
 }
 

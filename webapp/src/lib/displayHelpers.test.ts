@@ -86,7 +86,7 @@ describe("summary and transcript display helpers", () => {
     expect(formatOffset(3_661)).toBe("1:01:01");
     expect(modeLabel("")).toBeNull();
     expect(modeLabel("general")).toBeNull();
-    expect(modeLabel("one_on_one")).toBe("One on one");
+    expect(modeLabel("one_on_one")).toBe("1:1");
   });
 });
 

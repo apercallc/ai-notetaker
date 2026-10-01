@@ -4,6 +4,7 @@ import { getEntitlements } from "./usageLedger";
 import { completeManagedUpload, createManagedUpload, enqueueManagedJob, getUpload, ManagedValidationError } from "./managedJobs";
 import { dispatchManagedJob } from "./managedDispatch";
 import { upsertMeeting } from "./meetings";
+import { PICKABLE_TEMPLATES, isNoteTemplateId } from "./noteTemplates";
 import { IMPORT_CHUNK_BYTES, IMPORT_MAX_BYTES, importFormatFromName } from "./importFormats";
 import { mediaToolsAvailable } from "./mediaDecode";
 import { estimateImportSeconds, isManagedPlan, PLAN_IMPORT_MAX_SECONDS } from "./plans";
@@ -23,6 +24,8 @@ export interface StartImportInput {
   title?: string;
   /** File's last-modified time, used as the meeting date when plausible. */
   recordedAtMs?: number;
+  /** Notes template (a meeting mode); defaults to general. */
+  template?: string;
 }
 
 export function importUploadChunks(totalBytes: number): number {
@@ -65,6 +68,9 @@ export async function startImport(session: ManagedSession, input: StartImportInp
     throw new ManagedValidationError(`title must be ${MAX_TITLE_LENGTH} characters or fewer`);
   }
 
+  if (input.template !== undefined && (!isNoteTemplateId(input.template) || !PICKABLE_TEMPLATES.some((template) => template.id === input.template))) {
+    throw new ManagedValidationError("choose one of the listed notes templates");
+  }
   const now = Date.now();
   const recordedAt = typeof input.recordedAtMs === "number" && Number.isFinite(input.recordedAtMs) && input.recordedAtMs <= now && input.recordedAtMs >= now - TEN_YEARS_MS
     ? new Date(input.recordedAtMs)
@@ -90,6 +96,7 @@ export async function startImport(session: ManagedSession, input: StartImportInp
       actionItems: [],
       captureSource: "import",
       processingMode: "managed",
+      ...(input.template ? { mode: input.template } : {}),
       ...(input.title?.trim() ? { title: input.title.trim() } : {}),
     },
     session.workspaceId,
