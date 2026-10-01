@@ -87,18 +87,23 @@ const SUMMARY_PART_CHARS = 30_000;
 const REDUCE_GROUP_SIZE = 6;
 const SUMMARY_MAX_TOKENS = 4_096;
 const NO_SPEECH_SUMMARY = "No speech detected in this recording.";
+const LONG_SILENT_CALL_MINUTES = 3;
 const NO_SUMMARY = "No summary was produced for this recording.";
 
-class ProviderHttpError extends Error {}
+class ProviderHttpError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+  }
+}
 
 /** Says what the user can do about it, not just which status came back. */
 function providerError(response: Response, provider: string): Error {
   const { status } = response;
-  if (status === 401 || status === 403) return new ProviderHttpError(`${provider} rejected the API key (${status}). Check the key in Settings.`);
-  if (status === 402) return new ProviderHttpError(`${provider} reports no remaining credit (402). Check your ${provider} billing.`);
-  if (status === 413) return new ProviderHttpError(`${provider} refused the upload as too large (413).`);
-  if (status === 429) return new ProviderHttpError(`${provider} is rate limiting requests (429). Wait a few minutes and retry.`);
-  return new ProviderHttpError(`${provider} returned ${status}`);
+  if (status === 401 || status === 403) return new ProviderHttpError(`${provider} rejected the API key (${status}). Check the key in Settings.`, status);
+  if (status === 402) return new ProviderHttpError(`${provider} reports no remaining credit (402). Check your ${provider} billing.`, status);
+  if (status === 413) return new ProviderHttpError(`${provider} refused the upload as too large (413).`, status);
+  if (status === 429) return new ProviderHttpError(`${provider} is rate limiting requests (429). Wait a few minutes and retry.`, status);
+  return new ProviderHttpError(`${provider} returned ${status}`, status);
 }
 
 function retryableStatus(status: number): boolean {
@@ -311,17 +316,35 @@ function transcribeTimeoutMs(segment: AudioSegment): number {
   return TRANSCRIBE_TIMEOUT_BASE_MS + Math.ceil(samplesToMs(segment.samples.length) / 1000) * TRANSCRIBE_TIMEOUT_PER_AUDIO_SECOND_MS;
 }
 
+/** Languages nova-3 transcribes natively besides English (English is its default). */
+const DEEPGRAM_LANGUAGES = new Set(["es", "fr", "de", "hi", "ru", "pt", "ja", "it", "nl"]);
+
+/** The browser's UI language when it is a supported non-English one: a best guess at what the call is in. */
+function preferredDeepgramLanguage(): string | undefined {
+  const primary = (typeof navigator !== "undefined" ? navigator.language : "").toLowerCase().split("-")[0] ?? "";
+  return DEEPGRAM_LANGUAGES.has(primary) ? primary : undefined;
+}
+
 async function transcribeDeepgram(segment: AudioSegment, key: string, fetchImpl: typeof fetch): Promise<SpokenLine[]> {
   // The WAV header describes the audio, so encoding/sample_rate must NOT be passed (they are for headerless raw audio).
   // Diarization is deliberately off: speaker ids restart in every request, so they cannot be stitched across segments.
-  const url = `${DEEPGRAM_URL}?model=nova-3&smart_format=true&utterances=true`;
-  const body = await requestJson(
+  const base = `${DEEPGRAM_URL}?model=nova-3&smart_format=true&utterances=true`;
+  const language = preferredDeepgramLanguage();
+  const send = (url: string) => requestJson(
     fetchImpl,
     url,
     { method: "POST", headers: { Authorization: `Token ${key}`, "Content-Type": "audio/wav" }, body: wavBlob(segment) },
     transcribeTimeoutMs(segment),
     "Deepgram",
   );
+  let body: Record<string, unknown>;
+  try {
+    body = await send(language ? `${base}&language=${language}` : base);
+  } catch (error) {
+    // A language the model rejects (400) must not make the whole call unprocessable: fall back to the default.
+    if (language && error instanceof ProviderHttpError && error.status === 400) body = await send(base);
+    else throw error;
+  }
   const results = asRecord(body.results);
   const lines: SpokenLine[] = [];
   if (Array.isArray(results?.utterances)) {
@@ -707,7 +730,15 @@ export async function processBrowserMeetRecording(
     utteranceId: index,
     offsetMs: Math.round(turn.offsetMs),
   }));
-  if (transcript.length === 0) return { transcript, summary: NO_SPEECH_SUMMARY, actionItems: [], noSpeech: true };
+  if (transcript.length === 0) {
+    // A long call that produced no speech at all almost always means capture failed (muted or wrong
+    // microphone, silent tab), not that nobody spoke. Say so rather than presenting it as a quiet meeting.
+    const minutes = Math.round(timeline.endMs / 60_000);
+    const summary = minutes >= LONG_SILENT_CALL_MINUTES
+      ? `${NO_SPEECH_SUMMARY} This was a ${minutes}-minute recording, so Notetaker may not have been able to hear the call. Check that your microphone was not muted and that the Meet tab was audible, then try a short test recording.`
+      : NO_SPEECH_SUMMARY;
+    return { transcript, summary, actionItems: [], noSpeech: true };
+  }
 
   const notes = await summarizeTranscript(transcript, meetingMode, completerFor(settings.summarizationProvider, summaryKey, fetchImpl));
   if (!notes.structured) return { transcript, summary: notes.plainText || NO_SUMMARY, actionItems: [] };

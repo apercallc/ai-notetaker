@@ -347,6 +347,39 @@ describe("browser Meet processing", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("asks Deepgram for the browser's non-English language, and falls back if it is rejected", async () => {
+    const original = Object.getOwnPropertyDescriptor(window.navigator, "language");
+    Object.defineProperty(window.navigator, "language", { value: "es-MX", configurable: true });
+    try {
+      const urls: string[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url.includes("deepgram")) {
+          urls.push(url);
+          if (url.includes("language=es")) return new Response("unsupported", { status: 400 });
+          return deepgramUtterances([0, 1, "hola equipo"]);
+        }
+        return claudeReply({ title: "T", overview: "Hola", key_points: [], decisions: [], action_items: [] });
+      });
+      const result = await processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), fetchImpl);
+      expect(urls[0]).toContain("language=es");
+      expect(urls[1]).not.toContain("language=");
+      expect(result.transcript[0]?.text).toBe("hola equipo");
+    } finally {
+      if (original) Object.defineProperty(window.navigator, "language", original);
+      else delete (window.navigator as { language?: string }).language;
+    }
+  });
+
+  it("tells the user capture probably failed when a long call contains no speech at all", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const result = await processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 240, 0), fetchImpl);
+    expect(result.noSpeech).toBe(true);
+    expect(result.summary).toContain("4-minute recording");
+    expect(result.summary).toContain("muted");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("reuses transcribed segments on retry instead of paying for them again", async () => {
     const store = new Map<string, unknown[]>();
     const segmentCache = {
