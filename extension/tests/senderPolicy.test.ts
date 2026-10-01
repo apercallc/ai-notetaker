@@ -37,6 +37,9 @@ describe("isMessageAllowed", () => {
   it("accepts audio chunks only from the offscreen page, and nothing else from it", () => {
     expect(isMessageAllowed("MEET_AUDIO_CHUNK", "offscreen")).toBe(true);
     expect(isMessageAllowed("MEET_CAPTURE_ERROR", "offscreen")).toBe(true);
+    expect(isMessageAllowed("MEET_CAPTURE_WARNING", "offscreen")).toBe(true);
+    expect(isMessageAllowed("MEET_CAPTURE_WARNING", "meet-content-script")).toBe(false);
+    expect(isMessageAllowed("MEET_CAPTURE_WARNING", "extension-page")).toBe(false);
     expect(isMessageAllowed("SAVE_SETTINGS", "offscreen")).toBe(false);
     expect(isMessageAllowed("MEET_AUDIO_CHUNK", "extension-page")).toBe(false);
   });

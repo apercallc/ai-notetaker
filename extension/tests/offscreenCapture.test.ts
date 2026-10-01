@@ -4,7 +4,7 @@ import { chromeMock } from "./setup";
 type Listener = (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => boolean | void;
 
 function fakeTrack() {
-  return { stop: vi.fn() };
+  return { stop: vi.fn(), onended: null as (() => void) | null };
 }
 
 interface FakeWorkletNode {
@@ -157,6 +157,19 @@ describe("offscreen capture", () => {
 
     await vi.waitFor(() => expect(tab.stop).toHaveBeenCalled());
     expect(chromeMock.runtime.sendMessage.mock.calls.some(([message]) => (message as { type: string }).type === "MEET_CAPTURE_ERROR")).toBe(true);
+  });
+
+  it("warns, without stopping, when a capture track ends on its own", async () => {
+    const tab = fakeTrack();
+    const mic = fakeTrack();
+    const listener = await loadOffscreen(async (constraints) => ({ getTracks: () => [(constraints as { audio?: { mandatory?: unknown } }).audio?.mandatory ? tab : mic] }));
+    await send(listener, { type: "MEET_CAPTURE_START", streamId: "s1", meetingId: "m1" });
+
+    mic.onended?.();
+
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "MEET_CAPTURE_WARNING", meetingId: "m1" }));
+    expect(mic.stop).not.toHaveBeenCalled();
+    expect(tab.stop).not.toHaveBeenCalled();
   });
 
   it("ignores a start without a stream id", async () => {

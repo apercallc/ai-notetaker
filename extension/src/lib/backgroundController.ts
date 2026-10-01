@@ -352,6 +352,12 @@ export class BackgroundController {
     return true;
   }
 
+  /** A non-fatal capture problem (one channel went quiet): tell every open view, keep recording. */
+  warnRecording(meetingId: string, message: string): void {
+    if (this.activeMeetingId !== meetingId) return;
+    this.broadcast({ type: "PROCESSING_WARNING", meetingId, message });
+  }
+
   async failRecording(meetingId: string, message: string): Promise<void> {
     try {
       const meeting = await getMeeting(meetingId);

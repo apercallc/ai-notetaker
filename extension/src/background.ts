@@ -247,6 +247,9 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await meetCapture.stop(message.meetingId);
       await controller.failRecording(message.meetingId, message.message.slice(0, 500) || "Meet audio capture failed.");
       return {};
+    case "MEET_CAPTURE_WARNING":
+      controller.warnRecording(message.meetingId, message.message.slice(0, 300));
+      return {};
     case "MEET_LIVE_TRANSCRIPT_STATUS":
       await controller.updateMeetLiveTranscriptStatus(message.meetingId, message.status);
       return {};

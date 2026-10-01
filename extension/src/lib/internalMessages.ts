@@ -16,6 +16,7 @@ export type UiToBackgroundMessage =
   | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number; titleHint?: string }
   | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string; tabId?: number; chunkId?: string }
   | { type: "MEET_CAPTURE_ERROR"; meetingId: string; message: string }
+  | { type: "MEET_CAPTURE_WARNING"; meetingId: string; message: string }
   | { type: "MEET_LIVE_TRANSCRIPT_STATUS"; meetingId: string; status: LiveTranscriptStatus }
   | { type: "MEET_LIVE_TRANSCRIPT_UPDATE"; meetingId: string; channel: BrowserAudioChannel; speaker: Speaker; text: string; isFinal: boolean; utteranceId: number; offsetMs: number }
   | { type: "STOP_RECORDING"; meetingId: string }

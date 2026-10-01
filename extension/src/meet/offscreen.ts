@@ -163,6 +163,7 @@ async function stop(): Promise<void> {
 }
 
 function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetingId: string): void {
+  const generation = captureGeneration;
   if (!context) throw new Error("Meet audio context is not ready");
   const source = context.createMediaStreamSource(stream);
   const node = new AudioWorkletNode(context, "meet-capture", {
@@ -198,6 +199,20 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
     pendingWrites.add(write);
     void write.finally(() => pendingWrites.delete(write));
   };
+  // A track that ends on its own (headset unplugged, capture revoked) records silence from then on.
+  // Tell the user while the recording continues; stopping capture ourselves releases tracks without this event.
+  for (const track of stream.getTracks()) {
+    track.onended = () => {
+      if (generation !== captureGeneration) return;
+      void chrome.runtime.sendMessage({
+        type: "MEET_CAPTURE_WARNING",
+        meetingId,
+        message: channel === "mic"
+          ? "Your microphone stopped. Notes will keep recording the call, but your voice is not being captured."
+          : "Call audio stopped. Notes will keep recording, but other people are no longer being captured.",
+      }).catch(() => undefined);
+    };
+  }
   source.connect(node);
   // tabCapture mutes the tab while it is captured; reconnecting this source
   // to the destination preserves ordinary Meet listening for the user.
