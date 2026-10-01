@@ -1,5 +1,4 @@
 import { isFromExtensionWorker } from "../lib/senderPolicy";
-import { getSettings } from "../lib/storage";
 import { DeepgramLiveTranscriber, type DeepgramLiveEvent } from "./deepgramLiveTranscriber";
 import { float32ToPcm16 } from "./meetCapture";
 import type { BrowserAudioChannel } from "../types";
@@ -84,12 +83,10 @@ function reportLiveEvent(meetingId: string, generation: number, event: DeepgramL
   void task.finally(() => pendingLiveMessages.delete(task));
 }
 
-async function startLiveTranscription(meetingId: string, generation: number): Promise<void> {
+async function startLiveTranscription(meetingId: string, generation: number, apiKey: string | undefined): Promise<void> {
   try {
-    const settings = await getSettings();
     if (generation !== captureGeneration) return;
-    const apiKey = settings.apiKeys.deepgram?.trim() ?? "";
-    if (settings.processingMode.kind !== "local_byok" || settings.transcriptionProvider !== "deepgram" || !apiKey) {
+    if (!apiKey) {
       reportLiveEvent(meetingId, generation, { type: "status", status: "not_supported" });
       return;
     }
@@ -213,7 +210,7 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
   captureNodes.push(node);
 }
 
-async function start(capturedStreamId: string, meetingId: string, tabId?: number): Promise<void> {
+async function start(capturedStreamId: string, meetingId: string, tabId?: number, liveDeepgramKey?: string): Promise<void> {
   await stop();
   captureTabId = tabId;
   context = new AudioContext({ sampleRate: SAMPLE_RATE_HZ });
@@ -231,16 +228,16 @@ async function start(capturedStreamId: string, meetingId: string, tabId?: number
   streams = [speaker, mic];
   attachCapture(speaker, "speaker", meetingId);
   attachCapture(mic, "mic", meetingId);
-  void startLiveTranscription(meetingId, captureGeneration);
+  void startLiveTranscription(meetingId, captureGeneration, liveDeepgramKey);
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   // Runtime messages reach every extension context, including the Meet content
   // script; only the service worker may drive capture.
   if (!isFromExtensionWorker(sender, { extensionId: chrome.runtime.id, extensionBaseUrl: chrome.runtime.getURL("") })) return false;
-  const value = message as { type?: string; streamId?: string; meetingId?: string; tabId?: number };
+  const value = message as { type?: string; streamId?: string; meetingId?: string; tabId?: number; liveDeepgramKey?: string };
   if (value.type === "MEET_CAPTURE_START" && typeof value.streamId === "string" && typeof value.meetingId === "string") {
-    void start(value.streamId, value.meetingId, typeof value.tabId === "number" ? value.tabId : undefined).then(() => sendResponse({ ok: true })).catch((error: unknown) => {
+    void start(value.streamId, value.meetingId, typeof value.tabId === "number" ? value.tabId : undefined, typeof value.liveDeepgramKey === "string" ? value.liveDeepgramKey.trim() : undefined).then(() => sendResponse({ ok: true })).catch((error: unknown) => {
       void stop();
       sendResponse({ ok: false, error: errorMessage(error) });
     });

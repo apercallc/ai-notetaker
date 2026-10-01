@@ -1,4 +1,5 @@
 import type { BrowserAudioChannel } from "../types";
+import { getSettings } from "../lib/storage";
 import { MIC_PERMISSION_HINT } from "./hints";
 import { meetingCodeFromPath } from "./meetContext";
 
@@ -151,8 +152,24 @@ export class MeetCaptureController {
     await this.prepare(tabId);
   }
 
+  /**
+   * The offscreen document only gets chrome.runtime, not chrome.storage, so the
+   * worker hands it the one credential live captions need (only in local BYOK
+   * mode with Deepgram selected). Any failure just means no live captions.
+   */
+  private async liveDeepgramKey(): Promise<string | null> {
+    try {
+      const settings = await getSettings();
+      const key = settings.apiKeys.deepgram?.trim() ?? "";
+      return settings.processingMode.kind === "local_byok" && settings.transcriptionProvider === "deepgram" && key ? key : null;
+    } catch {
+      return null;
+    }
+  }
+
   async start(tabId: number, meetingId: string): Promise<void> {
     const { url, streamId } = await this.prepare(tabId);
+    const liveDeepgramKey = await this.liveDeepgramKey();
     if (!(await chrome.offscreen.hasDocument())) {
       await chrome.offscreen.createDocument({
         url: "meet/offscreen.html",
@@ -165,7 +182,7 @@ export class MeetCaptureController {
     // audio is durably forwarded instead of silently dropped.
     this.activeMeetings.set(meetingId, { tabId, callCode: callCodeOf(url) });
     try {
-      const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId, streamId });
+      const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId, streamId, ...(liveDeepgramKey ? { liveDeepgramKey } : {}) });
       if (response?.ok !== true) throw new Error(response?.error ?? "Google Meet capture could not start.");
       await this.persistCaptures();
     } catch (error) {

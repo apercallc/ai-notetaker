@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { MeetCaptureController, float32ToPcm16 } from "../src/meet/meetCapture";
+import { DEFAULT_SETTINGS } from "../src/types";
+import { saveSettings } from "../src/lib/storage";
 import { MIC_PERMISSION_HINT } from "../src/meet/hints";
 
 beforeEach(() => {
@@ -64,6 +66,13 @@ describe("Google Meet capture orchestration", () => {
       meetingId: "meeting-1",
       streamId: "stream-abc",
     });
+  });
+
+  it("hands the offscreen page the Deepgram key for live captions, since it cannot read storage", async () => {
+    grantStreamId("stream-abc");
+    await saveSettings({ ...DEFAULT_SETTINGS, transcriptionProvider: "deepgram", apiKeys: { deepgram: " dg-key " } });
+    await new MeetCaptureController(vi.fn()).start(7, "meeting-live");
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "MEET_CAPTURE_START", liveDeepgramKey: "dg-key" }));
   });
 
   it("forwards the first chunk even when it arrives before the offscreen start reply", async () => {
