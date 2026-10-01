@@ -1,3 +1,4 @@
+import { speakerLabel } from "./types";
 import { prisma } from "./db";
 import { ManagedWorkerError, managedSummaryModel, managedSummaryProvider, providerRequest } from "./managedWorker";
 import { releaseChatQuestion, reserveChatQuestion } from "./chatQuota";
@@ -51,6 +52,7 @@ export async function retrieveNotes(workspaceId: string, question: string): Prom
   const terms = extractTerms(question);
   const include = (filter: Insensitive[]) => ({
     actionItems: { select: { text: true }, take: 10 },
+    speakers: { select: { speakerKey: true, displayName: true } },
     transcript: {
       where: filter.length ? { OR: filter.map((contains) => ({ text: contains })) } : undefined,
       orderBy: { order: "asc" as const },
@@ -130,14 +132,16 @@ function toSource(row: {
   summary: string;
   actionItems: { text: string }[];
   transcript: { speaker: string; text: string }[];
+  speakers: { speakerKey: string; displayName: string }[];
 }): NoteSource {
+  const names = Object.fromEntries(row.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName]));
   return {
     id: row.id,
     title: row.title,
     startedAt: row.startedAt.toISOString(),
     summary: row.summary,
     actionItems: row.actionItems.map((item) => item.text),
-    excerpts: row.transcript.map((line) => ({ speaker: line.speaker, text: line.text })),
+    excerpts: row.transcript.map((line) => ({ speaker: speakerLabel(line.speaker, names), text: line.text })),
   };
 }
 

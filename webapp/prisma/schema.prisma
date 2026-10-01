@@ -35,6 +35,7 @@ model Meeting {
   uploads     ManagedUpload[]
   processingJobs ProcessingJob[]
   shareTokens MeetingShareToken[]
+  speakers    MeetingSpeaker[]
 
   @@index([userId, startedAt])
   @@index([workspaceId, startedAt])
@@ -387,4 +388,22 @@ model AuditEvent {
   @@index([workspaceId, createdAt])
   @@index([workspaceId, action, createdAt])
   @@index([createdAt])
+}
+
+// A person-chosen name for one speaker of one meeting. The transcript keeps its
+// stable keys ("you", "them-1", "speaker-2"); this table only maps a key to the
+// name shown everywhere. `appliedLabel` is the exact text currently written
+// into the summary and action items for that speaker, so the next rename
+// replaces precisely that text.
+model MeetingSpeaker {
+  id           String   @id @default(uuid())
+  meetingId    String
+  speakerKey   String
+  displayName  String
+  appliedLabel String
+  updatedAt    DateTime @updatedAt
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, speakerKey])
 }

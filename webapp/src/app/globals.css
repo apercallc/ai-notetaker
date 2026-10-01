@@ -2021,3 +2021,50 @@ a.meeting-card:hover,
     flex: 1 1 100%;
   }
 }
+
+/* Renamable speaker labels */
+.speaker-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.speaker-button svg {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.speaker-button:hover,
+.speaker-button:focus-visible {
+  border-color: var(--color-border);
+}
+
+.speaker-button:hover svg,
+.speaker-button:focus-visible svg {
+  opacity: 0.7;
+}
+
+@media (hover: none) {
+  .speaker-button svg {
+    opacity: 0.55;
+  }
+}
+
+.speaker-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.speaker-edit .text-input {
+  width: 200px;
+  min-height: 36px;
+}

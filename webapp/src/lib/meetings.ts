@@ -403,6 +403,7 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     include: {
       transcript: { orderBy: { order: "asc" } },
       actionItems: true,
+      speakers: { select: { speakerKey: true, displayName: true } },
       processingJobs: LATEST_JOB,
     },
   });
@@ -418,6 +419,7 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     processing: toProcessingState(row.processingJobs),
     processingMode: row.processingMode,
     notesRegenerations: row.notesRegenerations,
+    ...(row.speakers.length > 0 ? { speakerNames: Object.fromEntries(row.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName])) } : {}),
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,

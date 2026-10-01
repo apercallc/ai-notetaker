@@ -26,7 +26,7 @@ function markdownFor(meeting: MeetingDetailResponse): string {
       : ["_None_"]),
     "",
     "## Transcript",
-    ...meeting.transcript.map((segment) => `**${speakerLabel(segment.speaker)}:** ${segment.text}`),
+    ...meeting.transcript.map((segment) => `**${speakerLabel(segment.speaker, meeting.speakerNames)}:** ${segment.text}`),
   ].join("\n");
 }
 
@@ -46,7 +46,7 @@ function plainTextFor(meeting: MeetingDetailResponse): string {
       : ["None"]),
     "",
     "TRANSCRIPT",
-    ...meeting.transcript.map((segment) => `${speakerLabel(segment.speaker)}: ${segment.text}`),
+    ...meeting.transcript.map((segment) => `${speakerLabel(segment.speaker, meeting.speakerNames)}: ${segment.text}`),
   ].join("\n");
 }
 

@@ -8,6 +8,7 @@ import { requireSession } from "@/lib/currentUser";
 import { createMeetingShare, revokeMeetingShare, SharingValidationError } from "@/lib/sharing";
 import { retryMeetingProcessing } from "@/lib/meetingProcessing";
 import { regenerateNotes } from "@/lib/notesRegenerate";
+import { renameSpeaker } from "@/lib/speakers";
 import { isValidDateOnly } from "@/lib/actionItems";
 
 export type ShareActionResult =
@@ -138,4 +139,23 @@ export async function regenerateNotesAction(formData: FormData): Promise<Regener
   revalidatePath(`/meetings/${meetingId}`);
   revalidatePath("/actions");
   return { status: "done", remaining: result.remaining };
+}
+
+export type SpeakerRenameState = { status: "saved"; label: string } | { status: "error"; message: string };
+
+export async function renameSpeakerAction(formData: FormData): Promise<SpeakerRenameState> {
+  const { workspaceId } = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  let result;
+  try {
+    result = await renameSpeaker(workspaceId, meetingId, String(formData.get("speakerKey") ?? ""), String(formData.get("name") ?? ""));
+  } catch (error) {
+    console.error("speaker rename failed", { meetingId, error: error instanceof Error ? error.message : String(error) });
+    return { status: "error", message: "Couldn't save the name. Try again." };
+  }
+  if (!result.ok) return { status: "error", message: result.error };
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/meetings");
+  revalidatePath("/actions");
+  return { status: "saved", label: result.label };
 }

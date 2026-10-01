@@ -38,8 +38,12 @@ multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
 - [ ] Templates follow-ups: sections for local BYOK summaries, a cost ledger
       for regenerations, user-defined templates, template choice on the live
       Meet widget's hosted path, and a design-review pass.
-- [ ] Rename speakers (per meeting; rewrites transcript labels, summary text
-      and action-item owners).
+- [x] Rename speakers: per-meeting names, click-to-rename in the transcript,
+      rewrites summary text and action-item owners, used in exports, shares,
+      Drive export, Ask and regenerated notes. Spec:
+      [`docs/superpowers/specs/2026-09-30-speaker-names-design.md`](docs/superpowers/specs/2026-09-30-speaker-names-design.md).
+- [ ] Speaker-name follow-ups: merge two speakers into one, include names in
+      the account data export, and suggest names from the calendar attendees.
 - [ ] Library, Drive-style: nested folders, notes as `.md` text files, text-only
       editor (note body only, transcript read-only), Trash with 30-day restore,
       folder-scoped search/Ask, upload `.md`/`.txt` as a note, retention UI.

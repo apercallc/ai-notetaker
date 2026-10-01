@@ -36,6 +36,7 @@ export async function regenerateNotes(
       processingMode: true,
       notesRegenerations: true,
       transcript: { orderBy: { order: "asc" }, select: { speaker: true, text: true, timestamp: true } },
+      speakers: { select: { speakerKey: true, displayName: true } },
       processingJobs: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true } },
     },
   });
@@ -62,7 +63,8 @@ export async function regenerateNotes(
 
   let summary;
   try {
-    ({ summary } = await summarize(utterances, meeting.startedAt.toISOString().slice(0, 10), noteTemplateFor(templateId)));
+    const speakerNames = Object.fromEntries(meeting.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName]));
+    ({ summary } = await summarize(utterances, meeting.startedAt.toISOString().slice(0, 10), noteTemplateFor(templateId), speakerNames));
   } catch (error) {
     // A failed attempt must not use up one of the three.
     await prisma.meeting.updateMany({ where: { id: meeting.id, notesRegenerations: { gt: 0 } }, data: { notesRegenerations: { decrement: 1 } } });

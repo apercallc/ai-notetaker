@@ -78,7 +78,10 @@ export async function getSharedMeeting(token: string): Promise<MeetingDetailResp
   if (!share) return null;
   const meeting = await getMeeting(share.workspaceId, share.meetingId);
   if (!meeting) return null;
-  const { processing: _internal, ...publicView } = meeting;
-  void _internal;
+  // Internal processing details never reach a share link's reader.
+  const { processing: _processing, processingMode: _mode, notesRegenerations: _regenerations, ...publicView } = meeting;
+  void _processing;
+  void _mode;
+  void _regenerations;
   return publicView;
 }

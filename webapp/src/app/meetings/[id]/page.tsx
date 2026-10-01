@@ -19,6 +19,7 @@ import { RetryProcessing } from "@/components/RetryProcessing";
 import { DeleteButton } from "./DeleteButton";
 import { ExportButtons } from "./ExportButtons";
 import { NotesTemplate } from "./NotesTemplate";
+import { SpeakerName } from "./SpeakerName";
 import { ShareMeeting } from "./ShareMeeting";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { TitleEditor } from "./TitleEditor";
@@ -127,7 +128,13 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
             {turns.map((turn, index) => (
               <li key={index} className="turn">
                 <div className="turn-head">
-                  <span className={`speaker${turn.speaker === "you" ? " is-you" : ""}`}>{speakerLabel(turn.speaker)}</span>
+                  <SpeakerName
+                    meetingId={meeting.id}
+                    speakerKey={turn.speaker}
+                    label={speakerLabel(turn.speaker, meeting.speakerNames)}
+                    renamed={Boolean(meeting.speakerNames?.[turn.speaker])}
+                    isYou={turn.speaker === "you"}
+                  />
                   {turn.offsetSeconds !== null && <span className="offset">{formatOffset(turn.offsetSeconds)}</span>}
                 </div>
                 <p>{turn.lines.join(" ")}</p>
