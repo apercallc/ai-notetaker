@@ -1126,10 +1126,22 @@ describe("BackgroundController", () => {
 });
 
 describe("BackgroundController: recovery and in-call widget support", () => {
+  it("refuses to record a Meet call without provider keys instead of failing after the call", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg" } });
+
+    expect(await controller.startRecording("general", "meet")).toBe("");
+
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", phase: "start", recovery: "check_provider_key", message: expect.stringContaining("claude") }));
+  });
+
   it("uses the tab-derived title hint when no calendar event names the call", async () => {
     vi.mocked(findCurrentEvent).mockResolvedValue(null);
     const controller = new BackgroundController(createFakeClient(), vi.fn());
     await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
 
     const meetingId = await controller.startRecording("general", "meet", "Google Meet abc-defg-hij");
 
@@ -1295,7 +1307,7 @@ describe("BackgroundController: recovery and in-call widget support", () => {
     const broadcast = vi.fn();
     const controller = new BackgroundController(createFakeClient(), broadcast);
     await controller.init();
-    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg" } });
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
     const meetingId = await controller.startRecording("general", "meet");
 
     await controller.updateMeetLiveTranscriptStatus(meetingId, "available");
@@ -1322,6 +1334,7 @@ describe("BackgroundController: recovery and in-call widget support", () => {
     const broadcast = vi.fn();
     const controller = new BackgroundController(client, broadcast);
     await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
     const meetingId = await controller.startRecording("general", "meet");
     client.emitStatus("disconnected");
 

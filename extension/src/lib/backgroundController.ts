@@ -300,13 +300,32 @@ export class BackgroundController {
           this.broadcast({ type: "RECORDING_ERROR", meetingId: null, phase: "start", message, recovery: "check_billing" });
           return "";
         }
-      } catch {
+      } catch (error) {
+        // Only a rejected session needs a new sign-in; an offline or unavailable service is worth a plain retry.
+        const sessionRejected = error instanceof ManagedAuthError;
         this.broadcast({
           type: "RECORDING_ERROR",
           meetingId: null,
           phase: "start",
-          message: "Hosted AI availability could not be checked. Sign in again or switch to your own API keys in Settings before recording.",
-          recovery: "sign_in",
+          message: sessionRejected
+            ? "Your hosted session has expired. Sign in again or switch to your own API keys in Settings before recording."
+            : "Hosted AI could not be reached to check your plan. Check your connection and try again, or switch to your own API keys in Settings.",
+          recovery: sessionRejected ? "sign_in" : "retry",
+        });
+        return "";
+      }
+    }
+    if (captureSource === "meet" && this.settings.processingMode.kind === "local_byok") {
+      // Meet audio is processed in the browser only after the call ends. Without keys the user would
+      // record the whole meeting and learn at the end that nothing can turn it into notes.
+      const missing = [this.settings.transcriptionProvider, this.settings.summarizationProvider].filter((provider) => !this.settings?.apiKeys[provider]?.trim());
+      if (missing.length > 0) {
+        this.broadcast({
+          type: "RECORDING_ERROR",
+          meetingId: null,
+          phase: "start",
+          message: `Add your ${missing.join(" and ")} API key in Settings before recording, or switch to Hosted AI.`,
+          recovery: "check_provider_key",
         });
         return "";
       }
