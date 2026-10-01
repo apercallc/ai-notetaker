@@ -15,6 +15,7 @@ export const AUDIT_ACTIONS = [
   "member.role_change",
   "member.password_reset",
   "workspace.retention_update",
+  "workspace.language_update",
   "meeting.delete",
   "meeting.create",
   "meeting.edit",

@@ -41,6 +41,8 @@ model Meeting {
   // Set once when "note ready" was announced to the workspace's integrations,
   // so a note triggers its deliveries a single time.
   readyNotifiedAt DateTime?
+  // ISO 639-1 code of the spoken language: chosen at import, else detected by the transcriber.
+  language    String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -141,6 +143,10 @@ model Workspace {
   name      String
   isDefault Boolean  @default(false)
   retentionDays Int?
+  // Names and terms the transcriber and summarizer should spell correctly, one per line.
+  vocabulary    String   @default("")
+  // Language notes are written in; null means the language of the conversation.
+  summaryLanguage String?
   createdAt DateTime @default(now())
 
   memberships WorkspaceMembership[]

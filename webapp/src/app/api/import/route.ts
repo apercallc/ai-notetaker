@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       ...(typeof value.title === "string" ? { title: value.title } : {}),
       ...(typeof value.recordedAtMs === "number" ? { recordedAtMs: value.recordedAtMs } : {}),
       ...(typeof value.template === "string" ? { template: value.template } : {}),
+      ...(typeof value.language === "string" ? { language: value.language } : {}),
     });
     return NextResponse.json(started, { status: 201, headers: { "x-request-id": requestId } });
   } catch (error) {

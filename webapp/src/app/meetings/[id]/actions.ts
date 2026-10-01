@@ -138,7 +138,7 @@ export type RegenerateState = { status: "done"; remaining: number } | { status: 
 export async function regenerateNotesAction(formData: FormData): Promise<RegenerateState> {
   const session = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
-  const result = await regenerateNotes(session, meetingId, String(formData.get("template") ?? ""));
+  const result = await regenerateNotes(session, meetingId, String(formData.get("template") ?? ""), { summaryLanguage: String(formData.get("summaryLanguage") ?? "") });
   if (!result.ok) return { status: "error", message: result.error };
   revalidatePath("/meetings");
   revalidatePath(`/meetings/${meetingId}`);

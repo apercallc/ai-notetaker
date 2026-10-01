@@ -10,6 +10,7 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
 import { ACCOUNT_TABS, resolveAccountTab } from "./tabs";
 import { listIntegrations, listRecentDeliveries } from "@/lib/integrations";
 import { NotesDeliveryPanel } from "./NotesDeliveryPanel";
+import { LanguageSettingsForm } from "./LanguageSettingsForm";
 
 export const metadata = { title: "Settings", referrer: "no-referrer", robots: { index: false, follow: false } };
 
@@ -35,7 +36,7 @@ export default async function AccountPage({
     listApiTokens(session.userId),
     prisma.workspace.findUniqueOrThrow({
       where: { id: session.workspaceId },
-      select: { name: true, retentionDays: true },
+      select: { name: true, retentionDays: true, vocabulary: true, summaryLanguage: true },
     }),
     googleConnectionStatus(session.userId),
   ]);
@@ -149,6 +150,11 @@ export default async function AccountPage({
 
           {tab === "data" && (
             <>
+              <section className="settings-card">
+                <h2>Language and vocabulary</h2>
+                <LanguageSettingsForm vocabulary={workspace.vocabulary} summaryLanguage={workspace.summaryLanguage ?? ""} canEdit={session.role === "owner"} />
+              </section>
+
               <section className="settings-card">
                 <h2>Export</h2>
                 <p className="muted-copy">Download every meeting in {workspace.name} — summary, transcript, and action items — as one JSON file.</p>

@@ -3,15 +3,17 @@
 import { useState, useTransition } from "react";
 import { regenerateNotesAction } from "./actions";
 import { MAX_NOTES_REGENERATIONS, PICKABLE_TEMPLATES } from "@/lib/noteTemplates";
+import { LANGUAGES } from "@/lib/languages";
 
 /**
  * Pick a template and rewrite the notes from the stored transcript. Two steps
  * (choose, then confirm) because it replaces the summary text.
  */
-export function NotesTemplate({ meetingId, mode, used, edited }: { meetingId: string; mode: string; used: number; edited: boolean }) {
+export function NotesTemplate({ meetingId, mode, used, edited, defaultLanguage }: { meetingId: string; mode: string; used: number; edited: boolean; defaultLanguage: string }) {
   const initial = PICKABLE_TEMPLATES.some((template) => template.id === mode) ? mode : "general";
   const [template, setTemplate] = useState(initial);
   const [confirming, setConfirming] = useState(false);
+  const [language, setLanguage] = useState(defaultLanguage);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [remaining, setRemaining] = useState(Math.max(0, MAX_NOTES_REGENERATIONS - used));
   const [pending, startTransition] = useTransition();
@@ -21,6 +23,7 @@ export function NotesTemplate({ meetingId, mode, used, edited }: { meetingId: st
     const formData = new FormData();
     formData.set("meetingId", meetingId);
     formData.set("template", template);
+    formData.set("summaryLanguage", language);
     startTransition(async () => {
       let result;
       try {
@@ -46,6 +49,11 @@ export function NotesTemplate({ meetingId, mode, used, edited }: { meetingId: st
         <label htmlFor="notes-template-select">Notes template</label>
         <select id="notes-template-select" className="text-input" value={template} onChange={(event) => { setTemplate(event.target.value); setConfirming(false); setMessage(null); }} disabled={pending}>
           {PICKABLE_TEMPLATES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+        </select>
+        <label htmlFor="notes-language">Write in</label>
+        <select id="notes-language" className="text-input" value={language} onChange={(event) => { setLanguage(event.target.value); setConfirming(false); setMessage(null); }} disabled={pending}>
+          <option value="">Same as the conversation</option>
+          {LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
         </select>
         {!confirming && (
           <button type="button" className="button button-secondary button-small" onClick={() => setConfirming(true)} disabled={pending || remaining === 0}>

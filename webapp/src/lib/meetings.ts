@@ -260,6 +260,8 @@ export interface MeetingListItem extends MeetingSummaryResponse {
 export interface MeetingDetail extends MeetingDetailResponse {
   processing: ProcessingState | null;
   folderId: string | null;
+  /** ISO 639-1 spoken language, chosen or detected. */
+  language: string | null;
   /** Version token for edit-conflict checks (the row's last-change time). */
   version: string;
   /** Set when the body was edited by hand and not regenerated since. */
@@ -454,6 +456,7 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     processingMode: row.processingMode,
     notesRegenerations: row.notesRegenerations,
     folderId: row.folderId,
+    language: row.language,
     version: row.updatedAt.toISOString(),
     summaryEditedAt: row.summaryEditedAt?.toISOString() ?? null,
     hasPreviousSummary: row.previousSummary !== null,

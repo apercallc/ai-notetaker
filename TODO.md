@@ -63,8 +63,11 @@ multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
       package in `mcp/`. Spec: [`docs/superpowers/specs/2026-09-30-mcp-design.md`](docs/superpowers/specs/2026-09-30-mcp-design.md).
 - [ ] MCP follow-ups: publish `ai-notetaker-mcp` to npm, OAuth sign-in instead of pasted
       tokens, write tools behind explicit scopes, resources/prompts, and an Ask-your-notes tool.
-- [ ] Multilingual: detect, translated summary, custom vocabulary (the local
-      helper already supports vocabulary; hosted does not).
+- [x] Multilingual: custom vocabulary, spoken-language hint/detection, summary language
+      (workspace default and per regenerate). Spec:
+      [`docs/superpowers/specs/2026-09-30-multilingual-design.md`](docs/superpowers/specs/2026-09-30-multilingual-design.md).
+- [ ] Multilingual follow-ups: verify the Deepgram/Whisper language and vocabulary parameters
+      against the live providers, keep a second-language copy of a summary, right-to-left review.
 - [x] Audit-log viewer for Team: owner-only page, category/actor filters, keyset paging, CSV
       export. Spec: [`docs/superpowers/specs/2026-09-30-audit-log-design.md`](docs/superpowers/specs/2026-09-30-audit-log-design.md).
 - [ ] Audit follow-ups: date filters and search, sign-in events, "who viewed" for shared

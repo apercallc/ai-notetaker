@@ -5,6 +5,7 @@ import { completeManagedUpload, createManagedUpload, enqueueManagedJob, getUploa
 import { dispatchManagedJob } from "./managedDispatch";
 import { upsertMeeting } from "./meetings";
 import { PICKABLE_TEMPLATES, isNoteTemplateId } from "./noteTemplates";
+import { isLanguageCode } from "./languages";
 import { IMPORT_CHUNK_BYTES, IMPORT_MAX_BYTES, importFormatFromName } from "./importFormats";
 import { mediaToolsAvailable } from "./mediaDecode";
 import { estimateImportSeconds, isManagedPlan, PLAN_IMPORT_MAX_SECONDS } from "./plans";
@@ -26,6 +27,8 @@ export interface StartImportInput {
   recordedAtMs?: number;
   /** Notes template (a meeting mode); defaults to general. */
   template?: string;
+  /** Spoken language (ISO 639-1); omit to detect it. */
+  language?: string;
 }
 
 export function importUploadChunks(totalBytes: number): number {
@@ -71,6 +74,9 @@ export async function startImport(session: ManagedSession, input: StartImportInp
   if (input.template !== undefined && (!isNoteTemplateId(input.template) || !PICKABLE_TEMPLATES.some((template) => template.id === input.template))) {
     throw new ManagedValidationError("choose one of the listed notes templates");
   }
+  if (input.language !== undefined && input.language !== "" && !isLanguageCode(input.language)) {
+    throw new ManagedValidationError("choose one of the listed languages");
+  }
   const now = Date.now();
   const recordedAt = typeof input.recordedAtMs === "number" && Number.isFinite(input.recordedAtMs) && input.recordedAtMs <= now && input.recordedAtMs >= now - TEN_YEARS_MS
     ? new Date(input.recordedAtMs)
@@ -103,6 +109,7 @@ export async function startImport(session: ManagedSession, input: StartImportInp
     session.userId,
   );
 
+  if (input.language) await prisma.meeting.updateMany({ where: { id: input.meetingId, workspaceId: session.workspaceId }, data: { language: input.language } });
   let upload;
   try {
     upload = await createManagedUpload(session.workspaceId, {

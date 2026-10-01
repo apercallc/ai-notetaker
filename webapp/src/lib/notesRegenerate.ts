@@ -4,6 +4,7 @@ import { managedHostingEnabled } from "./managedAuth";
 import { ManagedWorkerError, formatSummaryText, summarize, type ManagedUtterance } from "./managedWorker";
 import { MAX_NOTES_REGENERATIONS, NOTE_TEMPLATES, PICKABLE_TEMPLATES, isNoteTemplateId, noteTemplateFor } from "./noteTemplates";
 import { hasProcessingAccess } from "./usageLedger";
+import { isLanguageCode, parseVocabulary } from "./languages";
 
 export type RegenerateResult =
   | { ok: true; template: string; remaining: number }
@@ -22,10 +23,12 @@ export async function regenerateNotes(
   session: { workspaceId: string; userId: string },
   meetingId: string,
   templateId: string,
+  options: { summaryLanguage?: string } = {},
 ): Promise<RegenerateResult> {
   if (!managedHostingEnabled()) return fail("Hosted notes aren't enabled on this instance.");
   if (!isNoteTemplateId(templateId) || !PICKABLE_TEMPLATES.some((template) => template.id === templateId)) return fail("Choose one of the listed templates.");
   const template = NOTE_TEMPLATES[templateId];
+  if (options.summaryLanguage && !isLanguageCode(options.summaryLanguage)) return fail("Choose one of the listed languages.");
 
   const meeting = await prisma.meeting.findFirst({
     where: { id: meetingId, workspaceId: session.workspaceId, deletedAt: null },
@@ -63,8 +66,9 @@ export async function regenerateNotes(
 
   let summary;
   try {
+    const vocabulary = (await prisma.workspace.findUnique({ where: { id: session.workspaceId }, select: { vocabulary: true } }))?.vocabulary ?? "";
     const speakerNames = Object.fromEntries(meeting.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName]));
-    ({ summary } = await summarize(utterances, meeting.startedAt.toISOString().slice(0, 10), noteTemplateFor(templateId), speakerNames));
+    ({ summary } = await summarize(utterances, meeting.startedAt.toISOString().slice(0, 10), noteTemplateFor(templateId), speakerNames, { language: options.summaryLanguage || null, vocabulary: parseVocabulary(vocabulary) }));
   } catch (error) {
     // A failed attempt must not use up one of the three.
     await prisma.meeting.updateMany({ where: { id: meeting.id, notesRegenerations: { gt: 0 } }, data: { notesRegenerations: { decrement: 1 } } });

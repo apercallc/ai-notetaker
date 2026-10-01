@@ -11,6 +11,7 @@ import {
   importFormatFromName,
 } from "@/lib/importFormats";
 import { PICKABLE_TEMPLATES } from "@/lib/noteTemplates";
+import { LANGUAGES } from "@/lib/languages";
 
 type Phase = "idle" | "uploading" | "finishing";
 type Chosen = { file: File; durationSeconds: number | null };
@@ -90,6 +91,7 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const [title, setTitle] = useState("");
   const [template, setTemplate] = useState("general");
+  const [language, setLanguage] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -168,6 +170,7 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
           ...(chosen.durationSeconds ? { durationSeconds: Math.ceil(chosen.durationSeconds) } : {}),
           ...(title.trim() ? { title: title.trim() } : {}),
           template,
+          ...(language ? { language } : {}),
           recordedAtMs: file.lastModified,
         }),
         signal: controller.signal,
@@ -252,6 +255,11 @@ export function ImportClient({ maxSeconds, remainingSeconds }: { maxSeconds: num
             {PICKABLE_TEMPLATES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
           </select>
           <p className="muted-copy">{PICKABLE_TEMPLATES.find((option) => option.id === template)?.description}</p>
+          <label htmlFor="import-language">Spoken language</label>
+          <select id="import-language" className="text-input" value={language} onChange={(event) => setLanguage(event.target.value)} disabled={busy}>
+            <option value="">Detect automatically</option>
+            {LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+          </select>
           <p className="muted-copy" role="status">
             {tooLong
               ? `This recording is longer than the ${formatImportDuration(maxSeconds)} your plan allows for one file.`

@@ -9,6 +9,8 @@ import { formatOffset, groupTurns } from "@/lib/transcript";
 import { parseSummary } from "@/lib/summaryFormat";
 import { actionItemsToText } from "@/lib/actionItems";
 import { listFolders } from "@/lib/library";
+import { prisma } from "@/lib/db";
+import { languageName } from "@/lib/languages";
 import { folderPath } from "@/lib/libraryTree";
 import { SummaryBlocks } from "@/components/SummaryBlocks";
 import { modeLabel } from "@/lib/meetingText";
@@ -47,6 +49,7 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
 
   const shares = await listActiveShares(workspaceId, meeting.id);
   const crumbs = folderPath(await listFolders(workspaceId), meeting.folderId);
+  const summaryLanguage = (await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { summaryLanguage: true } }))?.summaryLanguage ?? "";
   const summaryBlocks = parseSummary(meeting.summary);
   const turns = groupTurns(meeting.startedAt, meeting.endedAt, meeting.transcript);
   const mode = modeLabel(meeting.mode);
@@ -69,6 +72,7 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
       <p className="meeting-date">
         <LocalTime iso={meeting.startedAt} />
         {mode && <> · {mode}</>}
+        {languageName(meeting.language) && <> · {languageName(meeting.language)}</>}
         {processing && <span className="meeting-status"><ProcessingBadge state={processing} /></span>}
       </p>
 
@@ -79,7 +83,7 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
         </div>
       )}
 
-      {canRegenerate && <NotesTemplate meetingId={meeting.id} mode={meeting.mode} used={meeting.notesRegenerations} edited={meeting.summaryEditedAt !== null} />}
+      {canRegenerate && <NotesTemplate meetingId={meeting.id} mode={meeting.mode} used={meeting.notesRegenerations} edited={meeting.summaryEditedAt !== null} defaultLanguage={summaryLanguage} />}
 
       <section aria-labelledby="summary-heading">
         <div className="section-head">

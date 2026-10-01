@@ -31,6 +31,7 @@ export const AUDIT_ACTION_INFO: Record<AuditAction, { label: string; category: A
   "member.role_change": { label: "Changed a member's role", category: "members" },
   "member.password_reset": { label: "Sent a password reset", category: "members" },
   "workspace.retention_update": { label: "Changed the retention policy", category: "settings" },
+  "workspace.language_update": { label: "Changed vocabulary or summary language", category: "settings" },
   "meeting.delete": { label: "Deleted a note", category: "notes" },
   "meeting.create": { label: "Created a note", category: "notes" },
   "meeting.edit": { label: "Edited a note", category: "notes" },
