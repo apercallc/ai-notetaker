@@ -1016,6 +1016,14 @@ impl AudioAppender {
     }
 }
 
+impl Drop for AudioAppender {
+    /// Whoever owns a live capture drops the appender when the capture ends; flush what the
+    /// batching has not yet made durable. Best effort: there is nobody left to report to.
+    fn drop(&mut self) {
+        let _ = self.sync();
+    }
+}
+
 pub fn is_valid_root(path: &Path) -> bool {
     path.is_dir() || !path.exists()
 }

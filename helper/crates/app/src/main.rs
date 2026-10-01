@@ -1198,18 +1198,25 @@ async fn handle_message(
             // One error per failure streak, not one per ~10 ms frame: a full
             // disk would otherwise flood the extension with ~100 errors/s.
             let storage_error_reported = AtomicBool::new(false);
+            let live_writer = std::sync::Mutex::new(LiveAudioWriter::new(
+                state.store.open_audio_appender(meeting_id),
+            ));
             let result = audio
                 .start_capture(Box::new(move |frame| {
-                    // Backends deliver frames on one dispatcher thread. Persist
+                    // Backends deliver frames on one dispatcher thread. Write
                     // synchronously there so stop joins every write, and queue
-                    // provider work only after the durable append completes.
-                    let existing_len = match persist_audio_frame(
-                        &state_for_audio.store,
-                        meeting_id,
-                        frame.channel,
-                        &frame.pcm16,
-                        frame.sample_rate_hz,
-                    ) {
+                    // provider work only after the append completes.
+                    let written = live_writer
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .write(
+                            &state_for_audio.store,
+                            meeting_id,
+                            frame.channel,
+                            &frame.pcm16,
+                            frame.sample_rate_hz,
+                        );
+                    let existing_len = match written {
                         Ok(existing_len) => {
                             storage_error_reported.store(false, Ordering::Relaxed);
                             existing_len
@@ -1890,6 +1897,67 @@ fn spawn_capture_health_forwarder(
     });
 }
 
+/// The live desktop-capture write path. Keeps both channel files open and `fsync`s about
+/// once a second instead of once per ~10 ms frame (which saturated slow disks and let the
+/// frame queue grow), and rewrites `meta.json` only when a channel's sample rate changes.
+/// The window this opens is an OS crash or power loss costing up to a second of the newest
+/// audio; a process crash loses nothing, because every frame is already in the file.
+struct LiveAudioWriter {
+    appender: notetaker_core::storage::AudioAppender,
+    sample_rates: [Option<u32>; 2],
+}
+
+const LIVE_AUDIO_SYNC_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl LiveAudioWriter {
+    fn new(appender: notetaker_core::storage::AudioAppender) -> Self {
+        Self {
+            appender,
+            sample_rates: [None, None],
+        }
+    }
+
+    /// Appends one frame and returns the offset it starts at.
+    fn write(
+        &mut self,
+        store: &MeetingStore,
+        meeting_id: Uuid,
+        channel: notetaker_core::providers::AudioChannel,
+        pcm16: &[u8],
+        sample_rate_hz: u32,
+    ) -> Result<usize, (ErrorCode, String)> {
+        let (channel_file, slot) = match channel {
+            notetaker_core::providers::AudioChannel::Mic => (notetaker_core::storage::MIC_FILE, 0),
+            notetaker_core::providers::AudioChannel::Speaker => {
+                (notetaker_core::storage::SPEAKER_FILE, 1)
+            }
+        };
+        let start = self.appender.append(channel_file, pcm16).map_err(|error| {
+            (
+                error.error_code(),
+                format!("failed to persist audio to disk: {error}"),
+            )
+        })?;
+        if self.sample_rates[slot] != Some(sample_rate_hz) {
+            store
+                .mark_audio_sample_rate(meeting_id, channel_file, sample_rate_hz)
+                .map_err(|error| {
+                    (
+                        error.error_code(),
+                        format!("failed to persist audio metadata: {error}"),
+                    )
+                })?;
+            self.sample_rates[slot] = Some(sample_rate_hz);
+        }
+        // A failed flush is reported like any storage failure, but the frame itself is in the
+        // file, so it still goes on to transcription.
+        if let Err(error) = self.appender.sync_if_due(LIVE_AUDIO_SYNC_INTERVAL) {
+            tracing::warn!(%error, "audio flush failed");
+        }
+        Ok(start)
+    }
+}
+
 fn persist_audio_frame(
     store: &MeetingStore,
     meeting_id: Uuid,
@@ -2230,6 +2298,47 @@ fn build_audio_backend() -> Arc<dyn AudioCapture> {
 mod tests {
     use super::*;
     use notetaker_core::storage::MeetingStore;
+
+    #[test]
+    fn live_writer_appends_in_order_and_flushes_everything_when_dropped() {
+        use notetaker_core::providers::AudioChannel;
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, chrono::Utc::now()).unwrap();
+        let mut writer = LiveAudioWriter::new(store.open_audio_appender(id));
+
+        assert_eq!(
+            writer
+                .write(&store, id, AudioChannel::Mic, &[1, 2], 48_000)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            writer
+                .write(&store, id, AudioChannel::Speaker, &[9], 44_100)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            writer
+                .write(&store, id, AudioChannel::Mic, &[3, 4, 5], 48_000)
+                .unwrap(),
+            2
+        );
+        // Readers see the bytes immediately (they are in the file), before any flush is due.
+        assert_eq!(
+            store
+                .audio_len(id, notetaker_core::storage::MIC_FILE)
+                .unwrap(),
+            5
+        );
+        drop(writer);
+
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meta.mic_sample_rate_hz, 48_000);
+        assert_eq!(meta.speaker_sample_rate_hz, 44_100);
+    }
 
     #[test]
     fn queued_audio_reads_exact_durable_ranges_after_capture_advances() {
