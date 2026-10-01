@@ -98,7 +98,7 @@ describe("checkout and portal failure recovery", () => {
     await withWorkspace("Checkout malformed response", async (workspaceId) => {
       fetch.mockResolvedValueOnce(new Response("not-json", { status: 500 }));
       await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_gaps", "https://billing.example.test/ok", "https://billing.example.test/cancel"))
-        .rejects.toThrow("Stripe request failed");
+        .rejects.toThrow("temporarily unavailable");
       await expect(prisma.workspaceSubscription.findUnique({ where: { workspaceId } })).resolves.toMatchObject({ status: "inactive" });
     });
     await withWorkspace("Checkout missing URL", async (workspaceId) => {
