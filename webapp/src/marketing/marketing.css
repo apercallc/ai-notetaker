@@ -1110,3 +1110,84 @@
   margin: 16px 0 28px;
   color: var(--mk-deep-muted);
 }
+
+/* ---------- Phones: a compact header (brand + actions on one row, nav scrolls) ---------- */
+.mk-label-short {
+  display: none;
+}
+
+.mk-brand {
+  min-height: 44px;
+}
+
+.mk-header-actions .mk-btn {
+  min-height: 44px;
+}
+
+@media (max-width: 560px) {
+  .mk-header-inner {
+    gap: 2px 10px;
+    padding-block: 8px 4px;
+  }
+
+  .mk-brand {
+    margin-inline-end: auto;
+    font-size: 1.05rem;
+  }
+
+  .mk-header-actions {
+    order: 2;
+    width: auto;
+    gap: 6px;
+  }
+
+  .mk-header-actions .mk-btn {
+    flex: none;
+    padding: 0 14px;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+
+  .mk-label-full {
+    display: none;
+  }
+
+  .mk-label-short {
+    display: inline;
+  }
+
+  .mk-nav {
+    order: 3;
+    width: 100%;
+    flex-wrap: nowrap;
+    gap: 0 4px;
+    margin-inline: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mk-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mk-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 10px;
+    white-space: nowrap;
+  }
+}
+
+@media (pointer: coarse) {
+  .mk-nav a,
+  .mk-footer a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .mk-btn {
+    min-height: 48px;
+  }
+}

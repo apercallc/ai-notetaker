@@ -20,7 +20,10 @@ import { highlightParts } from "@/lib/snippet";
 import { MEETING_RANGES, parseMeetingRange, rangeStart } from "@/lib/dateRange";
 import { FolderRow } from "./FolderRow";
 import { LibraryToolbar } from "./LibraryToolbar";
-import { NoteActions } from "./NoteActions";
+import { NoteRow } from "./NoteRow";
+import { CrumbLink } from "./CrumbLink";
+import { FolderList } from "./FolderList";
+import { LibraryProvider } from "./LibraryProvider";
 import { SearchForm } from "./SearchForm";
 
 const PAGE_SIZE = 50;
@@ -143,6 +146,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   }
 
   return (
+    <LibraryProvider folders={flatFolders} currentFolderId={currentFolder?.id ?? null}>
     <div className="container">
       <AutoRefresh active={meetings.some((meeting) => meeting.processing?.status === "processing")} />
       <div className="page-header">
@@ -150,15 +154,15 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         <p className="total-count" role="status" aria-live="polite">{countText}</p>
       </div>
 
-      <LibraryToolbar folderId={currentFolder?.id ?? null} canImport={managed} />
+      <LibraryToolbar folderId={currentFolder?.id ?? null} canImport={managed} canCreateFolder={browsing} showHint={browsing && (folderRows.length > 0 || meetings.length > 0)} />
 
       {(currentFolder || folderMissing) && (
         <nav className="breadcrumbs" aria-label="Folder path">
           <ol>
-            <li><Link href="/meetings">Library</Link></li>
+            <li><CrumbLink href="/meetings" destinationId={null}>Library</CrumbLink></li>
             {crumbs.map((crumb, index) => (
               <li key={crumb.id}>
-                {index === crumbs.length - 1 ? <span aria-current="page">{crumb.name}</span> : <Link href={hrefFor({ folder: crumb.id })}>{crumb.name}</Link>}
+                {index === crumbs.length - 1 ? <span aria-current="page">{crumb.name}</span> : <CrumbLink href={hrefFor({ folder: crumb.id })} destinationId={crumb.id}>{crumb.name}</CrumbLink>}
               </li>
             ))}
           </ol>
@@ -185,23 +189,20 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         <p className="callout" role="status">Moved to Trash. <Link href="/trash">Open Trash</Link> to restore it within 30 days.</p>
       )}
 
-      {folderRows.length > 0 && (
-        <ul className="folder-list" aria-label="Folders">
-          {folderRows.map((folder) => (
-            <FolderRow
-              key={folder.id}
-              id={folder.id}
-              name={folder.name}
-              parentId={folder.parentId}
-              href={hrefFor({ folder: folder.id, scope: undefined, range: undefined })}
-              noteCount={folder.noteCount}
-              subfolderCount={folder.subfolderCount}
-              folders={flatFolders}
-              excludeIds={folder.subtree}
-            />
-          ))}
-        </ul>
-      )}
+      <FolderList hasRows={folderRows.length > 0}>
+        {folderRows.map((folder) => (
+          <FolderRow
+            key={folder.id}
+            id={folder.id}
+            name={folder.name}
+            parentId={folder.parentId}
+            href={hrefFor({ folder: folder.id, scope: undefined, range: undefined })}
+            noteCount={folder.noteCount}
+            subfolderCount={folder.subfolderCount}
+            subtree={folder.subtree}
+          />
+        ))}
+      </FolderList>
 
       {meetings.length === 0 ? (
         onboarding ?? (
@@ -211,7 +212,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                 {q
                   ? `No notes match “${q}”${rangeLabel ? ` in the ${rangeLabel}` : ""}.`
                   : currentFolder
-                    ? "This folder is empty. Create a note, upload a .md or .txt file, or move notes here."
+                    ? "This folder is empty. Create a note or upload a file, or drag notes here from the Library."
                     : "No notes in this period."}
               </p>
               {(q || range) && <Link href={hrefFor({ q: null, ...(searchAll ? { scope: "all" } : {}) })}>Clear filters</Link>}
@@ -221,12 +222,13 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       ) : (
         <ul className="meeting-list">
           {meetings.map((meeting) => (
-            <li key={meeting.id} className="meeting-card">
-              <div className="title">
-                <Link href={`/meetings/${meeting.id}`} className="card-link">
-                  {q ? <Highlight parts={highlightParts(meeting.title, q)} /> : meeting.title}
-                </Link>
-              </div>
+            <NoteRow
+              key={meeting.id}
+              id={meeting.id}
+              title={meeting.title}
+              folderId={meeting.folderId}
+              titleNode={q ? <Highlight parts={highlightParts(meeting.title, q)} /> : meeting.title}
+            >
               <div className="meta">
                 <LocalTime iso={meeting.startedAt} />
                 {!browsing && meeting.folderId && <span> · {folderPathLabel(folders, meeting.folderId)}</span>}
@@ -242,11 +244,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
               ) : meeting.summaryPreview ? (
                 <div className="preview">{meeting.summaryPreview}</div>
               ) : null}
-              <div className="card-actions">
-                {meeting.processing?.status === "error" && <RetryProcessing meetingId={meeting.id} />}
-                <NoteActions id={meeting.id} title={meeting.title} folderId={meeting.folderId} folders={flatFolders} />
-              </div>
-            </li>
+              {meeting.processing?.status === "error" && <div className="row-retry"><RetryProcessing meetingId={meeting.id} /></div>}
+            </NoteRow>
           ))}
         </ul>
       )}
@@ -259,5 +258,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         </nav>
       )}
     </div>
+    </LibraryProvider>
   );
 }

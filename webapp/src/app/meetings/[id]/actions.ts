@@ -7,6 +7,7 @@ import { trashNote } from "@/lib/library";
 import { restorePreviousBody, updateNoteBody } from "@/lib/noteEditing";
 import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
+import { prisma } from "@/lib/db";
 import { createMeetingShare, revokeMeetingShare, SharingValidationError } from "@/lib/sharing";
 import { retryMeetingProcessing } from "@/lib/meetingProcessing";
 import { regenerateNotes } from "@/lib/notesRegenerate";
@@ -14,18 +15,24 @@ import { renameSpeaker } from "@/lib/speakers";
 import { isValidDateOnly } from "@/lib/actionItems";
 
 export type ShareActionResult =
-  | { ok: true; id: string; token: string; expiresAt: string }
+  | { ok: true; id: string; token: string; expiresAt: string | null }
   | { ok: false; error: string };
 
 export async function createMeetingShareAction(formData: FormData): Promise<ShareActionResult> {
-  const { workspaceId, userId } = await requireSession();
-  const meetingId = String(formData.get("meetingId") ?? "");
-  const expiresInDays = Number(formData.get("expiresInDays") ?? "7");
+  const { workspaceId, userId, role } = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "").slice(0, 128);
+  const rawExpiry = String(formData.get("expiresInDays") ?? "7");
+  const expiresInDays = rawExpiry === "never" ? null : Number(rawExpiry);
   try {
+    // A link that never expires is a standing public door to the note, so only its author or a workspace owner may open one.
+    if (expiresInDays === null && role !== "owner") {
+      const author = await prisma.meeting.findFirst({ where: { id: meetingId, workspaceId, deletedAt: null }, select: { userId: true } });
+      if (author && author.userId !== userId) return { ok: false, error: "Only the note's author or a workspace owner can create a link that never expires." };
+    }
     const share = await createMeetingShare(workspaceId, meetingId, expiresInDays);
     await recordAudit({ workspaceId, actorUserId: userId, action: "share.create", targetType: "meeting", targetId: meetingId, metadata: { expiresInDays } });
     revalidatePath(`/meetings/${meetingId}`);
-    return { ok: true, id: share.id, token: share.token, expiresAt: share.expiresAt.toISOString() };
+    return { ok: true, id: share.id, token: share.token, expiresAt: share.expiresAt?.toISOString() ?? null };
   } catch (error) {
     if (error instanceof SharingValidationError) return { ok: false, error: error.message };
     console.error("meeting share creation failed", { meetingId, error: error instanceof Error ? error.message : String(error) });

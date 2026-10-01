@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "./db";
 import { upsertMeeting } from "./meetings";
-import { createMeetingShare, getSharedMeeting, revokeMeetingShare, SharingValidationError } from "./sharing";
+import { createMeetingShare, getSharedMeeting, listActiveShares, revokeMeetingShare, SharingValidationError } from "./sharing";
 
 const WORKSPACE_ID = "44444444-0000-0000-0000-000000000004";
 const OTHER_WORKSPACE_ID = "55555555-0000-0000-0000-000000000005";
@@ -36,12 +36,22 @@ describe("meeting shares", () => {
   it("returns a private meeting through an expiring bearer token", async () => {
     const share = await createMeetingShare(WORKSPACE_ID, MEETING_ID, 7);
     expect(share.token).not.toContain("44444444");
-    expect(share.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect(share.expiresAt!.getTime()).toBeGreaterThan(Date.now());
 
     const meeting = await getSharedMeeting(share.token);
     expect(meeting?.title).toBe("Shared roadmap");
     expect(meeting?.summary).toBe("A private summary");
     expect(await getSharedMeeting(`${share.token}tampered`)).toBeNull();
+  });
+
+  it("supports links that never expire, until revoked", async () => {
+    const share = await createMeetingShare(WORKSPACE_ID, MEETING_ID, null);
+    expect(share.expiresAt).toBeNull();
+    expect((await getSharedMeeting(share.token))?.title).toBe("Shared roadmap");
+    expect((await listActiveShares(WORKSPACE_ID, MEETING_ID)).map((link) => link.expiresAt)).toEqual([null]);
+    expect(await revokeMeetingShare(WORKSPACE_ID, share.id)).toBe(true);
+    expect(await getSharedMeeting(share.token)).toBeNull();
+    expect(await listActiveShares(WORKSPACE_ID, MEETING_ID)).toEqual([]);
   });
 
   it("enforces workspace ownership and revocation", async () => {
@@ -54,8 +64,10 @@ describe("meeting shares", () => {
     expect(await revokeMeetingShare(WORKSPACE_ID, share.id)).toBe(false);
   });
 
-  it("bounds share expiry and rejects expired links", async () => {
-    await expect(createMeetingShare(WORKSPACE_ID, MEETING_ID, 31)).rejects.toBeInstanceOf(SharingValidationError);
+  it("bounds finite share expiry to 1-365 days, allows 90, and rejects expired links", async () => {
+    await expect(createMeetingShare(WORKSPACE_ID, MEETING_ID, 0)).rejects.toBeInstanceOf(SharingValidationError);
+    expect((await createMeetingShare(WORKSPACE_ID, MEETING_ID, 90)).expiresAt).not.toBeNull();
+    await expect(createMeetingShare(WORKSPACE_ID, MEETING_ID, 366)).rejects.toBeInstanceOf(SharingValidationError);
     const share = await createMeetingShare(WORKSPACE_ID, MEETING_ID, 1);
     await prisma.meetingShareToken.update({ where: { id: share.id }, data: { expiresAt: new Date(Date.now() - 1_000) } });
     expect(await getSharedMeeting(share.token)).toBeNull();

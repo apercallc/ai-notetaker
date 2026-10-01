@@ -320,7 +320,8 @@ model MeetingShareToken {
   workspaceId String
   meetingId   String
   tokenHash   String   @unique
-  expiresAt   DateTime
+  /// null = never expires
+  expiresAt   DateTime?
   revokedAt   DateTime?
   createdAt   DateTime @default(now())
 

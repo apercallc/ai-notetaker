@@ -128,11 +128,11 @@ token is configured; an external scheduler can retry queued/error jobs too.
 Provider credentials are server environment secrets, not request fields.
 The browser UI exposes the same purchase and portal flow at `/billing`.
 
-The authenticated browser meeting page can create expiring, workspace-scoped
-share capabilities. Share links are served at `/share/:token`; the token is
+The authenticated browser meeting page can create workspace-scoped
+share capabilities that expire after 1 to 365 days or never (`expiresAt` is null). Share links are served at `/share/:token`; the token is
 stored only as a SHA-256 hash, and the read-only page exposes meeting notes
 without requiring the recipient to have an account. The owner/workspace can
-revoke a link before its expiry. Share links contain notes only and never
+revoke a link at any time; deleting the note ends it too. Share links contain notes only and never
 expose the temporary audio used during processing.
 
 ### `POST /api/meetings`

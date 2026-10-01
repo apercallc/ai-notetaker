@@ -29,7 +29,7 @@ export async function POST(request: Request, context: { params: Promise<{ meetin
         // The full share URL is built from the canonical configured origin,
         // never from request headers.
         shareUrl: `${getAppUrl()}/share/${share.token}`,
-        expiresAt: share.expiresAt.toISOString(),
+        expiresAt: share.expiresAt?.toISOString() ?? null,
       },
       { headers: { "x-request-id": requestId } },
     );
