@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { safeEqual } from "./secureCompare";
 
 /**
  * v1 has no real multi-user concept — every row is written/read under this
@@ -8,18 +8,7 @@ import { timingSafeEqual } from "node:crypto";
  */
 export const LOCAL_USER_ID = "local";
 
-function constantTimeEquals(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  // Buffers of different length must still be compared against something of
-  // matching length, or timingSafeEqual throws — hash-pad instead of
-  // short-circuiting on length, to avoid leaking length via timing.
-  if (bufA.length !== bufB.length) {
-    timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return timingSafeEqual(bufA, bufB);
-}
+const constantTimeEquals = safeEqual;
 
 /**
  * Every route in this app requires the deploy-time AUTH_TOKEN, including

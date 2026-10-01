@@ -184,13 +184,16 @@ export async function listTrash(workspaceId: string, now = new Date()): Promise<
     prisma.$queryRaw<TrashRootRow[]>`SELECT "id", "name", "deletedAt" FROM "Folder" WHERE "workspaceId" = ${workspaceId} AND "deletedAt" IS NOT NULL AND "trashRootId" = "id" ORDER BY "deletedAt" DESC LIMIT 500`,
     prisma.$queryRaw<TrashRootRow[]>`SELECT "id", "title" AS "name", "deletedAt" FROM "Meeting" WHERE "workspaceId" = ${workspaceId} AND "deletedAt" IS NOT NULL AND "trashRootId" = "id" ORDER BY "deletedAt" DESC LIMIT 500`,
   ]);
-  const withFolders = await Promise.all(folders.map(async (folder) => {
-    const [noteCount, folderCount] = await Promise.all([
-      prisma.meeting.count({ where: { workspaceId, trashRootId: folder.id } }),
-      prisma.folder.count({ where: { workspaceId, trashRootId: folder.id } }),
-    ]);
-    return { folder, noteCount, folderCount };
-  }));
+  const rootIds = folders.map((folder) => folder.id);
+  const [noteCounts, folderCounts] = rootIds.length
+    ? await Promise.all([
+        prisma.meeting.groupBy({ by: ["trashRootId"], where: { workspaceId, trashRootId: { in: rootIds } }, _count: { _all: true } }),
+        prisma.folder.groupBy({ by: ["trashRootId"], where: { workspaceId, trashRootId: { in: rootIds } }, _count: { _all: true } }),
+      ])
+    : [[], []];
+  const noteCountByRoot = new Map(noteCounts.map((row) => [row.trashRootId, row._count._all]));
+  const folderCountByRoot = new Map(folderCounts.map((row) => [row.trashRootId, row._count._all]));
+  const withFolders = folders.map((folder) => ({ folder, noteCount: noteCountByRoot.get(folder.id) ?? 0, folderCount: folderCountByRoot.get(folder.id) ?? 0 }));
   const daysLeft = (deletedAt: Date) => Math.max(0, Math.ceil((deletedAt.getTime() + TRASH_RETENTION_DAYS * DAY_MS - now.getTime()) / DAY_MS));
   return [
     ...withFolders.map(({ folder, noteCount, folderCount }): TrashItem => ({ kind: "folder", id: folder.id, name: folder.name, deletedAt: folder.deletedAt, daysLeft: daysLeft(folder.deletedAt), noteCount, folderCount })),

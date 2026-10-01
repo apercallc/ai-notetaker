@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { managedHostingEnabled } from "@/lib/managedAuth";
 import { requireSession } from "@/lib/currentUser";
 import { TRASH_RETENTION_DAYS, listTrash, purgeExpiredTrash } from "@/lib/library";
 import { TrashList } from "./TrashList";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function TrashPage() {
   const { workspaceId, role } = await requireSession();
-  await purgeExpiredTrash().catch(() => undefined);
+  if (!managedHostingEnabled()) await purgeExpiredTrash().catch(() => undefined);
   const items = await listTrash(workspaceId);
 
   return (

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requestIdFrom } from "@/lib/apiErrors";
 import { exportMeetingToGoogleDrive, GoogleIntegrationError } from "@/lib/googleIntegration";
+import { readManagedJson } from "@/lib/managedJobs";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
 
 export async function POST(request: Request) {
@@ -9,7 +10,7 @@ export async function POST(request: Request) {
   if (!session) return managedUnauthorized(requestId);
   let body: unknown;
   try {
-    body = await request.json();
+    body = await readManagedJson(request);
   } catch {
     return NextResponse.json({ error: "request body must be JSON", requestId }, { status: 400, headers: { "x-request-id": requestId } });
   }

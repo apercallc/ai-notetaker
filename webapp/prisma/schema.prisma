@@ -56,6 +56,7 @@ model Meeting {
 
   @@index([workspaceId, folderId, startedAt])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, trashRootId])
   @@index([userId, startedAt])
   @@index([workspaceId, startedAt])
 }
@@ -457,6 +458,7 @@ model Folder {
 
   @@index([workspaceId, parentId])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, trashRootId])
 }
 
 // An outbound destination for "note ready" events: a signed webhook (which is
