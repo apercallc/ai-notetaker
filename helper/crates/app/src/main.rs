@@ -559,9 +559,12 @@ async fn poll_managed_job(
     let url = format!("{base}/api/v1/jobs/{job_id}");
     let mut last_status = "queued".to_string();
 
-    for attempt in 0..150 {
+    // Two seconds a poll for the first ten minutes, then ten seconds up to about half an hour in
+    // total: a long call's job routinely outlasts five minutes, and giving up while it is still
+    // running leaves the user thinking the notes failed.
+    for attempt in 0..MANAGED_POLL_ATTEMPTS {
         if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::time::sleep(managed_poll_delay(attempt)).await;
         }
         let response = match client
             .get(&url)
@@ -646,6 +649,17 @@ async fn poll_managed_job(
                         })
                         .collect::<Vec<_>>()
                 });
+            // The browser may be asleep (no subscriber) when the job finishes. Keep the result on
+            // this computer first, so it is never lost with the only copy of the message.
+            if let Some(text) = &summary {
+                let saved = Summary {
+                    summary: text.clone(),
+                    action_items: action_items.clone().unwrap_or_default(),
+                };
+                if let Err(error) = state.store.write_summary(meeting_id, &saved) {
+                    tracing::warn!(%meeting_id, %error, "could not save the hosted summary locally");
+                }
+            }
             let _ = state.store.mark_managed_complete(meeting_id);
             send_meeting_message(
                 &state,
@@ -690,6 +704,12 @@ async fn poll_managed_job(
             action_items: None,
         },
     );
+}
+
+const MANAGED_POLL_ATTEMPTS: u32 = 300 + 120;
+
+fn managed_poll_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_secs(if attempt < 300 { 2 } else { 10 })
 }
 
 /// Runs one durable managed-processing attempt. If the helper stopped before
@@ -2486,6 +2506,17 @@ mod tests {
         assert!(StopGuard::acquire(Uuid::new_v4()).is_some());
         drop(first);
         assert!(StopGuard::acquire(id).is_some());
+    }
+
+    #[test]
+    fn hosted_job_polling_slows_down_but_keeps_going_for_about_half_an_hour() {
+        assert_eq!(managed_poll_delay(1), std::time::Duration::from_secs(2));
+        assert_eq!(managed_poll_delay(299), std::time::Duration::from_secs(2));
+        assert_eq!(managed_poll_delay(300), std::time::Duration::from_secs(10));
+        let total: u64 = (1..MANAGED_POLL_ATTEMPTS)
+            .map(|attempt| managed_poll_delay(attempt).as_secs())
+            .sum();
+        assert!((25 * 60..=35 * 60).contains(&total), "{total}s");
     }
 
     #[test]
