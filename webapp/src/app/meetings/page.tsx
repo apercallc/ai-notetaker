@@ -36,7 +36,7 @@ type SearchParams = Promise<{ q?: string; page?: string; range?: string; error?:
 function cleanQuery(raw: string | undefined): string | undefined {
   // Keep a pasted or hand-crafted URL from turning a normal page view into a
   // validation error; the API still rejects oversized queries explicitly.
-  return raw?.trim().slice(0, MAX_SEARCH_LENGTH) || undefined;
+  return raw?.replaceAll("\u0000", "").trim().slice(0, MAX_SEARCH_LENGTH) || undefined;
 }
 
 export async function generateMetadata({ searchParams }: { searchParams: SearchParams }): Promise<Metadata> {

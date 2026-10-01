@@ -132,7 +132,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       }
       const authorization = request.headers.get("authorization");
       const sessionId = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
-      const user = sessionId && sessionId !== process.env.AUTH_TOKEN ? await getSessionUser(sessionId) : null;
+      let user: Awaited<ReturnType<typeof getSessionUser>> = null;
+      try {
+        user = sessionId && sessionId !== process.env.AUTH_TOKEN ? await getSessionUser(sessionId) : null;
+      } catch (error) {
+        // The session store is unreachable. That is not "signed out": clients must be told to retry,
+        // not to discard a good session.
+        console.error("session lookup failed", { requestId, error: error instanceof Error ? error.message : String(error) });
+        return NextResponse.json({ error: "service temporarily unavailable", requestId }, { status: 503, headers: { ...corsHeaders, "retry-after": "5", "x-request-id": requestId } });
+      }
       if (!user) {
         return NextResponse.json({ error: "managed session required", requestId }, { status: 401, headers: { ...corsHeaders, "x-request-id": requestId } });
       }
@@ -171,7 +179,16 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
 
   const sessionId = request.cookies.get("session")?.value;
-  const user = await getSessionUser(sessionId);
+  let user: Awaited<ReturnType<typeof getSessionUser>>;
+  try {
+    user = await getSessionUser(sessionId);
+  } catch (error) {
+    console.error("session lookup failed", { requestId, error: error instanceof Error ? error.message : String(error) });
+    return new NextResponse("The service is temporarily unavailable. Please try again in a moment.", {
+      status: 503,
+      headers: { "retry-after": "5", "content-type": "text/plain; charset=utf-8", "x-request-id": requestId },
+    });
+  }
   if (!user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);

@@ -147,6 +147,16 @@ describe("upsertMeeting", () => {
     expect((await listActionItems(WORKSPACE_ID, { status: "done" })).items).toHaveLength(1);
   });
 
+  it("rejects text containing NUL instead of failing inside Postgres", async () => {
+    await expect(upsertMeeting(sampleMeeting({ summary: "bad\u0000summary" }), WORKSPACE_ID)).rejects.toThrow("null characters");
+    await expect(upsertMeeting(sampleMeeting({ title: "bad\u0000title" }), WORKSPACE_ID)).rejects.toThrow("null characters");
+  });
+
+  it("ignores NUL in a search query", async () => {
+    await upsertMeeting(sampleMeeting(), WORKSPACE_ID);
+    await expect(listMeetings(WORKSPACE_ID, { query: "\u0000" })).resolves.toMatchObject({ meetings: expect.any(Array) });
+  });
+
   it("defaults the title when none is provided", async () => {
     const input = sampleMeeting({ title: undefined });
     const result = await upsertMeeting(input, WORKSPACE_ID);

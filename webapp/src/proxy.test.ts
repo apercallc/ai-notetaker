@@ -36,6 +36,20 @@ describe("managed API proxy boundaries", () => {
     expect(await response.json()).toEqual({ error: "managed session required", requestId: "proxy-managed-auth-test" });
   });
 
+  it("answers 503 with Retry-After, not 401, when the session store is down", async () => {
+    getSessionUser.mockRejectedValue(new Error("connection refused"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = await proxy(request("/api/v1/meetings", { method: "POST", headers: { authorization: "Bearer some-session", "x-request-id": "db-down" } }));
+    expect(api.status).toBe(503);
+    expect(api.headers.get("retry-after")).toBe("5");
+    expect(await api.json()).toEqual({ error: "service temporarily unavailable", requestId: "db-down" });
+
+    const page = await proxy(request("/meetings", { headers: { cookie: "session=abc" } }));
+    expect(page.status).toBe(503);
+    expect(page.headers.get("location")).toBeNull();
+    log.mockRestore();
+  });
+
   it("allows preflight only for the fixed extension origin", async () => {
     const origin = "chrome-extension://jidooookkdbbbhkkdmcajnnnhhphodok";
     const response = await proxy(request("/api/v1/uploads", { method: "OPTIONS", headers: { origin } }));

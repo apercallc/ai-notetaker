@@ -29,6 +29,10 @@ function assertValid(input: unknown): CreateMeetingRequest {
     throw new ValidationError("Request body must be an object");
   }
   const body = input as Record<string, unknown>;
+  // Postgres text cannot hold U+0000: Prisma would throw mid-write and surface a 500 for what is just bad input.
+  if (JSON.stringify(input).includes("\\u0000")) {
+    throw new ValidationError("text must not contain null characters");
+  }
 
   if (typeof body.id !== "string" || body.id.length === 0 || body.id.length > MAX_ID_LENGTH) {
     throw new ValidationError("id is required");
@@ -322,7 +326,7 @@ export async function listMeetings(
   workspaceId: string,
   options: ListMeetingsOptions
 ): Promise<{ meetings: MeetingListItem[]; total: number }> {
-  const query = options.query?.trim();
+  const query = options.query?.replaceAll("\u0000", "").trim();
   if (query && query.length > MAX_SEARCH_LENGTH) {
     throw new ValidationError(`query must be ${MAX_SEARCH_LENGTH} characters or fewer`);
   }
