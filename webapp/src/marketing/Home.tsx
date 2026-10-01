@@ -98,7 +98,7 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
               <h3 className="mk-h3">Install</h3>
               <p>Add the Chrome extension and you can record Google Meet straight away.</p>
               <ul>
-                <li>Zoom, Teams or Slack too? Add the desktop helper for macOS, Windows or Linux.</li>
+                <li>Zoom, Teams or Slack too? <Link href="/download?mode=desktop">Download and set up the desktop helper</Link> for macOS, Windows or Linux.</li>
               </ul>
             </li>
             <li className="mk-step">

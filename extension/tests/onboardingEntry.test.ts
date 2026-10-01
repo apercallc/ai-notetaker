@@ -27,6 +27,28 @@ describe("onboarding entry point", () => {
     vi.restoreAllMocks();
   });
 
+  it("opens hosted signup and signs in without asking for a server URL", async () => {
+    await loadWizard("/onboarding/onboarding.html");
+    await vi.waitFor(() => expect(document.querySelector("#onboarding-mode-managed")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>("#onboarding-mode-managed")!.click();
+    expect(document.querySelector("#onboarding-managed-url")).toBeNull();
+    const signup = document.querySelector<HTMLButtonElement>("#onboarding-managed-signup")!;
+    expect(signup.disabled).toBe(false);
+    signup.click();
+    expect(chromeMock.tabs.create).toHaveBeenCalledWith({
+      url: "https://ai-notetaker.apercallc.com/login?tab=signup",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      accessToken: "test-session", accountId: "acct", workspaceId: "ws", plan: "hosted_trial",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    document.querySelector<HTMLInputElement>("#onboarding-managed-email")!.value = "owner@example.test";
+    document.querySelector<HTMLInputElement>("#onboarding-managed-password")!.value = "test-password";
+    document.querySelector<HTMLButtonElement>("#onboarding-managed-sign-in")!.click();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://ai-notetaker.apercallc.com/api/v1/auth/login");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Hosted AI is connected"));
+  });
+
   it("keeps a stale desktop onboarding URL on the Meet-first single setup screen", async () => {
     await loadWizard("/onboarding/onboarding.html?mode=desktop");
 

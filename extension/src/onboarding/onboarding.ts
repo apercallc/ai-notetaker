@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS, type AudioProbeResult, type AudioStatus, type Notetak
 import { escapeHtml } from "../lib/html";
 import { detectInstallPlatform, getInstallPageUrl, type InstallPlatform } from "../lib/install";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
-import { loginManaged, managedSignupUrl } from "../lib/managedClient";
+import { loginManaged, MANAGED_SERVICE_ORIGIN, managedSignupUrl } from "../lib/managedClient";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { MEET_AUTO_RECORD_GUIDANCE } from "../lib/autoRecord";
 import { microphoneAlreadyAllowed, requestMicrophone, type MicOutcome } from "../meet/micPermission";
@@ -42,7 +42,7 @@ let onboardingMode: "local_byok" | "managed" = "local_byok";
 let meetingApp: MeetingApp = "other";
 let onboardingTier: "default" | "budget" = "default";
 let onboardingSummarizer: "gemini" | "deepseek" = "gemini";
-let managedDraft = { url: "", email: "" };
+const managedDraft = { email: "" };
 let helperStatus: BackgroundState["helperStatus"] = "connecting";
 let helperInfo: BackgroundState["helperInfo"] = null;
 let helperAlarmPermissionMissing = false;
@@ -116,12 +116,12 @@ function renderHelperStep(): string {
     <p><button type="button" class="primary" id="download-helper">${downloadLabel}</button>
     <button type="button" class="secondary" id="check-helper">Check desktop helper</button></p>
     <p id="helper-install-status" class="text-secondary" role="status">${helperStatusCopy()}</p>
-    <div class="callout warning">
-      <strong>Heads up:</strong> after installing, you may need to reboot or
-      log out and back in before the device shows up in your meeting app's
-      audio settings. This is normal — it's how audio devices work on
-      ${platformLabel(platform)}, not a sign that something went wrong.
-    </div>
+    <ol>
+      <li>Open the download page and follow the installation steps for ${platformLabel(platform)}.</li>
+      <li>Launch <strong>AI Notetaker</strong>. It runs in your menu bar or system tray.</li>
+      <li>Return here and choose <strong>Check desktop helper</strong>, then continue to the audio test.</li>
+    </ol>
+    <p class="text-secondary">On Mac, the download page also includes the one-time browser connection step. If you install a fallback audio driver, it may ask you to restart.</p>
     <p><button type="button" class="text-link" id="use-meet">Recording Google Meet instead?</button></p>
   `;
 }
@@ -226,11 +226,11 @@ function renderManagedSection(): string {
   }
   return `
     <p class="text-secondary">Hosted AI writes your notes on the service, so you do not need provider keys. Audio is saved on this device first, then uploaded for processing. The service deletes it when notes are ready; failed uploads are cleared by the 24-hour cleanup. Your transcript and notes are saved to this workspace.</p>
-    <div class="field"><label for="onboarding-managed-url">Hosted service URL</label><input type="url" id="onboarding-managed-url" placeholder="https://notes.example.com" autocomplete="url" value="${escapeHtml(managedDraft.url)}" /></div>
+    <p class="text-secondary">Sign in below with your AI Notetaker account. Your service, <strong>ai-notetaker.apercallc.com</strong>, is already configured.</p>
     <div class="field"><label for="onboarding-managed-email">Account email</label><input type="email" id="onboarding-managed-email" autocomplete="username" value="${escapeHtml(managedDraft.email)}" /></div>
     <div class="field"><label for="onboarding-managed-password">Account password</label><input type="password" id="onboarding-managed-password" autocomplete="current-password" /></div>
     <p><button type="button" class="secondary" id="onboarding-managed-sign-in">Sign in to Hosted AI</button>
-    <button type="button" class="secondary" id="onboarding-managed-signup" disabled>Create hosted account</button></p>
+    <button type="button" class="secondary" id="onboarding-managed-signup">Create hosted account</button></p>
     <p class="result" id="onboarding-managed-result" role="status" aria-live="polite"></p>`;
 }
 
@@ -547,7 +547,6 @@ function updateMicUi(): void {
 async function signInManaged(): Promise<void> {
   const button = document.getElementById("onboarding-managed-sign-in") as HTMLButtonElement | null;
   const resultEl = document.getElementById("onboarding-managed-result");
-  const baseUrl = (document.getElementById("onboarding-managed-url") as HTMLInputElement | null)?.value.trim() ?? "";
   const email = (document.getElementById("onboarding-managed-email") as HTMLInputElement | null)?.value.trim() ?? "";
   const password = (document.getElementById("onboarding-managed-password") as HTMLInputElement | null)?.value ?? "";
   if (button) button.disabled = true;
@@ -556,7 +555,7 @@ async function signInManaged(): Promise<void> {
     resultEl.className = "result";
   }
   try {
-    const result = await loginManaged(baseUrl, email, password);
+    const result = await loginManaged(MANAGED_SERVICE_ORIGIN, email, password);
     settings.managedService = result.config;
     settings.processingMode = { kind: "managed", accountId: result.config.accountId, workspaceId: result.config.workspaceId, plan: result.config.plan };
     await sendToBackground({ type: "SAVE_SETTINGS", settings });
@@ -740,48 +739,24 @@ function wireEvents(): void {
     readOnboardingProviderFields();
     onboardingMode = "managed";
     resetKeyTest();
-    render({ focus: "onboarding-managed-url" });
+    render({ focus: "onboarding-managed-email" });
   });
 
   document.getElementById("onboarding-managed-sign-in")?.addEventListener("click", () => void signInManaged());
   // Pressing Enter in a sign-in field means "sign in", not "finish setup".
-  for (const id of ["onboarding-managed-url", "onboarding-managed-email", "onboarding-managed-password"]) {
+  for (const id of ["onboarding-managed-email", "onboarding-managed-password"]) {
     document.getElementById(id)?.addEventListener("keydown", (event) => {
       if ((event as KeyboardEvent).key !== "Enter") return;
       event.preventDefault();
       void signInManaged();
     });
   }
-  const managedUrlInput = document.getElementById("onboarding-managed-url") as HTMLInputElement | null;
   const managedEmailInput = document.getElementById("onboarding-managed-email") as HTMLInputElement | null;
-  const managedSignupButton = document.getElementById("onboarding-managed-signup") as HTMLButtonElement | null;
-  const updateManagedSignupState = (): void => {
-    if (!managedSignupButton) return;
-    try {
-      managedSignupUrl(managedUrlInput?.value.trim() ?? "");
-      managedSignupButton.disabled = false;
-    } catch {
-      managedSignupButton.disabled = true;
-    }
-  };
-  managedUrlInput?.addEventListener("input", () => {
-    managedDraft.url = managedUrlInput.value;
-    updateManagedSignupState();
-  });
   managedEmailInput?.addEventListener("input", () => {
     managedDraft.email = managedEmailInput.value;
   });
-  updateManagedSignupState();
-  managedSignupButton?.addEventListener("click", () => {
-    try {
-      chrome.tabs.create({ url: managedSignupUrl(managedUrlInput?.value.trim() ?? "") });
-    } catch (error) {
-      const resultEl = document.getElementById("onboarding-managed-result");
-      if (resultEl) {
-        resultEl.textContent = error instanceof Error ? error.message : "Enter a valid hosted service URL first.";
-        resultEl.className = "result error";
-      }
-    }
+  document.getElementById("onboarding-managed-signup")?.addEventListener("click", () => {
+    void chrome.tabs.create({ url: managedSignupUrl(MANAGED_SERVICE_ORIGIN) });
   });
 
   document.getElementById("check-audio-setup")?.addEventListener("click", async () => {

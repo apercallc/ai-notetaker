@@ -107,7 +107,7 @@ export function managedIntegrationsUrl(baseUrl: string): string {
 }
 
 /**
- * Hosted mode is opt-in and the service URL is user-provided, so do not ship
+ * Hosted mode is opt-in, so do not ship
  * a permanent all-origins permission. Chrome asks for the exact origin when
  * the user presses the explicit Hosted AI sign-in button. The no-op fallback
  * keeps this library usable in Firefox/test harnesses that do not expose the

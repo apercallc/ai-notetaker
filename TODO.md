@@ -1,5 +1,20 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Setup clarity — 2026-10-01
+
+- [x] Onboarding uses the project Hosted AI service automatically, matching Settings;
+      signup is available without entering a server URL.
+- [x] Download page includes per-OS installation, browser connection, audio check,
+      first-recording steps and a release link when direct downloads cannot load.
+- [x] Homepage links directly to desktop setup; Mac instructions include the
+      currently required one-time Native Messaging registration command.
+- Verified: 596 extension tests and 762 webapp tests with local Postgres; configured
+      coverage floors, strict typechecks, webapp lint and both production builds pass.
+      Download page browser-checked at desktop and 375 px; production preview loads
+      without console errors. No standalone JS formatter is configured.
+- Deferred: Chrome Web Store link awaits the published listing from the owner.
+      Native installer execution and real-device audio acceptance remain unverified.
+
 ## Infrastructure implementation — 2026-10-01
 
 - [x] Durable provider-attempt accounting independent of customer quota refunds

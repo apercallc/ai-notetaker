@@ -7,7 +7,7 @@ import { Plans, type PlanDisplay } from "./Plans";
 import { chromeWebStoreUrl, formatBytes, type DownloadLinks } from "./release";
 import type { ShellContext } from "./Shell";
 
-const UNSIGNED_DOC = "https://github.com/apercallc/ai-notetaker/blob/main/docs/unsigned-install.md";
+const UNSIGNED_DOC = "https://github.com/apercallc/ai-notetaker/blob/main/docs/code-signing-policy.md";
 const EFFECTIVE = "September 30, 2026";
 
 function PageHead({ title, lede }: { title: string; lede?: string }) {
@@ -276,7 +276,7 @@ export function DownloadView({
   return (
     <>
       <PageHead
-        title="Download AI Notetaker."
+        title="Set up AI Notetaker."
         lede="Add the Chrome extension for Google Meet. Add the desktop helper only if you also meet in Zoom, Teams, Slack or other apps."
       />
       <section className="mk-section mk-section--flush" aria-label="Downloads">
@@ -293,14 +293,14 @@ export function DownloadView({
               </div>
               {!store && !release?.extension && (
                 <p className="mk-small">
-                  Not published yet. It will appear here with the first release; watch the{" "}
+                  The extension download could not be loaded. Check the{" "}
                   <a href={SITE.releasesUrl}>releases page</a>.
                 </p>
               )}
               {!store && release?.extension && (
                 <p className="mk-small">
-                  Until the Chrome Web Store listing is live, unzip the file, open <code>chrome://extensions</code>,
-                  turn on Developer mode and choose Load unpacked.
+                  Chrome Web Store link coming soon. For now, unzip the file, open <code>chrome://extensions</code>,
+                  turn on Developer mode, choose Load unpacked, and select the unzipped folder containing manifest.json.
                 </p>
               )}
             </article>
@@ -314,19 +314,70 @@ export function DownloadView({
               </p>
               <div className="mk-cta-row">
                 <AssetButton asset={release?.mac} label="macOS (Apple silicon)" primary={platform === "macos"} />
-                <AssetButton asset={release?.windows} label="Windows" primary={platform === "windows"} />
-                <AssetButton asset={release?.linux} label="Linux (Debian, Ubuntu)" primary={platform === "linux"} />
+                <AssetButton asset={release?.windows} label="Windows (64-bit)" primary={platform === "windows"} />
+                <AssetButton asset={release?.linux} label="Linux (Debian, Ubuntu 64-bit)" primary={platform === "linux"} />
               </div>
               {!release && (
                 <p className="mk-small">
-                  Not published yet. Installers will appear here with the first release.
+                  Direct downloads could not be loaded. Choose the .dmg (Mac), .exe (Windows), or .deb (Linux) on the release page below.
                 </p>
               )}
               {release && !release.mac && !release.windows && !release.linux && (
                 <p className="mk-small">Installers for this release are on the <a href={release.pageUrl}>release page</a>.</p>
               )}
+              <p><a href={release?.pageUrl ?? SITE.releasesUrl}>All desktop downloads on GitHub</a></p>
               <p className="mk-small">Macs with Intel chips are not supported yet.</p>
+              <a href="#install-helper">How to install and connect the helper →</a>
             </article>
+          </div>
+
+          <div className="mk-prose mk-mt-l mk-setup" id="install-helper">
+            <h2>Install the desktop helper</h2>
+            <p>Only recording Google Meet? <a href="#choose-ai">Skip to AI setup</a>. For desktop calls, keep the Chrome extension installed too: it controls the helper.</p>
+            <details open={platform === "macos"}>
+              <summary>macOS · Apple silicon (M1 or newer)</summary>
+              <ol>
+                <li>Download the Mac .dmg above, open it, and drag <strong>AI Notetaker</strong> into <strong>Applications</strong>.</li>
+                <li>Open AI Notetaker from Applications. It runs in the menu bar. If macOS blocks this unsigned app, follow the <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
+                <li>Connect it to Chrome once: open <strong>Terminal</strong>, paste the command below, and press Return.</li>
+              </ol>
+              <pre><code>sh &quot;/Applications/AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh&quot;</code></pre>
+              <p>This registers the installed app with your browser. It does not download another program.</p>
+            </details>
+            <details open={platform === "windows"}>
+              <summary>Windows · 64-bit Intel / AMD</summary>
+              <ol>
+                <li>Download and run the Windows .exe above, then follow the installer.</li>
+                <li>If SmartScreen blocks this unsigned installer, review the <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
+                <li>Launch <strong>AI Notetaker</strong> from Start. Look for its icon in the system tray, including the hidden-icons menu. The installer connects it to Chrome.</li>
+              </ol>
+            </details>
+            <details open={platform === "linux"}>
+              <summary>Linux · Debian / Ubuntu, 64-bit Intel / AMD</summary>
+              <ol>
+                <li>Download the Linux .deb above and open it with your system&apos;s Software Install app.</li>
+                <li>Choose <strong>Install</strong> and approve the system prompt. The package installs the browser connection and required audio utilities.</li>
+                <li>Launch <strong>AI Notetaker</strong> from your applications menu and look for its tray icon.</li>
+              </ol>
+            </details>
+            <h3>Connect and check the audio</h3>
+            <ol>
+              <li>Open the AI Notetaker Chrome extension from a tab outside Google Meet. If shown, choose <strong>Recording Zoom or Teams instead?</strong>, then <strong>Set up desktop capture</strong>. If the helper is already connected, use the audio check in the popup.</li>
+              <li>Choose <strong>Check desktop helper</strong>. Once connected, continue to the audio check.</li>
+              <li>Keep your normal microphone and speakers selected. Grant the requested microphone and system-audio permissions, then run the <strong>2-second test</strong>. Follow any fallback instructions shown for your device.</li>
+            </ol>
+            <details>
+              <summary>Helper still not detected?</summary>
+              <p>Make sure AI Notetaker is running from its installed location. On Mac, complete the Terminal step above. Close and reopen Chrome, then check again. If setup says it is paired with another browser, choose <strong>Pair New Browser</strong> from the helper&apos;s menu.</p>
+            </details>
+          </div>
+
+          <div className="mk-prose mk-mt-l mk-setup" id="choose-ai">
+            <h2>Choose how your notes are written</h2>
+            <p>In the extension setup, choose <strong>Hosted AI</strong> and sign in to your AI Notetaker account, or create one. Our service is already configured; there is no server URL to enter.</p>
+            <p>Prefer your own providers? Choose <strong>Use my own API keys</strong> and follow the key checks. This mode requires no AI Notetaker account. Connecting a self-hosted history server is optional, under Settings.</p>
+            <h2>Make your first recording</h2>
+            <p>For Google Meet, open a meeting in Chrome and choose <strong>Start notes</strong> in the call widget or extension. For a desktop call, open the extension from a tab outside Meet, choose <strong>Recording Zoom or Teams instead?</strong> if shown, then <strong>Start notes</strong>. Tell participants and confirm the recording notice. Stop when you finish; the extension shows processing progress and your notes when ready.</p>
           </div>
 
           <div className="mk-prose mk-mt-l">
