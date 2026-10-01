@@ -3,11 +3,15 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { CheckSquare, CreditCard, FileText, MessageSquare, Settings, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/app/login/actions";
 
 interface NavItem {
   href: string;
   label: string;
+  icon: LucideIcon;
+  /** Shorter label for the narrow bottom tab bar. */
+  short?: string;
 }
 
 /**
@@ -21,11 +25,12 @@ export function AppHeader({ role, managed }: { role: "owner" | "member"; managed
   if (pathname.startsWith("/share/")) return null;
 
   const items: NavItem[] = [
-    { href: "/meetings", label: "Meetings" },
-    { href: "/actions", label: "Actions" },
-    ...(role === "owner" ? [{ href: "/team", label: "Team" }] : []),
-    ...(managed ? [{ href: "/billing", label: "Plans & usage" }] : []),
-    { href: "/account", label: "Account" },
+    { href: "/meetings", label: "Meetings", icon: FileText },
+    { href: "/actions", label: "Actions", icon: CheckSquare },
+    ...(managed ? [{ href: "/ask", label: "Ask", icon: MessageSquare }] : []),
+    ...(role === "owner" ? [{ href: "/team", label: "Team", icon: Users }] : []),
+    ...(managed ? [{ href: "/billing", label: "Plans & usage", short: "Plans", icon: CreditCard }] : []),
+    { href: "/account", label: "Settings", icon: Settings },
   ];
 
   return (
@@ -41,7 +46,11 @@ export function AppHeader({ role, managed }: { role: "owner" | "member"; managed
               const current = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <li key={item.href}>
-                  <Link href={item.href} aria-current={current ? "page" : undefined}>{item.label}</Link>
+                  <Link href={item.href} aria-current={current ? "page" : undefined}>
+                    <item.icon className="nav-icon" size={18} strokeWidth={1.75} aria-hidden="true" />
+                    <span className="nav-label-full">{item.label}</span>
+                    <span className="nav-label-short" aria-hidden="true">{item.short ?? item.label}</span>
+                  </Link>
                 </li>
               );
             })}

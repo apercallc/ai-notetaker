@@ -7,6 +7,7 @@ import {
   HardDrive,
   KeyRound,
   ListChecks,
+  MessageCircleQuestion,
   MessagesSquare,
   Users,
   Briefcase,
@@ -58,10 +59,10 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           <div className="mk-choice">
             <article className="mk-panel mk-panel--lead" aria-labelledby="choice-hosted">
               <h3 className="mk-h3" id="choice-hosted">Hosted AI</h3>
-              <p className="mk-panel-price"><strong>From {fromPrice}</strong>, after {LIMITS.trial} free meetings</p>
+              <p className="mk-panel-price"><strong>From {fromPrice}</strong>, after {LIMITS.trial} free meetings. Pro includes {LIMITS.pro.toLocaleString("en-US")} meetings or {LIMITS.proHours} meeting hours a month.</p>
               <p className="mk-panel-copy">
                 We run the transcription and summaries. There is nothing to set up except an account, and your notes
-                are in a searchable library on any device.
+                are in a searchable library on any device. Pro and Team also include Ask your notes.
               </p>
               <Link className="mk-btn mk-btn--light" href={start}>{startLabel}</Link>
             </article>
@@ -110,6 +111,28 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
               </p>
             </li>
           </ol>
+        </div>
+      </section>
+
+      <section className="mk-section" id="ask" aria-labelledby="ask-title">
+        <div className="mk-wrap">
+          <div className="mk-section-head">
+            <h2 className="mk-h2" id="ask-title">Ask your notes instead of searching them.</h2>
+            <p className="mk-lede">
+              Ask your notes is included with Hosted Pro ({LIMITS.proQuestions.toLocaleString("en-US")} questions a month) and Hosted Team ({LIMITS.teamQuestions.toLocaleString("en-US")} a month). Type a question and get an answer drawn only from your own meetings,
+              with a link to each note it used. If the answer is not in your notes, it says so.
+            </p>
+          </div>
+          <ul className="mk-rows">
+            <li className="mk-row">
+              <h3 className="mk-h3"><Icon as={MessageCircleQuestion} size={22} />&ldquo;What did we decide about pricing?&rdquo;</h3>
+              <p>An example question. The answer cites the meetings it came from, so you can check it in one tap.</p>
+            </li>
+            <li className="mk-row">
+              <h3 className="mk-h3"><Icon as={ListChecks} size={22} />&ldquo;What action items are still open?&rdquo;</h3>
+              <p>Works across every meeting in your workspace, and only your workspace. Meeting hours and questions are separate allowances, so asking never uses up recording time.</p>
+            </li>
+          </ul>
         </div>
       </section>
 

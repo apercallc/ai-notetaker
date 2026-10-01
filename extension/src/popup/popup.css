@@ -258,3 +258,35 @@ button.record-toggle.armed {
   flex-basis: 100%;
   margin: 0;
 }
+
+.history-more {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+
+.history-section [hidden] {
+  display: none;
+}
+
+.meeting-search input:focus-visible {
+  border-color: var(--color-accent);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.meeting-search .text-link,
+.history-heading .text-link {
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+.history-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Stay in layout so screen readers announce match-count changes. */
+#history-summary:empty {
+  display: block;
+  min-height: 1em;
+}

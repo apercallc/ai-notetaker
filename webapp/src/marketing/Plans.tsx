@@ -38,7 +38,7 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
     <div className="mk-plans">
       <article className="mk-plan" aria-labelledby="plan-keys">
         <h3 className="mk-h3" id="plan-keys">Your own keys</h3>
-        <p className="mk-plan-price">$0<small> software</small></p>
+        <p className="mk-plan-price">Free<small> you pay your AI providers directly</small></p>
         <p className="mk-plan-for">For people who want to bring their own AI providers.</p>
         <ul className="mk-checks">
           <li><Icon as={Check} /><span>No AI Notetaker account needed</span></li>
@@ -52,12 +52,13 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
       <article className="mk-plan mk-plan--lead" aria-labelledby="plan-pro">
         <span className="mk-plan-flag">Best for one person</span>
         <h3 className="mk-h3" id="plan-pro">Hosted Pro</h3>
-        <p className="mk-plan-price">{pro.amount}<small> {pro.period}</small></p>
-        <p className="mk-plan-for">We run the AI. Up to {n(LIMITS.pro)} meetings a month.</p>
+        <p className="mk-plan-price">{pro.amount}{pro.period && <small> {pro.period}</small>}</p>
+        <p className="mk-plan-for">We run the AI. Up to {n(LIMITS.pro)} meetings or {n(LIMITS.proHours)} meeting hours a month, whichever comes first.</p>
         <ul className="mk-checks">
           <li><Icon as={Check} /><span>{LIMITS.trial} free meetings first, no card</span></li>
           <li><Icon as={Check} /><span>No provider accounts or keys to manage</span></li>
           <li><Icon as={Check} /><span>Searchable library of your notes</span></li>
+          <li><Icon as={Check} /><span><strong>Ask your notes:</strong> {n(LIMITS.proQuestions)} questions a month, answered from your meetings</span></li>
           <li><Icon as={Check} /><span>Audio deleted after processing</span></li>
         </ul>
         <Link className="mk-btn mk-btn--solid" href={start}>{signupOpen ? "Try Hosted AI free" : "Get the extension"}</Link>
@@ -65,10 +66,10 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
 
       <article className="mk-plan" aria-labelledby="plan-team">
         <h3 className="mk-h3" id="plan-team">Hosted Team</h3>
-        <p className="mk-plan-price">{team.amount}<small> {team.period}</small></p>
-        <p className="mk-plan-for">One shared workspace. Up to {n(LIMITS.team)} meetings a month.</p>
+        <p className="mk-plan-price">{team.amount}{team.period && <small> {team.period}</small>}</p>
+        <p className="mk-plan-for">One shared workspace. Up to {n(LIMITS.team)} meetings or {n(LIMITS.teamHours)} meeting hours a month, whichever comes first.</p>
         <ul className="mk-checks">
-          <li><Icon as={Check} /><span>Everything in Pro</span></li>
+          <li><Icon as={Check} /><span>Everything in Pro, with {n(LIMITS.teamQuestions)} Ask-your-notes questions a month</span></li>
           <li><Icon as={Check} /><span>Invite teammates to one library</span></li>
           <li><Icon as={Check} /><span>Owners set how long notes are kept</span></li>
           <li><Icon as={Check} /><span>Workspaces are fully isolated from each other</span></li>

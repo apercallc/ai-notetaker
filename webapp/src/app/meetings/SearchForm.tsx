@@ -12,24 +12,28 @@ const LIVE_SEARCH_DELAY_MS = 350;
  * short pause (useDeferredValue keeps typing responsive while the server
  * render is in flight) and Enter searches immediately.
  */
-export function SearchForm({ initialQuery }: { initialQuery: string }) {
+export function SearchForm({ initialQuery, range }: { initialQuery: string; range?: string }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
   const [seenInitial, setSeenInitial] = useState(initialQuery);
   const deferred = useDeferredValue(query);
   const [pending, startTransition] = useTransition();
   const input = useRef<HTMLInputElement>(null);
+  // What we last pushed to the URL; only a different incoming value (back/forward) may overwrite typing.
+  const [lastSent, setLastSent] = useState(initialQuery);
 
   // Browser back/forward changes the URL under us; follow it.
   if (seenInitial !== initialQuery) {
     setSeenInitial(initialQuery);
-    setQuery(initialQuery);
+    if (initialQuery !== lastSent) setQuery(initialQuery);
   }
 
   function go(value: string, mode: "push" | "replace") {
     const params = new URLSearchParams();
     const trimmed = value.trim();
+    setLastSent(trimmed);
     if (trimmed) params.set("q", trimmed);
+    if (range) params.set("range", range);
     const href = params.size ? `/meetings?${params.toString()}` : "/meetings";
     startTransition(() => (mode === "push" ? router.push(href) : router.replace(href)));
   }
@@ -56,6 +60,7 @@ export function SearchForm({ initialQuery }: { initialQuery: string }) {
 
   return (
     <form method="get" action="/meetings" role="search" onSubmit={submit}>
+      {range && <input type="hidden" name="range" value={range} />}
       <label className="sr-only" htmlFor="meeting-search">Search meetings</label>
       <div className="search-row">
         <div className="search-field">

@@ -1,0 +1,40 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { requireSession } from "@/lib/currentUser";
+import { managedHostingEnabled } from "@/lib/managedAuth";
+import { getChatEntitlement } from "@/lib/chatQuota";
+import { MAX_QUESTION_LENGTH } from "@/lib/notesChatContext";
+import { AskClient } from "./AskClient";
+
+export const metadata = { title: "Ask your notes" };
+export const dynamic = "force-dynamic";
+
+export default async function AskPage() {
+  const { workspaceId } = await requireSession();
+  if (!managedHostingEnabled()) notFound();
+  const entitlement = await getChatEntitlement(workspaceId);
+
+  return (
+    <div className="container">
+      <div className="page-header">
+        <h1>Ask your notes</h1>
+        {entitlement.limit > 0 && (
+          <p className="total-count">{entitlement.remaining} of {entitlement.limit} questions left this period</p>
+        )}
+      </div>
+      {entitlement.eligible ? (
+        <AskClient maxLength={MAX_QUESTION_LENGTH} />
+      ) : (
+        <section className="settings-card">
+          <h2>{entitlement.reason === "limit" ? "You've used this period's questions" : "Chat with your meetings"}</h2>
+          <p className="muted-copy">
+            {entitlement.reason === "limit"
+              ? "Your question allowance resets with your billing period."
+              : "Ask questions across every meeting and get answers with links to the notes they came from. Included with Hosted Pro and Hosted Team."}
+          </p>
+          <Link className="button button-primary" href="/billing">See plans</Link>
+        </section>
+      )}
+    </div>
+  );
+}

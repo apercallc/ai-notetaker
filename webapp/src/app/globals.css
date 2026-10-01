@@ -1376,3 +1376,537 @@ a.meeting-card:hover,
     scroll-behavior: auto;
   }
 }
+
+/* ── UX overhaul: icon nav, mobile tab bar, settings, team, filters ── */
+.app-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nav-icon {
+  flex: 0 0 auto;
+}
+
+.nav-label-short {
+  display: none;
+}
+
+.filter-chips {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filter-chips a {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.filter-chips a[aria-current="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.settings-nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-nav a {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 9px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.settings-nav a:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+}
+
+.settings-nav a[aria-current="page"] {
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.settings-panel > :first-child {
+  margin-top: 0;
+}
+
+.settings-card {
+  margin: 0 0 20px;
+  padding: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.settings-card > h2 {
+  margin: 0 0 4px;
+  font-size: 1.0625rem;
+}
+
+.settings-card > .muted-copy {
+  margin: 0 0 14px;
+}
+
+.settings-card--danger {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+}
+
+.team-members {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.team-member + .team-member {
+  border-top: 1px solid var(--color-border);
+}
+
+.team-member > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.team-member > summary::-webkit-details-marker {
+  display: none;
+}
+
+.team-member > summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-accent) 65%, transparent);
+  outline-offset: -3px;
+}
+
+.team-member-email {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.team-member-joined {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.role-badge {
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.role-badge--owner {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.team-member-actions {
+  display: grid;
+  gap: 12px;
+  padding: 4px 16px 18px;
+}
+
+.team-member-actions .login-form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  width: auto;
+  max-width: none;
+}
+
+.team-member-actions fieldset,
+.team-invite fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.team-invite .login-form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  width: auto;
+  max-width: none;
+}
+
+.team-invite .text-input {
+  min-width: min(100%, 280px);
+}
+
+@media (max-width: 760px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .settings-nav ul {
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .settings-nav a {
+    white-space: nowrap;
+  }
+
+  /* Bottom tab bar: primary navigation sits in thumb reach. A backdrop-filter
+     on an ancestor would trap a fixed child, so the header drops it here. */
+  :root {
+    --tabbar-h: 3.5rem;
+  }
+
+  .app-header {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--color-bg);
+  }
+
+  body {
+    padding-bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom));
+  }
+
+  .app-nav {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 30;
+    order: 0;
+    flex-basis: auto;
+    overflow: visible;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-bg) 94%, transparent);
+    backdrop-filter: blur(18px) saturate(150%);
+  }
+
+  .app-nav ul {
+    width: 100%;
+    justify-content: space-around;
+    gap: 0;
+  }
+
+  .app-nav li {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .app-nav a {
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    min-height: var(--tabbar-h);
+    padding: 6px 2px;
+    border-radius: 0;
+    border-color: transparent;
+    box-shadow: none;
+    background: none;
+    font-size: 0.6875rem;
+  }
+
+  .app-nav a[aria-current="page"] {
+    color: var(--color-accent);
+    background: none;
+    box-shadow: none;
+    border-color: transparent;
+  }
+
+  .nav-label-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .nav-label-short {
+    display: inline;
+  }
+
+  .app-nav a span {
+    overflow: hidden;
+    max-width: 100%;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-header-inner {
+    flex-wrap: nowrap;
+    min-height: 56px;
+  }
+}
+
+.settings-card .login-form {
+  width: auto;
+  max-width: none;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: none;
+}
+
+/* Ask your notes */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 760px;
+}
+
+.ask-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.ask-chip {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.ask-chip:hover {
+  border-color: var(--color-accent);
+}
+
+.ask-suggestions {
+  flex-wrap: wrap;
+}
+
+.ask-question {
+  align-self: flex-end;
+  max-width: 85%;
+  margin: 0 0 10px auto;
+  padding: 10px 14px;
+  border-radius: var(--radius) var(--radius) 4px var(--radius);
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+  overflow-wrap: anywhere;
+}
+
+.ask-reply {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.ask-answer {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.ask-cite {
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.ask-sources {
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.ask-form {
+  position: sticky;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.ask-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+@media (max-width: 760px) {
+  .ask-form {
+    bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Review fixes ── */
+.search-field {
+  position: relative;
+}
+
+.search-field .search-input {
+  width: 100%;
+  padding-right: 46px;
+}
+
+.search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 40px;
+  min-height: 40px;
+  transform: translateY(-50%);
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Scroll strips keep room for the 3px focus ring that overflow would clip. */
+.filter-chips,
+.settings-nav ul {
+  padding: 4px;
+  margin-left: -4px;
+  margin-right: -4px;
+}
+
+.ask-suggestions {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.team-members > li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.team-member > summary {
+  flex-wrap: wrap;
+  position: relative;
+  padding-right: 40px;
+}
+
+.team-member > summary::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--color-text-muted);
+  border-bottom: 2px solid var(--color-text-muted);
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.team-member[open] > summary::after {
+  transform: translateY(-30%) rotate(-135deg);
+}
+
+.settings-list {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 8px;
+}
+
+.ask-form:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.ask-input:focus,
+.ask-input:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
+.ask-cite {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .settings-nav a,
+  .filter-chips a,
+  .ask-chip {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 560px) {
+  .team-member-joined {
+    display: none;
+  }
+
+  .container > section.settings-card,
+  .settings-card {
+    padding: 18px 16px;
+  }
+
+  .search-row .button {
+    display: none;
+  }
+}

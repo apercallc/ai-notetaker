@@ -271,6 +271,8 @@ function toProcessingState(jobs: { id: string; status: string; errorMessage: str
 
 export interface ListMeetingsOptions {
   query?: string;
+  /** Only meetings that started at or after this instant. */
+  since?: Date;
   limit?: number;
   offset?: number;
 }
@@ -294,6 +296,7 @@ export async function listMeetings(
 
   const where = {
     workspaceId,
+    ...(options.since ? { startedAt: { gte: options.since } } : {}),
     ...(query
       ? {
           OR: [
