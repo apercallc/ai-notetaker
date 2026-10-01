@@ -61,7 +61,7 @@ export function ShareMeeting({ meetingId, links }: { meetingId: string; links: A
 
   return (
     <div className="share-panel">
-      <form action={create} className="share-form">
+      <form onSubmit={(event) => { event.preventDefault(); create(new FormData(event.currentTarget)); }} className="share-form">
         <input type="hidden" name="meetingId" value={meetingId} />
         <label htmlFor="share-expiry">Link expires</label>
         <select id="share-expiry" name="expiresInDays" value={expiry} onChange={(event) => setExpiry(event.target.value)} className="select">
@@ -108,7 +108,7 @@ export function ShareMeeting({ meetingId, links }: { meetingId: string; links: A
                 {tokens[link.id] ? (
                   <CopyButton text={shareUrl(tokens[link.id]!)} label="Copy" className="button button-secondary button-small" />
                 ) : (
-                  <span className="muted-copy">URL shown once</span>
+                  <span className="muted-copy">Can’t be shown again</span>
                 )}
                 <button
                   type="button"

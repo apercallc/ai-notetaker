@@ -54,8 +54,8 @@ events record who deleted or restored what (ids only, never note text).
 Delete synced notes from the user's own webapp through its meeting detail
 route or API. Managed users can delete hosted meetings and their text notes;
 temporary audio is removed after successful processing and is not playable,
-downloadable, or shareable from the hosted service. Expiring share links can
-be revoked independently. Removing the extension does not automatically
+downloadable, or shareable from the hosted service. Share links (1 to 365 days, or no expiry)
+can be revoked independently, and they stop working when the note is deleted. Removing the extension does not automatically
 delete provider account data or a separately deployed webapp/managed workspace
 database.
 
