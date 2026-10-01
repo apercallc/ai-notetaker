@@ -254,6 +254,56 @@ impl RetryWorker {
     }
 }
 
+/// Meetings whose Stop is being processed. The slot is released when the guard drops, whichever
+/// way the stop ends.
+static STOPS_IN_FLIGHT: std::sync::LazyLock<std::sync::Mutex<HashSet<Uuid>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+
+struct StopGuard(Uuid);
+
+impl StopGuard {
+    fn acquire(meeting_id: Uuid) -> Option<Self> {
+        let mut in_flight = STOPS_IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        in_flight.insert(meeting_id).then(|| Self(meeting_id))
+    }
+}
+
+impl Drop for StopGuard {
+    fn drop(&mut self) {
+        STOPS_IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// https anywhere, or plain http only to a loopback host (local development). The host is
+/// parsed rather than prefix-matched: `http://localhost.evil.com` must not pass for loopback.
+fn hosted_url_is_allowed(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    match url.scheme() {
+        "https" => true,
+        "http" => {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .parse::<std::net::Ipv4Addr>()
+                    .is_ok_and(|address| address.is_loopback())
+                || host
+                    .trim_matches(['[', ']'])
+                    .parse::<std::net::Ipv6Addr>()
+                    .is_ok_and(|address| address.is_loopback())
+        }
+        _ => false,
+    }
+}
+
 async fn managed_service_from_state(state: &AppState) -> Result<ManagedServiceConfig, String> {
     let settings = state
         .settings
@@ -288,11 +338,7 @@ async fn managed_service_from_state(state: &AppState) -> Result<ManagedServiceCo
     }
     // The bearer token and raw call audio go to this URL: never over plain http
     // (loopback is allowed for local development).
-    let base_url = service.base_url.to_ascii_lowercase();
-    let loopback = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
-        .iter()
-        .any(|prefix| base_url.starts_with(prefix));
-    if !base_url.starts_with("https://") && !loopback {
+    if !hosted_url_is_allowed(&service.base_url) {
         return Err("hosted service URL must use https".into());
     }
     if service.account_id != account_id || service.workspace_id != workspace_id {
@@ -1011,6 +1057,11 @@ async fn handle_message(
         } => {
             // One desktop capture session at a time: starting a second would stop the first's
             // capture (the session is shared) while it still looks active, silently losing its audio.
+            // The extension retries a start it did not hear back about; the second one must not
+            // build a second pipeline and audio queue over the same files.
+            if state.active.lock().await.contains_key(&meeting_id) {
+                return true;
+            }
             if capture_source != CaptureSource::Meet
                 && state
                     .active
@@ -1201,6 +1252,14 @@ async fn handle_message(
             let live_writer = std::sync::Mutex::new(LiveAudioWriter::new(
                 state.store.open_audio_appender(meeting_id),
             ));
+            // A full disk cannot be recorded through: keep capturing and every frame is dropped
+            // while the tray still says "recording". Stop the capture instead and leave the meeting
+            // unfinished, so the next start offers to resume once space is freed.
+            let disk_full_handle = tokio::runtime::Handle::current();
+            let disk_full_state = state.clone();
+            let disk_full_tray = tray.clone();
+            let disk_full_audio = audio.clone();
+            let disk_full_stopped = AtomicBool::new(false);
             let result = audio
                 .start_capture(Box::new(move |frame| {
                     // Backends deliver frames on one dispatcher thread. Write
@@ -1222,6 +1281,23 @@ async fn handle_message(
                             existing_len
                         }
                         Err((code, message)) => {
+                            if code == ErrorCode::DiskFull
+                                && !disk_full_stopped.swap(true, Ordering::Relaxed)
+                            {
+                                let state = disk_full_state.clone();
+                                let tray = disk_full_tray.clone();
+                                let audio = disk_full_audio.clone();
+                                disk_full_handle.spawn(async move {
+                                    let _ = audio.stop_capture().await;
+                                    if let Some(active) =
+                                        state.active.lock().await.remove(&meeting_id)
+                                    {
+                                        active.audio_processing.finish().await;
+                                    }
+                                    tray.set_recording(false);
+                                    tray.set_attention(true);
+                                });
+                            }
                             if !storage_error_reported.swap(true, Ordering::Relaxed) {
                                 let _ = audio_errors.send(HelperToExtension::Error {
                                     meeting_id: Some(meeting_id),
@@ -1356,6 +1432,11 @@ async fn handle_message(
             meeting_id,
             flagged_moments,
         } => {
+            // A second Stop for the same meeting (double click, a retrying extension) while the
+            // first is still finishing must not run the whole stop pipeline twice.
+            let Some(stop_guard) = StopGuard::acquire(meeting_id) else {
+                return true;
+            };
             let active_recording = state.active.lock().await.remove(&meeting_id);
             if active_recording.is_none() && !state.pipelines.lock().await.contains_key(&meeting_id)
             {
@@ -1384,6 +1465,7 @@ async fn handle_message(
                 let tray = tray.clone();
                 let out_tx_for_stop = out_tx.clone();
                 tokio::spawn(async move {
+                    let _stop_guard = stop_guard;
                     if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
                         if !flagged_moments.is_empty() {
                             let moments: Vec<FlaggedMoment> = flagged_moments
@@ -1500,6 +1582,16 @@ async fn handle_message(
         // was already captured before the interruption, then transcribe the
         // durable raw-audio tail before summarizing it.
         ExtensionToHelper::ResumeRecording { meeting_id } => {
+            // Resuming a meeting that is recording right now would stamp it stopped under a live
+            // capture and build a second pipeline over the same retry queue.
+            if state.active.lock().await.contains_key(&meeting_id) {
+                let _ = out_tx.send(HelperToExtension::Error {
+                    meeting_id: Some(meeting_id),
+                    code: ErrorCode::StorageError,
+                    message: "This recording is already in progress.".into(),
+                });
+                return true;
+            }
             if let Ok(meta) = state.store.load_meta(meeting_id) {
                 if meta.managed_pending {
                     subscribe_meeting(&state, meeting_id, out_tx.clone());
@@ -1662,6 +1754,23 @@ async fn handle_message(
         }
 
         ExtensionToHelper::AudioProbe => {
+            // The probe starts and stops the shared capture session. Running it during a live
+            // desktop recording would silently end that recording's capture.
+            if state
+                .active
+                .lock()
+                .await
+                .values()
+                .any(|active| active.audio.is_some())
+            {
+                let _ = out_tx.send(HelperToExtension::AudioProbeResult {
+                    mic_frames: 0,
+                    speaker_frames: 0,
+                    passed: false,
+                    message: "A recording is in progress. Run the audio test after it ends.".into(),
+                });
+                return true;
+            }
             let audio = state.audio.clone();
             match audio.probe().await {
                 Ok(result) => {
@@ -1766,7 +1875,10 @@ fn spawn_retry_worker(
                 let mut pipeline = pipeline.lock().await;
                 let now = chrono::Utc::now();
                 let mut messages = pipeline.process_due_retries(now).await;
-                if summary_backoff_until.is_none() {
+                // The summary waits for the transcript queue to drain, so a tick that only retried
+                // chunks is not a failed summary attempt. Counting it burned the whole budget during
+                // a transcription outage and then dropped the pending summary for good.
+                if summary_backoff_until.is_none() && pipeline.retry_queue_len() == 0 {
                     messages.extend(pipeline.process_pending_summary(meeting_id).await);
                     summary_attempts = summary_attempts.saturating_add(1);
                 }
@@ -2298,6 +2410,40 @@ fn build_audio_backend() -> Arc<dyn AudioCapture> {
 mod tests {
     use super::*;
     use notetaker_core::storage::MeetingStore;
+
+    #[test]
+    fn a_second_stop_for_the_same_meeting_is_refused_until_the_first_ends() {
+        let id = Uuid::new_v4();
+        let first = StopGuard::acquire(id).expect("first stop proceeds");
+        assert!(StopGuard::acquire(id).is_none());
+        assert!(StopGuard::acquire(Uuid::new_v4()).is_some());
+        drop(first);
+        assert!(StopGuard::acquire(id).is_some());
+    }
+
+    #[test]
+    fn hosted_urls_must_be_https_or_true_loopback() {
+        for allowed in [
+            "https://notes.example.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:8080/x",
+            "http://[::1]:3000",
+            "HTTP://LOCALHOST",
+        ] {
+            assert!(hosted_url_is_allowed(allowed), "{allowed}");
+        }
+        for denied in [
+            "http://notes.example.com",
+            "http://localhost.evil.com",
+            "http://127.0.0.1.attacker.net",
+            "http://localhost@evil.com",
+            "ftp://notes.example.com",
+            "not a url",
+            "",
+        ] {
+            assert!(!hosted_url_is_allowed(denied), "{denied}");
+        }
+    }
 
     #[test]
     fn live_writer_appends_in_order_and_flushes_everything_when_dropped() {
