@@ -236,6 +236,21 @@ async fn read_frame<R: tokio::io::AsyncRead + Unpin>(
     Ok(Some(payload))
 }
 
+/// The stand-in for a helper message too large for one frame (a very long summary, say).
+fn oversized_message_error(msg: &HelperToExtension) -> HelperToExtension {
+    let meeting_id = match msg {
+        HelperToExtension::SummaryReady { meeting_id, .. } => Some(*meeting_id),
+        HelperToExtension::ManagedJobStatus { meeting_id, .. } => Some(*meeting_id),
+        _ => None,
+    };
+    HelperToExtension::Error {
+        meeting_id,
+        code: ErrorCode::StorageError,
+        message: "The result was too large to send to the browser. It is saved on this computer; open the note folder from the tray menu."
+            .to_string(),
+    }
+}
+
 fn protocol_error(message: &str) -> HelperToExtension {
     HelperToExtension::Error {
         meeting_id: None,
@@ -259,9 +274,19 @@ where
 
     let writer_task = tokio::spawn(async move {
         while let Some(msg) = out_rx.recv().await {
-            let Ok(bytes) = serde_json::to_vec(&msg) else {
+            let Ok(mut bytes) = serde_json::to_vec(&msg) else {
+                tracing::warn!("a helper message could not be serialized and was dropped");
                 continue;
             };
+            // The Native Messaging relay closes the whole connection on an over-limit frame, which
+            // would drop every other recording's channel too. Tell the extension what happened instead.
+            if bytes.len() > MAX_MESSAGE_BYTES as usize {
+                tracing::warn!(
+                    size = bytes.len(),
+                    "a helper message exceeded the frame limit; replaced with an error"
+                );
+                bytes = serde_json::to_vec(&oversized_message_error(&msg)).unwrap_or_default();
+            }
             if write_half
                 .write_all(&(bytes.len() as u32).to_le_bytes())
                 .await
@@ -346,6 +371,31 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    #[test]
+    fn an_oversized_summary_becomes_a_small_error_for_that_meeting() {
+        let meeting_id = uuid::Uuid::new_v4();
+        let huge = HelperToExtension::SummaryReady {
+            meeting_id,
+            summary: "x".repeat(MAX_MESSAGE_BYTES as usize + 1),
+            action_items: Vec::new(),
+        };
+        assert!(serde_json::to_vec(&huge).unwrap().len() > MAX_MESSAGE_BYTES as usize);
+
+        let replacement = oversized_message_error(&huge);
+        assert!(serde_json::to_vec(&replacement).unwrap().len() < 1024);
+        match replacement {
+            HelperToExtension::Error {
+                meeting_id: id,
+                message,
+                ..
+            } => {
+                assert_eq!(id, Some(meeting_id));
+                assert!(message.contains("too large"));
+            }
+            other => panic!("expected an error, got {other:?}"),
+        }
+    }
 
     async fn send_raw(stream: &mut LocalStream, payload: &[u8]) {
         stream
