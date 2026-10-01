@@ -48,6 +48,14 @@ describe("NativeMessagingClient", () => {
     expect(chromeMock.runtime.connectNative).toHaveBeenCalledWith("com.ainotetaker.helper");
   });
 
+  it("does not spawn a second helper while a port is already attached", async () => {
+    chromeMock.runtime.connectNative.mockReturnValue(createFakePort());
+    const client = new NativeMessagingClient();
+    await client.connect();
+    await client.connect();
+    expect(chromeMock.runtime.connectNative).toHaveBeenCalledTimes(1);
+  });
+
   it("does not probe the helper until optional Native Messaging access is granted", async () => {
     chromeMock.permissions.contains.mockResolvedValue(false);
     const client = new NativeMessagingClient();

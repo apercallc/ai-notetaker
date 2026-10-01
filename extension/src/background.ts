@@ -44,9 +44,11 @@ const meetCapture = new MeetCaptureController((pcm16, meetingId, channel, chunkI
 // Restore the persisted capture map before the controller rehydrates
 // meeting state, so a tab-close event arriving during this same wake finds
 // the capture and finishes the meeting instead of stranding it.
+// Each step is isolated: one transient storage error must not leave every
+// message handler awaiting a rejected promise until the worker restarts.
 const readyPromise = (async () => {
-  await meetCapture.restoreCaptures();
-  await controller.init();
+  await meetCapture.restoreCaptures().catch((error) => console.warn("Capture restore failed", error));
+  await controller.init().catch((error) => console.warn("Controller init failed", error));
 })();
 
 // A captured tab that closes, or leaves its call, is the end of the call and
@@ -97,7 +99,8 @@ async function openNotification(notificationId: string): Promise<void> {
   if (!(await openNotesReady(notificationId))) await openReminderCall(notificationId);
 }
 chrome.notifications?.onClicked.addListener((notificationId) => void openNotification(notificationId));
-chrome.notifications?.onButtonClicked?.addListener((notificationId) => void openNotification(notificationId));
+// Reminder buttons are handled by registerReminderNotificationHandlers; only notes-ready buttons come through here.
+chrome.notifications?.onButtonClicked?.addListener((notificationId) => void openNotesReady(notificationId));
 
 chrome.runtime.onInstalled?.addListener((details) => {
   void handleInstalled(details).catch((error) => console.warn("Install handling failed", error));

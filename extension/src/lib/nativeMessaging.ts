@@ -73,6 +73,8 @@ export class NativeMessagingClient {
 
   connect(): Promise<void> {
     if (this.connectPromise) return this.connectPromise;
+    // A live port means a helper process is already attached; a second connectNative would spawn another and orphan this one.
+    if (this.port) return Promise.resolve();
 
     const connection = (async (): Promise<void> => {
       let granted = false;

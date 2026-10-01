@@ -400,6 +400,8 @@ export class BackgroundController {
 
   async stopRecording(meetingId: string): Promise<void> {
     const meeting = await getMeeting(meetingId);
+    // A late or duplicate stop (stale popup, tab-close race) must not reopen a finished meeting for reprocessing.
+    if (meeting && meeting.status !== "recording") return;
     if (meeting) {
       meeting.status = "processing";
       meeting.endedAt ??= new Date().toISOString();

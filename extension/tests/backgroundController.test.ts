@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { BackgroundController, type NativeClientLike } from "../src/lib/backgroundController";
-import { getMeeting, saveSettings, saveWidgetPosition } from "../src/lib/storage";
+import { getMeeting, saveMeeting, saveSettings, saveWidgetPosition } from "../src/lib/storage";
 import { DEFAULT_SETTINGS } from "../src/types";
 import * as browserStorage from "../src/meet/browserStorage";
 import * as browserProcessing from "../src/meet/browserProcessing";
@@ -821,6 +821,22 @@ describe("BackgroundController", () => {
       expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "PROCESSING_WARNING" }));
     });
     expect(controller.getState().activeMeeting).toEqual({ id: meetingId });
+  });
+
+  it("ignores a late duplicate stop instead of reopening a finished meeting", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await controller.stopRecording(meetingId);
+    const meeting = await getMeeting(meetingId);
+    await saveMeeting({ ...meeting!, status: "complete", summary: "Done" });
+    vi.mocked(client.stopRecording).mockClear();
+
+    await controller.stopRecording(meetingId);
+
+    expect(client.stopRecording).not.toHaveBeenCalled();
+    expect((await getMeeting(meetingId))?.status).toBe("complete");
   });
 
   it("marks the meeting as processing and reflects no active meeting once stopped", async () => {
