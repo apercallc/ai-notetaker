@@ -109,6 +109,12 @@ export async function startMeetRecording(
     }
     return "";
   }
+  // Stop (or closing the tab) can land in the window while capture was still starting. The meeting is
+  // then already finished, so a capture left running would record into it with nothing to stop it.
+  if (controller.getState().activeMeeting?.id !== meetingId) {
+    await capture.stop(meetingId).catch(() => undefined);
+    return meetingId;
+  }
   // A start that succeeded (from the widget, the popup, or the shortcut —
   // the shortcut press is itself the invocation) retires any remembered
   // handoff for this tab, so the next popup open never double-starts.

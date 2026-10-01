@@ -6,15 +6,24 @@ import { chromeMock } from "./setup";
 import { saveMeeting } from "../src/lib/storage";
 
 function fakes(active: { id: string } | null = null) {
+  // Once a recording has started, the controller reports it as the live one (until a test ends it).
+  let started = false;
+  let ended = false;
   const controller = {
-    startRecording: vi.fn(async () => "m1"),
+    startRecording: vi.fn(async () => {
+      started = true;
+      return "m1";
+    }),
+    endRecording: () => {
+      ended = true;
+    },
     failRecording: vi.fn(async () => undefined),
     stopRecording: vi.fn(async (_id: string): Promise<void> => undefined),
     addBookmark: vi.fn(async () => true),
     reportStartFailure: vi.fn(),
     reportCaptureInvocationRequired: vi.fn(),
     abortStart: vi.fn(async () => undefined),
-    getState: vi.fn(() => ({ activeMeeting: active })),
+    getState: vi.fn(() => ({ activeMeeting: active ?? (started && !ended ? { id: "m1" } : null) })),
   };
   const capture = {
     start: vi.fn(async () => undefined),
@@ -160,6 +169,18 @@ describe("startMeetRecording", () => {
     await startMeetRecording(c, k, { tabId: 9 });
 
     expect(chromeMock.storage.session._dump()["notetaker.pendingMeetStart"]).toBeUndefined();
+  });
+
+  it("tears capture down when Stop landed while it was still starting", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.start.mockImplementation(async () => {
+      controller.endRecording();
+    });
+    const [c, k] = asTypes();
+
+    expect(await startMeetRecording(c, k, { tabId: 9 })).toBe("m1");
+
+    expect(capture.stop).toHaveBeenCalledWith("m1");
   });
 
   it("retires a remembered start once capture actually begins", async () => {
