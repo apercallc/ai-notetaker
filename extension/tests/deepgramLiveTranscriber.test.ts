@@ -76,6 +76,43 @@ describe("DeepgramLiveTranscriber", () => {
     expect(FakeSocket.instances.every((socket) => socket.close.mock.calls.length === 1)).toBe(true);
   });
 
+  it("reconnects after a dropped connection, then gives up after repeated failures", async () => {
+    vi.useFakeTimers();
+    try {
+      FakeSocket.reset();
+      const events: DeepgramLiveEvent[] = [];
+      const transcriber = makeTranscriber(events);
+      const connecting = transcriber.connect({ kind: "apiKey", token: "dg" });
+      FakeSocket.instances.forEach((socket) => socket.open());
+      await connecting;
+      expect(events.at(-1)).toMatchObject({ status: "available" });
+
+      // The network drops: both sockets close.
+      const first = [...FakeSocket.instances];
+      first[0]!.onclose?.({} as CloseEvent);
+      expect(events.at(-1)).toMatchObject({ status: "connecting" });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      const reopened = FakeSocket.instances.slice(first.length);
+      expect(reopened.length).toBe(2);
+      reopened.forEach((socket) => socket.open());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(events.at(-1)).toMatchObject({ status: "available" });
+
+      // Three consecutive failed reconnects end live captions for good.
+      reopened[0]!.onclose?.({} as CloseEvent);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(10_000);
+        FakeSocket.instances.slice(-2).forEach((socket) => socket.onerror?.(new Event("error")));
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(events.at(-1)).toMatchObject({ status: "unavailable" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("converts interim and final results to stable speaker-labeled transcript events", async () => {
     FakeSocket.reset();
     const events: DeepgramLiveEvent[] = [];

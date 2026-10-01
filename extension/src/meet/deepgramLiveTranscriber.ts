@@ -24,6 +24,8 @@ export interface DeepgramLiveTranscriberOptions {
 
 const LIVE_URL = "wss://api.deepgram.com/v1/listen";
 const MAX_PENDING_CHUNKS_PER_CHANNEL = 8;
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_BASE_MS = 1_000;
 // Five seconds of 48 kHz mono PCM16. Raw audio remains durable locally when
 // the optional live connection cannot keep up; never let WebSocket queue an
 // entire call in the extension's heap.
@@ -51,6 +53,9 @@ export class DeepgramLiveTranscriber {
   private readonly activeUtterances = new Map<string, number>();
   private readonly nextUtterance = new Map<string, number>();
   private stopped = false;
+  private credential: DeepgramCredential | null = null;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly createSocket: (url: string, protocols: string[]) => WebSocket;
   private readonly connectTimeoutMs: number;
 
@@ -61,7 +66,38 @@ export class DeepgramLiveTranscriber {
 
   async connect(credential: DeepgramCredential): Promise<void> {
     this.stopped = false;
+    this.credential = credential;
     this.options.onEvent({ type: "status", status: "connecting" });
+    await this.openAll(credential);
+  }
+
+  /**
+   * A network blip must not end live captions for the rest of the call. Re-open both sockets with
+   * a short backoff a few times; only then give up. Audio stays durable locally throughout.
+   */
+  private recover(message: string): void {
+    if (this.stopped) return;
+    if (!this.credential || this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this.fail(message);
+      return;
+    }
+    const delay = RECONNECT_BASE_MS * 2 ** this.reconnectAttempts;
+    this.reconnectAttempts += 1;
+    this.closeSockets();
+    this.options.onEvent({ type: "status", status: "connecting", message: "Reconnecting live transcript…" });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (this.stopped || !this.credential) return;
+      this.openAll(this.credential).then(
+        () => {
+          this.reconnectAttempts = 0;
+        },
+        () => this.recover(message),
+      );
+    }, delay);
+  }
+
+  private async openAll(credential: DeepgramCredential): Promise<void> {
     const protocols = credential.kind === "apiKey" ? ["token", credential.token] : ["bearer", credential.token];
     const url = new URL(LIVE_URL);
     url.search = new URLSearchParams({
@@ -84,6 +120,7 @@ export class DeepgramLiveTranscriber {
       if (!this.stopped) this.options.onEvent({ type: "status", status: "available" });
     } catch (error) {
       this.closeSockets();
+      if (this.reconnectAttempts > 0) throw error; // a reconnect attempt: recover() decides what happens next
       const message = error instanceof Error ? error.message : "Live transcription could not connect";
       this.options.onEvent({ type: "status", status: "unavailable", message });
       throw error;
@@ -101,7 +138,7 @@ export class DeepgramLiveTranscriber {
       try {
         socket.send(toArrayBuffer(pcm16));
       } catch {
-        this.fail("The live transcript connection was interrupted");
+        this.recover("The live transcript connection was interrupted");
       }
       return;
     }
@@ -111,6 +148,8 @@ export class DeepgramLiveTranscriber {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
     for (const socket of this.sockets.values()) {
       if (socket.readyState === WebSocket.OPEN) {
         try {
@@ -146,7 +185,7 @@ export class DeepgramLiveTranscriber {
       socket.onerror = () => finish(new Error("Live transcript connection failed"));
       socket.onclose = () => {
         if (!settled && !this.stopped) finish(new Error("Live transcript connection closed before it was ready"));
-        else if (!this.stopped) this.fail("The live transcript connection was interrupted");
+        else if (!this.stopped) this.recover("The live transcript connection was interrupted");
       };
       socket.onmessage = (event) => this.handleMessage(channel, event.data);
     });
