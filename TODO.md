@@ -1,5 +1,77 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Only you can do these (updated 2026-09-30)
+
+Everything below needs your accounts, devices, money or a decision. Each item is also
+marked **You** where it sits in this file. Engineering follow-ups that need nothing from
+you are listed under "Engineering backlog" and are not started.
+
+- Deploy (Railway): apply migrations, set `INTEGRATIONS_ENCRYPTION_KEY`, and give the web
+  service `ffmpeg`/`ffprobe` (switch to the Dockerfile builder or add ffmpeg to Nixpacks).
+- Live acceptance on production: a long real import; an upload end to end with staged-audio
+  deletion; Google Meet, Google OAuth/Drive, Stripe, managed worker and storage health.
+- Live provider checks: Deepgram/Whisper language and vocabulary parameters; measured cost
+  per import, per regeneration and per chat question.
+- Real devices: Zoom/Teams/Slack on macOS and Windows, native installers, iOS Safari and
+  Android Chrome layout checks.
+- Store listing and release: Chrome Web Store listing and real screenshots, replace the
+  development extension ID in Native Messaging origins, publish the tagged release, and
+  `ai-notetaker-mcp` on npm.
+- Signing: Apple Developer ID and notarization secrets; Windows code-signing certificate.
+- Decisions: plan pricing/allowances and chat pricing, Deepgram diarization for imports as a
+  paid perk, Hosted as the primary onboarding path, helper launch-at-login default.
+
+## Engineering backlog (not started; nothing needed from you)
+
+Moved out of the checklist so that every unchecked box in this file needs you.
+
+- Phase 2, Local BYOK: extension popup and helper "Import file" (Symphonia
+      decode, user's ffmpeg for video), saved as `captureSource = "import"`,
+      `processingMode = "local_byok"`. Covers self-hosted without managed mode.
+- Import extras still open: a per-file language hint, a per-file notes template, and import from a link.
+- Templates: sections for local BYOK summaries, a cost ledger for regenerations (regeneration is capped per meeting but not metered in the usage ledger), user-defined templates, and template choice on the live Meet widget's hosted path.
+- Speaker-name follow-ups: merge two speakers into one, include names in
+      the account data export, and suggest names from the calendar attendees.
+- Library: per-person private folders and folder permissions, drag-and-drop and multi-select move, autosave and fuller version history, folder-level retention, and folders in the account data export.
+- Integrations: Slack/Notion OAuth installs, per-folder routing, a delivery-log page, more event types.
+- MCP: OAuth sign-in instead of pasted tokens, write tools behind explicit scopes, resources/prompts, an Ask-your-notes tool, and binding a token to one workspace (today a read token reaches any workspace its owner belongs to, via `X-Workspace-Id`).
+- Multilingual: keep a second-language copy of a summary; right-to-left review.
+- Audit log: date filters and search, sign-in events, "who viewed" for shared notes, SIEM export. The page is browser-checked at 375/768/1280 px and design-reviewed (2026-09-30).
+- Team admin: SSO.
+- Chat: pgvector retrieval once usage data exists; a retention-aware design for chat history (intentionally not persisted today).
+- Before broad Hosted AI launch: implement irreversible provider-attempt
+      spend ledger, global/trial budgets, durable scheduled cleanup and measured
+      cohort contribution dashboards as specified in the scale plan.
+- Dependencies (waiting on upstream): CPAL 0.17+ once macOS 13 support is preserved (CoreAudio releases need macOS 14.2).
+- Dependencies (waiting on upstream): webapp TypeScript 7 and ESLint 10 once `eslint-config-next` supports them; Dependabot ignores only the blocked majors.
+- Enable live transcription for Hosted AI only after adding server-owned
+      real-time usage reservation/metering and a verified short-lived Deepgram
+      token flow; other providers continue to create transcripts after stop.
+- Smarter notes follow-ups: an email recap (structured summaries, chat, Slack, Notion and webhooks are built).
+- Live browser-side transcription during Meet calls: the widget already
+      shows the live transcript when the desktop helper streams it, but
+      extension-owned Meet capture still transcribes only after stop. In-call
+      streaming Deepgram for the browser path remains open work.
+- Extension `listMeetings` search loads full meeting records (summaries
+      included) to match a query, while popup/history only needs the list
+      view. Fixing this means splitting transcripts/summaries into separate
+      storage keys or adding a lightweight index — a storage schema
+      migration with a data-move path, too risky to land pre-launch.
+      Revisit with the planned history indexing work.
+- Webapp Dockerfile keeps `prisma` CLI in production dependencies:
+      `scripts/docker-entrypoint.mjs` runs `npx prisma migrate deploy` at
+      container start, so the CLI must ship. Revisit only if entrypoint
+      switches to a build-time migration step or a standalone engine.
+- Helper `stop_capture_only` (pipeline.rs) drops mic/speaker streaming
+      sessions without `close()` — audit lead from the delegation sweep,
+      not re-verified against the current code after the pipeline rework;
+      sessions drop when the process exits, but an explicit close would
+      flush provider buffers cleanly. Verify on the next pipeline pass.
+- Track six RustSec unmaintained-dependency warnings in the transitive
+      Tauri/GTK dependency graph (`proc-macro-error` and the `unic-*` crates).
+      The 2026-09-29 `cargo audit` run found zero vulnerable or yanked crates;
+      revisit when upstream Tauri dependencies offer supported replacements.
+
 ## File import: transcribe and summarize an audio/video file (2026-09-30)
 
 Spec: [`docs/superpowers/specs/2026-09-30-file-import-design.md`](docs/superpowers/specs/2026-09-30-file-import-design.md).
@@ -10,21 +82,18 @@ Spec: [`docs/superpowers/specs/2026-09-30-file-import-design.md`](docs/superpowe
       refund on failure), `Speaker N` labels, stage progress on the meeting.
       Verified: 533 webapp tests, build, and a real-browser upload (201/201/202,
       1 unit + 75 s reserved, 375 px layout).
-- [ ] Deploy: migration `20260930230000_file_import` (additive columns), and
-      confirm the production build provides `ffmpeg`/`ffprobe` (the Docker
-      image does; a Nixpacks build needs them added). Until then `/import`
-      says import is unavailable rather than failing.
-- [ ] Live acceptance: import a long real recording (an hour of mp3 and an mp4)
-      on production and check the true-up, provider cost
+- [ ] **You:** deploy the notes-platform migrations (all additive; list in
+      `docs/hosted-deployment.md`). Make the web service provide `ffmpeg`/`ffprobe`:
+      the Dockerfile does (verified locally), but `railway.json` still uses Nixpacks,
+      which does not. Until then `/import` says import is unavailable. Set
+      `INTEGRATIONS_ENCRYPTION_KEY` (required on managed hosting).
+- [ ] **You:** live acceptance: import a long real recording (an hour of mp3 and an
+      mp4) on production and check the true-up, provider cost
       (`ProcessingJob.providerCostMicros`) and scratch-disk use.
-- [ ] Phase 2, Local BYOK: extension popup and helper "Import file" (Symphonia
-      decode, user's ffmpeg for video), saved as `captureSource = "import"`,
-      `processingMode = "local_byok"`. Covers self-hosted without managed mode.
-- [ ] Decide whether Deepgram diarization for imports becomes a paid-tier perk
+- [ ] **You (decision):** whether Deepgram diarization for imports becomes a paid-tier perk
       (`MANAGED_IMPORT_TRANSCRIPTION_PROVIDER`) once measured cost is known.
-- [ ] Import extras: language hint, notes templates, import from a link.
-- [ ] Add a design-review pass for `/import` and a marketing line (site,
-      `llms.txt`, pricing FAQ) once it is live.
+- [x] Design-review pass for `/import` and marketing lines (site, `llms.txt`, pricing FAQ):
+      done 2026-09-30; see the browser pass under UX overhaul.
 
 ## Notes platform series (2026-09-30)
 
@@ -35,55 +104,39 @@ multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
 - [x] Notes templates: six hosted templates with sections, regenerate (3 per
       meeting), Lecture mode in the extension and helper. Spec:
       [`docs/superpowers/specs/2026-09-30-notes-templates-design.md`](docs/superpowers/specs/2026-09-30-notes-templates-design.md).
-- [ ] Templates follow-ups: sections for local BYOK summaries, a cost ledger
-      for regenerations, user-defined templates, template choice on the live
-      Meet widget's hosted path, and a design-review pass.
 - [x] Rename speakers: per-meeting names, click-to-rename in the transcript,
       rewrites summary text and action-item owners, used in exports, shares,
       Drive export, Ask and regenerated notes. Spec:
       [`docs/superpowers/specs/2026-09-30-speaker-names-design.md`](docs/superpowers/specs/2026-09-30-speaker-names-design.md).
-- [ ] Speaker-name follow-ups: merge two speakers into one, include names in
-      the account data export, and suggest names from the calendar attendees.
 - [x] Library, Drive-style: nested folders, notes as `.md` text, text-only editor
       (body only, transcript read-only, undo), Trash with 30-day restore,
       folder-scoped search and Ask, upload `.md`/`.txt`. Spec:
       [`docs/superpowers/specs/2026-09-30-library-design.md`](docs/superpowers/specs/2026-09-30-library-design.md).
-- [ ] Library follow-ups: per-person private folders and folder permissions,
-      drag-and-drop and multi-select move, autosave and fuller version history,
-      folder-level retention, include folders in the account data export, and a
-      design-review pass. Update the public privacy page wording if its deletion
-      text is kept separate from the FAQ.
 - [x] Export and integrations: signed webhooks (Zapier/Make/n8n), Slack, Notion, with
       encrypted secrets, SSRF-hardened sending and retries. Spec:
       [`docs/superpowers/specs/2026-09-30-integrations-design.md`](docs/superpowers/specs/2026-09-30-integrations-design.md).
-- [ ] Integration follow-ups: Slack/Notion OAuth installs, per-folder routing, a
-      delivery-log page, more event types, and a design-review pass.
 - [x] MCP server over a user's own notes: read-only `notes_read` tokens, a stateless
       Streamable HTTP endpoint at `/api/mcp` (five read tools) and a stdio bridge
       package in `mcp/`. Spec: [`docs/superpowers/specs/2026-09-30-mcp-design.md`](docs/superpowers/specs/2026-09-30-mcp-design.md).
-- [ ] MCP follow-ups: publish `ai-notetaker-mcp` to npm, OAuth sign-in instead of pasted
-      tokens, write tools behind explicit scopes, resources/prompts, and an Ask-your-notes tool.
+- [ ] **You:** publish `ai-notetaker-mcp` (the `mcp/` package) to npm; it needs your npm account.
 - [x] Multilingual: custom vocabulary, spoken-language hint/detection, summary language
       (workspace default and per regenerate). Spec:
       [`docs/superpowers/specs/2026-09-30-multilingual-design.md`](docs/superpowers/specs/2026-09-30-multilingual-design.md).
-- [ ] Multilingual follow-ups: verify the Deepgram/Whisper language and vocabulary parameters
-      against the live providers, keep a second-language copy of a summary, right-to-left review.
+- [ ] **You:** verify the Deepgram/Whisper language and vocabulary parameters against the live providers (needs provider keys and real audio).
 - [x] Audit-log viewer for Team: owner-only page, category/actor filters, keyset paging, CSV
       export. Spec: [`docs/superpowers/specs/2026-09-30-audit-log-design.md`](docs/superpowers/specs/2026-09-30-audit-log-design.md).
-- [ ] Audit follow-ups: date filters and search, sign-in events, "who viewed" for shared
-      notes, SIEM export, and a browser/design-review pass (the page is not yet visually checked).
 
 ## Competitive features, ranked by value over cost (2026-09-30)
 
-- [ ] Notes templates (1:1, sales call, standup, interview, lecture) picked per
+- [x] Notes templates (1:1, sales call, standup, interview, lecture) picked per
       meeting, applied to live and imported audio.
-- [ ] Rename speakers once and apply across transcript and summary.
-- [ ] Export and integrations: Notion, Slack post, and a webhook / Zapier
+- [x] Rename speakers once and apply across transcript and summary.
+- [x] Export and integrations: Notion, Slack post, and a webhook / Zapier
       trigger on "notes ready".
-- [ ] MCP server over a user's own notes (strong open-source differentiator).
-- [ ] Team library: folders, shared search scope, per-workspace retention.
-- [ ] Multilingual: auto-detect, translated summary, custom vocabulary.
-- [ ] Team admin: audit log, then SSO.
+- [x] MCP server over a user's own notes (strong open-source differentiator).
+- [x] Team library: folders, shared search scope, per-workspace retention.
+- [x] Multilingual: auto-detect, translated summary, custom vocabulary.
+- [x] Team admin: audit log.
 
 ## UX overhaul (2026-09-30)
 
@@ -96,11 +149,12 @@ Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowe
       reserved before provider spend and released on failure.
 - [x] Extension popup: live search, paged results, one-click "Browse all meetings".
 - [x] Marketing: Ask-your-notes section, plan bullets, FAQ and llms.txt.
-- [ ] Verify the new layouts in a real browser at 375/768/1280 px and on
-      iOS Safari and Android Chrome; run the design-review pass.
-- [ ] Decide chat pricing from measured per-question cost (no cost ledger for
-      chat yet) and consider pgvector retrieval once usage data exists.
-- [ ] Chat history is intentionally not persisted; revisit with a retention-aware design.
+- [x] Layouts verified in headless Chromium at 375/768/1280 px (no horizontal overflow on 27
+      page/width combinations; fixed a tablet header overflow and a phone audit table) and
+      design-reviewed, 2026-09-30.
+- [ ] **You:** check the layouts on a real iPhone (Safari) and Android (Chrome).
+- [ ] **You (decision):** chat pricing from measured per-question cost (no cost ledger for
+      chat yet).
 
 ## Scale and reliability audit (2026-09-30)
 
@@ -126,15 +180,12 @@ Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowe
 - [x] Document unit economics, workload scenarios and staged acceptance gates
       in [the scale and profitability plan](docs/launch/scale-and-profitability.md)
       with a reproducible `scripts/scale-cost-model.mjs`.
-- [ ] Before broad Hosted AI launch: implement irreversible provider-attempt
-      spend ledger, global/trial budgets, durable scheduled cleanup and measured
-      cohort contribution dashboards as specified in the scale plan.
-- [ ] Decide new-plan pricing/allowances from measured full-use cost; existing
-      commitments remain honored. Evaluate direct private uploads and audio
-      transport compression with quality and tenant-isolation acceptance.
-- [ ] Deploy the new indexes through normal migration/release flow. Large
-      production tables require an online index rollout; no deployment or
-      100M-user load certification is claimed by this local audit.
+- [ ] **You (decision):** new-plan pricing/allowances from measured full-use cost; existing
+      commitments remain honored. Direct private uploads and audio transport compression
+      still need evaluation with quality and tenant-isolation acceptance.
+- [ ] **You:** deploy the new indexes through the normal migration/release flow. Large
+      production tables need an online index rollout; no deployment or 100M-user load
+      certification is claimed by this local audit.
 
 This tracks the current implementation baseline, the approved dual-mode
 product migration, and the remaining production gates. The current target
@@ -157,11 +208,6 @@ ports) lives under "Ideas" at the bottom, not in the roadmap.
       PostgreSQL adapter and patched transitive dependencies.
 - [x] Refresh compatible helper, webapp, and release workflow dependencies;
       retain CPAL 0.15 until the macOS 13 compatibility gate is resolved.
-- [ ] Revisit CPAL 0.17+ after macOS 13 support is preserved; current CoreAudio
-      releases require macOS 14.2 while this app supports macOS 13.
-- [ ] Revisit webapp TypeScript 7 and ESLint 10 after `eslint-config-next`
-      supports them. The current version fails parsing or linting with those
-      majors. Dependabot ignores only the blocked major versions for now.
 
 ## Approved product migration (2026-09-24)
 
@@ -284,10 +330,7 @@ Implementation plan:
 - [x] Explain the one-click Chrome capture gate accurately in onboarding and
       the in-call widget; if Chrome blocks auto-start, one toolbar click hands
       the pending recording directly to capture without a second Start action.
-- [ ] Enable live transcription for Hosted AI only after adding server-owned
-      real-time usage reservation/metering and a verified short-lived Deepgram
-      token flow; other providers continue to create transcripts after stop.
-- [ ] Complete real Chrome/Meet, provider, deployment, storage, and billing
+- [ ] **You:** Complete real Chrome/Meet, provider, deployment, storage, and billing
       acceptance evidence before advertising hosted mode.
 
 ## Pre-launch decisions (product audit, 2026-09-24)
@@ -296,12 +339,9 @@ Open product and release decisions found by the documentation and product
 coherence audit. Each needs an owner decision before public launch; none is
 decided yet.
 
-- [ ] (a) Make **Hosted** the primary onboarding call to action, with a
-      baked-in service URL (no URL to type) and a free trial, and move the
-      bring-your-own-keys path under a secondary **Use my own keys** option.
-      Today onboarding treats both modes as equals and Hosted needs a
-      user-entered service URL. Requires the trial/quota policy from the design
-      spec (section 6) to be affordable first.
+- [ ] **You (decision):** (a) make **Hosted** the primary onboarding call to action (baked-in
+      service URL, free trial) with bring-your-own-keys as the secondary option. Needs the
+      trial/quota policy from the design spec (section 6) to be affordable first.
 - [x] Implement a project-owned **server** Google OAuth client for sign-in and
       Drive export: per-user encrypted-at-rest connections, CSRF state + PKCE
       callback, authenticated extension endpoints, and account
@@ -317,7 +357,7 @@ decided yet.
       optional permissions requested when the feature is first used, so the
       install prompt for a Meet-only user is minimal. Denials have recovery
       guidance; calendar reminder retries fall back to an in-session timer.
-- [ ] (d) Replace the committed development extension ID in the Native
+- [ ] **You:** (d) Replace the committed development extension ID in the Native
       Messaging `allowed_origins` with the real Chrome Web Store extension ID
       once the listing exists, and verify the committed manifest `key`
       derives the published ID (or add both origins deliberately).
@@ -325,10 +365,10 @@ decided yet.
       GitHub-release check and explicit opt-in to the release page. The helper
       never downloads or installs updates; a tray action also supports manual
       checks.
-- [ ] (f) Capture real store screenshots on each OS (macOS, Windows, Linux) for
+- [ ] **You:** (f) Capture real store screenshots on each OS (macOS, Windows, Linux) for
       the Chrome Web Store listing, the install page, and the README; current
       screenshots are rendered extension UI only.
-- [ ] (g) Decide the helper's launch-at-login default (currently off) and have
+- [ ] **You:** (g) Decide the helper's launch-at-login default (currently off) and have
       the installer or first launch register the Native Messaging manifests
       automatically, including the macOS DMG post-copy step that today is
       manual.
@@ -349,7 +389,7 @@ reintroducing its old assumptions.
 - [x] Stable local action-item IDs, completion/due-date tracking, and a
       cross-meeting action inbox in both the extension and optional webapp;
       webapp updates remain authenticated and self-hosted.
-- [ ] Validate the audio probe and complete meeting workflow on real macOS,
+- [ ] **You:** Validate the audio probe and complete meeting workflow on real macOS,
       Windows, and Linux devices with each supported meeting app; local tests
       cannot prove OS routing or provider behavior. On 2026-09-24, the current
       Linux host passed a real helper/Native Messaging protocol-v3 check and a
@@ -394,7 +434,7 @@ reintroducing its old assumptions.
       pre-start audio callbacks.
 - [x] Add open-source project operations: MIT license, security policy,
       CODEOWNERS, Dependabot configuration, and `docs/testing.md`.
-- [ ] Run real browser/Chrome Native Messaging flows and provider/audio tests
+- [ ] **You:** Run real browser/Chrome Native Messaging flows and provider/audio tests
       on supported OSes; source/tests/builds cannot prove a live helper pairing,
       virtual-device routing, or a real provider response. Linux Native
       Messaging and native-loopback audio are now verified on the current host;
@@ -428,9 +468,9 @@ remains native; Docker is for the optional history webapp only.
 - [x] Add a daily stable-release check to the desktop helper. It asks before
       opening the official GitHub release page and never downloads or installs
       an update; users can also check from the tray menu.
-- [ ] Publish a tagged release and confirm the real Apple-silicon, Windows,
+- [ ] **You:** Publish a tagged release and confirm the real Apple-silicon, Windows,
       and Linux artifacts install/register Native Messaging on their target OS.
-- [ ] Publish the Chrome Web Store listing and capture real customer stories
+- [ ] **You:** Publish the Chrome Web Store listing and capture real customer stories
       with written permission before presenting testimonials as social proof.
 
 ## Live release gates (audit, 2026-09-27; rechecked 2026-09-29)
@@ -455,16 +495,16 @@ remains native; Docker is for the optional history webapp only.
       `delivered@resend.dev` was accepted. Production has no silent email
       fallback, so these are required for managed signup and password reset.
       Real inbox delivery (spam placement) is still unverified.
-- [ ] Complete an upload end to end and confirm staged audio deletion on
+- [ ] **You:** Complete an upload end to end and confirm staged audio deletion on
       success and expiry.
-- [ ] Run cross-platform helper CI on the exact release candidate. The latest
+- [ ] **You:** Run cross-platform helper CI on the exact release candidate. The latest
       recorded GitHub helper matrix passed for Linux, macOS, and Windows; repeat
       it against the tagged candidate before publishing native artifacts.
-- [ ] Complete production acceptance with live Chrome/Meet, Google OAuth and
+- [ ] **You:** Complete production acceptance with live Chrome/Meet, Google OAuth and
       Drive, providers, managed upload/worker/storage, Stripe billing, and
       health checks after configuration; local tests/builds do not prove those
       account- and deployment-backed flows.
-- [ ] Publish the first unsigned native release and Chrome Web Store listing,
+- [ ] **You:** Publish the first unsigned native release and Chrome Web Store listing,
       replace the development extension ID in Native Messaging origins, and
       capture real store screenshots. Rechecked: GitHub has no published
       release and `release/manifest.json` remains unpublished with no artifacts
@@ -478,7 +518,7 @@ remains native; Docker is for the optional history webapp only.
 - [x] Add helper/extension protocol compatibility and a user-facing install
       health state for helper missing, incompatible, driver missing, routing
       incomplete, and ready.
-- [ ] Complete acceptance testing for native installers, GitHub Release
+- [ ] **You:** Complete acceptance testing for native installers, GitHub Release
       download/update flows, and Chrome Web Store/manual extension paths.
 - [x] Docker webapp acceptance smoke test passes: image build, migrations,
       health endpoint, unauthenticated rejection, and authenticated API access;
@@ -772,7 +812,7 @@ accessibility failures):*
 - [x] Meeting list + search UI
 - [x] Meeting detail view (transcript, summary, action items) + delete
       with a confirmation dialog
-- [ ] "Deploy on Railway" one-click template — `webapp/railway.json` exists
+- [ ] **You:** "Deploy on Railway" one-click template — `webapp/railway.json` exists
       and its `startCommand` (`npm run db:migrate && npm run start`) checked
       against `webapp/package.json`'s real `db:migrate`/`start` scripts, so
       the config is internally consistent; **not verified**: an actual
@@ -787,7 +827,7 @@ accessibility failures):*
 
 ### Cross-cutting for sub-project 1
 
-- [ ] End-to-end manual test: real meeting on each of Zoom, Google Meet,
+- [ ] **You:** End-to-end manual test: real meeting on each of Zoom, Google Meet,
       Microsoft Teams, Slack Huddles, on macOS and Windows at minimum —
       **not done**, needs a live meeting with real participants and real
       OS installs, outside what's possible in this sandbox
@@ -811,7 +851,7 @@ accessibility failures):*
 - [x] Onboarding, popup, Settings, meeting detail, data-handling, protocol,
       and getting-started documentation explain the two capture paths and the
       two-key provider model.
-- [ ] Live Google Meet permission/audio proof and real Google OAuth/Drive
+- [ ] **You:** Live Google Meet permission/audio proof and real Google OAuth/Drive
       export remain release-owner validation; mocked REST and local protocol
       tests are green.
 
@@ -836,9 +876,9 @@ Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
       meet.google.com): capture refusal without invocation, real `Alt+Shift+R`
       start, separate mic/speaker files, bookmark, stop, second start without a
       new invocation, strict CSP + Trusted Types, alarm + notification.
-- [ ] Live proof on a real Google Meet call with real participants: widget
+- [ ] **You:** Live proof on a real Google Meet call with real participants: widget
       placement against Meet's layout and real audio end to end.
-- [ ] Click-through of a real desktop notification (needs a person).
+- [ ] **You:** Click-through of a real desktop notification (needs a person).
 - [x] Calendar reminder (opt-out setting) and calendar-named call in the widget.
 - [x] Flagged moments passed to the summarizer (`stop_recording.flaggedMoments`,
       backward compatible) and stored with the meeting.
@@ -853,21 +893,19 @@ Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
       triggers a fresh Native Messaging pairing; a stale non-empty token is
       cleared by the extension before retrying. A real reinstall remains an
       OS/package acceptance gate.
-- [ ] Sub-project 2 (smarter notes: structured summaries, chat with a meeting)
-      and sub-project 3 (Slack webhook, Notion, email recap).
 
 ---
 
 ## Sub-project 2: Cross-platform helper packaging polish
 
-- [ ] macOS: Apple Developer ID signing + notarization (no "unidentified
+- [ ] **You:** macOS: Apple Developer ID signing + notarization (no "unidentified
       developer" wall on first launch) — `release-build.yml` now signs and
       notarizes automatically once the release owner adds
       `APPLE_CERTIFICATE`/`APPLE_CERTIFICATE_PASSWORD`/`APPLE_SIGNING_IDENTITY`/
       `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID` repo secrets; see
       `docs/helper-packaging.md`. Still blocked on the release owner actually
       holding an Apple Developer Program membership.
-- [ ] Windows: Authenticode code signing (no SmartScreen warning wall) —
+- [ ] **You:** Windows: Authenticode code signing (no SmartScreen warning wall) —
       `release-build.yml` now signtool-signs every `.msi`/`.exe` once the
       release owner adds `WINDOWS_CERTIFICATE`/`WINDOWS_CERTIFICATE_PASSWORD`
       repo secrets; see `docs/helper-packaging.md`. Still blocked on the
@@ -1055,8 +1093,7 @@ Spec: `docs/superpowers/specs/2026-09-24-meet-widget-design.md`.
 - [x] CI: build + test matrix for helper (macOS/Windows/Linux), extension,
       and webapp — `.github/workflows/helper.yml`, `extension.yml`, and
       `webapp.yml`; release bundles are built by `release-build.yml`.
-- [ ] `notetaker-release` skill used for every version bump — helper and
-      extension versions never drift apart
+- [x] Use the `notetaker-release` skill for every version bump (standing rule, not a task).
 - [x] Chrome Web Store listing draft prepared (description, permission
       justification, privacy boundaries, and submission checklist) —
       `docs/chrome-web-store-listing.md`; store submission remains external.
@@ -1136,10 +1173,6 @@ open-notes is on:
 - [x] Open notes when ready (`openNotesWhenReady`, ON): the notes tab opens
       automatically when notes complete (Meet and desktop paths); the
       notification is skipped in that mode and remains the off-mode fallback.
-- [ ] Live browser-side transcription during Meet calls: the widget already
-      shows the live transcript when the desktop helper streams it, but
-      extension-owned Meet capture still transcribes only after stop. In-call
-      streaming Deepgram for the browser path remains open work.
 
 Fixed in this pass (see commits ca6aea1 helper, 1e9a3fa extension, 9abc589
 webapp): pairing hardening + tray re-pair flow, IPC subscriber-leak pruning,
@@ -1151,21 +1184,6 @@ query-param key leak, recover even-byte clamp, empty-summary retry.
 
 Consciously deferred (why):
 
-- [ ] Extension `listMeetings` search loads full meeting records (summaries
-      included) to match a query, while popup/history only needs the list
-      view. Fixing this means splitting transcripts/summaries into separate
-      storage keys or adding a lightweight index — a storage schema
-      migration with a data-move path, too risky to land pre-launch.
-      Revisit with the planned history indexing work.
-- [ ] Webapp Dockerfile keeps `prisma` CLI in production dependencies:
-      `scripts/docker-entrypoint.mjs` runs `npx prisma migrate deploy` at
-      container start, so the CLI must ship. Revisit only if entrypoint
-      switches to a build-time migration step or a standalone engine.
-- [ ] Helper `stop_capture_only` (pipeline.rs) drops mic/speaker streaming
-      sessions without `close()` — audit lead from the delegation sweep,
-      not re-verified against the current code after the pipeline rework;
-      sessions drop when the process exits, but an explicit close would
-      flush provider buffers cleanly. Verify on the next pipeline pass.
 
 ---
 
@@ -1178,7 +1196,7 @@ Consciously deferred (why):
       motion behavior across the extension, history app, and marketing site.
 - [x] Record design tokens, accessible interaction rules, and the licensed
       local icon approach in `docs/design-system.md`.
-- [ ] Capture and review real browser and native OS screenshots for the
+- [ ] **You:** Capture and review real browser and native OS screenshots for the
       extension, helper, and history app before store/release publication.
 
 ## Final production-readiness audit (2026-09-29)
@@ -1196,11 +1214,7 @@ Consciously deferred (why):
       the GitHub release publishing job; build checkouts do not persist tokens.
 - [x] Keep the Meet widget's keyboard toggle action clear to screen readers and
       retain section links in the mobile site navigation.
-- [ ] Track six RustSec unmaintained-dependency warnings in the transitive
-      Tauri/GTK dependency graph (`proc-macro-error` and the `unic-*` crates).
-      The 2026-09-29 `cargo audit` run found zero vulnerable or yanked crates;
-      revisit when upstream Tauri dependencies offer supported replacements.
-- [ ] Run the full cross-platform, live-provider, signed-in managed service,
+- [ ] **You:** Run the full cross-platform, live-provider, signed-in managed service,
       browser install, and native audio acceptance checks; these need real
       accounts/devices and a published release.
 - [x] Fix Hosted AI account creation links to select the signup tab and keep
