@@ -545,6 +545,20 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
         return;
       }
     }
+    // Stripe timestamps have one-second resolution, so a late "updated" can carry the same second as the
+    // "deleted" that actually came after it. An event that does not strictly postdate a cancellation must not
+    // bring the same subscription back to life.
+    if (
+      live &&
+      eventCreatedAt !== undefined &&
+      current?.lastBillingEventCreatedAt != null &&
+      eventCreatedAt === current.lastBillingEventCreatedAt &&
+      TERMINAL_SUBSCRIPTION_STATUSES.has(current.status) &&
+      subscriptionId !== undefined &&
+      subscriptionId === current.stripeSubscriptionId
+    ) {
+      return;
+    }
     const { start, end } = periodOf(object);
     const graceEndsAt = reportedStatus === "past_due"
       ? (current?.status === "past_due" && current.graceEndsAt ? current.graceEndsAt : new Date(Date.now() + PAYMENT_GRACE_MS))

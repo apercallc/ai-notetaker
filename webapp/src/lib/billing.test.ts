@@ -134,6 +134,35 @@ describe("Stripe checkout retry", () => {
   });
 });
 
+describe("same-second subscription events", () => {
+  it("does not let an update from the same second revive a subscription that was just canceled", async () => {
+    const workspaceId = randomUUID();
+    const originalPrice = process.env.STRIPE_PRICE_HOSTED_PRO;
+    process.env.STRIPE_PRICE_HOSTED_PRO = "price_pro_tie";
+    const subscription = (status: string) => ({
+      id: "sub_tie",
+      customer: "cus_tie",
+      status,
+      current_period_end: Math.floor(Date.now() / 1_000) + 86_400 * 20,
+      metadata: { workspaceId },
+      items: { data: [{ price: { id: "price_pro_tie" } }] },
+    });
+    try {
+      await prisma.workspace.create({ data: { id: workspaceId, name: "Tie workspace" } });
+      await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_trial", status: "trialing" } });
+
+      await applyStripeEvent({ id: `evt-tie-deleted-${workspaceId}`, type: "customer.subscription.deleted", created: 500, data: { object: subscription("canceled") } });
+      await applyStripeEvent({ id: `evt-tie-updated-${workspaceId}`, type: "customer.subscription.updated", created: 500, data: { object: subscription("active") } });
+
+      expect((await prisma.workspaceSubscription.findUnique({ where: { workspaceId } }))?.status).toBe("canceled");
+    } finally {
+      await prisma.workspace.delete({ where: { id: workspaceId } });
+      if (originalPrice === undefined) delete process.env.STRIPE_PRICE_HOSTED_PRO;
+      else process.env.STRIPE_PRICE_HOSTED_PRO = originalPrice;
+    }
+  });
+});
+
 describe("pending cancellation", () => {
   it("records cancel_at (new API) and cancel_at_period_end (old API), and clears it on resume", async () => {
     const workspaceId = randomUUID();
