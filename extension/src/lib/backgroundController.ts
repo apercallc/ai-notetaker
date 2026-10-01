@@ -123,6 +123,8 @@ export class BackgroundController {
    * interrupted processing records and recoverable managed errors after the
    * worker restores a signed-in mode. Local-BYOK records are never included.
    */
+  private readonly meetFinishRuns = new Map<string, Promise<void>>();
+
   private async drainManagedMeetOutbox(): Promise<void> {
     if (this.managedMeetDrain) return this.managedMeetDrain;
     const settings = this.settings;
@@ -455,7 +457,22 @@ export class BackgroundController {
     await this.finishBrowserMeetRecording(meetingId, processing);
   }
 
-  private async finishBrowserMeetRecording(meetingId: string, meeting: MeetingRecord): Promise<void> {
+  /**
+   * One processing run per meeting at a time. Stop, retry, and the managed
+   * outbox drain can all arrive together (a settings save mid-processing
+   * re-runs the drain); a second concurrent run would upload and bill twice.
+   */
+  private finishBrowserMeetRecording(meetingId: string, meeting: MeetingRecord): Promise<void> {
+    const running = this.meetFinishRuns.get(meetingId);
+    if (running) return running;
+    const run = this.runBrowserMeetFinish(meetingId, meeting).finally(() => {
+      if (this.meetFinishRuns.get(meetingId) === run) this.meetFinishRuns.delete(meetingId);
+    });
+    this.meetFinishRuns.set(meetingId, run);
+    return run;
+  }
+
+  private async runBrowserMeetFinish(meetingId: string, meeting: MeetingRecord): Promise<void> {
     const pending = this.meetChunkWrites.get(meetingId);
     if (pending) await pending.catch(() => undefined);
     try {
@@ -505,6 +522,7 @@ export class BackgroundController {
             if (completed) {
               this.broadcast({ type: "SUMMARY_READY", meetingId, summary: completed.summary ?? "", actionItems: completed.actionItems });
               await this.syncToWebapp(completed);
+              void this.exportToDrive(completed);
               await this.onNotesComplete(meetingId, completed);
             }
             await this.clearCompletedMeetChunks(meetingId);
@@ -533,6 +551,7 @@ export class BackgroundController {
       if (completed) {
         this.broadcast({ type: "SUMMARY_READY", meetingId, summary: result.summary, actionItems: result.actionItems });
         await this.syncToWebapp(completed);
+        void this.exportToDrive(completed);
         await this.onNotesComplete(meetingId, completed);
       }
       await this.clearCompletedMeetChunks(meetingId);

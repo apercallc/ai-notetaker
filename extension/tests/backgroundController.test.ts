@@ -659,6 +659,22 @@ describe("BackgroundController", () => {
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "DRIVE_EXPORT", status: "error", meetingId }));
   });
 
+  it("exports a finished Google Meet note to Drive when Drive is connected", async () => {
+    vi.mocked(exportMeetingToDrive).mockResolvedValue({ fileId: "doc-2" });
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockReturnValue((async function* () { yield { channel: "mic" as const, sequence: 0, bytes: new Uint8Array([1]) }; })());
+    vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockResolvedValue({ transcript: [], summary: "Meet notes", actionItems: [] });
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    const drive = { clientId: "client", accessToken: "token", expiresAt: Date.now() + 60_000 };
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" }, drive });
+    const id = await controller.startRecording("general", "meet");
+    await controller.stopRecording(id);
+
+    await vi.waitFor(async () => expect((await getMeeting(id))?.driveExport?.status).toBe("exported"));
+    expect(exportMeetingToDrive).toHaveBeenCalledWith(expect.objectContaining({ id }), drive, expect.any(Function));
+  });
+
   it("exports a completed meeting asynchronously when Drive is connected", async () => {
     vi.mocked(exportMeetingToDrive).mockResolvedValue({ fileId: "doc-1", webViewLink: "https://docs.google.com/document/d/doc-1/edit" });
     const client = createFakeClient();
