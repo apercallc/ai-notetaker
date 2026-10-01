@@ -115,11 +115,13 @@ New environment variables:
 - `MANAGED_IMPORT_TRANSCRIPTION_PROVIDER` is optional (see above).
 
 `ffmpeg` and `ffprobe` must exist on the **web** service (import decodes inside the
-web process). The Dockerfile installs them. `webapp/railway.json` and
-`webapp/railway-worker.json` still select the Nixpacks builder, which does not
-provide them: either switch the web service to the Dockerfile builder, or add
-`ffmpeg` to the Nixpacks build. Check `/import` after the deploy; it says import is
-unavailable when the binaries are missing. Neither option was run on Railway here.
+web process). The Dockerfile installs them. The production `web` service builds
+with the Dockerfile builder (a service-level setting that overrides the
+`builder: NIXPACKS` in `webapp/railway.json`); `ffmpeg`/`ffprobe` 5.1.9 were confirmed
+inside the running production container on 2026-09-30. The `managed-worker` service
+uses Nixpacks, which is fine because it only polls `web` for jobs. Any new service
+that runs jobs itself must use the Dockerfile builder or add `ffmpeg`. `/import`
+says import is unavailable when the binaries are missing.
 
 What was checked locally on 2026-09-30 for the Docker image (`docker build` in
 `webapp/`): it builds; ffmpeg/ffprobe 5.1.9 run as the non-root `node` user; the

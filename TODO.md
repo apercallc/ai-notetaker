@@ -6,8 +6,6 @@ Everything below needs your accounts, devices, money or a decision. Each item is
 marked **You** where it sits in this file. Engineering follow-ups that need nothing from
 you are listed under "Engineering backlog" and are not started.
 
-- Deploy (Railway): apply migrations, set `INTEGRATIONS_ENCRYPTION_KEY`, and give the web
-  service `ffmpeg`/`ffprobe` (switch to the Dockerfile builder or add ffmpeg to Nixpacks).
 - Live acceptance on production: a long real import; an upload end to end with staged-audio
   deletion; Google Meet, Google OAuth/Drive, Stripe, managed worker and storage health.
 - Live provider checks: Deepgram/Whisper language and vocabulary parameters; measured cost
@@ -82,11 +80,9 @@ Spec: [`docs/superpowers/specs/2026-09-30-file-import-design.md`](docs/superpowe
       refund on failure), `Speaker N` labels, stage progress on the meeting.
       Verified: 533 webapp tests, build, and a real-browser upload (201/201/202,
       1 unit + 75 s reserved, 375 px layout).
-- [ ] **You:** deploy the notes-platform migrations (all additive; list in
-      `docs/hosted-deployment.md`). Make the web service provide `ffmpeg`/`ffprobe`:
-      the Dockerfile does (verified locally), but `railway.json` still uses Nixpacks,
-      which does not. Until then `/import` says import is unavailable. Set
-      `INTEGRATIONS_ENCRYPTION_KEY` (required on managed hosting).
+- [x] Deploy: migrations applied (26 of 26), `INTEGRATIONS_ENCRYPTION_KEY` set on the
+      production `web` service, and `ffmpeg`/`ffprobe` confirmed in the running container
+      (the service uses the Dockerfile builder). Done 2026-09-30.
 - [ ] **You:** live acceptance: import a long real recording (an hour of mp3 and an
       mp4) on production and check the true-up, provider cost
       (`ProcessingJob.providerCostMicros`) and scratch-disk use.
