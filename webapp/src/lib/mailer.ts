@@ -196,7 +196,14 @@ function smtpSender(smtpUrl: string, from: string): EmailSender {
           ? tls.connect({ host: config.host, port: config.port, servername: config.host }, () => resolve(socket))
           : net.connect({ host: config.host, port: config.port }, () => resolve(socket));
         socket.once("error", reject);
+        // The idle timeout only starts after connect; a blackholed host would otherwise block the
+        // invite or reset request until the OS gives up (about two minutes).
+        socket.setTimeout(10_000, () => {
+          socket.destroy();
+          reject(new Error("SMTP connection timed out"));
+        });
       });
+      raw.setTimeout(0);
       const connection = new SmtpConnection(raw);
       try {
         await connection.reply("220");
