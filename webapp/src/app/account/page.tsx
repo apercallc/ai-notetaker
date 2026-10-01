@@ -8,6 +8,8 @@ import { ApiTokenPanel, ChangePasswordForm, DeleteAccountForm, DeleteWorkspaceFo
 import { googleConnectionStatus } from "@/lib/googleIntegration";
 import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
 import { ACCOUNT_TABS, resolveAccountTab } from "./tabs";
+import { listIntegrations, listRecentDeliveries } from "@/lib/integrations";
+import { NotesDeliveryPanel } from "./NotesDeliveryPanel";
 
 export const metadata = { title: "Settings", referrer: "no-referrer", robots: { index: false, follow: false } };
 
@@ -37,6 +39,9 @@ export default async function AccountPage({
     }),
     googleConnectionStatus(session.userId),
   ]);
+  const [integrations, deliveries] = session.role === "owner"
+    ? await Promise.all([listIntegrations(session.workspaceId), listRecentDeliveries(session.workspaceId)])
+    : [[], []];
   const params = await searchParams;
   const { required, google: googleNotice, googleError } = params;
   const tab = resolveAccountTab(params);
@@ -110,6 +115,24 @@ export default async function AccountPage({
                     lastUsedAt: token.lastUsedAt ? formatDateTime(token.lastUsedAt) : null,
                     expiresAt: formatDate(token.expiresAt),
                   }))}
+                />
+              </section>
+
+              <section id="notes-delivery" className="settings-card">
+                <h2>Send notes elsewhere</h2>
+                <NotesDeliveryPanel
+                  canManage={session.role === "owner"}
+                  rows={integrations.map((integration) => ({
+                    id: integration.id,
+                    kind: integration.kind,
+                    name: integration.name,
+                    enabled: integration.enabled,
+                    hint: integration.hint,
+                    status: integration.lastStatus,
+                    error: integration.lastError,
+                    lastDelivered: integration.lastDeliveredAt ? formatDateTime(integration.lastDeliveredAt) : null,
+                  }))}
+                  deliveries={deliveries.map((delivery) => ({ id: delivery.id, name: delivery.integration.name, event: delivery.event, status: delivery.status, attempts: delivery.attempts, error: delivery.lastError, when: formatDateTime(delivery.createdAt) }))}
                 />
               </section>
 

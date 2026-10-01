@@ -8,6 +8,7 @@ import { getEntitlements } from "@/lib/usageLedger";
 import { getRequestContext } from "@/lib/requestContext";
 import { prisma } from "@/lib/db";
 import { listFolders, purgeExpiredTrash } from "@/lib/library";
+import { runIntegrationMaintenance } from "@/lib/integrations";
 import { flattenFolders, folderPath, folderPathLabel, subtreeIds } from "@/lib/libraryTree";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { Highlight } from "@/components/Highlight";
@@ -63,6 +64,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
 
   // Self-hosted instances never run the worker that clears expired trash, so page loads do it (at most hourly).
   await purgeExpiredTrash().catch(() => undefined);
+  // Same reason: retry any due "note ready" deliveries when there is no worker.
+  void runIntegrationMaintenance().catch(() => undefined);
   const folders = await listFolders(workspaceId);
   const requestedFolder = rawFolder?.slice(0, 128);
   const currentFolder = requestedFolder ? folders.find((folder) => folder.id === requestedFolder) ?? null : null;

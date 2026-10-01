@@ -38,6 +38,9 @@ model Meeting {
   // once in previousSummary so an edit or a regeneration can be undone.
   summaryEditedAt DateTime?
   previousSummary String? @db.Text
+  // Set once when "note ready" was announced to the workspace's integrations,
+  // so a note triggers its deliveries a single time.
+  readyNotifiedAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -148,6 +151,7 @@ model Workspace {
   shareTokens MeetingShareToken[]
   auditEvents AuditEvent[]
   folders     Folder[]
+  integrations Integration[]
 
   // Exactly one workspace has isDefault = true — the ingestion target for
   // every meeting synced via the AUTH_TOKEN Bearer contract, and the
@@ -446,4 +450,52 @@ model Folder {
 
   @@index([workspaceId, parentId])
   @@index([workspaceId, deletedAt])
+}
+
+// An outbound destination for "note ready" events: a signed webhook (which is
+// also how Zapier and n8n connect), a Slack incoming webhook, or a Notion page.
+// `configCipher` is the destination's secret config encrypted at rest
+// (lib/secretBox.ts); it never leaves the server after it is saved.
+model Integration {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  kind            String
+  name            String
+  enabled         Boolean   @default(true)
+  configCipher    String    @db.Text
+  createdByUserId String?
+  lastStatus      String?
+  lastError       String?
+  lastDeliveredAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries IntegrationDelivery[]
+
+  @@index([workspaceId])
+}
+
+// One attempt series to one integration for one event. Holds ids and status
+// only; the payload is rebuilt from the note when sent, so note text is never
+// duplicated here. Old rows are purged after 14 days.
+model IntegrationDelivery {
+  id            String    @id @default(uuid())
+  integrationId String
+  workspaceId   String
+  event         String
+  meetingId     String?
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  responseStatus Int?
+  createdAt     DateTime  @default(now())
+  deliveredAt   DateTime?
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([integrationId, createdAt])
+  @@index([createdAt])
 }

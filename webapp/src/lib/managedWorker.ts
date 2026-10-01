@@ -12,6 +12,7 @@ import { decodeToPcm, mediaToolsAvailable, MediaDecodeError, type DecodedAudio }
 import { getObject } from "./objectStorage";
 import { purgeExpiredAuditEvents } from "./audit";
 import { purgeExpiredTrash } from "./library";
+import { notifyNoteReady, runIntegrationMaintenance } from "./integrations";
 import { noteTemplateFor, type NoteTemplate } from "./noteTemplates";
 import { sweepStaleStagedObjects } from "./objectStorage";
 import { chunksToReadableStream, deleteManagedUploadAudio, expireManagedMeetings, expireManagedUploads, readChunksSequentially } from "./managedJobs";
@@ -769,6 +770,9 @@ export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
   await purgeExpiredTrash().catch((error: unknown) => {
     console.error("trash purge failed", { error: error instanceof Error ? error.message : String(error) });
   });
+  await runIntegrationMaintenance().catch((error: unknown) => {
+    console.error("integration retries failed", { error: error instanceof Error ? error.message : String(error) });
+  });
   await sweepOrphanedAudio();
   const staleBefore = new Date(Date.now() - MANAGED_JOB_LEASE_MS);
   await failExhaustedJobs(staleBefore);
@@ -952,6 +956,11 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
         error: error instanceof Error ? error.message : String(error),
       });
     });
+    if (hasSpeech) {
+      await notifyNoteReady(workspaceId, job.meetingId).catch((error: unknown) => {
+        console.error("note-ready notification failed", { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
+      });
+    }
     if (!hasSpeech) {
       // A recording with no speech produced nothing of value, so it does not
       // consume the plan's meeting allowance.

@@ -2343,3 +2343,69 @@ a.meeting-card:hover,
   min-width: 180px;
   max-width: 100%;
 }
+
+/* Notes delivery (integrations) */
+.notes-delivery {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.integration-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.integration-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.integration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.integration-form {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 520px;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secret-value {
+  display: block;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.delivery-log ul {
+  display: grid;
+  gap: 4px;
+  margin: var(--space-2) 0 0;
+  padding-left: 18px;
+}
+
+.notes-delivery .button,
+.integration-actions .button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 14px;
+}

@@ -6,6 +6,7 @@ import type { CaptureSource, CreateMeetingRequest, MeetingDetailResponse, Meetin
 import { MAX_SEARCH_LENGTH } from "./meetingConstants";
 import { makeSnippet, type HighlightPart } from "./snippet";
 import { utcDateString } from "./actionItems";
+import { notifyNoteReady } from "./integrations";
 
 export class ValidationError extends Error {}
 
@@ -227,6 +228,12 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
     }
   });
 
+  // A synced note that already has its summary is a finished note; announce it once.
+  if (input.summary.trim() && !isManagedRegistration) {
+    void notifyNoteReady(workspaceId, input.id).catch((error: unknown) => {
+      console.error("note-ready notification failed", { meetingId: input.id, error: error instanceof Error ? error.message : String(error) });
+    });
+  }
   return { id: input.id, title };
 }
 
