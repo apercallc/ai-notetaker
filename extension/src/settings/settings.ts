@@ -77,6 +77,28 @@ function captureDrafts(): void {
 }
 
 /**
+ * This page loaded its copy of the settings when it opened. Another page (onboarding, an account
+ * connection) may have changed fields this page does not edit since then; saving the stale copy
+ * would silently undo them. Take the current stored value for those fields right before saving.
+ */
+async function saveToBackground(): Promise<void> {
+  try {
+    const latest = await getSettings();
+    settings = {
+      ...settings,
+      calendar: latest.calendar,
+      drive: latest.drive,
+      // These only ever turn on; never let a stale copy turn them back off.
+      consentDisclosureAcknowledged: settings.consentDisclosureAcknowledged || latest.consentDisclosureAcknowledged,
+      onboardingComplete: settings.onboardingComplete || latest.onboardingComplete,
+    };
+  } catch {
+    // Storage unreadable: the save below reports the real problem.
+  }
+  await sendToBackground({ type: "SAVE_SETTINGS", settings });
+}
+
+/**
  * Reads whatever the current markup holds into `settings`/`drafts`. Driven by
  * which elements exist, not by which tier is selected, so it is safe to call
  * before AND after a state change without wiping a value whose input is gone.
@@ -465,7 +487,7 @@ function wireEvents(): void {
     settings = signOutOfHosted(settings);
     signedOutNotice = "Signed out. Your own API keys are used until you sign in again.";
     try {
-      await sendToBackground({ type: "SAVE_SETTINGS", settings });
+      await saveToBackground();
     } catch {
       setResult(resultEl, "Signed out here, but the change could not be saved. Press Save settings to finish.", "invalid");
       return;
@@ -486,7 +508,7 @@ function wireEvents(): void {
       settings = applyModeChoice(settings, true);
       managedSetupVisible = true;
       signedOutNotice = "";
-      await sendToBackground({ type: "SAVE_SETTINGS", settings });
+      await saveToBackground();
       render({ focus: "managed-sign-out" });
     } catch (error) {
       setResult(resultEl, error instanceof Error ? error.message : "Sign-in failed.", "invalid");
@@ -632,7 +654,7 @@ function wireEvents(): void {
       } catch {
         permissionApiFailed = true;
       }
-      await sendToBackground({ type: "SAVE_SETTINGS", settings });
+      await saveToBackground();
       if (permissionApiFailed) {
         setResult(statusEl, "Settings were saved, but Chrome permission access could not be checked. Test your provider key and save again before recording.", "invalid");
       } else {

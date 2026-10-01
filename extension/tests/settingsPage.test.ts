@@ -151,6 +151,19 @@ describe("settings page: unsaved input", () => {
     await vi.waitFor(() => expect(savedSettings()?.webapp).toBeNull());
   });
 
+  it("does not undo a Drive connection or consent made elsewhere while this page was open", async () => {
+    await openSettings(DEFAULT_SETTINGS);
+    // Another page connected Drive and the user acknowledged consent after this page loaded.
+    await saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, onboardingComplete: true, drive: { clientId: "c", accessToken: "t", expiresAt: 1 } });
+
+    $("save-settings").click();
+
+    await vi.waitFor(() => expect(savedSettings()).toBeDefined());
+    expect(savedSettings()?.drive).toEqual({ clientId: "c", accessToken: "t", expiresAt: 1 });
+    expect(savedSettings()?.consentDisclosureAcknowledged).toBe(true);
+    expect(savedSettings()?.onboardingComplete).toBe(true);
+  });
+
   it("leaves a saved webapp connection untouched when saving in Hosted mode", async () => {
     await openSettings({ ...hosted, webapp: { url: "https://app.example.com", token: "keep" } });
     $("save-settings").click();
