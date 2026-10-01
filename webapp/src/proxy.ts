@@ -185,8 +185,9 @@ export const config = {
   // Everything except Next's own internals and static assets — those don't
   // need to pass through the auth check. In particular, excluding SVG and
   // font files keeps the login page's own assets usable before a session
-  // exists.
+  // exists. API paths are never exempt: a client-chosen id such as
+  // `/api/meetings/x.png` must still hit the auth check.
   matcher: [
-    "/((?!_next/static|_next/image|_next/font|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml|webmanifest)$).*)",
+    "/((?!_next/static|_next/image|_next/font|favicon.ico|(?!api/).*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml|webmanifest)$).*)",
   ],
 };

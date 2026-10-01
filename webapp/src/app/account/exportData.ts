@@ -129,6 +129,8 @@ export async function* streamWorkspaceMeetings(
     const rows: Array<Parameters<typeof toExportedMeeting>[0]> = await prisma.meeting.findMany({
       where: {
         workspaceId,
+        // Trashed notes are "deleted" from the user's point of view; they must not reappear in an export.
+        deletedAt: null,
         ...(cursor
           ? { OR: [{ startedAt: { lt: cursor.startedAt } }, { startedAt: cursor.startedAt, id: { lt: cursor.id } }] }
           : {}),

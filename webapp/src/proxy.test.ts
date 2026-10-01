@@ -6,7 +6,7 @@ const getSessionUser = vi.fn();
 vi.mock("./lib/sessions", () => ({ getSessionUser }));
 vi.mock("./lib/auth", () => ({ isAuthorizedBearer: vi.fn(() => false) }));
 
-const { contentSecurityPolicy, proxy } = await import("./proxy");
+const { config, contentSecurityPolicy, proxy } = await import("./proxy");
 
 function request(path: string, init: { method?: string; headers?: HeadersInit; body?: BodyInit | null } = {}): NextRequest {
   return new NextRequest(`https://notes.example.test${path}`, init);
@@ -166,5 +166,16 @@ describe("legacy AUTH_TOKEN ingest availability", () => {
     process.env.LEGACY_INGEST_ENABLED = "true";
     const response = await proxy(request("/api/meetings", { method: "GET" }));
     expect(response.status).toBe(401);
+  });
+});
+
+describe("proxy matcher", () => {
+  const matches = (path: string) => new RegExp(`^${config.matcher[0]}$`).test(path);
+
+  it("skips static assets but never an /api path that merely ends in an asset extension", () => {
+    expect(matches("/logo.png")).toBe(false);
+    expect(matches("/_next/static/chunk.js")).toBe(false);
+    expect(matches("/api/meetings/abc.png")).toBe(true);
+    expect(matches("/api/meetings/abc")).toBe(true);
   });
 });

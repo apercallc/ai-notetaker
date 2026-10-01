@@ -64,6 +64,13 @@ describe("meeting shares", () => {
     expect(await revokeMeetingShare(WORKSPACE_ID, share.id)).toBe(false);
   });
 
+  it("only revokes a link through the note it belongs to", async () => {
+    const share = await createMeetingShare(WORKSPACE_ID, MEETING_ID);
+    expect(await revokeMeetingShare(WORKSPACE_ID, share.id, "some-other-meeting")).toBe(false);
+    expect(await getSharedMeeting(share.token)).not.toBeNull();
+    expect(await revokeMeetingShare(WORKSPACE_ID, share.id, MEETING_ID)).toBe(true);
+  });
+
   it("bounds finite share expiry to 1-365 days, allows 90, and rejects expired links", async () => {
     await expect(createMeetingShare(WORKSPACE_ID, MEETING_ID, 0)).rejects.toBeInstanceOf(SharingValidationError);
     expect((await createMeetingShare(WORKSPACE_ID, MEETING_ID, 90)).expiresAt).not.toBeNull();

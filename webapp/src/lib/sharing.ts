@@ -48,10 +48,11 @@ export async function createMeetingShare(
   return { ...share, token };
 }
 
-export async function revokeMeetingShare(workspaceId: string, shareId: string): Promise<boolean> {
+export async function revokeMeetingShare(workspaceId: string, shareId: string, meetingId?: string): Promise<boolean> {
   if (!shareId || shareId.length > 128) throw new SharingValidationError("share id is invalid");
   const result = await prisma.meetingShareToken.updateMany({
-    where: { id: shareId, workspaceId, revokedAt: null },
+    // When the caller names the note (the UI always does), the link must belong to it.
+    where: { id: shareId, workspaceId, revokedAt: null, ...(meetingId ? { meetingId } : {}) },
     data: { revokedAt: new Date() },
   });
   return result.count > 0;

@@ -42,15 +42,16 @@ export async function createMeetingShareAction(formData: FormData): Promise<Shar
 
 export async function revokeMeetingShareAction(formData: FormData): Promise<boolean> {
   const { workspaceId, userId } = await requireSession();
-  const meetingId = String(formData.get("meetingId") ?? "");
+  const meetingId = String(formData.get("meetingId") ?? "").slice(0, 128);
   let revoked = false;
+  if (!meetingId) return false;
   try {
-    revoked = await revokeMeetingShare(workspaceId, String(formData.get("shareId") ?? ""));
+    revoked = await revokeMeetingShare(workspaceId, String(formData.get("shareId") ?? ""), meetingId);
   } catch (error) {
     if (!(error instanceof SharingValidationError)) throw error;
   }
   if (revoked) await recordAudit({ workspaceId, actorUserId: userId, action: "share.revoke", targetType: "meeting", targetId: meetingId });
-  if (meetingId) revalidatePath(`/meetings/${meetingId}`);
+  if (revoked) revalidatePath(`/meetings/${meetingId}`);
   return revoked;
 }
 
