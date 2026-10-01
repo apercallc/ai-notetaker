@@ -1,7 +1,8 @@
 import { prisma } from "./db";
 import { recordAudit } from "./audit";
 import { getEntitlements } from "./usageLedger";
-import { completeManagedUpload, createManagedUpload, enqueueManagedJob, getUpload, ManagedValidationError } from "./managedJobs";
+import { completeManagedUpload, createManagedUpload, deleteManagedUploadAudio, enqueueManagedJob, getUpload, ManagedValidationError } from "./managedJobs";
+import { EntitlementError } from "./entitlementError";
 import { dispatchManagedJob } from "./managedDispatch";
 import { upsertMeeting } from "./meetings";
 import { PICKABLE_TEMPLATES, isNoteTemplateId } from "./noteTemplates";
@@ -155,7 +156,19 @@ export async function assertImportUpload(workspaceId: string, uploadId: string) 
 export async function finishImport(session: ManagedSession, uploadId: string) {
   const upload = await assertImportUpload(session.workspaceId, uploadId);
   const completed = await completeManagedUpload(session.workspaceId, uploadId);
-  const job = await enqueueManagedJob(session.workspaceId, completed.meetingId, uploadId, `import:${uploadId}`);
+  let job;
+  try {
+    job = await enqueueManagedJob(session.workspaceId, completed.meetingId, uploadId, `import:${uploadId}`);
+  } catch (error) {
+    if (error instanceof EntitlementError) {
+      // The plan or minutes ran out between starting and finishing. The recording was not processed,
+      // so it must not sit staged for a day counting against the workspace's staging limit.
+      if (await deleteManagedUploadAudio(uploadId).catch(() => false)) {
+        await prisma.managedUpload.updateMany({ where: { id: uploadId, workspaceId: session.workspaceId }, data: { status: "expired" } });
+      }
+    }
+    throw error;
+  }
   if (job.status === "queued") dispatchManagedJob(job.id, session.workspaceId);
   return { meetingId: upload.meetingId, jobId: job.id, status: job.status };
 }

@@ -194,6 +194,33 @@ describe.skipIf(!HAVE_FFMPEG)("browser import flow", () => {
     expect(await prisma.meeting.count({ where: { workspaceId: WORKSPACE_ID } })).toBe(0);
   });
 
+  it("frees the staging slot when the minutes run out between starting and finishing an import", async () => {
+    const body = startBody({ durationSeconds: 120 });
+    const started = await (await startImport(post("/api/import", body, browserHeaders(sessionId)))).json() as { uploadId: string };
+    const bytes = Buffer.alloc(3_000_000, 7);
+    await putChunk(
+      new Request(`${ORIGIN}/api/import/${started.uploadId}/chunks/0`, {
+        method: "PUT",
+        headers: { ...browserHeaders(sessionId), "x-chunk-sha256": createHash("sha256").update(bytes).digest("hex") },
+        body: bytes,
+      }),
+      { params: Promise.resolve({ uploadId: started.uploadId, chunkIndex: "0" }) },
+    );
+    // Another upload used the remaining minutes meanwhile.
+    await prisma.usageLedgerEntry.create({
+      data: { workspaceId: WORKSPACE_ID, periodStart: new Date(), kind: "meeting_processing", units: 1, audioSeconds: 60 * 3_600, idempotencyKey: `drained-${started.uploadId}` },
+    });
+
+    const finish = await finishImport(
+      new Request(`${ORIGIN}/api/import/${started.uploadId}/complete`, { method: "POST", headers: browserHeaders(sessionId) }),
+      { params: Promise.resolve({ uploadId: started.uploadId }) },
+    );
+
+    expect(finish.status).toBe(402);
+    expect(await prisma.uploadChunk.count({ where: { uploadId: started.uploadId } })).toBe(0);
+    expect(await prisma.managedUpload.findUniqueOrThrow({ where: { id: started.uploadId } })).toMatchObject({ status: "expired" });
+  });
+
   it("does not let another workspace upload to or finish an import it does not own", async () => {
     const started = await (await startImport(post("/api/import", startBody(), browserHeaders(sessionId)))).json() as { uploadId: string };
     const bytes = Buffer.alloc(1_000, 1);
