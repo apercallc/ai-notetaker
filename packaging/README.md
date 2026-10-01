@@ -8,7 +8,9 @@ does not define external package-manager channels.
   attribution/setup notes. The installer launches the vendor setup visibly.
 - The Debian package registers a stable Chrome Native Messaging relay and
   declares the PulseAudio/PipeWire command-line dependency.
-- The macOS DMG includes guarded Native Messaging install/uninstall scripts.
+- `macos/` seals the completed app with a free ad-hoc signature and packages
+  the guided installer, including automatic Native Messaging registration.
+  This is not Developer ID signing or notarization.
 
 See [`../docs/helper-packaging.md`](../docs/helper-packaging.md) for build and
 installer details, and [`../release/README.md`](../release/README.md) for the

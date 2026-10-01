@@ -99,7 +99,7 @@ jobs:
           - os: ubuntu-latest
             bundle: deb
           - os: macos-latest
-            bundle: dmg
+            bundle: app
             target: aarch64-apple-darwin
           - os: windows-latest
             bundle: nsis
@@ -152,6 +152,14 @@ jobs:
       - name: Build native bundles
         working-directory: helper/crates/app
         run: npx --yes @tauri-apps/cli@2.11.5 build --no-sign ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundle }}
+      - name: Test Mac installer and package guided DMG
+        if: runner.os == 'macOS'
+        run: |
+          python3 ../packaging/macos/test_installer.py
+          app="target/aarch64-apple-darwin/release/bundle/macos/AI Notetaker.app"
+          version=$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")
+          bash ../packaging/macos/build-dmg.sh "$app" "target/aarch64-apple-darwin/release/bundle/dmg/AI.Notetaker_${version}_aarch64-installer.dmg"
+
       - uses: actions/upload-artifact@v7
         with:
           name: helper-${{ matrix.os }}-${{ github.ref_name }}
@@ -247,7 +255,7 @@ jobs:
           REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
         run: |
           npx --yes chrome-webstore-upload-cli@3 upload \
-            --source store/ai-notetaker-chrome-web-store-${GITHUB_REF_NAME}.zip \
+            --source "store/ai-notetaker-chrome-web-store-${GITHUB_REF_NAME}.zip" \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \

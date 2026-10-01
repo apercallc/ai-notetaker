@@ -336,13 +336,26 @@ export function DownloadView({
             <p>Only recording Google Meet? <a href="#choose-ai">Skip to AI setup</a>. For desktop calls, keep the Chrome extension installed too: it controls the helper.</p>
             <details open={platform === "macos"}>
               <summary>macOS · Apple silicon (M1 or newer)</summary>
-              <ol>
-                <li>Download the Mac .dmg above, open it, and drag <strong>AI Notetaker</strong> into <strong>Applications</strong>.</li>
-                <li>Open AI Notetaker from Applications. It runs in the menu bar. If macOS blocks this unsigned app, follow the <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
-                <li>Connect it to Chrome once: open <strong>Terminal</strong>, paste the command below, and press Return.</li>
-              </ol>
-              <pre><code>sh &quot;/Applications/AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh&quot;</code></pre>
-              <p>This registers the installed app with your browser. It does not download another program.</p>
+              {release?.mac?.name.endsWith("-installer.dmg") ? (
+                <>
+                  <ol>
+                    <li>Download and open the Mac .dmg above.</li>
+                    <li>Double-click <strong>Install AI Notetaker.command</strong>. A Terminal window opens; choose <strong>Install</strong> in the confirmation dialog. It copies the app to Applications, connects it to Chrome, and opens it.</li>
+                    <li>Look for AI Notetaker in your menu bar, then return to the extension and choose <strong>Check desktop helper</strong>.</li>
+                  </ol>
+                  <p>This release is not notarized by Apple. The installer asks you to approve this app only; your other Mac security settings stay unchanged. If macOS blocks the installer, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</p>
+                </>
+              ) : (
+                <>
+                  <ol>
+                    <li>Download the Mac .dmg above, open it, and drag <strong>AI Notetaker</strong> into <strong>Applications</strong>.</li>
+                    <li>Open AI Notetaker from Applications. If macOS says it is damaged, follow the <a href={UNSIGNED_DOC}>Mac repair guide</a> before continuing.</li>
+                    <li>Connect it to Chrome once: open <strong>Terminal</strong>, paste the command below, and press Return.</li>
+                  </ol>
+                  <pre><code>sh &quot;/Applications/AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh&quot;</code></pre>
+                  <p>Older downloads require this browser connection step. New guided installers perform it for you.</p>
+                </>
+              )}
             </details>
             <details open={platform === "windows"}>
               <summary>Windows · 64-bit Intel / AMD</summary>

@@ -1,5 +1,17 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Mac installation repair — 2026-10-01
+
+- [x] Confirm v0.15.0 DMG checksum matches the published asset; its app fails
+      bundle signature validation with an unsealed linker-only signature.
+- [x] Ad-hoc sign the completed app and nested binaries, verify strictly, and
+      package a guided installer in Mac CI and release builds.
+- [x] Installer explicitly approves only this app, connects it to Chrome and
+      opens it; rejects tampering, symlinks, unrelated apps and running capture.
+- [x] Keep older-release instructions until a guided DMG is actually published.
+- Pending: publish a new release; clean-machine Finder/Gatekeeper acceptance
+      across supported macOS versions. No Developer ID or notarization claim.
+
 ## Setup clarity — 2026-10-01
 
 - [x] Onboarding uses the project Hosted AI service automatically, matching Settings;

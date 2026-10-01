@@ -30,7 +30,7 @@ jobs:
           - os: ubuntu-latest
             bundle: deb,appimage
           - os: macos-latest
-            bundle: dmg
+            bundle: app
           - os: windows-latest
             bundle: msi,nsis
     defaults:
@@ -94,6 +94,14 @@ jobs:
       - name: Build unsigned native bundle
         working-directory: helper/crates/app
         run: npx --yes @tauri-apps/cli@2.11.5 build --bundles ${{ matrix.bundle }}
+
+      - name: Test Mac installer and package guided DMG
+        if: runner.os == 'macOS'
+        run: |
+          python3 ../packaging/macos/test_installer.py
+          app="target/release/bundle/macos/AI Notetaker.app"
+          version=$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")
+          bash ../packaging/macos/build-dmg.sh "$app" "target/release/bundle/dmg/AI.Notetaker_${version}_aarch64-installer.dmg"
 
       # LLVM coverage is Linux-only here because the Tauri tray and native
       # audio backends are platform-specific. The report still covers the

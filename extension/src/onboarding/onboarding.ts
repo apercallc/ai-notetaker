@@ -121,7 +121,7 @@ function renderHelperStep(): string {
       <li>Launch <strong>AI Notetaker</strong>. It runs in your menu bar or system tray.</li>
       <li>Return here and choose <strong>Check desktop helper</strong>, then continue to the audio test.</li>
     </ol>
-    <p class="text-secondary">On Mac, the download page also includes the one-time browser connection step. If you install a fallback audio driver, it may ask you to restart.</p>
+    <p class="text-secondary">On Mac, use Install AI Notetaker.command if included in your download; it connects the app to Chrome for you. Older downloads have a manual connection step on the download page.</p>
     <p><button type="button" class="text-link" id="use-meet">Recording Google Meet instead?</button></p>
   `;
 }

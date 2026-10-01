@@ -87,7 +87,13 @@ unchanged:
   plus a separate Firefox-shaped manifest under
   `HKCU\Software\Mozilla\NativeMessagingHosts\com.ainotetaker.helper`. They
   refuse to remove a changed or unrelated manifest.
-- macOS DMG has no post-install hook. The app bundles
+- macOS guided DMGs (`-installer.dmg`) include **Install AI Notetaker.command**.
+  It verifies the ad-hoc signed bundle, asks the user to approve this
+  non-notarized app, copies it to Applications, clears only its quarantine,
+  registers the browser connection and opens the app. It refuses to replace a
+  running app or an unrelated bundle. Recordings and settings are untouched.
+  Build with `packaging/macos/build-dmg.sh` after the Tauri `app` bundle.
+- Older macOS DMGs have no post-install hook. The app bundles
   `Contents/Resources/scripts/install-native-messaging.sh` and its guarded
   uninstall counterpart. Run the installer helper after copying the app to
   `/Applications` (or pass the actual `.app` path) so it can write the
