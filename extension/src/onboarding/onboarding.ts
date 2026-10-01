@@ -282,6 +282,8 @@ function micCopy(): { text: string; ok: boolean; error: boolean } {
       return { text: "Chrome blocked the microphone. Click the site-settings icon at the left of the address bar, set Microphone to Allow, then try again.", ok: false, error: true };
     case "no-device":
       return { text: "No microphone found. Connect or enable one, then try again.", ok: false, error: true };
+    case "in-use":
+      return { text: "Your microphone is busy. Close any app that is using it exclusively, then try again.", ok: false, error: true };
     default:
       return { text: "", ok: false, error: false };
   }

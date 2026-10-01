@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-function stubMedia(result: "granted" | "denied" | "missing"): { stop: ReturnType<typeof vi.fn> } {
+function stubMedia(result: "granted" | "denied" | "missing" | "busy"): { stop: ReturnType<typeof vi.fn> } {
   const track = { stop: vi.fn() };
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: {
       getUserMedia: vi.fn(async () => {
         if (result === "denied") throw new DOMException("Permission denied", "NotAllowedError");
+        if (result === "busy") throw new DOMException("Could not start audio source", "NotReadableError");
         if (result === "missing") throw new DOMException("Requested device not found", "NotFoundError");
         return { getTracks: () => [track] };
       }),
@@ -37,6 +38,13 @@ describe("microphone permission page", () => {
 
     expect(document.querySelector("h1")?.textContent).toBe("Microphone allowed");
     expect(track.stop).toHaveBeenCalled();
+  });
+
+  it("tells the user the microphone is busy instead of sending them to site settings", async () => {
+    stubMedia("busy");
+    await load();
+    expect(document.querySelector("h1")?.textContent).toBe("Your microphone is busy");
+    expect(document.querySelector("#retry")).not.toBeNull();
   });
 
   it("explains how to unblock a denied microphone and lets the user retry", async () => {

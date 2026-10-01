@@ -42,6 +42,13 @@ describe("meeting page: background updates", () => {
     expect(document.body.textContent).not.toContain("Still processing");
   });
 
+  it("still shows the failure and offers retry when an earlier summary exists", async () => {
+    await openMeeting({ ...base, summary: "Earlier notes", status: "error", captureSource: "meet", errorMessage: "Reprocessing failed" });
+    await vi.waitFor(() => expect(document.querySelector("#retry-processing")).not.toBeNull());
+    expect(document.body.textContent).toContain("Reprocessing failed");
+    expect(document.body.textContent).toContain("Earlier notes");
+  });
+
   it("updates Drive export after notes are complete", async () => {
     await openMeeting({ ...base, driveExport: { status: "pending" } });
     await saveMeeting({ ...base, driveExport: { status: "exported", webViewLink: "https://docs.google.com/document/d/notes" } });

@@ -142,6 +142,7 @@ async function render(focusActionId?: string): Promise<void> {
 
     <section>
       <h2>Summary</h2>
+      ${meeting.summary && meeting.status === "error" ? `<p class="error-state meeting-error">Failed: ${escapeHtml(meeting.errorMessage ?? "unknown error")}</p>` : ""}
       ${meeting.summary
         ? `<div class="summary">${renderSummaryHtml(meeting.summary, { hideActionItems: hasActions })}</div>`
         : meeting.status === "processing"

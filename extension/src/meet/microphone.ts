@@ -61,6 +61,11 @@ function render(outcome: Outcome | "asking"): void {
       body: "Connect or enable a microphone, then try again.",
       action: true,
     },
+    "in-use": {
+      title: "Your microphone is busy",
+      body: "Another app is using the microphone exclusively. Close it, then try again.",
+      action: true,
+    },
   }[outcome];
   app.innerHTML = `
     <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div>

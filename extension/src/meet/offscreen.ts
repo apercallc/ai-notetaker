@@ -143,23 +143,29 @@ async function stop(): Promise<void> {
   captureGeneration += 1;
   const nodes = captureNodes;
   captureNodes = [];
-  // Flush while the streams are still live; the resulting chunks go out before the STOP reply does.
-  await Promise.all(nodes.map((node) => flush(node)));
-  await Promise.allSettled([...pendingWrites]);
-  const transcriber = liveTranscriber;
-  await transcriber?.stop();
-  await Promise.allSettled([...pendingLiveMessages]);
-  if (liveTranscriber === transcriber) liveTranscriber = null;
-  for (const queue of pendingLiveAudio.values()) queue.splice(0);
-  stoppingGeneration = null;
-  nodes.forEach((node) => {
-    node.port.onmessage = null;
-    node.disconnect();
-  });
-  streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
-  streams = [];
-  if (context) await context.close().catch(() => {});
-  context = null;
+  try {
+    // Flush while the streams are still live; the resulting chunks go out before the STOP reply does.
+    await Promise.all(nodes.map((node) => flush(node)));
+    await Promise.allSettled([...pendingWrites]);
+    const transcriber = liveTranscriber;
+    // Live captions are a convenience: a transcriber that throws on close must never keep the tab locked.
+    await transcriber?.stop().catch(() => undefined);
+    await Promise.allSettled([...pendingLiveMessages]);
+    if (liveTranscriber === transcriber) liveTranscriber = null;
+    for (const queue of pendingLiveAudio.values()) queue.splice(0);
+  } finally {
+    // Always release the streams: a captured tab stays locked ("Cannot capture a tab with an
+    // active stream") until its tracks stop, so the next start would fail.
+    stoppingGeneration = null;
+    nodes.forEach((node) => {
+      node.port.onmessage = null;
+      node.disconnect();
+    });
+    streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
+    streams = [];
+    if (context) await context.close().catch(() => {});
+    context = null;
+  }
 }
 
 function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetingId: string): void {

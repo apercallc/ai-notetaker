@@ -4,7 +4,7 @@
  * capture page, so it is requested on a normal extension page (onboarding, or
  * the standalone microphone tab) in response to a click, and stays granted.
  */
-export type MicOutcome = "granted" | "blocked" | "no-device";
+export type MicOutcome = "granted" | "blocked" | "no-device" | "in-use";
 
 export async function requestMicrophone(): Promise<MicOutcome> {
   try {
@@ -12,7 +12,12 @@ export async function requestMicrophone(): Promise<MicOutcome> {
     stream.getTracks().forEach((track) => track.stop());
     return "granted";
   } catch (error) {
-    return error instanceof DOMException && error.name === "NotFoundError" ? "no-device" : "blocked";
+    if (error instanceof DOMException) {
+      if (error.name === "NotFoundError" || error.name === "OverconstrainedError") return "no-device";
+      // Another app (or tab) holds the microphone exclusively: permission is fine, so do not send the user to site settings.
+      if (error.name === "NotReadableError" || error.name === "AbortError") return "in-use";
+    }
+    return "blocked";
   }
 }
 

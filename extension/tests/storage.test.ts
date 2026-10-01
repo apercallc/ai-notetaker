@@ -256,6 +256,25 @@ describe("meeting index", () => {
   });
 });
 
+describe("corrupt stored meetings", () => {
+  it("repairs a partial record instead of breaking list, search and open", async () => {
+    await chrome.storage.local.set({
+      "notetaker.meetings.index": ["bad-1", "bad-2", "bad-3"],
+      "notetaker.meeting.bad-1": { id: "bad-1", status: "weird" },
+      "notetaker.meeting.bad-2": "not an object",
+      "notetaker.meeting.bad-3": { id: "bad-3", title: "Fine", startedAt: "2026-09-24T10:00:00.000Z", transcript: [{ text: "hello" }], actionItems: [], summary: "ok", status: "complete" },
+    });
+
+    const all = await listMeetings();
+    expect(all.map((item) => item.id).sort()).toEqual(["bad-1", "bad-3"]);
+    const repaired = await getMeeting("bad-1");
+    expect(repaired).toMatchObject({ id: "bad-1", title: "Untitled meeting", transcript: [], actionItems: [], summary: null, status: "error" });
+    expect(await getMeeting("bad-2")).toBeNull();
+    expect((await listMeetings(undefined, "hello")).map((item) => item.id)).toEqual(["bad-3"]);
+    expect((await listMeetings(undefined, "zzz")).length).toBe(0);
+  });
+});
+
 describe("widget position and reminded calls", () => {
   it("remembers where the widget was dropped, rounded to whole pixels", async () => {
     expect(await getWidgetPosition()).toBeNull();

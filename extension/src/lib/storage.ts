@@ -131,6 +131,32 @@ export async function clearPairingToken(): Promise<void> {
   await storageRemove(KEYS.pairingToken);
 }
 
+const MEETING_STATUSES = new Set(["recording", "processing", "complete", "error"]);
+
+/**
+ * A stored meeting can be partial or corrupt (an interrupted write, an older
+ * build, manual tampering). Every consumer assumes `transcript`/`actionItems`
+ * are arrays and `startedAt` a string, so one bad record would otherwise break
+ * the popup, search, widget and inbox. Repair what is repairable; drop what is
+ * not (no id means it cannot be addressed at all).
+ */
+export function normalizeMeeting(raw: unknown): MeetingRecord | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Partial<MeetingRecord> & Record<string, unknown>;
+  if (typeof record.id !== "string" || record.id.length === 0) return null;
+  const startedAtValid = typeof record.startedAt === "string" && !Number.isNaN(Date.parse(record.startedAt));
+  return {
+    ...(record as MeetingRecord),
+    title: typeof record.title === "string" && record.title.trim() ? record.title : "Untitled meeting",
+    startedAt: startedAtValid ? (record.startedAt as string) : new Date(0).toISOString(),
+    transcript: Array.isArray(record.transcript) ? record.transcript : [],
+    actionItems: Array.isArray(record.actionItems) ? record.actionItems : [],
+    summary: typeof record.summary === "string" ? record.summary : null,
+    // An unknown status would render no controls at all; "error" at least offers Retry/Delete.
+    status: MEETING_STATUSES.has(record.status as string) ? (record.status as MeetingRecord["status"]) : "error",
+  };
+}
+
 /**
  * The index is append-ordered because meetings are created chronologically.
  * Reading only its tail keeps the popup cheap even after a year of notes.
@@ -148,7 +174,7 @@ export async function listMeetings(limit?: number, query?: string): Promise<Meet
   const records = ids.length
     ? ((await storageGet<Record<string, MeetingRecord>>(ids.map((id) => KEYS.meetingPrefix + id))) ?? {})
     : {};
-  const meetings = ids.map((id) => records[KEYS.meetingPrefix + id] ?? null);
+  const meetings = ids.map((id) => normalizeMeeting(records[KEYS.meetingPrefix + id]));
   const matchingMeetings = meetings.filter((meeting): meeting is MeetingRecord => {
     if (!meeting) return false;
     if (!normalizedQuery) return true;
@@ -165,8 +191,7 @@ export async function listMeetings(limit?: number, query?: string): Promise<Meet
 }
 
 export async function getMeeting(id: string): Promise<MeetingRecord | null> {
-  const record = await storageGet<MeetingRecord>(KEYS.meetingPrefix + id);
-  return record ?? null;
+  return normalizeMeeting(await storageGet<unknown>(KEYS.meetingPrefix + id));
 }
 
 type MeetingMutation<T> = () => Promise<T>;
