@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import {
   getSettings,
@@ -253,6 +253,21 @@ describe("meeting index", () => {
     ]);
 
     expect((await listMeetings()).map((item) => item.id).sort()).toEqual(["keep-1", "keep-2", "keep-3"]);
+  });
+});
+
+describe("cross-context locking", () => {
+  it("takes a Web Lock per meeting and for the index when available", async () => {
+    const names: string[] = [];
+    const locks = { request: vi.fn(async (name: string, task: () => Promise<unknown>) => { names.push(name); return task(); }) };
+    Object.defineProperty(navigator, "locks", { value: locks, configurable: true });
+    try {
+      await saveMeeting({ id: "locked-1", title: "T", startedAt: "2026-09-24T10:00:00.000Z", endedAt: null, transcript: [], summary: null, actionItems: [], status: "recording" } as unknown as MeetingRecord);
+    } finally {
+      delete (navigator as { locks?: unknown }).locks;
+    }
+    expect(names).toContain("notetaker.meeting.locked-1");
+    expect(names).toContain("notetaker.meetings.index");
   });
 });
 

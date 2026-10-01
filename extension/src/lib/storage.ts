@@ -195,12 +195,24 @@ export async function getMeeting(id: string): Promise<MeetingRecord | null> {
   return normalizeMeeting(await storageGet<unknown>(KEYS.meetingPrefix + id));
 }
 
+/**
+ * The per-meeting and index queues below only order writes within one JavaScript context. The
+ * service worker and an open meeting page are different contexts, so a page edit and a worker
+ * update could interleave their read-modify-write and revert each other. Web Locks span every
+ * extension context; where they are unavailable (older environments, tests) the in-context
+ * queues are all there is.
+ */
+function withCrossContextLock<T>(name: string, task: () => Promise<T>): Promise<T> {
+  const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+  return locks ? locks.request(name, task) : task();
+}
+
 type MeetingMutation<T> = () => Promise<T>;
 const meetingWriteQueues = new Map<string, Promise<void>>();
 
 function enqueueMeetingMutation<T>(id: string, mutation: MeetingMutation<T>): Promise<T> {
   const previous = meetingWriteQueues.get(id) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(mutation);
+  const current = previous.catch(() => undefined).then(() => withCrossContextLock(`notetaker.meeting.${id}`, mutation));
   const tracked = current.then(
     () => undefined,
     () => undefined,
@@ -218,7 +230,7 @@ function enqueueMeetingMutation<T>(id: string, mutation: MeetingMutation<T>): Pr
 let meetingsIndexQueue: Promise<void> = Promise.resolve();
 
 function withMeetingsIndexLock<T>(task: () => Promise<T>): Promise<T> {
-  const current = meetingsIndexQueue.catch(() => undefined).then(task);
+  const current = meetingsIndexQueue.catch(() => undefined).then(() => withCrossContextLock("notetaker.meetings.index", task));
   meetingsIndexQueue = current.then(
     () => undefined,
     () => undefined,

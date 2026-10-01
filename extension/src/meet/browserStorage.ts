@@ -20,6 +20,7 @@ interface StoredChunk {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    let abandoned = false;
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       // Runs for fresh installs (v0) and for v1 databases alike. Existing v1
@@ -34,11 +35,22 @@ function openDatabase(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       const db = request.result;
+      if (abandoned) {
+        // The caller already gave up after a blocked upgrade; do not leave this connection open.
+        db.close();
+        return;
+      }
       // A future upgrade in another context must never be blocked by this connection.
       db.onversionchange = () => db.close();
       resolve(db);
     };
     request.onerror = () => reject(request.error ?? new Error("Meet capture storage could not open"));
+    // Another context still holds an older version open and ignored the upgrade request. Without
+    // this the open never settles, and every chunk write (and so the recording) hangs behind it.
+    request.onblocked = () => {
+      abandoned = true;
+      reject(new Error("Meet audio storage is busy because another Notetaker tab is using an older version. Reload the extension and try again."));
+    };
   });
 }
 
