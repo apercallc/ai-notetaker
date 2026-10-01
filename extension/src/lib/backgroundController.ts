@@ -456,12 +456,17 @@ export class BackgroundController {
     if (sampleRateHz !== 48_000 || pcm16.byteLength === 0 || pcm16.byteLength > 64 * 1024 || pcm16.byteLength % 2 !== 0) {
       throw new Error("Meet audio chunks must be non-empty, even-length PCM16 data under 64 KiB at 48 kHz");
     }
-    const sequence = this.meetChunkSequence.get(meetingId) ?? 0;
-    this.meetChunkSequence.set(meetingId, sequence + 1);
     const previous = this.meetChunkWrites.get(meetingId) ?? Promise.resolve();
     const current = previous
       .catch(() => undefined)
-      .then(() => appendBrowserMeetChunk(meetingId, channel, sequence, pcm16, Date.now(), chunkId));
+      .then(async () => {
+        // Assigned inside the per-meeting write chain, so the order is the arrival order. After a worker
+        // restart nothing is cached: continue from what IndexedDB already holds rather than restarting
+        // at 0, which would collide with (or sort before) the chunks of the first half of the call.
+        const next = this.meetChunkSequence.get(meetingId) ?? (await lastBrowserMeetSequence(meetingId)) + 1;
+        this.meetChunkSequence.set(meetingId, next + 1);
+        return appendBrowserMeetChunk(meetingId, channel, next, pcm16, Date.now(), chunkId);
+      });
     this.meetChunkWrites.set(meetingId, current);
     const cleanup = () => {
       if (this.meetChunkWrites.get(meetingId) === current) this.meetChunkWrites.delete(meetingId);

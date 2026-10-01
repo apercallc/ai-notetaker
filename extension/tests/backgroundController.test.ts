@@ -138,7 +138,19 @@ describe("BackgroundController", () => {
     await expect(getMeeting(id)).resolves.toMatchObject({ status: "error", processingMode: { kind: "managed" }, errorMessage: expect.stringContaining("started with Hosted AI") });
   });
 
+  it("continues chunk numbering from storage after a worker restart instead of restarting at 0", async () => {
+    vi.spyOn(browserStorage, "lastBrowserMeetSequence").mockResolvedValue(41);
+    const append = vi.spyOn(browserStorage, "appendBrowserMeetChunk").mockResolvedValue();
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+
+    await controller.sendMeetAudioChunk("restarted", "mic", new Uint8Array([1, 2]));
+    await controller.sendMeetAudioChunk("restarted", "speaker", new Uint8Array([3, 4]));
+
+    expect(append.mock.calls.map((call) => call[2])).toEqual([42, 43]);
+  });
+
   it("acknowledges a Meet chunk only after its durable write finishes", async () => {
+    vi.spyOn(browserStorage, "lastBrowserMeetSequence").mockResolvedValue(-1);
     let finish!: () => void;
     vi.spyOn(browserStorage, "appendBrowserMeetChunk").mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
     const controller = new BackgroundController(createFakeClient(), vi.fn());
