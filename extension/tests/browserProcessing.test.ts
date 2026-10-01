@@ -343,8 +343,26 @@ describe("browser Meet processing", () => {
 
   it("does not retry a permanent browser provider failure", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response("bad key", { status: 401 }));
-    await expect(processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), fetchImpl)).rejects.toThrow("Deepgram returned 401");
+    await expect(processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), fetchImpl)).rejects.toThrow("Deepgram rejected the API key (401)");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains billing, an unreadable 200, and an unreachable provider in plain words", async () => {
+    const noCredit = vi.fn<typeof fetch>(async () => new Response("", { status: 402 }));
+    await expect(processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), noCredit)).rejects.toThrow("no remaining credit");
+    expect(noCredit).toHaveBeenCalledTimes(1);
+
+    const notJson = vi.fn<typeof fetch>(async () => new Response("<html>captive portal</html>", { status: 200 }));
+    await expect(processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), notJson)).rejects.toThrow("unreadable response");
+    expect(notJson).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    const offline = vi.fn<typeof fetch>(async () => { throw new TypeError("Failed to fetch"); });
+    const pending = processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), offline);
+    const assertion = expect(pending).rejects.toThrow("Could not reach Deepgram");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
+    vi.useRealTimers();
   });
 
   it("gives up on a stalled upload after retries instead of hanging", async () => {

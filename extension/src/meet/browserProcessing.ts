@@ -50,7 +50,7 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 const REQUEST_MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 250;
-const MAX_RETRY_AFTER_MS = 30_000;
+const MAX_RETRY_AFTER_MS = 90_000;
 /** Upload + transcription time budget: a fixed floor plus half a second per second of audio. */
 const TRANSCRIBE_TIMEOUT_BASE_MS = 60_000;
 const TRANSCRIBE_TIMEOUT_PER_AUDIO_SECOND_MS = 500;
@@ -84,8 +84,14 @@ const NO_SUMMARY = "No summary was produced for this recording.";
 
 class ProviderHttpError extends Error {}
 
+/** Says what the user can do about it, not just which status came back. */
 function providerError(response: Response, provider: string): Error {
-  return new ProviderHttpError(`${provider} returned ${response.status}`);
+  const { status } = response;
+  if (status === 401 || status === 403) return new ProviderHttpError(`${provider} rejected the API key (${status}). Check the key in Settings.`);
+  if (status === 402) return new ProviderHttpError(`${provider} reports no remaining credit (402). Check your ${provider} billing.`);
+  if (status === 413) return new ProviderHttpError(`${provider} refused the upload as too large (413).`);
+  if (status === 429) return new ProviderHttpError(`${provider} is rate limiting requests (429). Wait a few minutes and retry.`);
+  return new ProviderHttpError(`${provider} returned ${status}`);
 }
 
 function retryableStatus(status: number): boolean {
@@ -120,12 +126,23 @@ async function requestJson(fetchImpl: typeof fetch, url: string, init: RequestIn
     let delay: number;
     try {
       const response = await fetchImpl(url, { ...init, signal: controller.signal });
-      if (response.ok) return (await response.json()) as Record<string, unknown>;
+      if (response.ok) {
+        try {
+          return (await response.json()) as Record<string, unknown>;
+        } catch (parseError) {
+          // A 200 that is not JSON (a proxy or captive-portal page) will not fix itself on retry.
+          if (parseError instanceof SyntaxError) throw new ProviderHttpError(`${provider} returned an unreadable response. Check your network or proxy, then retry.`);
+          throw parseError;
+        }
+      }
       if (!retryableStatus(response.status) || last) throw providerError(response, provider);
       delay = retryDelayMs(attempt, response);
     } catch (error) {
       if (error instanceof ProviderHttpError) throw error;
-      if (last) throw controller.signal.aborted ? new Error(`${provider} timed out`) : error;
+      if (last) {
+        if (controller.signal.aborted) throw new Error(`${provider} timed out`);
+        throw error instanceof TypeError ? new Error(`Could not reach ${provider}. Check your internet connection.`) : error;
+      }
       delay = retryDelayMs(attempt);
     } finally {
       clearTimeout(timer);
