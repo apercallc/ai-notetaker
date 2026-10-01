@@ -19,6 +19,7 @@ function shareUrl(token: string): string {
 export function ShareMeeting({ meetingId, links }: { meetingId: string; links: ActiveShare[] }) {
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [justCreated, setJustCreated] = useState<string | null>(null);
+  const [expiry, setExpiry] = useState("7");
   const [error, setError] = useState<string | null>(null);
   const [creating, startCreate] = useTransition();
   const [revokingId, setRevokingId] = useState<string | null>(null);
@@ -62,16 +63,24 @@ export function ShareMeeting({ meetingId, links }: { meetingId: string; links: A
     <div className="share-panel">
       <form action={create} className="share-form">
         <input type="hidden" name="meetingId" value={meetingId} />
-        <label htmlFor="share-expiry">Expires in</label>
-        <select id="share-expiry" name="expiresInDays" defaultValue="7" className="select">
+        <label htmlFor="share-expiry">Link expires</label>
+        <select id="share-expiry" name="expiresInDays" value={expiry} onChange={(event) => setExpiry(event.target.value)} className="select">
           <option value="1">1 day</option>
           <option value="7">7 days</option>
           <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="never">Never expires</option>
         </select>
         <button type="submit" className="button button-secondary" disabled={creating} aria-busy={creating}>
           {creating ? "Creating…" : "Create link"}
         </button>
       </form>
+
+      <p className="muted-copy share-hint">
+        {expiry === "never"
+          ? "Anyone with this link can read the note until you revoke it or delete the note."
+          : "Anyone with this link can read the note until it expires or you revoke it."}
+      </p>
 
       {createdToken && (
         <div className="share-result" role="status">
@@ -93,7 +102,7 @@ export function ShareMeeting({ meetingId, links }: { meetingId: string; links: A
           {links.map((link) => (
             <li key={link.id} className="share-link-row">
               <span className="share-link-meta">
-                Created <LocalTime iso={link.createdAt} style="date" /> · expires <LocalTime iso={link.expiresAt} style="date" />
+                Created <LocalTime iso={link.createdAt} style="date" /> · {link.expiresAt ? <>expires <LocalTime iso={link.expiresAt} style="date" /></> : "never expires"}
               </span>
               <span className="share-link-actions">
                 {tokens[link.id] ? (

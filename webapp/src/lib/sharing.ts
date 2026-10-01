@@ -6,11 +6,17 @@ import type { MeetingDetailResponse } from "./types";
 export interface ActiveShare {
   id: string;
   createdAt: string;
-  expiresAt: string;
+  /** null = never expires */
+  expiresAt: string | null;
 }
 
 const DEFAULT_SHARE_EXPIRY_DAYS = 7;
-const MAX_SHARE_EXPIRY_DAYS = 30;
+const MAX_SHARE_EXPIRY_DAYS = 365;
+
+/** `null` means the link never expires. */
+export type ShareExpiry = number | null;
+
+const stillValid = () => ({ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] });
 
 export class SharingValidationError extends Error {}
 
@@ -28,13 +34,13 @@ function expiryDate(days: number): Date {
 export async function createMeetingShare(
   workspaceId: string,
   meetingId: string,
-  expiresInDays = DEFAULT_SHARE_EXPIRY_DAYS,
-): Promise<{ id: string; token: string; expiresAt: Date }> {
+  expiresInDays: ShareExpiry = DEFAULT_SHARE_EXPIRY_DAYS,
+): Promise<{ id: string; token: string; expiresAt: Date | null }> {
   const meeting = await prisma.meeting.findFirst({ where: { id: meetingId, workspaceId, deletedAt: null }, select: { id: true } });
   if (!meeting) throw new SharingValidationError("meeting not found");
 
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = expiryDate(expiresInDays);
+  const expiresAt = expiresInDays === null ? null : expiryDate(expiresInDays);
   const share = await prisma.meetingShareToken.create({
     data: { workspaceId, meetingId, tokenHash: hashToken(token), expiresAt },
     select: { id: true, expiresAt: true },
@@ -58,11 +64,11 @@ export async function revokeMeetingShare(workspaceId: string, shareId: string): 
  */
 export async function listActiveShares(workspaceId: string, meetingId: string): Promise<ActiveShare[]> {
   const rows = await prisma.meetingShareToken.findMany({
-    where: { workspaceId, meetingId, revokedAt: null, expiresAt: { gt: new Date() } },
+    where: { workspaceId, meetingId, revokedAt: null, ...stillValid() },
     orderBy: { createdAt: "desc" },
     select: { id: true, createdAt: true, expiresAt: true },
   });
-  return rows.map((row) => ({ id: row.id, createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString() }));
+  return rows.map((row) => ({ id: row.id, createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt?.toISOString() ?? null }));
 }
 
 /**
@@ -72,7 +78,7 @@ export async function listActiveShares(workspaceId: string, meetingId: string): 
 export async function getSharedMeeting(token: string): Promise<MeetingDetailResponse | null> {
   if (!token || token.length > 128) return null;
   const share = await prisma.meetingShareToken.findFirst({
-    where: { tokenHash: hashToken(token), revokedAt: null, expiresAt: { gt: new Date() } },
+    where: { tokenHash: hashToken(token), revokedAt: null, ...stillValid() },
     select: { workspaceId: true, meetingId: true },
   });
   if (!share) return null;

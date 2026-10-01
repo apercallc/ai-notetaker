@@ -14,18 +14,19 @@ import { renameSpeaker } from "@/lib/speakers";
 import { isValidDateOnly } from "@/lib/actionItems";
 
 export type ShareActionResult =
-  | { ok: true; id: string; token: string; expiresAt: string }
+  | { ok: true; id: string; token: string; expiresAt: string | null }
   | { ok: false; error: string };
 
 export async function createMeetingShareAction(formData: FormData): Promise<ShareActionResult> {
   const { workspaceId, userId } = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
-  const expiresInDays = Number(formData.get("expiresInDays") ?? "7");
+  const rawExpiry = String(formData.get("expiresInDays") ?? "7");
+  const expiresInDays = rawExpiry === "never" ? null : Number(rawExpiry);
   try {
     const share = await createMeetingShare(workspaceId, meetingId, expiresInDays);
     await recordAudit({ workspaceId, actorUserId: userId, action: "share.create", targetType: "meeting", targetId: meetingId, metadata: { expiresInDays } });
     revalidatePath(`/meetings/${meetingId}`);
-    return { ok: true, id: share.id, token: share.token, expiresAt: share.expiresAt.toISOString() };
+    return { ok: true, id: share.id, token: share.token, expiresAt: share.expiresAt?.toISOString() ?? null };
   } catch (error) {
     if (error instanceof SharingValidationError) return { ok: false, error: error.message };
     console.error("meeting share creation failed", { meetingId, error: error instanceof Error ? error.message : String(error) });
