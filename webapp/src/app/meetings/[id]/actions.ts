@@ -2,7 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { deleteMeeting, renameMeeting, updateActionItem, ValidationError } from "@/lib/meetings";
+import { renameMeeting, updateActionItem, ValidationError } from "@/lib/meetings";
+import { trashNote } from "@/lib/library";
+import { restorePreviousBody, updateNoteBody } from "@/lib/noteEditing";
 import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
 import { createMeetingShare, revokeMeetingShare, SharingValidationError } from "@/lib/sharing";
@@ -46,19 +48,22 @@ export async function revokeMeetingShareAction(formData: FormData): Promise<bool
 }
 
 export async function deleteMeetingAction(formData: FormData): Promise<void> {
-  const { workspaceId, userId } = await requireSession();
+  const session = await requireSession();
   const id = String(formData.get("id") ?? "");
   if (!id) {
     redirect("/meetings?error=invalid-delete");
   }
+  let denied: string | null = null;
   try {
-    await deleteMeeting(workspaceId, id);
-    await recordAudit({ workspaceId, actorUserId: userId, action: "meeting.delete", targetType: "meeting", targetId: id });
+    // Deleting a note moves it to the Trash, where it can be restored for 30 days.
+    const result = await trashNote(session, id);
+    if (!result.ok) denied = result.error;
   } catch (error) {
     console.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
     redirect("/meetings?error=delete-failed");
   }
-  redirect("/meetings");
+  if (denied) redirect(`/meetings/${id}?error=${encodeURIComponent(denied)}`);
+  redirect("/meetings?notice=trashed");
 }
 
 export type RenameState = { status: "saved"; title: string } | { status: "error"; message: string };
@@ -158,4 +163,26 @@ export async function renameSpeakerAction(formData: FormData): Promise<SpeakerRe
   revalidatePath("/meetings");
   revalidatePath("/actions");
   return { status: "saved", label: result.label };
+}
+
+export type SaveBodyState = { status: "saved"; version: string } | { status: "conflict" | "error"; message: string };
+
+export async function saveNoteBodyAction(formData: FormData): Promise<SaveBodyState> {
+  const session = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const result = await updateNoteBody(session, meetingId, String(formData.get("body") ?? ""), String(formData.get("version") ?? ""));
+  if (!result.ok) return { status: "conflict" in result ? "conflict" : "error", message: result.error };
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/meetings");
+  return { status: "saved", version: result.version };
+}
+
+export async function restorePreviousBodyAction(formData: FormData): Promise<SaveBodyState> {
+  const session = await requireSession();
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const result = await restorePreviousBody(session, meetingId);
+  if (!result.ok) return { status: "error", message: result.error };
+  revalidatePath(`/meetings/${meetingId}`);
+  revalidatePath("/meetings");
+  return { status: "saved", version: result.version };
 }

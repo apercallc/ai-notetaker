@@ -4,6 +4,8 @@ import { requireSession } from "@/lib/currentUser";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { getChatEntitlement } from "@/lib/chatQuota";
 import { MAX_QUESTION_LENGTH } from "@/lib/notesChatContext";
+import { listFolders } from "@/lib/library";
+import { flattenFolders } from "@/lib/libraryTree";
 import { AskClient } from "./AskClient";
 
 export const metadata = { title: "Ask your notes" };
@@ -13,6 +15,7 @@ export default async function AskPage() {
   const { workspaceId } = await requireSession();
   if (!managedHostingEnabled()) notFound();
   const entitlement = await getChatEntitlement(workspaceId);
+  const folders = flattenFolders(await listFolders(workspaceId));
 
   return (
     <div className="container">
@@ -23,7 +26,7 @@ export default async function AskPage() {
         )}
       </div>
       {entitlement.eligible ? (
-        <AskClient maxLength={MAX_QUESTION_LENGTH} />
+        <AskClient maxLength={MAX_QUESTION_LENGTH} folders={folders.map((folder) => ({ id: folder.id, label: `${"\u2003".repeat(folder.depth)}${folder.name}` }))} />
       ) : (
         <section className="settings-card">
           <h2>{entitlement.reason === "limit" ? "You've used this period's questions" : "Chat with your meetings"}</h2>

@@ -244,12 +244,22 @@ export interface ProcessingState {
 
 export interface MeetingListItem extends MeetingSummaryResponse {
   processing: ProcessingState | null;
+  /** Library placement (null = top level). */
+  folderId: string | null;
   /** Where the search query matched, when it matched somewhere other than the title. */
   match: { source: "summary" | "action item" | "transcript"; parts: HighlightPart[] } | null;
 }
 
 export interface MeetingDetail extends MeetingDetailResponse {
   processing: ProcessingState | null;
+  folderId: string | null;
+  /** Version token for edit-conflict checks (the row's last-change time). */
+  version: string;
+  /** Set when the body was edited by hand and not regenerated since. */
+  summaryEditedAt: string | null;
+  hasPreviousSummary: boolean;
+  /** Created by hand or uploaded as text, not from a recording. */
+  isManual: boolean;
   /** "managed" meetings were summarized by the hosted service and can be regenerated. */
   processingMode: string;
   notesRegenerations: number;
@@ -277,10 +287,24 @@ function toProcessingState(jobs: { id: string; status: string; stage: string | n
 
 export interface ListMeetingsOptions {
   query?: string;
+  /** Exactly this folder (null = the top level). Omit to look everywhere. */
+  folderId?: string | null;
+  /** Any of these folders; used for "this folder and everything inside it". Wins over folderId. */
+  folderIds?: string[];
   /** Only meetings that started at or after this instant. */
   since?: Date;
   limit?: number;
   offset?: number;
+}
+
+/** Card preview: Markdown markers removed, lines joined, cut at 200 characters. */
+export function previewText(summary: string): string {
+  const plain = summary
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s+)/, "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return plain.length > 200 ? `${plain.slice(0, 200).trimEnd()}…` : plain;
 }
 
 export async function listMeetings(
@@ -302,6 +326,8 @@ export async function listMeetings(
 
   const where = {
     workspaceId,
+    deletedAt: null,
+    ...(options.folderIds ? { folderId: { in: options.folderIds } } : options.folderId !== undefined ? { folderId: options.folderId } : {}),
     ...(options.since ? { startedAt: { gte: options.since } } : {}),
     ...(query
       ? {
@@ -342,9 +368,10 @@ export async function listMeetings(
       id: row.id,
       title: row.title,
       startedAt: row.startedAt.toISOString(),
-      summaryPreview: row.summary.length > 200 ? `${row.summary.slice(0, 200)}…` : row.summary,
+      summaryPreview: previewText(row.summary),
       openActionItems: row.actionItems.length,
       processing: toProcessingState(row.processingJobs),
+      folderId: row.folderId,
       match: matches.get(row.id) ?? null,
     })),
     total,
@@ -399,7 +426,7 @@ async function findMatches(
 
 export async function getMeeting(workspaceId: string, id: string): Promise<MeetingDetail | null> {
   const row = await prisma.meeting.findFirst({
-    where: { id, workspaceId },
+    where: { id, workspaceId, deletedAt: null },
     include: {
       transcript: { orderBy: { order: "asc" } },
       actionItems: true,
@@ -419,6 +446,11 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     processing: toProcessingState(row.processingJobs),
     processingMode: row.processingMode,
     notesRegenerations: row.notesRegenerations,
+    folderId: row.folderId,
+    version: row.updatedAt.toISOString(),
+    summaryEditedAt: row.summaryEditedAt?.toISOString() ?? null,
+    hasPreviousSummary: row.previousSummary !== null,
+    isManual: row.captureSource === "manual",
     ...(row.speakers.length > 0 ? { speakerNames: Object.fromEntries(row.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName])) } : {}),
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
@@ -462,7 +494,7 @@ export async function listActionItems(workspaceId: string, options: ListActionIt
   const limit = Math.min(Math.max(options.limit ?? ACTION_ITEMS_PAGE_SIZE, 1), 100);
   const status = options.overdue ? "open" : options.status;
   const where = {
-    meeting: { workspaceId },
+    meeting: { workspaceId, deletedAt: null },
     ...(status ? { status } : {}),
     ...(options.overdue ? { dueAt: { lt: new Date(`${utcDateString()}T00:00:00.000Z`) } } : {}),
     ...(options.mine
@@ -504,7 +536,7 @@ export async function updateActionItem(
     throw new ValidationError("dueAt must be an ISO 8601 string");
   }
   const result = await prisma.actionItem.updateMany({
-    where: { id, meeting: { workspaceId } },
+    where: { id, meeting: { workspaceId, deletedAt: null } },
     data: {
       ...(changes.status ? { status: changes.status, completedAt: changes.status === "done" ? new Date() : null } : {}),
       ...(changes.dueAt !== undefined ? { dueAt: changes.dueAt ? new Date(changes.dueAt) : null } : {}),
@@ -517,7 +549,7 @@ export async function renameMeeting(workspaceId: string, id: string, title: stri
   const trimmed = title.trim();
   if (!trimmed) throw new ValidationError("title is required");
   if (trimmed.length > MAX_TITLE_LENGTH) throw new ValidationError(`title must be ${MAX_TITLE_LENGTH} characters or fewer`);
-  const result = await prisma.meeting.updateMany({ where: { id, workspaceId }, data: { title: trimmed } });
+  const result = await prisma.meeting.updateMany({ where: { id, workspaceId, deletedAt: null }, data: { title: trimmed } });
   return result.count > 0;
 }
 

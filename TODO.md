@@ -44,9 +44,15 @@ multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
       [`docs/superpowers/specs/2026-09-30-speaker-names-design.md`](docs/superpowers/specs/2026-09-30-speaker-names-design.md).
 - [ ] Speaker-name follow-ups: merge two speakers into one, include names in
       the account data export, and suggest names from the calendar attendees.
-- [ ] Library, Drive-style: nested folders, notes as `.md` text files, text-only
-      editor (note body only, transcript read-only), Trash with 30-day restore,
-      folder-scoped search/Ask, upload `.md`/`.txt` as a note, retention UI.
+- [x] Library, Drive-style: nested folders, notes as `.md` text, text-only editor
+      (body only, transcript read-only, undo), Trash with 30-day restore,
+      folder-scoped search and Ask, upload `.md`/`.txt`. Spec:
+      [`docs/superpowers/specs/2026-09-30-library-design.md`](docs/superpowers/specs/2026-09-30-library-design.md).
+- [ ] Library follow-ups: per-person private folders and folder permissions,
+      drag-and-drop and multi-select move, autosave and fuller version history,
+      folder-level retention, include folders in the account data export, and a
+      design-review pass. Update the public privacy page wording if its deletion
+      text is kept separate from the FAQ.
 - [ ] Export and integrations: Slack, Notion, signed webhooks (Zapier).
 - [ ] MCP server over a user's own notes (read-only scoped tokens first).
 - [ ] Multilingual: detect, translated summary, custom vocabulary (the local

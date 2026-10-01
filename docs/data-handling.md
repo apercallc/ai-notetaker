@@ -41,6 +41,16 @@ then remove its
 [`helper-packaging.md`](helper-packaging.md). Deleting a meeting or the data
 directory is permanent; export or copy data first when it must be retained.
 
+Deleting a note or folder in the webapp library moves it to the Trash: it
+disappears from lists, search, Ask your notes, action items and share links
+immediately, stays restorable for 30 days, then is removed permanently (the
+managed worker, or page loads on a self-hosted instance, purge expired items).
+"Delete forever" and "Empty trash" (owners only) remove items at once, and
+workspace retention policies and account/workspace deletion remove trashed
+notes too. The legacy `DELETE /api/meetings/:id` API and retention sweeps
+delete permanently. Deleting a folder trashes every note inside it. Audit
+events record who deleted or restored what (ids only, never note text).
+
 Delete synced notes from the user's own webapp through its meeting detail
 route or API. Managed users can delete hosted meetings and their text notes;
 temporary audio is removed after successful processing and is not playable,

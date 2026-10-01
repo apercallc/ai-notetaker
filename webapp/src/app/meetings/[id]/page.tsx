@@ -8,6 +8,9 @@ import { speakerLabel } from "@/lib/types";
 import { formatOffset, groupTurns } from "@/lib/transcript";
 import { parseSummary } from "@/lib/summaryFormat";
 import { actionItemsToText } from "@/lib/actionItems";
+import { listFolders } from "@/lib/library";
+import { folderPath } from "@/lib/libraryTree";
+import { SummaryBlocks } from "@/components/SummaryBlocks";
 import { modeLabel } from "@/lib/meetingText";
 import { requireSession } from "@/lib/currentUser";
 import { ActionItemRow } from "@/components/ActionItemRow";
@@ -18,6 +21,7 @@ import { ProcessingBadge, failureReason } from "@/components/ProcessingBadge";
 import { RetryProcessing } from "@/components/RetryProcessing";
 import { DeleteButton } from "./DeleteButton";
 import { ExportButtons } from "./ExportButtons";
+import { NoteBody } from "./NoteBody";
 import { NotesTemplate } from "./NotesTemplate";
 import { SpeakerName } from "./SpeakerName";
 import { ShareMeeting } from "./ShareMeeting";
@@ -34,13 +38,15 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: meeting?.title ?? "Meeting not found" };
 }
 
-export default async function MeetingDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function MeetingDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string; error?: string }> }) {
   const { id } = await params;
+  const { edit, error } = await searchParams;
   const { workspaceId } = await requireSession();
   const meeting = await loadMeeting(workspaceId, id);
   if (!meeting) notFound();
 
   const shares = await listActiveShares(workspaceId, meeting.id);
+  const crumbs = folderPath(await listFolders(workspaceId), meeting.folderId);
   const summaryBlocks = parseSummary(meeting.summary);
   const turns = groupTurns(meeting.startedAt, meeting.endedAt, meeting.transcript);
   const mode = modeLabel(meeting.mode);
@@ -51,7 +57,13 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="container">
       <AutoRefresh active={inFlight} />
-      <Link href="/meetings" className="back-link">← All meetings</Link>
+      <nav className="breadcrumbs" aria-label="Folder path">
+        <ol>
+          <li><Link href="/meetings">Library</Link></li>
+          {crumbs.map((crumb) => <li key={crumb.id}><Link href={`/meetings?folder=${crumb.id}`}>{crumb.name}</Link></li>)}
+        </ol>
+      </nav>
+      {error && <p className="error-text" role="alert">{error.slice(0, 200)}</p>}
 
       <TitleEditor key={meeting.title} meetingId={meeting.id} title={meeting.title} />
       <p className="meeting-date">
@@ -67,32 +79,26 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
         </div>
       )}
 
-      {canRegenerate && <NotesTemplate meetingId={meeting.id} mode={meeting.mode} used={meeting.notesRegenerations} />}
+      {canRegenerate && <NotesTemplate meetingId={meeting.id} mode={meeting.mode} used={meeting.notesRegenerations} edited={meeting.summaryEditedAt !== null} />}
 
       <section aria-labelledby="summary-heading">
         <div className="section-head">
           <h2 id="summary-heading" className="section-title">Summary</h2>
           {meeting.summary && <CopyButton text={meeting.summary} label="Copy summary" className="button button-secondary button-small" />}
         </div>
-        {summaryBlocks.length === 0 ? (
-          <p className="muted-copy">{inFlight ? "Your notes are being prepared. This page updates on its own." : "No summary was generated for this meeting."}</p>
-        ) : (
-          <div className="summary">
-            {summaryBlocks.map((block, index) =>
-              block.type === "heading" ? (
-                <h3 key={index}>{block.text}</h3>
-              ) : block.type === "list" ? (
-                block.ordered ? (
-                  <ol key={index}>{block.items.map((item, i) => <li key={i}>{item}</li>)}</ol>
-                ) : (
-                  <ul key={index}>{block.items.map((item, i) => <li key={i}>{item}</li>)}</ul>
-                )
-              ) : (
-                <p key={index}>{block.text}</p>
-              ),
-            )}
-          </div>
-        )}
+        <NoteBody
+          meetingId={meeting.id}
+          summary={meeting.summary}
+          version={meeting.version}
+          hasPrevious={meeting.hasPreviousSummary}
+          startEditing={edit === "1" || (meeting.isManual && meeting.summary === "")}
+        >
+          {summaryBlocks.length === 0 ? (
+            <p className="muted-copy">{inFlight ? "Your notes are being prepared. This page updates on its own." : "No summary was generated for this meeting."}</p>
+          ) : (
+            <SummaryBlocks blocks={summaryBlocks} />
+          )}
+        </NoteBody>
       </section>
 
       {meeting.actionItems.length > 0 && (
@@ -145,7 +151,7 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
       )}
 
       <div className="detail-actions">
-        <ExportButtons meeting={meeting} />
+        <ExportButtons meeting={meeting} manual={meeting.isManual} />
         <DeleteButton meetingId={meeting.id} meetingTitle={meeting.title} />
       </div>
 

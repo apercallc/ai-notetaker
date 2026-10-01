@@ -28,7 +28,7 @@ export async function regenerateNotes(
   const template = NOTE_TEMPLATES[templateId];
 
   const meeting = await prisma.meeting.findFirst({
-    where: { id: meetingId, workspaceId: session.workspaceId },
+    where: { id: meetingId, workspaceId: session.workspaceId, deletedAt: null },
     select: {
       id: true,
       userId: true,
@@ -77,7 +77,12 @@ export async function regenerateNotes(
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.meeting.update({ where: { id: meeting.id }, data: { summary: formatSummaryText(summary), mode: templateId } });
+    // Keep what was there once, so a regeneration can be undone like a hand edit.
+    const current = await tx.meeting.findUniqueOrThrow({ where: { id: meeting.id }, select: { summary: true } });
+    await tx.meeting.update({
+      where: { id: meeting.id },
+      data: { summary: formatSummaryText(summary), mode: templateId, previousSummary: current.summary, summaryEditedAt: null },
+    });
     const existing = await tx.actionItem.findMany({ where: { meetingId: meeting.id }, select: { text: true } });
     const known = new Set(existing.map((item) => item.text.trim().toLowerCase()));
     const fresh = summary.actionItems.filter((item) => !known.has(item.text.trim().toLowerCase()));

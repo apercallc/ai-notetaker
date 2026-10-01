@@ -11,6 +11,7 @@ import { isManagedPlan, PLAN_IMPORT_MAX_SECONDS } from "./plans";
 import { decodeToPcm, mediaToolsAvailable, MediaDecodeError, type DecodedAudio } from "./mediaDecode";
 import { getObject } from "./objectStorage";
 import { purgeExpiredAuditEvents } from "./audit";
+import { purgeExpiredTrash } from "./library";
 import { noteTemplateFor, type NoteTemplate } from "./noteTemplates";
 import { sweepStaleStagedObjects } from "./objectStorage";
 import { chunksToReadableStream, deleteManagedUploadAudio, expireManagedMeetings, expireManagedUploads, readChunksSequentially } from "./managedJobs";
@@ -764,6 +765,9 @@ export async function nextManagedJob(): Promise<ManagedJobClaim | null> {
   await expireManagedMeetings();
   await purgeExpiredAuditEvents().catch((error: unknown) => {
     console.error("audit purge failed", { error: error instanceof Error ? error.message : String(error) });
+  });
+  await purgeExpiredTrash().catch((error: unknown) => {
+    console.error("trash purge failed", { error: error instanceof Error ? error.message : String(error) });
   });
   await sweepOrphanedAudio();
   const staleBefore = new Date(Date.now() - MANAGED_JOB_LEASE_MS);

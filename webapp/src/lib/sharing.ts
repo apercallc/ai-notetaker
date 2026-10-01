@@ -30,7 +30,7 @@ export async function createMeetingShare(
   meetingId: string,
   expiresInDays = DEFAULT_SHARE_EXPIRY_DAYS,
 ): Promise<{ id: string; token: string; expiresAt: Date }> {
-  const meeting = await prisma.meeting.findFirst({ where: { id: meetingId, workspaceId }, select: { id: true } });
+  const meeting = await prisma.meeting.findFirst({ where: { id: meetingId, workspaceId, deletedAt: null }, select: { id: true } });
   if (!meeting) throw new SharingValidationError("meeting not found");
 
   const token = randomBytes(32).toString("base64url");
@@ -79,9 +79,7 @@ export async function getSharedMeeting(token: string): Promise<MeetingDetailResp
   const meeting = await getMeeting(share.workspaceId, share.meetingId);
   if (!meeting) return null;
   // Internal processing details never reach a share link's reader.
-  const { processing: _processing, processingMode: _mode, notesRegenerations: _regenerations, ...publicView } = meeting;
-  void _processing;
-  void _mode;
-  void _regenerations;
+  const { processing: _processing, processingMode: _mode, notesRegenerations: _regenerations, folderId: _folder, version: _version, summaryEditedAt: _edited, hasPreviousSummary: _previous, isManual: _manual, ...publicView } = meeting;
+  void [_processing, _mode, _regenerations, _folder, _version, _edited, _previous, _manual];
   return publicView;
 }

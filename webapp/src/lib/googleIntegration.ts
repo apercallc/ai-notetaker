@@ -449,7 +449,7 @@ export async function exportMeetingToGoogleDrive(userId: string, workspaceId: st
   getGoogleConfig();
   if (!meetingId || meetingId.length > 128) throw new GoogleIntegrationError("meetingId is required.", 400);
   const meeting = await prisma.meeting.findFirst({
-    where: { id: meetingId, workspaceId, endedAt: { lte: new Date() } },
+    where: { id: meetingId, workspaceId, deletedAt: null, endedAt: { lte: new Date() } },
     include: { transcript: { orderBy: { order: "asc" } }, actionItems: { orderBy: { id: "asc" } }, speakers: { select: { speakerKey: true, displayName: true } } },
   });
   if (!meeting) throw new GoogleIntegrationError("Completed meeting not found.", 404);

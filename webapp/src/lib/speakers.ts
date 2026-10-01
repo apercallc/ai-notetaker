@@ -26,7 +26,7 @@ export async function renameSpeaker(workspaceId: string, meetingId: string, spea
     // Renames of one meeting run one at a time; the summary rewrite reads then writes.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${meetingId}, 1))`;
     const meeting = await tx.meeting.findFirst({
-      where: { id: meetingId, workspaceId },
+      where: { id: meetingId, workspaceId, deletedAt: null },
       select: { summary: true, speakers: true, transcript: { select: { speaker: true }, distinct: ["speaker"] } },
     });
     if (!meeting) return { ok: false as const, error: "This meeting no longer exists." };

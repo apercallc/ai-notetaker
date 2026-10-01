@@ -27,6 +27,17 @@ model Meeting {
   recordingObjectKey String?
   // Times notes were regenerated from the stored transcript (each is a paid summary call).
   notesRegenerations Int @default(0)
+  // Library placement. Null folderId is the top level.
+  folderId    String?
+  // Trash: a note with deletedAt set is hidden everywhere until restored or
+  // purged. trashRootId names the item (a folder or this note) whose deletion
+  // took it, so restoring a folder brings back exactly what went with it.
+  deletedAt   DateTime?
+  trashRootId String?
+  // Set when the user edits the note body by hand; the replaced text is kept
+  // once in previousSummary so an edit or a regeneration can be undone.
+  summaryEditedAt DateTime?
+  previousSummary String? @db.Text
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -36,7 +47,10 @@ model Meeting {
   processingJobs ProcessingJob[]
   shareTokens MeetingShareToken[]
   speakers    MeetingSpeaker[]
+  folder      Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
+  @@index([workspaceId, folderId, startedAt])
+  @@index([workspaceId, deletedAt])
   @@index([userId, startedAt])
   @@index([workspaceId, startedAt])
 }
@@ -133,6 +147,7 @@ model Workspace {
   subscription WorkspaceSubscription?
   shareTokens MeetingShareToken[]
   auditEvents AuditEvent[]
+  folders     Folder[]
 
   // Exactly one workspace has isDefault = true — the ingestion target for
   // every meeting synced via the AUTH_TOKEN Bearer contract, and the
@@ -406,4 +421,29 @@ model MeetingSpeaker {
   meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@unique([meetingId, speakerKey])
+}
+
+// A library folder. Folders nest (depth is capped in lib/library.ts) and hold
+// notes; they are workspace-wide, like the notes themselves. Names are unique
+// per parent ignoring case among live folders (a partial unique index created
+// in the migration, which Prisma cannot express). Deleting a folder trashes it
+// together with everything inside; see Meeting.trashRootId.
+model Folder {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  parentId        String?
+  name            String
+  createdByUserId String?
+  deletedAt       DateTime?
+  trashRootId     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    Folder?   @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[]  @relation("FolderTree")
+  meetings  Meeting[]
+
+  @@index([workspaceId, parentId])
+  @@index([workspaceId, deletedAt])
 }

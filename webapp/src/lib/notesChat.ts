@@ -48,8 +48,10 @@ function countHits(text: string, terms: string[]): number {
  * with no usable terms ("what happened last week?") falls back to the most
  * recent meetings.
  */
-export async function retrieveNotes(workspaceId: string, question: string): Promise<NoteSource[]> {
+export async function retrieveNotes(workspaceId: string, question: string, folderIds?: string[]): Promise<NoteSource[]> {
   const terms = extractTerms(question);
+  // Optional library scope: only notes in these folders.
+  const scope = folderIds ? { folderId: { in: folderIds } } : {};
   const include = (filter: Insensitive[]) => ({
     actionItems: { select: { text: true }, take: 10 },
     speakers: { select: { speakerKey: true, displayName: true } },
@@ -68,6 +70,8 @@ export async function retrieveNotes(workspaceId: string, question: string): Prom
     const candidates = await prisma.meeting.findMany({
       where: {
         workspaceId,
+        deletedAt: null,
+        ...scope,
         OR: [
           ...filters.map((contains) => ({ title: contains })),
           ...filters.map((contains) => ({ summary: contains })),
@@ -105,7 +109,7 @@ export async function retrieveNotes(workspaceId: string, question: string): Prom
         .slice(0, TOP_MEETINGS);
       // Phase 2: load evidence for the winners only, keeping rank order.
       const rows = await prisma.meeting.findMany({
-        where: { workspaceId, id: { in: top.map((entry) => entry.id) } },
+        where: { workspaceId, deletedAt: null, id: { in: top.map((entry) => entry.id) } },
         select: { id: true, title: true, startedAt: true, summary: true, ...include(filters) },
       });
       const byId = new Map(rows.map((row) => [row.id, row]));
@@ -117,7 +121,7 @@ export async function retrieveNotes(workspaceId: string, question: string): Prom
   }
 
   const recent = await prisma.meeting.findMany({
-    where: { workspaceId },
+    where: { workspaceId, deletedAt: null, ...scope },
     orderBy: [{ startedAt: "desc" }, { id: "desc" }],
     take: RECENT_FALLBACK,
     select: { id: true, title: true, startedAt: true, summary: true, ...include([]) },
@@ -194,7 +198,7 @@ async function askProvider(question: string, contextText: string): Promise<strin
  * monthly question cap before any provider spend, and gives the question back
  * if the provider fails. Provider keys never leave the server.
  */
-export async function askNotes(workspaceId: string, rawQuestion: string): Promise<ChatAnswer> {
+export async function askNotes(workspaceId: string, rawQuestion: string, folderIds?: string[]): Promise<ChatAnswer> {
   const question = rawQuestion.trim();
   if (!question) throw new InvalidQuestionError("Type a question first.");
   if (question.length > MAX_QUESTION_LENGTH) throw new InvalidQuestionError(`Keep questions under ${MAX_QUESTION_LENGTH} characters.`);
@@ -202,7 +206,7 @@ export async function askNotes(workspaceId: string, rawQuestion: string): Promis
   if ((inFlight.get(workspaceId) ?? 0) >= MAX_IN_FLIGHT_PER_WORKSPACE) throw new ChatBusyError();
   inFlight.set(workspaceId, (inFlight.get(workspaceId) ?? 0) + 1);
   try {
-    return await answer(workspaceId, question);
+    return await answer(workspaceId, question, folderIds);
   } finally {
     const left = (inFlight.get(workspaceId) ?? 1) - 1;
     if (left <= 0) inFlight.delete(workspaceId);
@@ -210,10 +214,10 @@ export async function askNotes(workspaceId: string, rawQuestion: string): Promis
   }
 }
 
-async function answer(workspaceId: string, question: string): Promise<ChatAnswer> {
+async function answer(workspaceId: string, question: string, folderIds?: string[]): Promise<ChatAnswer> {
   const reservation = await reserveChatQuestion(workspaceId);
   try {
-    const { text, used } = buildContext(await retrieveNotes(workspaceId, question));
+    const { text, used } = buildContext(await retrieveNotes(workspaceId, question, folderIds));
     const reply = await askProvider(question, text);
     const sources = citedNumbers(reply, used.length).map((n) => {
       const source = used[n - 1] as NoteSource;

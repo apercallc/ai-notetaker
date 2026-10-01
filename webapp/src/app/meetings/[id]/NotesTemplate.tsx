@@ -8,7 +8,7 @@ import { MAX_NOTES_REGENERATIONS, PICKABLE_TEMPLATES } from "@/lib/noteTemplates
  * Pick a template and rewrite the notes from the stored transcript. Two steps
  * (choose, then confirm) because it replaces the summary text.
  */
-export function NotesTemplate({ meetingId, mode, used }: { meetingId: string; mode: string; used: number }) {
+export function NotesTemplate({ meetingId, mode, used, edited }: { meetingId: string; mode: string; used: number; edited: boolean }) {
   const initial = PICKABLE_TEMPLATES.some((template) => template.id === mode) ? mode : "general";
   const [template, setTemplate] = useState(initial);
   const [confirming, setConfirming] = useState(false);
@@ -56,7 +56,7 @@ export function NotesTemplate({ meetingId, mode, used }: { meetingId: string; mo
       <p className="muted-copy">{description} {remaining > 0 ? `${remaining} of ${MAX_NOTES_REGENERATIONS} rewrites left for this meeting.` : "No rewrites left for this meeting."}</p>
       {confirming && (
         <div className="callout" role="group" aria-label="Confirm rewriting the notes">
-          <p>Rewrite the summary with the {PICKABLE_TEMPLATES.find((option) => option.id === template)?.label} template? Your action items are kept; new ones are added.</p>
+          <p>Rewrite the summary with the {PICKABLE_TEMPLATES.find((option) => option.id === template)?.label} template? Your action items are kept; new ones are added.{edited ? " This replaces the text you edited; you can restore it afterwards." : " The current text is kept so you can restore it."}</p>
           <div className="inline-action">
             <button type="button" className="button button-primary button-small" onClick={run} disabled={pending} aria-busy={pending}>{pending ? "Rewriting…" : "Rewrite notes"}</button>
             <button type="button" className="button button-secondary button-small" onClick={() => setConfirming(false)} disabled={pending}>Cancel</button>

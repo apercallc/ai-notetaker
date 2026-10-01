@@ -2068,3 +2068,278 @@ a.meeting-card:hover,
   width: 200px;
   min-height: 36px;
 }
+
+/* Library */
+.library-toolbar {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.library-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.library-toolbar .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.folder-rename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.folder-rename .text-input {
+  width: 240px;
+  min-height: 38px;
+}
+
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.breadcrumbs li + li::before {
+  content: "/";
+  margin-right: 4px;
+  color: var(--color-text-muted);
+}
+
+.breadcrumbs a {
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.breadcrumbs a:hover {
+  color: var(--color-accent);
+}
+
+.search-scope {
+  margin: var(--space-2) 0;
+}
+
+.folder-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.folder-link {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.folder-link:hover .folder-name {
+  color: var(--color-accent);
+}
+
+.folder-name {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.folder-count {
+  font-size: 13px;
+}
+
+.folder-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.folder-message {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.file-type {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.move-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 48px));
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.move-dialog::backdrop {
+  background: #0a140e80;
+}
+
+.move-dialog h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.move-options {
+  display: grid;
+  gap: 2px;
+  max-height: 320px;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+}
+
+.move-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding-right: 12px;
+  padding-left: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.move-option:hover {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.move-option.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.move-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.note-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.note-body-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.note-body-tools .button[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+}
+
+.note-count {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.note-editor {
+  min-height: 340px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.trash-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .folder-actions {
+    flex: 1 1 100%;
+  }
+
+  .folder-actions .button {
+    flex: 1;
+  }
+
+  .folder-rename .text-input {
+    width: 100%;
+  }
+}
+
+/* Compact buttons inside the library, trash and note tools (".button-small" itself carries no style). */
+.library-toolbar .button,
+.folder-actions .button,
+.folder-rename .button,
+.card-actions .button,
+.note-body-tools .button,
+.trash .button-secondary,
+.notes-template .button,
+.speaker-edit .button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .library-toolbar .button,
+  .folder-actions .button,
+  .card-actions .button,
+  .note-body-tools .button,
+  .trash .button {
+    min-height: 44px;
+  }
+}
+
+.ask-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.ask-scope select {
+  width: auto;
+  min-width: 180px;
+  max-width: 100%;
+}
