@@ -63,6 +63,7 @@ summary and action items as to-dos.
 ## Configuration
 
 `INTEGRATIONS_ENCRYPTION_KEY` (32 random bytes, base64) encrypts stored secrets.
-When unset it is derived from `AUTH_TOKEN`, so no setup is needed; rotating
+Self-hosted instances may leave it unset: it is then derived from `AUTH_TOKEN`; rotating
 `AUTH_TOKEN` without setting the dedicated key makes saved destinations unreadable
-and they must be re-created. `APP_URL` makes links in payloads absolute.
+and they must be re-created. With `MANAGED_HOSTING=true` the key is required (no fallback), and
+`INTEGRATIONS_ALLOW_PRIVATE_NETWORKS` is ignored. `APP_URL` makes links in payloads absolute.

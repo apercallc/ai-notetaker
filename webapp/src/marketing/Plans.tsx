@@ -59,6 +59,9 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
           <li><Icon as={Check} /><span>No provider accounts or keys to manage</span></li>
           <li><Icon as={Check} /><span>Searchable library of your notes</span></li>
           <li><Icon as={Check} /><span><strong>Ask your notes:</strong> {n(LIMITS.proQuestions)} questions a month, answered from your meetings</span></li>
+          <li><Icon as={Check} /><span>Import audio and video files, up to {LIMITS.importHoursPro} hours each</span></li>
+          <li><Icon as={Check} /><span>Notes templates, speaker names, folders and Trash</span></li>
+          <li><Icon as={Check} /><span>Slack, Notion, webhooks and an MCP connection for AI assistants</span></li>
           <li><Icon as={Check} /><span>Audio deleted after processing</span></li>
         </ul>
         <Link className="mk-btn mk-btn--solid" href={start}>{signupOpen ? "Try Hosted AI free" : "Get the extension"}</Link>
@@ -71,6 +74,8 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
         <ul className="mk-checks">
           <li><Icon as={Check} /><span>Everything in Pro, with {n(LIMITS.teamQuestions)} Ask-your-notes questions a month</span></li>
           <li><Icon as={Check} /><span>Invite teammates to one library</span></li>
+          <li><Icon as={Check} /><span>Imports up to {LIMITS.importHoursTeam} hours each</span></li>
+          <li><Icon as={Check} /><span>Activity log for workspace owners</span></li>
           <li><Icon as={Check} /><span>Owners set how long notes are kept</span></li>
           <li><Icon as={Check} /><span>Workspaces are fully isolated from each other</span></li>
         </ul>

@@ -1933,6 +1933,8 @@ a.meeting-card:hover,
 .import-drop:hover,
 .import-drop.is-dragging,
 .import-drop:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
   border-color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
 }
@@ -2033,6 +2035,7 @@ a.meeting-card:hover,
   border-radius: 8px;
   background: transparent;
   font: inherit;
+  min-height: 24px;
   cursor: pointer;
 }
 
@@ -2169,6 +2172,7 @@ a.meeting-card:hover,
 }
 
 .folder-count {
+  white-space: nowrap;
   font-size: 13px;
 }
 
@@ -2450,4 +2454,78 @@ a.meeting-card:hover,
 
 .audit-table td:first-child {
   white-space: nowrap;
+}
+
+/* Tablet widths: seven nav items plus sign-out must fit beside the brand. */
+@media (min-width: 761px) and (max-width: 1080px) {
+  .app-header-inner {
+    width: calc(100% - 32px);
+    gap: 14px;
+  }
+
+  .app-nav ul {
+    gap: 2px;
+  }
+
+  .app-nav a {
+    padding: 0 8px;
+    gap: 5px;
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 840px) {
+  .app-nav .nav-icon {
+    display: none;
+  }
+}
+
+/* Phones: one entry per card instead of a three-column table that scrolls sideways. */
+@media (max-width: 560px) {
+  .audit-filters label {
+    flex: 0 0 100%;
+    margin-bottom: -4px;
+  }
+
+  .audit-filters select {
+    flex: 1 1 140px;
+  }
+
+  .audit-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .audit-table,
+  .audit-table tbody,
+  .audit-table tr,
+  .audit-table td {
+    display: block;
+  }
+
+  .audit-table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .audit-table td {
+    padding: 1px 0;
+    border: 0;
+  }
+
+  .audit-table td:first-child {
+    color: var(--color-text-muted);
+    font-size: 13px;
+  }
+
+  .audit-table td:nth-child(2) {
+    font-weight: 600;
+  }
+}
+
+.trash-empty {
+  margin-top: var(--space-4);
 }

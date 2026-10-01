@@ -126,7 +126,7 @@ export async function createManagedUpload(
     throw new ManagedValidationError("totalBytes is out of range");
   }
 
-  const meeting = await prisma.meeting.findFirst({ where: { id: input.meetingId, workspaceId }, select: { id: true } });
+  const meeting = await prisma.meeting.findFirst({ where: { id: input.meetingId, workspaceId, deletedAt: null }, select: { id: true } });
   if (!meeting) throw new ManagedValidationError("meeting not found");
 
   const existing = await prisma.managedUpload.findUnique({

@@ -2,6 +2,11 @@ import Link from "next/link";
 import {
   BotOff,
   Check,
+  FileAudio,
+  FolderOpen,
+  Languages,
+  LayoutTemplate,
+  Plug,
   Cloud,
   Code,
   HardDrive,
@@ -131,6 +136,40 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
             <li className="mk-row">
               <h3 className="mk-h3"><Icon as={ListChecks} size={22} />&ldquo;What action items are still open?&rdquo;</h3>
               <p>Works across every meeting in your workspace, and only your workspace. Meeting hours and questions are separate allowances, so asking never uses up recording time.</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section className="mk-section" id="more" aria-labelledby="more-title">
+        <div className="mk-wrap">
+          <div className="mk-section-head">
+            <h2 className="mk-h2" id="more-title">More than live calls.</h2>
+            <p className="mk-lede">
+              These come with Hosted AI. Your own-keys setup stays free and keeps live capture, transcripts and
+              summaries on your device.
+            </p>
+          </div>
+          <ul className="mk-rows">
+            <li className="mk-row">
+              <h3 className="mk-h3"><Icon as={FileAudio} size={22} />Import a recording</h3>
+              <p>Upload an audio or video file you already have and get the same transcript, summary and action items. The file is deleted once it is processed.</p>
+            </li>
+            <li className="mk-row">
+              <h3 className="mk-h3"><Icon as={LayoutTemplate} size={22} />Templates and speaker names</h3>
+              <p>Choose Standup, Sales call, 1:1, Interview, Lecture or General notes, and rename a speaker once to fix it everywhere.</p>
+            </li>
+            <li className="mk-row">
+              <h3 className="mk-h3"><Icon as={FolderOpen} size={22} />A library with folders and Trash</h3>
+              <p>Nested folders, text notes you can edit, and 30 days to restore anything you delete.</p>
+            </li>
+            <li className="mk-row">
+              <h3 className="mk-h3"><Icon as={Plug} size={22} />Slack, Notion, Zapier and AI assistants</h3>
+              <p>Send finished notes to a signed webhook, Slack or Notion, or let an MCP-compatible assistant read your own notes with a token you can revoke.</p>
+            </li>
+            <li className="mk-row">
+              <h3 className="mk-h3"><Icon as={Languages} size={22} />{LIMITS.languages} languages</h3>
+              <p>Set or detect the spoken language, add custom vocabulary, and write the notes in another language.</p>
             </li>
           </ul>
         </div>

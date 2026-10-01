@@ -180,7 +180,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         </p>
       )}
 
-      {error && <p className="error-text" role="alert">{ERROR_TEXT[error] ?? "That request was invalid."}</p>}
+      {error && <p className="error-text" role="alert">{ERROR_TEXT[error] ?? "Something went wrong. Try again."}</p>}
       {notice === "trashed" && (
         <p className="callout" role="status">Moved to Trash. <Link href="/trash">Open Trash</Link> to restore it within 30 days.</p>
       )}
@@ -226,7 +226,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                 <Link href={`/meetings/${meeting.id}`} className="card-link">
                   {q ? <Highlight parts={highlightParts(meeting.title, q)} /> : meeting.title}
                 </Link>
-                <span className="file-type" title="Markdown note">.md</span>
               </div>
               <div className="meta">
                 <LocalTime iso={meeting.startedAt} />
@@ -255,7 +254,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       {totalPages > 1 && (
         <nav className="pagination" aria-label="Note pages">
           {currentPage > 1 ? <Link href={pageHref(currentPage - 1)}>← Newer</Link> : <span aria-hidden="true" />}
-          <span aria-current="page">Page {currentPage} of {totalPages}</span>
+          <span>Page {currentPage} of {totalPages}</span>
           {currentPage < totalPages ? <Link href={pageHref(currentPage + 1)}>Older →</Link> : <span aria-hidden="true" />}
         </nav>
       )}

@@ -46,7 +46,8 @@ export function isPublicAddress(address: string): boolean {
 }
 
 export function privateNetworksAllowed(env: Record<string, string | undefined> = process.env): boolean {
-  return env.INTEGRATIONS_ALLOW_PRIVATE_NETWORKS === "true";
+  // Never on managed hosting: tenants must not be able to aim webhooks at internal addresses.
+  return env.INTEGRATIONS_ALLOW_PRIVATE_NETWORKS === "true" && env.MANAGED_HOSTING !== "true";
 }
 
 const PRIVATE_NAME = /(^|\.)(localhost|local|internal|localdomain|home\.arpa|lan|intranet)$/i;

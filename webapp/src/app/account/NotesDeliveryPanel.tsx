@@ -125,7 +125,7 @@ export function NotesDeliveryPanel({ rows, deliveries, canManage }: { rows: Inte
           {kind === "notion" && (
             <>
               <label htmlFor="int-notion-token">Notion integration token</label>
-              <input id="int-notion-token" name="notionToken" className="text-input" type="password" required disabled={pending} autoComplete="off" />
+              <input id="int-notion-token" name="notionToken" className="text-input" type="password" required disabled={pending} autoComplete="new-password" />
               <label htmlFor="int-notion-page">Notion page link</label>
               <input id="int-notion-page" name="notionPage" className="text-input" required disabled={pending} placeholder="https://www.notion.so/…" />
               <p className="muted-copy">Share that page with your Notion integration first; each note becomes a sub-page.</p>

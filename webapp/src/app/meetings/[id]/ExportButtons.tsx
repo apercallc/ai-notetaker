@@ -69,7 +69,7 @@ function download(meeting: MeetingDetailResponse, contents: string, extension: s
 
 export function ExportButtons({ meeting, manual = false }: { meeting: MeetingDetailResponse; manual?: boolean }) {
   return (
-    <div className="export-actions" aria-label="Export meeting">
+    <div className="export-actions" role="group" aria-label="Export meeting">
       <button type="button" className="button button-secondary" onClick={() => download(meeting, manual ? manualMarkdown(meeting) : markdownFor(meeting), "md", "text/markdown")}>
         Markdown
       </button>

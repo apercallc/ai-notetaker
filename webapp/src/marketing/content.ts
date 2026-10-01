@@ -1,4 +1,5 @@
-import { HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS, PLAN_CHAT_QUESTION_LIMITS, PLAN_MEETING_LIMITS } from "@/lib/plans";
+import { LANGUAGES } from "@/lib/languages";
+import { HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS, PLAN_CHAT_QUESTION_LIMITS, PLAN_IMPORT_MAX_SECONDS, PLAN_MEETING_LIMITS } from "@/lib/plans";
 
 /**
  * One source of truth for every product fact the marketing site states: the
@@ -36,6 +37,9 @@ export const LIMITS = {
   teamHours: PLAN_AUDIO_HOUR_LIMITS.hosted_team,
   proQuestions: PLAN_CHAT_QUESTION_LIMITS.hosted_pro,
   teamQuestions: PLAN_CHAT_QUESTION_LIMITS.hosted_team,
+  languages: LANGUAGES.length,
+  importHoursPro: PLAN_IMPORT_MAX_SECONDS.hosted_pro / 3_600,
+  importHoursTeam: PLAN_IMPORT_MAX_SECONDS.hosted_team / 3_600,
 } as const;
 
 const n = (value: number): string => value.toLocaleString("en-US");
@@ -64,7 +68,7 @@ export const FAQS: Faq[] = [
   {
     question: "How much does AI Notetaker cost?",
     topics: ["pricing"],
-    answer: `Using your own AI keys is free (the providers you choose bill you directly). Hosted AI includes ${LIMITS.trial} free meetings with no card. After that, Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for up to ${n(LIMITS.pro)} meetings or ${n(LIMITS.proHours)} meeting hours a month, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace with up to ${n(LIMITS.team)} meetings or ${n(LIMITS.teamHours)} meeting hours a month. Both include Ask your notes (${n(LIMITS.proQuestions)} and ${n(LIMITS.teamQuestions)} questions a month). Cancel any time from the billing page.`,
+    answer: `Using your own AI keys is free (the providers you choose bill you directly). Hosted AI includes ${LIMITS.trial} free meetings with no card. After that, Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for up to ${n(LIMITS.pro)} meetings or ${n(LIMITS.proHours)} meeting hours a month, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace with up to ${n(LIMITS.team)} meetings or ${n(LIMITS.teamHours)} meeting hours a month. Both include Ask your notes (${n(LIMITS.proQuestions)} and ${n(LIMITS.teamQuestions)} questions a month), file import, notes templates, the library, integrations and the MCP connection; Team adds an activity log for workspace owners. Imported recordings use the same monthly meeting hours as live meetings. Cancel any time from the billing page.`,
   },
   {
     question: "Can I ask questions about my past meetings?",
@@ -76,6 +80,34 @@ export const FAQS: Faq[] = [
     topics: ["setup"],
     answer:
       "No. Clearing history, cookies or cache does not delete notes. With Hosted AI your notes are stored in your workspace, so only a sign-in is needed again. In local mode they are stored in the extension on your device: they stay unless you uninstall the extension, delete the Chrome profile, or lose the device, and we hold no copy. Sync to Hosted AI or your own history server, or export the notes you want to keep.",
+  },
+  {
+    question: "Can I import a recording I already have?",
+    topics: ["pricing"],
+    answer: `Yes, with Hosted AI. Open Import in the web app and choose an audio or video file (mp3, m4a, wav, mp4, mov, mkv and more, up to 1.9 GB). It is transcribed and summarized like a live meeting. A single file can run up to ${LIMITS.importHoursPro} hours on Pro and ${LIMITS.importHoursTeam} hours on Team, and its length counts against your monthly meeting hours. The file is deleted once it has been processed. Imported files have no separate microphone channel, so speakers appear as Speaker 1, Speaker 2 and so on when the provider can tell them apart; you can rename them afterwards. Importing in the free own-keys mode is not available yet.`,
+  },
+  {
+    question: "Can I choose the format of my notes and rename the speakers?",
+    topics: ["pricing"],
+    answer:
+      "Yes, with Hosted AI. Pick a template per meeting: General, Standup, Sales call, 1:1, Interview or Lecture, and rewrite a meeting's notes with a different template later (up to three times per meeting; your action items are kept and the earlier text can be restored). Click a speaker's name in the transcript to rename them once; the new name replaces the old one throughout the transcript, summary, action-item owners, exports, shares and Ask your notes.",
+  },
+  {
+    question: "Which languages are supported?",
+    topics: ["pricing"],
+    answer: `With Hosted AI you can set a spoken-language hint or let the transcriber detect the language, write the notes in a different language than the one spoken (for example, a translated summary), and add custom vocabulary so names and jargon are spelled correctly. ${LIMITS.languages} languages are offered for hints and summaries. Accuracy depends on the transcription provider and the audio.`,
+  },
+  {
+    question: "Can I send notes to Slack, Notion or Zapier, or use them with an AI assistant?",
+    topics: ["pricing"],
+    answer:
+      "Yes. A workspace owner can set it up so that when a note is ready it is sent to to a signed webhook (use it with Zapier, Make or n8n), a Slack channel or a Notion page. Webhook signing secrets and tokens are stored encrypted and shown only once. For AI assistants, you can create a read-only token in Settings and connect an assistant that supports the Model Context Protocol (MCP) to search and read your own notes; it cannot change or delete anything, and you can revoke the token at any time.",
+  },
+  {
+    question: "Can I organise notes into folders and recover deleted ones?",
+    topics: ["pricing"],
+    answer:
+      "Yes. The hosted library has nested folders, plain text notes you can write or edit yourself, and upload of .md or .txt files. Search and Ask your notes can be limited to a folder. Deleting a note or folder moves it to Trash, where you can restore it for 30 days before it is removed for good.",
   },
   {
     question: "Can I cancel any time?",

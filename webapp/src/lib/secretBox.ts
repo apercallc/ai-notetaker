@@ -20,6 +20,7 @@ export function integrationsKey(env: Record<string, string | undefined> = proces
     if (key.length !== 32) throw new SecretBoxError("INTEGRATIONS_ENCRYPTION_KEY must be 32 bytes, base64 encoded");
     return key;
   }
+  if (env.MANAGED_HOSTING === "true") throw new SecretBoxError("Set INTEGRATIONS_ENCRYPTION_KEY: managed hosting does not derive it from AUTH_TOKEN");
   const seed = env.AUTH_TOKEN?.trim();
   if (!seed) throw new SecretBoxError("Set INTEGRATIONS_ENCRYPTION_KEY (or AUTH_TOKEN) to store integration secrets");
   return Buffer.from(hkdfSync("sha256", seed, "ai-notetaker", "integrations-v1", 32));
