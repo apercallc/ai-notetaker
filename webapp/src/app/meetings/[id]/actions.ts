@@ -13,6 +13,7 @@ import { retryMeetingProcessing } from "@/lib/meetingProcessing";
 import { regenerateNotes } from "@/lib/notesRegenerate";
 import { renameSpeaker } from "@/lib/speakers";
 import { isValidDateOnly } from "@/lib/actionItems";
+import { createSlidingWindowLimiter } from "@/lib/lookupThrottle";
 
 export type ShareActionResult =
   | { ok: true; id: string; token: string; expiresAt: string | null }
@@ -145,9 +146,16 @@ async function failSoft<T>(label: string, meetingId: string, work: () => Promise
 
 export type RetryState = { status: "started" } | { status: "error"; message: string };
 
+// A retry can re-run paid provider calls. A few per minute per note is plenty for a person; a stuck
+// button or a script is not. (Per server process, like the share-page limiter.)
+const retryLimiter = createSlidingWindowLimiter({ limit: 3, windowMs: 60_000 });
+
 export async function retryProcessingAction(formData: FormData): Promise<RetryState> {
   const { workspaceId } = await requireSession();
   const meetingId = String(formData.get("meetingId") ?? "");
+  if (!retryLimiter.hit(`${workspaceId}:${meetingId}`).allowed) {
+    return { status: "error", message: "That note was retried a few times just now. Give it a minute, then try again." };
+  }
   const result = await failSoft("retry processing failed", meetingId, () => retryMeetingProcessing(workspaceId, meetingId), "Couldn't restart processing. Try again.");
   if ("status" in result) return result;
   if (!result.ok) return { status: "error", message: result.error };
