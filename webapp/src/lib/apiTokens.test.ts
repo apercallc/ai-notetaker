@@ -31,6 +31,24 @@ describe("managed API token lifecycle", () => {
     expect(create.mock.calls[0]?.[0].data).not.toHaveProperty("token");
   });
 
+  it("keeps only the newest tokens per user and never fails a sign-in over housekeeping", async () => {
+    const newest = Array.from({ length: 25 }, (_, index) => ({ id: `keep-${index}` }));
+    findMany.mockResolvedValueOnce(newest);
+    await createApiToken("user-1", { now: 5_000 });
+    const prune = deleteMany.mock.calls.map((call) => call[0]?.where).find((where) => where?.id?.notIn);
+    expect(prune).toMatchObject({ userId: "user-1", id: { notIn: newest.map((row) => row.id) } });
+
+    findMany.mockResolvedValueOnce([{ id: "only-one" }]);
+    deleteMany.mockClear();
+    await createApiToken("user-1", { now: 6_000 });
+    expect(deleteMany.mock.calls.some((call) => call[0]?.where?.id?.notIn)).toBe(false);
+
+    deleteMany.mockRejectedValue(new Error("db blip"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(createApiToken("user-1", { now: 7_000 })).resolves.toMatchObject({ id: "token-row-1" });
+    log.mockRestore();
+  });
+
   it("ignores malformed, revoked, foreign-scope, expired, and temporary-password credentials", async () => {
     expect(await resolveApiToken("" )).toBeNull();
     expect(await resolveApiToken("cookie-id")).toBeNull();

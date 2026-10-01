@@ -59,7 +59,24 @@ export async function createApiToken(
       expiresAt,
     },
   });
+  await pruneApiTokens(userId, now);
   return { id: row.id, token, expiresAt };
+}
+
+/** Most tokens one user keeps. Signing the extension in again must always work, so the oldest give way. */
+export const MAX_API_TOKENS_PER_USER = 25;
+
+async function pruneApiTokens(userId: string, now: number): Promise<void> {
+  try {
+    await prisma.apiToken.deleteMany({ where: { userId, expiresAt: { lte: new Date(now) } } });
+    const keep = await prisma.apiToken.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: MAX_API_TOKENS_PER_USER, select: { id: true } });
+    if (keep.length === MAX_API_TOKENS_PER_USER) {
+      await prisma.apiToken.deleteMany({ where: { userId, id: { notIn: keep.map((token) => token.id) } } });
+    }
+  } catch (error) {
+    // Housekeeping must never fail the sign-in that triggered it.
+    console.error("api token pruning failed", { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 export interface ApiTokenUser {
