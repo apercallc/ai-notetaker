@@ -45,6 +45,14 @@ describe("managed provider requests", () => {
   });
 });
 
+describe("provider text hygiene", () => {
+  it("removes NUL characters Postgres cannot store", async () => {
+    const { stripNul } = await import("./managedWorker");
+    expect(stripNul("he\u0000llo\u0000")).toBe("hello");
+    expect(stripNul("clean")).toBe("clean");
+  });
+});
+
 describe("managed worker response parsing", () => {
   it("maps Deepgram diarization to you / them-1..n with start offsets", () => {
     const speaker = parseDeepgramUtterances({

@@ -375,6 +375,14 @@ export function parseSummary(value: unknown): ManagedSummary {
   return { title, overview, keyPoints, decisions, actionItems, sections };
 }
 
+/**
+ * Postgres text cannot hold U+0000. A provider that emits one would make the final write throw after the
+ * provider spend, failing a job whose result is otherwise fine.
+ */
+export function stripNul(value: string): string {
+  return value.replaceAll("\u0000", "");
+}
+
 /** Markdown stored in Meeting.summary: the overview, then "## " sections with bullet lists. */
 export function formatSummaryText(summary: ManagedSummary): string {
   const sections = [summary.overview];
@@ -988,11 +996,11 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
       await tx.meeting.update({
         where: { id: job.meetingId },
         data: {
-          summary: summary ? formatSummaryText(summary) : NO_SPEECH_SUMMARY,
+          summary: summary ? stripNul(formatSummaryText(summary)) : NO_SPEECH_SUMMARY,
           endedAt,
           processingMode: "managed",
           ...(!job.meeting.language && detectedLanguage ? { language: detectedLanguage } : {}),
-          ...(generatedTitle ? { title: generatedTitle } : {}),
+          ...(generatedTitle ? { title: stripNul(generatedTitle) } : {}),
         },
       });
       if (utterances.length) {
@@ -1000,15 +1008,15 @@ export async function runManagedJob(workspaceId: string, jobId: string): Promise
           data: utterances.map((utterance, order) => ({
             meetingId: job.meetingId,
             userId: job.meeting.userId,
-            speaker: utterance.speaker,
-            text: utterance.text,
+            speaker: stripNul(utterance.speaker),
+            text: stripNul(utterance.text),
             timestamp: new Date(startedAt.getTime() + utterance.startMs),
             order,
           })),
         });
       }
       if (summary?.actionItems.length) {
-        await tx.actionItem.createMany({ data: summary.actionItems.map((item) => ({ meetingId: job.meetingId, userId: job.meeting.userId, text: item.text, owner: item.owner ?? null, dueAt: item.dueAt ?? null })) });
+        await tx.actionItem.createMany({ data: summary.actionItems.map((item) => ({ meetingId: job.meetingId, userId: job.meeting.userId, text: stripNul(item.text), owner: item.owner ? stripNul(item.owner) : null, dueAt: item.dueAt ?? null })) });
       }
       // A long transcript is thousands of rows after provider spend: the default 5 s
       // interactive limit would throw the paid result away.
