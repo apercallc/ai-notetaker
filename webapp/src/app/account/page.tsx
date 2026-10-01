@@ -110,6 +110,7 @@ export default async function AccountPage({
                   tokens={tokens.map((token) => ({
                     id: token.id,
                     label: token.label,
+                    readOnly: token.scope === "notes_read",
                     device: token.userAgent ? describeUserAgent(token.userAgent) : null,
                     createdAt: formatDate(token.createdAt),
                     lastUsedAt: token.lastUsedAt ? formatDateTime(token.lastUsedAt) : null,

@@ -58,7 +58,11 @@ multilingual, audit viewer. One commit per slice on `feat/notes-platform`.
       [`docs/superpowers/specs/2026-09-30-integrations-design.md`](docs/superpowers/specs/2026-09-30-integrations-design.md).
 - [ ] Integration follow-ups: Slack/Notion OAuth installs, per-folder routing, a
       delivery-log page, more event types, and a design-review pass.
-- [ ] MCP server over a user's own notes (read-only scoped tokens first).
+- [x] MCP server over a user's own notes: read-only `notes_read` tokens, a stateless
+      Streamable HTTP endpoint at `/api/mcp` (five read tools) and a stdio bridge
+      package in `mcp/`. Spec: [`docs/superpowers/specs/2026-09-30-mcp-design.md`](docs/superpowers/specs/2026-09-30-mcp-design.md).
+- [ ] MCP follow-ups: publish `ai-notetaker-mcp` to npm, OAuth sign-in instead of pasted
+      tokens, write tools behind explicit scopes, resources/prompts, and an Ask-your-notes tool.
 - [ ] Multilingual: detect, translated summary, custom vocabulary (the local
       helper already supports vocabulary; hosted does not).
 - [ ] Audit-log viewer for Team (filters, paging, CSV export).

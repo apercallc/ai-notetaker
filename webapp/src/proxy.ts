@@ -107,6 +107,10 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     if (pathname === "/api/import" || pathname.startsWith("/api/import/")) {
       return NextResponse.next();
     }
+    // The MCP endpoint authenticates a read-only API token itself and checks Origin.
+    if (pathname === "/api/mcp") {
+      return NextResponse.next();
+    }
     if (pathname.startsWith("/api/v1/")) {
       const origin = request.headers.get("origin");
       const corsHeaders = managedCorsHeaders(origin, request.nextUrl.origin);

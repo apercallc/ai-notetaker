@@ -79,6 +79,10 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: MCP bridge tests
+        run: node --test test/bridge.test.mjs
+        working-directory: mcp
+
       - name: Test coverage
         run: npm run test:coverage
 
