@@ -444,12 +444,21 @@ mod status_tests {
     #[test]
     fn unhandled_statuses_are_classified_by_who_can_fix_them() {
         let status = |code| reqwest::StatusCode::from_u16(code).unwrap();
-        assert!(matches!(status_error("p", status(403)), ProviderError::AuthFailed(_)));
-        assert!(matches!(status_error("p", status(402)), ProviderError::AuthFailed(_)));
+        assert!(matches!(
+            status_error("p", status(403)),
+            ProviderError::AuthFailed(_)
+        ));
+        assert!(matches!(
+            status_error("p", status(402)),
+            ProviderError::AuthFailed(_)
+        ));
         assert!(status_error("p", status(400)).is_permanent());
         assert!(status_error("p", status(413)).is_permanent());
         assert!(!status_error("p", status(500)).is_permanent());
-        assert!(matches!(status_error("p", status(503)), ProviderError::Unreachable(_)));
+        assert!(matches!(
+            status_error("p", status(503)),
+            ProviderError::Unreachable(_)
+        ));
     }
 }
 

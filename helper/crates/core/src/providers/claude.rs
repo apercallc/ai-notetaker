@@ -171,7 +171,8 @@ mod tests {
 
     #[test]
     fn a_reply_cut_off_at_the_output_limit_is_permanent_not_a_parse_error() {
-        let body = json!({ "stop_reason": "max_tokens", "content": [{ "text": "{\"summary\": \"cut" }] });
+        let body =
+            json!({ "stop_reason": "max_tokens", "content": [{ "text": "{\"summary\": \"cut" }] });
         assert!(parse_response(&body).unwrap_err().is_permanent());
     }
 

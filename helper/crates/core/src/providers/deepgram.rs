@@ -173,15 +173,16 @@ impl TranscriptionProvider for DeepgramProvider {
                 .parse()
                 .map_err(|_| ProviderError::AuthFailed("invalid api key header".into()))?,
         );
-        let (ws_stream, _) = tokio_tungstenite::connect_async(request)
-            .await
-            .map_err(|e| match &e {
-                // The upgrade is refused with a plain HTTP status when the key is bad.
-                tokio_tungstenite::tungstenite::Error::Http(response) => {
-                    super::status_error("deepgram", response.status())
-                }
-                _ => ProviderError::Unreachable(e.to_string()),
-            })?;
+        let (ws_stream, _) =
+            tokio_tungstenite::connect_async(request)
+                .await
+                .map_err(|e| match &e {
+                    // The upgrade is refused with a plain HTTP status when the key is bad.
+                    tokio_tungstenite::tungstenite::Error::Http(response) => {
+                        super::status_error("deepgram", response.status())
+                    }
+                    _ => ProviderError::Unreachable(e.to_string()),
+                })?;
         let (write, mut read) = ws_stream.split();
         let (tx, rx) = mpsc::unbounded_channel();
         let closed = Arc::new(AtomicBool::new(false));

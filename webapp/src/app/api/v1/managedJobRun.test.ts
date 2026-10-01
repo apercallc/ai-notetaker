@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { runManagedJob, captureServerError } = vi.hoisted(() => ({
+const { runManagedJob, isBenignJobRace, captureServerError } = vi.hoisted(() => ({
   runManagedJob: vi.fn(),
+  isBenignJobRace: vi.fn((_error: unknown) => false),
   captureServerError: vi.fn(),
 }));
 
-vi.mock("@/lib/managedWorker", () => ({ runManagedJob }));
+vi.mock("@/lib/managedWorker", () => ({ runManagedJob, isBenignJobRace }));
 vi.mock("@/lib/observability", () => ({ captureServerError }));
 
 import { POST } from "./jobs/[jobId]/run/route";
@@ -49,6 +50,15 @@ describe("managed worker job run route", () => {
     expect(response.headers.get("x-request-id")).toBe("job-run-test");
     expect(await response.json()).toEqual({ jobId: "job-1", status: "complete" });
     expect(runManagedJob).toHaveBeenCalledWith("workspace-1", "job-1");
+  });
+
+  it("answers 409, without alerting, when the poller already claimed the job", async () => {
+    runManagedJob.mockRejectedValue(new Error("managed job not found or already running"));
+    isBenignJobRace.mockReturnValueOnce(true);
+    const response = await POST(request(workerHeaders), context);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ jobId: "job-1", status: "already-running" });
+    expect(captureServerError).not.toHaveBeenCalled();
   });
 
   it("returns a correlated safe error and reports processor failures", async () => {
