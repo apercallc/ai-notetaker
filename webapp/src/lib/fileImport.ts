@@ -91,7 +91,7 @@ export async function startImport(session: ManagedSession, input: StartImportInp
     throw new ManagedValidationError("Your plan has no hosted processing left. See Plans & usage.");
   }
 
-  const existed = Boolean(await prisma.meeting.findFirst({ where: { id: input.meetingId, workspaceId: session.workspaceId }, select: { id: true } }));
+  const existed = Boolean(await prisma.meeting.findFirst({ where: { id: input.meetingId, workspaceId: session.workspaceId, deletedAt: null }, select: { id: true } }));
   await upsertMeeting(
     {
       id: input.meetingId,

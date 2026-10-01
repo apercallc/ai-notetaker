@@ -46,6 +46,10 @@ export function NoteBody({
   }
 
   useEffect(() => {
+    if (editing) textarea.current?.focus();
+  }, [editing]);
+
+  useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -110,7 +114,7 @@ export function NoteBody({
     return (
       <div className="note-body">
         <div className="note-body-tools">
-          <button type="button" className="button button-secondary button-small" onClick={() => { setDraft(summary); setEditing(true); setMessage(null); setTimeout(() => textarea.current?.focus(), 0); }}>
+          <button type="button" className="button button-secondary button-small" onClick={() => { setDraft(summary); setEditing(true); setMessage(null); }}>
             Edit text
           </button>
           {hasPrevious && (
@@ -130,7 +134,7 @@ export function NoteBody({
       <div className="note-body-tools" role="group" aria-label="Editor view">
         <button type="button" className="button button-secondary button-small" aria-pressed={!preview} onClick={() => setPreview(false)}>Write</button>
         <button type="button" className="button button-secondary button-small" aria-pressed={preview} onClick={() => setPreview(true)}>Preview</button>
-        <span className="muted-copy note-count" aria-live="polite">{draft.length.toLocaleString("en-US")} / {MAX_NOTE_BODY.toLocaleString("en-US")}</span>
+        <span className="muted-copy note-count">{draft.length.toLocaleString("en-US")} / {MAX_NOTE_BODY.toLocaleString("en-US")}</span>
       </div>
       {preview ? (
         draft.trim() ? <SummaryBlocks blocks={parseSummary(draft)} /> : <p className="muted-copy">Nothing to preview yet.</p>

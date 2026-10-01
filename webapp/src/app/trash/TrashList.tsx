@@ -40,7 +40,7 @@ export function TrashList({ items, canEmpty }: { items: Item[]; canEmpty: boolea
   function describe(item: Item): string {
     if (item.kind === "note") return "Note";
     const notes = item.noteCount === 1 ? "1 note" : `${item.noteCount} notes`;
-    return item.folderCount > 1 ? `Folder · ${notes} · ${item.folderCount - 1} subfolders` : `Folder · ${notes}`;
+    return item.folderCount > 1 ? `Folder · ${notes} · ${item.folderCount - 1 === 1 ? "1 subfolder" : `${item.folderCount - 1} subfolders`}` : `Folder · ${notes}`;
   }
 
   return (
@@ -64,7 +64,7 @@ export function TrashList({ items, canEmpty }: { items: Item[]; canEmpty: boolea
                   <button type="button" className="button button-secondary button-small" disabled={pending} aria-busy={busyId === item.id} aria-label={`Restore ${item.name}`} onClick={() => run(restoreAction, { kind: item.kind, id: item.id }, item.id)}>Restore</button>
                   <button
                     type="button"
-                    className="button button-secondary button-small"
+                    className="button button-danger button-small"
                     disabled={pending}
                     aria-label={`Delete ${item.name} forever`}
                     onClick={() => {

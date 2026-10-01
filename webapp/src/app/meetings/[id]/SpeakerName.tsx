@@ -43,9 +43,8 @@ export function SpeakerName({ meetingId, speakerKey, label, renamed, isYou }: { 
       <button
         type="button"
         className={`speaker speaker-button${isYou ? " is-you" : ""}`}
-        onClick={() => { setEditing(true); setError(null); setTimeout(() => input.current?.select(), 0); }}
+        onClick={() => { setEditing(true); setError(null); }}
         aria-label={`Rename ${label}`}
-        title="Rename this speaker"
       >
         {label}
         <Pencil size={12} strokeWidth={1.75} aria-hidden="true" />

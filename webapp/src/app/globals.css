@@ -1933,6 +1933,8 @@ a.meeting-card:hover,
 .import-drop:hover,
 .import-drop.is-dragging,
 .import-drop:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
   border-color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
 }
@@ -2033,6 +2035,7 @@ a.meeting-card:hover,
   border-radius: 8px;
   background: transparent;
   font: inherit;
+  min-height: 24px;
   cursor: pointer;
 }
 

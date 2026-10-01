@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/currentUser";
-import { AUDIT_CATEGORIES, AUDIT_PAGE_SIZE, auditActors, auditLogAvailable, isAuditCategory, listAuditEvents } from "@/lib/auditLog";
+import { AUDIT_CATEGORIES, auditActors, auditLogAvailable, isAuditCategory, listAuditEvents } from "@/lib/auditLog";
 import { AUDIT_RETENTION_DAYS } from "@/lib/audit";
 import { LocalTime } from "@/components/LocalTime";
 
@@ -60,7 +60,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       {rows.length === 0 ? (
         <div className="empty-state"><p>No activity matches.</p></div>
       ) : (
-        <div className="audit-table-wrap">
+        <div className="audit-table-wrap" role="region" aria-label="Activity log" tabIndex={0}>
           <table className="audit-table">
             <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">What</th></tr></thead>
             <tbody>
@@ -80,7 +80,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
         </div>
       )}
       {nextQuery && <p><Link href={`/team/audit?${nextQuery}`}>Older activity →</Link></p>}
-      {rows.length > 0 && !nextQuery && rows.length >= AUDIT_PAGE_SIZE && <p className="muted-copy">That&apos;s everything.</p>}
+      {rows.length > 0 && !nextQuery && <p className="muted-copy">That&apos;s everything.</p>}
     </div>
   );
 }
