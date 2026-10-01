@@ -330,8 +330,8 @@ export async function listMeetings(
   if (query && query.length > MAX_SEARCH_LENGTH) {
     throw new ValidationError(`query must be ${MAX_SEARCH_LENGTH} characters or fewer`);
   }
-  if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 0)) {
-    throw new ValidationError("limit must be a non-negative integer");
+  if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1)) {
+    throw new ValidationError("limit must be a positive integer");
   }
   if (options.offset !== undefined && (!Number.isSafeInteger(options.offset) || options.offset < 0 || options.offset > MAX_OFFSET)) {
     throw new ValidationError("offset must be a non-negative integer");
@@ -523,6 +523,12 @@ export async function listActionItems(workspaceId: string, options: ListActionIt
         }
       : {}),
   };
+  // A cursor naming an item that was since deleted, trashed or filtered out would page into nothing
+  // (or error) while the total says there is more. Start from the top instead.
+  const cursorId = options.cursor && options.cursor.length <= MAX_ACTION_ID_LENGTH
+    && (await prisma.actionItem.findFirst({ where: { ...where, id: options.cursor }, select: { id: true } }))
+    ? options.cursor
+    : undefined;
   const [rows, total] = await Promise.all([
     prisma.actionItem.findMany({
       where,
@@ -531,7 +537,7 @@ export async function listActionItems(workspaceId: string, options: ListActionIt
       orderBy: [{ status: "desc" }, { dueAt: { sort: "asc", nulls: "last" } }, { id: "asc" }],
       include: { meeting: { select: { id: true, title: true, startedAt: true } } },
       take: limit + 1,
-      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 0 } : {}),
+      ...(cursorId ? { cursor: { id: cursorId }, skip: 0 } : {}),
     }),
     prisma.actionItem.count({ where }),
   ]);

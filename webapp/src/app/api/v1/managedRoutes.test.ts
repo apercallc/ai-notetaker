@@ -330,6 +330,16 @@ describe("managed upload routes", () => {
     const chunkContext = chunkContextFor(createdBody.uploadId, 0);
     const chunk = await putChunk(chunkRequest(), chunkContext);
     expect(chunk.status).toBe(201);
+    // "1e0", " 0" and "0x0" must not become aliases of chunk 0; an upper-case checksum is still the same checksum.
+    for (const alias of ["1e0", " 0", "0x0", "-0", "00000000000"]) {
+      const rejected = await putChunk(chunkRequest(), { params: Promise.resolve({ uploadId: createdBody.uploadId, chunkIndex: alias }) });
+      expect(rejected.status, alias).toBe(400);
+    }
+    const upperCase = await putChunk(
+      new Request("http://localhost/api/v1/uploads/chunk", { method: "PUT", headers: { authorization: `Bearer ${sessionId}`, "x-audio-channel": "mic", "x-chunk-sha256": checksum.toUpperCase() }, body: bytes }),
+      chunkContext,
+    );
+    expect(upperCase.status).toBe(200);
     const replayedChunk = await putChunk(chunkRequest(), chunkContext);
     expect(replayedChunk.status).toBe(200);
     await expect(replayedChunk.json()).resolves.toMatchObject({ replayed: true });

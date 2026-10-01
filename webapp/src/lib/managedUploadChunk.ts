@@ -19,7 +19,8 @@ export async function handleManagedChunkUpload(
   requestId: string,
 ): Promise<Response> {
   try {
-    const chunkIndex = Number(rawIndex);
+    // Number() also accepts " 1", "1e0" and "0x1", which would alias the same chunk under several spellings.
+    const chunkIndex = /^\d{1,9}$/.test(rawIndex) ? Number(rawIndex) : Number.NaN;
     if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) throw new ManagedValidationError("chunk index is invalid");
     const bytes = await readManagedBytes(request, MAX_CHUNK_BYTES);
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_CHUNK_BYTES) throw new ManagedValidationError("chunk size is invalid");
@@ -27,7 +28,7 @@ export async function handleManagedChunkUpload(
     const channel = request.headers.get("x-audio-channel") ?? "speaker";
     if (channel !== "mic" && channel !== "speaker") throw new ManagedValidationError("audio channel is invalid");
     const suppliedChecksum = request.headers.get("x-chunk-sha256");
-    if (!suppliedChecksum || suppliedChecksum !== checksum) return jsonError("chunk checksum mismatch", 400, requestId);
+    if (!suppliedChecksum || suppliedChecksum.toLowerCase() !== checksum) return jsonError("chunk checksum mismatch", 400, requestId);
 
     const upload = await getUpload(workspaceId, uploadId);
     if (!upload) return jsonError("upload not found", 404, requestId);

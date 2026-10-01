@@ -147,6 +147,17 @@ describe("upsertMeeting", () => {
     expect((await listActionItems(WORKSPACE_ID, { status: "done" })).items).toHaveLength(1);
   });
 
+  it("restarts from the top when an action-item cursor points at something that no longer exists", async () => {
+    await upsertMeeting(sampleMeeting({ actionItems: [{ id: "a-1", text: "One" }, { id: "a-2", text: "Two" }] }), WORKSPACE_ID);
+
+    const stale = await listActionItems(WORKSPACE_ID, { status: "open", cursor: "deleted-item-id" });
+    expect(stale.items).toHaveLength(2);
+    expect(stale.total).toBe(2);
+
+    const oversized = await listActionItems(WORKSPACE_ID, { status: "open", cursor: "x".repeat(500) });
+    expect(oversized.items).toHaveLength(2);
+  });
+
   it("rejects text containing NUL instead of failing inside Postgres", async () => {
     await expect(upsertMeeting(sampleMeeting({ summary: "bad\u0000summary" }), WORKSPACE_ID)).rejects.toThrow("null characters");
     await expect(upsertMeeting(sampleMeeting({ title: "bad\u0000title" }), WORKSPACE_ID)).rejects.toThrow("null characters");
