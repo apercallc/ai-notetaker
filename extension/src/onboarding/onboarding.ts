@@ -399,14 +399,19 @@ function resetKeyTest(): void {
  * to setup resumes with the keys intact and the finish gate unchanged.
  */
 let keyAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
+function flushKeyAutosave(): void {
+  if (keyAutosaveTimer === null) return;
+  clearTimeout(keyAutosaveTimer);
+  keyAutosaveTimer = null;
+  readOnboardingProviderFields();
+  sendToBackground({ type: "SAVE_SETTINGS", settings }).catch((error) => console.warn("Could not save the keys typed so far", error));
+}
 function scheduleKeyAutosave(): void {
   if (keyAutosaveTimer !== null) clearTimeout(keyAutosaveTimer);
-  keyAutosaveTimer = setTimeout(() => {
-    keyAutosaveTimer = null;
-    readOnboardingProviderFields();
-    sendToBackground({ type: "SAVE_SETTINGS", settings }).catch(() => undefined);
-  }, 800);
+  keyAutosaveTimer = setTimeout(flushKeyAutosave, 800);
 }
+// Closing the tab inside the debounce window used to drop the last typed key. Save right now instead.
+window.addEventListener("pagehide", flushKeyAutosave);
 
 // ---------- rendering ----------
 

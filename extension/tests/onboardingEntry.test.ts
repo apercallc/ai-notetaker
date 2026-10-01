@@ -100,4 +100,18 @@ describe("onboarding entry point", () => {
     pending.splice(0).forEach((resolve) => resolve({ valid: false, message: "Invalid" }));
     await vi.waitFor(() => expect(document.querySelector("#step-error")?.textContent).toContain("did not pass"));
   });
+
+  it("saves a typed key immediately when the tab is closed inside the autosave delay", async () => {
+    await loadWizard("/onboarding/onboarding.html");
+    await vi.waitFor(() => expect(document.querySelector("#onboarding-deepgram-key")).not.toBeNull());
+    chromeMock.runtime.sendMessage.mockClear();
+    const key = document.querySelector<HTMLInputElement>("#onboarding-deepgram-key")!;
+    key.value = "typed-just-now";
+    key.dispatchEvent(new Event("input"));
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    const saves = chromeMock.runtime.sendMessage.mock.calls.map((call) => call[0] as { type: string; settings?: { apiKeys?: { deepgram?: string } } }).filter((message) => message.type === "SAVE_SETTINGS");
+    expect(saves.at(-1)?.settings?.apiKeys?.deepgram).toBe("typed-just-now");
+  });
 });
