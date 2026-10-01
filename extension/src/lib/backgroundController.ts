@@ -115,6 +115,27 @@ export class BackgroundController {
     void this.drainManagedMeetOutbox().catch((error) => {
       console.warn("Managed Meet recovery could not start", error);
     });
+    void this.resumeInterruptedLocalMeetProcessing().catch((error) => {
+      console.warn("Meet processing recovery could not start", error);
+    });
+  }
+
+  /**
+   * A long transcription/summary run can outlive the service worker (MV3 ends
+   * it after a few minutes). The raw chunks are only cleared on success, so a
+   * meeting left in "processing" with no run in this fresh worker is resumed
+   * from storage rather than stuck forever.
+   */
+  private async resumeInterruptedLocalMeetProcessing(): Promise<void> {
+    for (const meeting of await listMeetings()) {
+      if (
+        meeting.captureSource !== "meet" ||
+        meeting.status !== "processing" ||
+        (meeting.processingMode?.kind ?? "local_byok") !== "local_byok" ||
+        this.meetFinishRuns.has(meeting.id)
+      ) continue;
+      await this.finishBrowserMeetRecording(meeting.id, meeting);
+    }
   }
 
   /**

@@ -344,6 +344,29 @@ describe("BackgroundController", () => {
     await expect(getMeeting("cleanup-failure-meet")).resolves.toMatchObject({ status: "complete", summary: "Recovered" });
   });
 
+  it("resumes a Meet meeting stranded in processing when the service worker was killed mid-run", async () => {
+    await saveMeeting({
+      id: "stranded-meet",
+      title: "Stranded Meet",
+      startedAt: "2026-09-24T15:00:00.000Z",
+      endedAt: "2026-09-24T15:30:00.000Z",
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      mode: "general",
+      status: "processing",
+      captureSource: "meet",
+      processingMode: { kind: "local_byok" },
+    });
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockReturnValue((async function* () { yield { channel: "mic" as const, sequence: 0, bytes: new Uint8Array([1]) }; })());
+    vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockResolvedValue({ transcript: [], summary: "Resumed", actionItems: [] });
+
+    await new BackgroundController(createFakeClient(), vi.fn()).init();
+
+    await vi.waitFor(async () => expect(await getMeeting("stranded-meet")).toMatchObject({ status: "complete", summary: "Resumed" }));
+  });
+
   it("blocks managed recording before creating a meeting when hosted quota is unavailable", async () => {
     const broadcast = vi.fn();
     const controller = new BackgroundController(createFakeClient(), broadcast);
