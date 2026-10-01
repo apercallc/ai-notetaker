@@ -142,6 +142,8 @@ describe("settings page: unsaved input", () => {
     $<HTMLInputElement>("webapp-token").value = "secret";
     $("save-settings").click();
     await vi.waitFor(() => expect(savedSettings()?.webapp).toEqual({ url: "https://app.example.com", token: "secret" }));
+    // A second save while the first is still settling is ignored by design; wait for it to finish.
+    await vi.waitFor(() => expect($("save-status").textContent).toBe("Saved."));
 
     $<HTMLInputElement>("webapp-url").value = "";
     $<HTMLInputElement>("webapp-token").value = "";

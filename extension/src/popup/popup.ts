@@ -8,6 +8,7 @@ import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
 import { takePendingMeetStart } from "../meet/pendingStart";
 import { HISTORY_PAGE_SIZE, HISTORY_RECENT_COUNT, SEARCH_DEBOUNCE_MS, historyHeading, pageOf, resultsSummary } from "./historyModel";
 import { providerHostPermissions, requestOptionalPermission } from "../lib/optionalPermissions";
+import { sendToBackground } from "../lib/sendToBackground";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
@@ -43,10 +44,6 @@ async function markDesktopOnboardingIntent(): Promise<void> {
 function clearLiveListener(): void {
   removeLiveListener?.();
   removeLiveListener = null;
-}
-
-async function sendToBackground<T>(message: unknown): Promise<T> {
-  return chrome.runtime.sendMessage(message) as Promise<T>;
 }
 
 function formatMeetingTime(iso: string): string {

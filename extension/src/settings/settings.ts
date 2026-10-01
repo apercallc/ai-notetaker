@@ -16,6 +16,7 @@ import {
   signOutOfHosted,
   validateWebappInputs,
 } from "./settingsModel";
+import { sendToBackground } from "../lib/sendToBackground";
 
 const app = document.getElementById("app")!;
 let settings: NotetakerSettings = structuredClone(DEFAULT_SETTINGS);
@@ -464,7 +465,7 @@ function wireEvents(): void {
     settings = signOutOfHosted(settings);
     signedOutNotice = "Signed out. Your own API keys are used until you sign in again.";
     try {
-      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+      await sendToBackground({ type: "SAVE_SETTINGS", settings });
     } catch {
       setResult(resultEl, "Signed out here, but the change could not be saved. Press Save settings to finish.", "invalid");
       return;
@@ -485,7 +486,7 @@ function wireEvents(): void {
       settings = applyModeChoice(settings, true);
       managedSetupVisible = true;
       signedOutNotice = "";
-      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+      await sendToBackground({ type: "SAVE_SETTINGS", settings });
       render({ focus: "managed-sign-out" });
     } catch (error) {
       setResult(resultEl, error instanceof Error ? error.message : "Sign-in failed.", "invalid");
@@ -631,7 +632,7 @@ function wireEvents(): void {
       } catch {
         permissionApiFailed = true;
       }
-      await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+      await sendToBackground({ type: "SAVE_SETTINGS", settings });
       if (permissionApiFailed) {
         setResult(statusEl, "Settings were saved, but Chrome permission access could not be checked. Test your provider key and save again before recording.", "invalid");
       } else {

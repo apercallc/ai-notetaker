@@ -13,6 +13,7 @@
  */
 import type { ProviderKind } from "../types";
 import { hasOptionalPermission, providerHostPermission, providerPermissionName } from "./optionalPermissions";
+import { sendToBackground } from "./sendToBackground";
 
 export interface KeyTestResult {
   valid: boolean;
@@ -33,12 +34,19 @@ export async function testProviderKey(
   if (key.trim().length === 0) {
     return { valid: false, message: "Enter an API key first." };
   }
-  return chrome.runtime.sendMessage({
-    type: "TEST_PROVIDER_KEY",
-    provider,
-    key,
-    ...(options.desktop ? { desktop: true } : {}),
-  });
+  try {
+    const result = await sendToBackground<unknown>({
+      type: "TEST_PROVIDER_KEY",
+      provider,
+      key,
+      ...(options.desktop ? { desktop: true } : {}),
+    });
+    // A closed channel or an unexpected reply must read as "could not test", never as an undefined verdict.
+    if (result && typeof result === "object" && typeof (result as KeyTestResult).valid === "boolean") return result as KeyTestResult;
+    return { valid: false, message: "Could not test the key right now. Try again." };
+  } catch {
+    return { valid: false, message: "Could not reach the extension to test the key. Reopen it and try again." };
+  }
 }
 
 const PROVIDER_NAMES: Record<ProviderKind, string> = {

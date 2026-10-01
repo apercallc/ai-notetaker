@@ -9,6 +9,7 @@ import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { MEET_AUTO_RECORD_GUIDANCE } from "../lib/autoRecord";
 import { microphoneAlreadyAllowed, requestMicrophone, type MicOutcome } from "../meet/micPermission";
 import { providerHostPermissions, requestDesktopHelperPermissions, requestOptionalPermission } from "../lib/optionalPermissions";
+import { sendToBackground } from "../lib/sendToBackground";
 
 /**
  * First-run setup. The Google Meet path is one screen and a finish screen:
@@ -401,7 +402,7 @@ function scheduleKeyAutosave(): void {
   keyAutosaveTimer = setTimeout(() => {
     keyAutosaveTimer = null;
     readOnboardingProviderFields();
-    chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings }).catch(() => undefined);
+    sendToBackground({ type: "SAVE_SETTINGS", settings }).catch(() => undefined);
   }, 800);
 }
 
@@ -551,7 +552,7 @@ async function signInManaged(): Promise<void> {
     const result = await loginManaged(baseUrl, email, password);
     settings.managedService = result.config;
     settings.processingMode = { kind: "managed", accountId: result.config.accountId, workspaceId: result.config.workspaceId, plan: result.config.plan };
-    await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+    await sendToBackground({ type: "SAVE_SETTINGS", settings });
     render();
   } catch (error) {
     if (resultEl) {
@@ -593,7 +594,7 @@ async function finishSetup(): Promise<void> {
   settings.onboardingComplete = true;
   settings.consentDisclosureAcknowledged = true;
   try {
-    await chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings });
+    await sendToBackground({ type: "SAVE_SETTINGS", settings });
   } catch {
     showStepError("Could not save setup. Check that the extension is running, then try again.");
     return;
@@ -682,7 +683,7 @@ function wireEvents(): void {
         return;
       }
       helperAlarmPermissionMissing = !permissions.alarms;
-      const state = await chrome.runtime.sendMessage({ type: "CHECK_HELPER" }) as BackgroundState;
+      const state = await sendToBackground({ type: "CHECK_HELPER" }) as BackgroundState;
       helperStatus = state.helperStatus;
       helperInfo = state.helperInfo;
       render({ focus: "check-helper" });
@@ -782,7 +783,7 @@ function wireEvents(): void {
     button.disabled = true;
     if (status) status.textContent = "Checking audio devices…";
     try {
-      const result = (await chrome.runtime.sendMessage({ type: "GET_AUDIO_PREFLIGHT" })) as { status: AudioStatus };
+      const result = (await sendToBackground({ type: "GET_AUDIO_PREFLIGHT" })) as { status: AudioStatus };
       audioStatus = result.status;
       audioProbe = null;
       render({ focus: "check-audio-setup" });
@@ -800,7 +801,7 @@ function wireEvents(): void {
     button.disabled = true;
     if (status) status.textContent = "Listening for microphone and meeting audio for 2 seconds…";
     try {
-      const result = (await chrome.runtime.sendMessage({ type: "RUN_AUDIO_PROBE" })) as { result: AudioProbeResult };
+      const result = (await sendToBackground({ type: "RUN_AUDIO_PROBE" })) as { result: AudioProbeResult };
       audioProbe = result.result;
       render({ focus: "probe-audio-setup" });
     } catch {
@@ -852,7 +853,7 @@ async function init(): Promise<void> {
   onboardingSummarizer = settings.summarizationProvider === "deepseek" ? "deepseek" : "gemini";
   consentAcknowledged = settings.consentDisclosureAcknowledged;
   if (await microphoneAlreadyAllowed()) micState = "granted";
-  const state = await chrome.runtime.sendMessage({ type: "GET_STATE" }) as BackgroundState;
+  const state = await sendToBackground({ type: "GET_STATE" }) as BackgroundState;
   helperStatus = state.helperStatus;
   helperInfo = state.helperInfo;
   render();

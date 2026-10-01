@@ -15,6 +15,7 @@ import {
   renderSummaryHtml,
   singleLine,
 } from "./meetingView";
+import { sendToBackground } from "../lib/sendToBackground";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
@@ -228,7 +229,7 @@ async function render(focusActionId?: string): Promise<void> {
     const button = document.getElementById("retry-drive-export") as HTMLButtonElement;
     button.disabled = true;
     try {
-      await chrome.runtime.sendMessage({ type: "RETRY_DRIVE_EXPORT", meetingId: id });
+      await sendToBackground({ type: "RETRY_DRIVE_EXPORT", meetingId: id });
       await render();
     } catch {
       showMeetingError("Drive export could not be retried. Your local meeting is still safe.");
@@ -247,7 +248,7 @@ async function render(focusActionId?: string): Promise<void> {
           return;
         }
       }
-      await chrome.runtime.sendMessage({ type: "RETRY_MEETING_PROCESSING", meetingId: id });
+      await sendToBackground({ type: "RETRY_MEETING_PROCESSING", meetingId: id });
       await render();
     } catch (error) {
       showMeetingError(error instanceof Error ? error.message : "Saved Meet processing could not be retried.");
@@ -412,7 +413,7 @@ function beginDelete(id: string): void {
 async function commitDelete(id: string): Promise<void> {
   pendingDelete = null;
   try {
-    await chrome.runtime.sendMessage({ type: "DELETE_MEETING", meetingId: id });
+    await sendToBackground({ type: "DELETE_MEETING", meetingId: id });
   } catch {
     // The helper may be offline; local deletion remains authoritative for
     // the extension UI and can be retried for helper-owned raw audio.
