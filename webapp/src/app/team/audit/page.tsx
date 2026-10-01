@@ -55,6 +55,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
           {actors.map((member) => <option key={member.id} value={member.id}>{member.email}</option>)}
         </select>
         <button type="submit" className="button button-secondary button-small">Filter</button>
+        {(filters.category || filters.actor) && <Link href="/team/audit">Clear</Link>}
       </form>
 
       {rows.length === 0 ? (

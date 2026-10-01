@@ -81,7 +81,7 @@ export function TrashList({ items, canEmpty }: { items: Item[]; canEmpty: boolea
           {canEmpty && (
             <button
               type="button"
-              className="button button-danger"
+              className="button button-danger trash-empty"
               disabled={pending}
               onClick={() => {
                 if (window.confirm("Empty the trash? Everything in it is deleted forever and can't be restored.")) run(() => emptyTrashAction(), {}, "all");
