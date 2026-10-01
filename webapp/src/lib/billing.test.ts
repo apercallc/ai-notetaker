@@ -97,6 +97,25 @@ describe("Stripe checkout retry", () => {
     });
   });
 
+  it("releases the checkout claim when Stripe reports the session expired", async () => {
+    await withWorkspace(async (workspaceId) => {
+      await prisma.workspaceSubscription.upsert({ where: { workspaceId }, create: { workspaceId, checkoutClaimedAt: new Date(), checkoutSessionId: "cs_abandoned" }, update: { checkoutClaimedAt: new Date(), checkoutSessionId: "cs_abandoned" } });
+
+      await applyStripeEvent({ id: `evt-expired-${workspaceId}`, type: "checkout.session.expired", created: 100, data: { object: { id: "cs_abandoned", mode: "subscription" } } });
+
+      const row = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+      expect(row?.checkoutClaimedAt).toBeNull();
+      expect(row?.checkoutSessionId).toBeNull();
+    });
+  });
+
+  it("turns a Stripe outage into a plain retry message", async () => {
+    await withWorkspace(async (workspaceId) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "No such price: price_internal" } }), { status: 500 }));
+      await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).rejects.toThrow("temporarily unavailable");
+    });
+  });
+
   it("keeps the lock when the old session is already paid or cannot be expired", async () => {
     await withWorkspace(async (workspaceId) => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");

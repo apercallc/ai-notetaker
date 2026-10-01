@@ -81,9 +81,15 @@ function validateBillingRedirect(value: string): string {
 }
 
 async function stripePost(path: string, form: URLSearchParams): Promise<Record<string, unknown>> {
-  const response = await fetch(stripeUrl(path), { method: "POST", headers: stripeHeaders(), body: form });
+  // A hung Stripe call would hold the checkout claim (an hour-long mutex) and the user's request.
+  const response = await fetch(stripeUrl(path), { method: "POST", headers: stripeHeaders(), body: form, signal: AbortSignal.timeout(20_000) }).catch(() => null);
+  if (!response) throw new BillingError("Stripe did not respond. Try again in a moment.");
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) throw new BillingError(typeof body.error === "object" && body.error && "message" in body.error ? String(body.error.message) : "Stripe request failed");
+  if (!response.ok) {
+    // Stripe's own text for a 5xx or a misconfiguration ("No such price") is not for end users.
+    if (response.status >= 500 || response.status === 401 || response.status === 403) throw new BillingError("Billing is temporarily unavailable. Try again in a moment.");
+    throw new BillingError(typeof body.error === "object" && body.error && "message" in body.error ? String(body.error.message) : "Stripe request failed");
+  }
   return body;
 }
 
@@ -422,6 +428,14 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
     } catch (error) {
       if ((error as { code?: string }).code === "P2002") return;
       throw error;
+    }
+    if (eventType === "checkout.session.expired") {
+      // The customer abandoned checkout. Release the claim now instead of making them wait out the hour.
+      const expiredSessionId = asString(value.data?.object?.id);
+      if (expiredSessionId) {
+        await tx.workspaceSubscription.updateMany({ where: { checkoutSessionId: expiredSessionId }, data: { checkoutClaimedAt: null, checkoutSessionId: null } });
+      }
+      return;
     }
     if (!isSubscriptionEvent && !isPaymentFailure && !isCheckoutCompletion) return;
 
