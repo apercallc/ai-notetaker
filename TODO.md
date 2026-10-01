@@ -17,8 +17,10 @@
 - [x] Operator cost-report command, Railway/Docker service configuration and
       [deployment/rollback runbook](docs/launch/infrastructure-rollout.md).
 
-Pilot budgets are configured on the existing web/worker services. Deployment
-verification, monitoring destinations, provider invoice/throughput proof and
+Pilot budgets are configured on the existing web/worker services. Hosted
+deployment, migrations, health and source CI are verified in the
+[2026-10-01 report](docs/launch/production-verification-2026-10-01.md).
+Monitoring destinations, provider invoice/throughput proof and
 pricing decisions are tracked in that runbook and below. No extra service,
 replica or capacity is required for this rollout.
 

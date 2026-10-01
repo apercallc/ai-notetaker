@@ -7,8 +7,9 @@ traffic off this infrastructure.
 ## Small footprint now, capacity when needed
 
 Prepare the software to scale while keeping provisioned capacity matched to
-current paid usage. These changes have not created, resized or deployed live
-services. The service configurations below are deployment options, not an
+current paid usage. The existing web and worker have been updated. No new
+service, replica or increased resource allocation was provisioned. The
+service configurations below are deployment options, not an
 instruction to reserve future capacity now.
 
 - Reuse the current database, bucket and web service. Replace an existing
@@ -198,8 +199,11 @@ leases. Standalone worker/cleaner `--once` and the cost report executed against
 an isolated local Postgres. A local `pg_dump`/`pg_restore` drill restored all 35
 migrations and a synthetic spend counter; it is not production backup proof.
 
-Live deployment, provider invoices, CORS/client paths, backup policy, platform
-spending limits, alert destinations and load capacity remain operational gates.
+The existing hosted stack was activated without additional service provisioning;
+see [the verification report](production-verification-2026-10-01.md) for the
+exact commits, checks and live evidence. Provider invoices, direct-upload
+CORS/client paths, backup policy, platform spending limits, alert destinations
+and load capacity remain operational gates.
 Plan pricing/allowances remain unchanged pending the business decision. The
 existing fully consumed Pro/Team allowances still have thin margins. Follow
 [the scale and profitability plan](scale-and-profitability.md) for pricing and
