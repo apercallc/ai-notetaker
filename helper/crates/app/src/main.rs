@@ -412,7 +412,7 @@ async fn upload_managed_recording(
         .map_err(|error| format!("managed meeting registration failed: {error}"))?;
     ensure_managed_success(response, "managed meeting registration").await?;
 
-    let idempotency_key = format!("meeting:{meeting_id}");
+    let idempotency_key = managed_upload_key(meeting_id, total_bytes);
     let manifest = serde_json::json!({
         "meetingId": meeting_id.to_string(),
         "totalChunks": total_chunks,
@@ -704,6 +704,13 @@ async fn poll_managed_job(
             action_items: None,
         },
     );
+}
+
+/// The upload's idempotency key names the exact recording: the same meeting resumed and grown is a
+/// different upload, and the server rightly refuses a key reused with a different manifest. Replays
+/// of the same recording (same size) still land on the same upload and resume it.
+fn managed_upload_key(meeting_id: Uuid, total_bytes: usize) -> String {
+    format!("meeting:{meeting_id}:{total_bytes}")
 }
 
 const MANAGED_POLL_ATTEMPTS: u32 = 300 + 120;
@@ -2518,6 +2525,14 @@ mod tests {
         assert!(StopGuard::acquire(Uuid::new_v4()).is_some());
         drop(first);
         assert!(StopGuard::acquire(id).is_some());
+    }
+
+    #[test]
+    fn a_grown_recording_gets_its_own_upload_key_but_a_replay_keeps_it() {
+        let id = Uuid::new_v4();
+        assert_eq!(managed_upload_key(id, 1_000), managed_upload_key(id, 1_000));
+        assert_ne!(managed_upload_key(id, 1_000), managed_upload_key(id, 2_000));
+        assert!(managed_upload_key(id, 1_000).starts_with(&format!("meeting:{id}")));
     }
 
     #[test]
