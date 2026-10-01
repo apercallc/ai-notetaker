@@ -13,6 +13,7 @@ const KEYS = {
   meetingsIndex: "notetaker.meetings.index", // ordered list of meeting IDs
   meetingPrefix: "notetaker.meeting.", // + id
   webappSyncOutbox: "notetaker.webappSync.outbox",
+  transcriptionCachePrefix: "notetaker.transcriptionCache.", // + meeting id
   remindedCalls: "notetaker.remindedCalls",
   widgetPosition: "notetaker.widget.position",
 } as const;
@@ -258,8 +259,31 @@ export function updateMeeting(
   });
 }
 
+/**
+ * Transcribed segments of a Meet call, saved as each finishes. A retry after a failed
+ * summary (or a failed later segment) reuses them instead of paying for every segment again.
+ */
+export type TranscriptionSegmentCache = Record<string, unknown[]>;
+
+export async function getTranscriptionSegment(meetingId: string, key: string): Promise<unknown[] | undefined> {
+  const cache = await storageGet<TranscriptionSegmentCache>(KEYS.transcriptionCachePrefix + meetingId);
+  const lines = cache?.[key];
+  return Array.isArray(lines) ? lines : undefined;
+}
+
+export async function saveTranscriptionSegment(meetingId: string, key: string, lines: unknown[]): Promise<void> {
+  const cacheKey = KEYS.transcriptionCachePrefix + meetingId;
+  const cache = (await storageGet<TranscriptionSegmentCache>(cacheKey)) ?? {};
+  await storageSet({ [cacheKey]: { ...cache, [key]: lines } });
+}
+
+export async function clearTranscriptionCache(meetingId: string): Promise<void> {
+  await storageRemove(KEYS.transcriptionCachePrefix + meetingId);
+}
+
 export async function deleteMeeting(id: string): Promise<void> {
   return enqueueMeetingMutation(id, async () => {
+    await clearTranscriptionCache(id).catch(() => undefined);
     // Remove the record first. If that fails, the meeting is still listed and the user can retry;
     // the other order orphaned a record (with its transcript) that no screen could reach or delete.
     await storageRemove(KEYS.meetingPrefix + id);

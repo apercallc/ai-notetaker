@@ -10,7 +10,7 @@ import { flaggedMomentsFor, withBookmark } from "./bookmarks";
 import { readShortcuts } from "./shortcuts";
 import { getWidgetPosition } from "./storage";
 import type { HelperConnectionStatus } from "./nativeMessaging";
-import { deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, listMeetings, saveMeeting, saveSettings, updateMeeting } from "./storage";
+import { clearTranscriptionCache, deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, getTranscriptionSegment, listMeetings, saveMeeting, saveSettings, saveTranscriptionSegment, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import { testProviderKeyDirect } from "./testProviderKey";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
@@ -623,7 +623,10 @@ export class BackgroundController {
         processingMode: { kind: "local_byok" },
         managedService: null,
       };
-      const result = await processBrowserMeetRecording(localSettings, meeting.mode ?? "general", streamBrowserMeetChunks(meetingId), this.fetchImpl, { startedAt: meeting.startedAt });
+      const result = await processBrowserMeetRecording(localSettings, meeting.mode ?? "general", streamBrowserMeetChunks(meetingId), this.fetchImpl, {
+        startedAt: meeting.startedAt,
+        segmentCache: { get: (key) => getTranscriptionSegment(meetingId, key), set: (key, lines) => saveTranscriptionSegment(meetingId, key, lines) },
+      });
       const completed = await updateMeeting(meetingId, (current) => ({
         ...current,
         status: "complete",
@@ -725,6 +728,7 @@ export class BackgroundController {
     } catch (error) {
       console.warn("Completed Meet audio cleanup failed", { meetingId, error });
     } finally {
+      await clearTranscriptionCache(meetingId).catch(() => undefined);
       this.meetChunkSequence.delete(meetingId);
     }
   }

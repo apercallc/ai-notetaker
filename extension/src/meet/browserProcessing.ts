@@ -37,7 +37,14 @@ export interface BrowserMeetResult {
   noSpeech?: boolean;
 }
 
+/** Persists each transcribed segment so a retry skips the ones already paid for. */
+export interface SegmentCache {
+  get(key: string): Promise<unknown[] | undefined>;
+  set(key: string, lines: unknown[]): Promise<void>;
+}
+
 export interface BrowserMeetProcessingOptions {
+  segmentCache?: SegmentCache;
   /** The meeting's startedAt. Segment timestamps (and bookmark jumps) are startedAt + offsetMs. */
   startedAt?: string;
 }
@@ -679,7 +686,16 @@ export async function processBrowserMeetRecording(
   const lines: SpokenLine[] = [];
   for await (const segment of segmentAudio(inSequenceOrder(chunks), startedAtEpoch, timeline)) {
     if (segment.samples.length < msToSamples(MIN_SEGMENT_MS) || peakAmplitude(segment.samples) < SILENCE_PEAK) continue;
-    lines.push(...(settings.transcriptionProvider === "groq" ? await transcribeGroq(segment, transcriptionKey, fetchImpl) : await transcribeDeepgram(segment, transcriptionKey, fetchImpl)));
+    // The key identifies this exact stretch of audio: a retry cuts the same chunks into the same segments.
+    const cacheKey = `${settings.transcriptionProvider}:${segment.channel}:${Math.round(segment.startMs)}:${segment.samples.length}`;
+    const cached = await options.segmentCache?.get(cacheKey).catch(() => undefined);
+    if (cached) {
+      lines.push(...(cached as SpokenLine[]));
+      continue;
+    }
+    const spoken = settings.transcriptionProvider === "groq" ? await transcribeGroq(segment, transcriptionKey, fetchImpl) : await transcribeDeepgram(segment, transcriptionKey, fetchImpl);
+    await options.segmentCache?.set(cacheKey, spoken).catch(() => undefined);
+    lines.push(...spoken);
   }
 
   const callStartEpoch = startedAtEpoch ?? timeline.firstStartEpoch ?? Date.now() - timeline.endMs;

@@ -82,7 +82,7 @@ describe("BackgroundController", () => {
     await controller.stopRecording(id);
     expect(client.startRecording).not.toHaveBeenCalled();
     expect(client.stopRecording).not.toHaveBeenCalled();
-    expect(process).toHaveBeenCalledWith(expect.any(Object), "general", chunks, expect.any(Function), { startedAt: original?.startedAt });
+    expect(process).toHaveBeenCalledWith(expect.any(Object), "general", chunks, expect.any(Function), expect.objectContaining({ startedAt: original?.startedAt, segmentCache: expect.any(Object) }));
     expect(await getMeeting(id)).toMatchObject({ status: "complete", title: "Planning", summary: "Notes", transcript: [expect.objectContaining({ offsetMs: 123 })], endedAt: expect.any(String) });
   });
 
@@ -108,7 +108,7 @@ describe("BackgroundController", () => {
     });
     await controller.stopRecording(id);
 
-    expect(process).toHaveBeenCalledWith(expect.objectContaining({ processingMode: { kind: "local_byok" }, managedService: null }), "general", chunks, expect.any(Function), { startedAt: expect.any(String) });
+    expect(process).toHaveBeenCalledWith(expect.objectContaining({ processingMode: { kind: "local_byok" }, managedService: null }), "general", chunks, expect.any(Function), expect.objectContaining({ startedAt: expect.any(String) }));
     expect(upload).not.toHaveBeenCalled();
     expect(share).not.toHaveBeenCalled();
     await expect(getMeeting(id)).resolves.toMatchObject({ status: "complete", summary: "Local notes", processingMode: { kind: "local_byok" } });

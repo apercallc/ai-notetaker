@@ -347,6 +347,29 @@ describe("browser Meet processing", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses transcribed segments on retry instead of paying for them again", async () => {
+    const store = new Map<string, unknown[]>();
+    const segmentCache = {
+      get: async (key: string) => store.get(key),
+      set: async (key: string, lines: unknown[]) => void store.set(key, lines),
+    };
+    // First attempt: speech is transcribed, then summarization fails.
+    const firstFetch = vi.fn<typeof fetch>(async (input) => String(input).includes("deepgram")
+      ? deepgramUtterances([0, 1, "hello team"])
+      : new Response("overloaded", { status: 529 }));
+    await expect(processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), firstFetch, { segmentCache })).rejects.toThrow();
+    expect(store.size).toBe(1);
+
+    // Retry: no audio goes to the transcription provider again.
+    const retryFetch = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).includes("deepgram")) throw new Error("must not be called again");
+      return claudeReply({ title: "T", overview: "Hello", key_points: [], decisions: [], action_items: [] });
+    });
+    const result = await processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), retryFetch, { segmentCache });
+    expect(result.transcript.map((turn) => turn.text)).toEqual(["hello team"]);
+    expect(retryFetch.mock.calls.every(([input]) => !String(input).includes("deepgram"))).toBe(true);
+  });
+
   it("explains billing, an unreadable 200, and an unreachable provider in plain words", async () => {
     const noCredit = vi.fn<typeof fetch>(async () => new Response("", { status: 402 }));
     await expect(processBrowserMeetRecording(settings(), "general", chunkRun("speaker", 0, 2), noCredit)).rejects.toThrow("no remaining credit");
