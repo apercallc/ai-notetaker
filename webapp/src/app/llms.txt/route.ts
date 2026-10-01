@@ -25,6 +25,7 @@ export function GET(): Response {
     "- The microphone and the meeting's audio are kept as separate channels, and raw audio is saved on the device before any AI provider is called.",
     "- Each meeting becomes a transcript, a summary, decisions and action items, searchable across meetings.",
     "- Ask your notes (Hosted Pro and Hosted Team only): questions answered from the user's own meetings, citing the notes used. Questions are not stored and do not use meeting hours.",
+    `- Hosted AI also offers: importing an existing audio or video file (up to ${LIMITS.importHoursPro} hours on Pro, ${LIMITS.importHoursTeam} on Team, counted against monthly meeting hours); notes templates (General, Standup, Sales call, 1:1, Interview, Lecture) and per-meeting speaker renaming; a library with nested folders, editable text notes and a 30-day Trash; signed webhooks, Slack and Notion delivery; a read-only MCP server over the user's own notes using revocable tokens; ${LIMITS.languages} languages with spoken-language detection, custom vocabulary and translated summaries; and, on Team, an activity log for workspace owners.`,
     `- Open source under the ${SITE.license} license: ${SITE.repoUrl}`,
     "",
     "## Two ways to run the AI",
