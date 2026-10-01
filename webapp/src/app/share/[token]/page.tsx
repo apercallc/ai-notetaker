@@ -34,15 +34,26 @@ function LinkUnavailable() {
   );
 }
 
+/** Shown to a reader who is over the lookup budget. It says nothing about the link itself. */
+function TooManyRequests() {
+  return (
+    <main className="container shared-meeting">
+      <div className="empty-state" role="status">
+        <h1>Too many requests right now</h1>
+        <p className="muted-copy">This page is being opened very often from your connection. Wait a minute, then reload.</p>
+      </div>
+    </main>
+  );
+}
+
 export default async function SharedMeetingPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const store = await headers();
   const ip = clientIpFromHeaders((name) => store.get(name));
   const lookup = shareLookupLimiter.hit(ip ?? "unknown");
-  // Same card for throttled and dead links: a throttled caller gets the
-  // page they would eventually get anyway, without learning how close
-  // they are to the limit.
-  if (!lookup.allowed) return <LinkUnavailable />;
+  // A throttled reader used to see "expired or revoked", which sent real readers off to ask for a new link.
+  // The limit is about the caller's volume, so naming it reveals nothing about whether the link is valid.
+  if (!lookup.allowed) return <TooManyRequests />;
 
   const meeting = await getSharedMeeting(token);
   if (!meeting) return <LinkUnavailable />;
