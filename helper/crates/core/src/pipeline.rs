@@ -24,6 +24,9 @@ use uuid::Uuid;
 /// transcript quality. Five seconds keeps rolling updates useful while
 /// keeping request volume sane.
 const TRANSCRIPTION_BATCH_SECONDS: usize = 5;
+// Reconnect history need not produce live updates every five seconds. Larger
+// bounded requests reduce catch-up overhead without loading a whole outage.
+const STREAM_BACKFILL_BATCH_SECONDS: usize = 30;
 
 struct PendingAudio {
     pcm16: Vec<u8>,
@@ -338,28 +341,53 @@ impl Pipeline {
             AudioChannel::Speaker => &mut self.speaker_stream_gap_start,
         };
         // A session just (re)opened and there's untranscribed history —
-        // backfill it exactly once through the existing batch retry path.
-        if let Some(start) = gap_start.take() {
-            if start < existing_len {
-                let backfill = self
-                    .store
-                    .read_audio_range(meeting_id, channel_file, start, existing_len)
-                    .unwrap_or_default();
-                if !backfill.is_empty() {
-                    messages.extend(
-                        self.transcribe_pending(
-                            meeting_id,
-                            channel,
-                            channel_file,
-                            PendingAudio {
-                                pcm16: backfill,
-                                sample_rate_hz,
-                                start,
-                            },
-                        )
-                        .await,
-                    );
-                }
+        // Backfill in bounded, durable retry ranges. A long provider outage
+        // must not turn into a full-call allocation or oversized API request.
+        if let Some(mut start) = gap_start.take() {
+            let batch_bytes = (sample_rate_hz as usize)
+                .saturating_mul(2)
+                .saturating_mul(STREAM_BACKFILL_BATCH_SECONDS)
+                .max(2);
+            while start < existing_len {
+                let end = start.saturating_add(batch_bytes).min(existing_len);
+                let backfill =
+                    match self
+                        .store
+                        .read_audio_range(meeting_id, channel_file, start, end)
+                    {
+                        Ok(bytes) => bytes,
+                        Err(error) => {
+                            // Retain the first unread range, including the current
+                            // durable frame, for the next attempt/startup recovery.
+                            let gap_start = match channel {
+                                AudioChannel::Mic => &mut self.mic_stream_gap_start,
+                                AudioChannel::Speaker => &mut self.speaker_stream_gap_start,
+                            };
+                            *gap_start = Some(start);
+                            messages.push(HelperToExtension::Error {
+                                meeting_id: Some(meeting_id),
+                                code: ErrorCode::StorageError,
+                                message: format!(
+                                    "stream backfill could not read saved audio: {error}"
+                                ),
+                            });
+                            return messages;
+                        }
+                    };
+                messages.extend(
+                    self.transcribe_pending(
+                        meeting_id,
+                        channel,
+                        channel_file,
+                        PendingAudio {
+                            pcm16: backfill,
+                            sample_rate_hz,
+                            start,
+                        },
+                    )
+                    .await,
+                );
+                start = end;
             }
         }
 
@@ -463,7 +491,80 @@ impl Pipeline {
                     .await,
             );
         }
+        messages.extend(self.queue_unstreamed_audio(meeting_id));
         messages
+    }
+
+    /// Closing during an outage must still schedule every durable frame that
+    /// never reached a stream. Queue disk ranges without loading audio or
+    /// waiting for the disconnected provider; the retry worker owns catch-up.
+    fn queue_unstreamed_audio(&mut self, meeting_id: Uuid) -> Vec<HelperToExtension> {
+        if self.mic_stream_gap_start.is_none() && self.speaker_stream_gap_start.is_none() {
+            return vec![];
+        }
+        let result = (|| -> Result<(), String> {
+            let meta = self
+                .store
+                .load_meta(meeting_id)
+                .map_err(|error| error.to_string())?;
+            for (channel, channel_file, gap_start, sample_rate_hz) in [
+                (
+                    AudioChannel::Mic,
+                    MIC_FILE,
+                    &mut self.mic_stream_gap_start,
+                    meta.mic_sample_rate_hz,
+                ),
+                (
+                    AudioChannel::Speaker,
+                    SPEAKER_FILE,
+                    &mut self.speaker_stream_gap_start,
+                    meta.speaker_sample_rate_hz,
+                ),
+            ] {
+                let Some(mut start) = *gap_start else {
+                    continue;
+                };
+                let end = self
+                    .store
+                    .audio_len(meeting_id, channel_file)
+                    .map_err(|error| error.to_string())?
+                    & !1usize;
+                let batch_bytes = (sample_rate_hz as usize)
+                    .saturating_mul(2)
+                    .saturating_mul(STREAM_BACKFILL_BATCH_SECONDS)
+                    .max(2);
+                while start < end {
+                    let batch_end = start.saturating_add(batch_bytes).min(end);
+                    self.retry_queue
+                        .enqueue(
+                            RetryableChunk {
+                                meeting_id,
+                                channel,
+                                sample_rate_hz,
+                                audio_ref: RetryAudioRef::FileRange {
+                                    channel_file: channel_file.into(),
+                                    start,
+                                    end: batch_end,
+                                },
+                            },
+                            Utc::now(),
+                        )
+                        .map_err(|error| error.to_string())?;
+                    start = batch_end;
+                    *gap_start = Some(start);
+                }
+                *gap_start = None;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => vec![],
+            Err(error) => vec![HelperToExtension::Error {
+                meeting_id: Some(meeting_id),
+                code: ErrorCode::StorageError,
+                message: format!("unstreamed audio could not be queued for retry: {error}"),
+            }],
+        }
     }
 
     async fn transcribe_pending(
@@ -574,7 +675,10 @@ impl Pipeline {
         let mut messages = vec![HelperToExtension::RecordingStopped { meeting_id }];
         messages.extend(self.flush_pending_audio(meeting_id).await);
 
-        if self.has_pending_retries(meeting_id) {
+        if self.has_pending_retries(meeting_id)
+            || self.mic_stream_gap_start.is_some()
+            || self.speaker_stream_gap_start.is_some()
+        {
             messages.push(HelperToExtension::Error {
                 meeting_id: Some(meeting_id),
                 code: ErrorCode::ProviderUnreachable,
@@ -669,7 +773,11 @@ impl Pipeline {
         let Ok(meta) = self.store.load_meta(meeting_id) else {
             return vec![];
         };
-        if !meta.summary_pending || self.has_pending_retries(meeting_id) {
+        if !meta.summary_pending
+            || self.has_pending_retries(meeting_id)
+            || self.mic_stream_gap_start.is_some()
+            || self.speaker_stream_gap_start.is_some()
+        {
             return vec![];
         }
         let transcript = match self.store.load_transcript(meeting_id) {
@@ -1760,6 +1868,275 @@ mod tests {
             m,
             HelperToExtension::TranscriptPartial { text, .. } if text.starts_with("backfilled")
         )));
+    }
+
+    struct OfflineUntilRetryTranscriber {
+        connected: bool,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for OfflineUntilRetryTranscriber {
+        fn id(&self) -> TranscriptionProviderId {
+            TranscriptionProviderId::Deepgram
+        }
+        fn is_streaming(&self) -> bool {
+            true
+        }
+        async fn transcribe_chunk(
+            &self,
+            chunk: &AudioChunk,
+        ) -> Result<Vec<TranscriptSegment>, ProviderError> {
+            if !self.connected {
+                return Err(ProviderError::Unreachable("offline".into()));
+            }
+            Ok(vec![TranscriptSegment {
+                speaker: if chunk.channel == AudioChannel::Mic {
+                    "you"
+                } else {
+                    "others"
+                }
+                .into(),
+                text: format!("recovered {} bytes", chunk.pcm16.len()),
+                is_final: true,
+            }])
+        }
+        async fn open_streaming_session(
+            &self,
+            _channel: AudioChannel,
+            _sample_rate_hz: u32,
+        ) -> Result<Box<dyn StreamingSession>, ProviderError> {
+            Err(ProviderError::Unreachable("offline".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_during_stream_outage_queues_audio_and_defers_summary_until_restart_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_path = dir.path().join("retry.json");
+        let retry_queue = RetryQueue::load_or_create(&retry_path).unwrap();
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(OfflineUntilRetryTranscriber { connected: false }),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        let sample_rate = 16_000;
+        let batch_bytes = sample_rate as usize * 2 * STREAM_BACKFILL_BATCH_SECONDS;
+        let mic = vec![7; batch_bytes * 2 + 4];
+        let speaker = vec![8; batch_bytes + 6];
+        for (channel, bytes) in [(AudioChannel::Mic, &mic), (AudioChannel::Speaker, &speaker)] {
+            pipeline
+                .handle_audio_chunk(id, channel, bytes, sample_rate)
+                .await;
+        }
+        let messages = pipeline.stop_recording(id).await.unwrap();
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::RecordingStopped { .. })));
+        assert!(!messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::SummaryReady { .. })));
+        assert!(pipeline.has_pending_summary(id));
+        assert_eq!(pipeline.retry_queue_len(), 5);
+        assert_eq!(pipeline.store.read_audio_all(id, MIC_FILE).unwrap(), mic);
+        assert_eq!(
+            pipeline.store.read_audio_all(id, SPEAKER_FILE).unwrap(),
+            speaker
+        );
+        // Repeating Stop does not duplicate the queued channel ranges.
+        pipeline.stop_recording(id).await.unwrap();
+        assert_eq!(pipeline.retry_queue_len(), 5);
+        drop(pipeline);
+
+        let mut restarted = Pipeline::new(
+            MeetingStore::new(dir.path()).unwrap(),
+            Box::new(OfflineUntilRetryTranscriber { connected: true }),
+            Box::new(FakeSummarizer),
+            RetryQueue::load_or_create(&retry_path).unwrap(),
+        );
+        let messages = restarted.process_due_retries(Utc::now()).await;
+        assert_eq!(restarted.retry_queue_len(), 0);
+        assert!(!restarted.has_pending_summary(id));
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::SummaryReady { .. })));
+        let transcript = restarted.store.load_transcript(id).unwrap();
+        assert_eq!(transcript.len(), 5);
+        assert_eq!(
+            transcript
+                .iter()
+                .filter(|segment| segment.speaker == "you")
+                .count(),
+            3
+        );
+        assert_eq!(
+            transcript
+                .iter()
+                .filter(|segment| segment.speaker == "others")
+                .count(),
+            2
+        );
+    }
+
+    struct BackfillFailureTranscriber {
+        calls: Arc<std::sync::Mutex<Vec<AudioChunk>>>,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for BackfillFailureTranscriber {
+        fn id(&self) -> TranscriptionProviderId {
+            TranscriptionProviderId::Deepgram
+        }
+        fn is_streaming(&self) -> bool {
+            true
+        }
+        async fn transcribe_chunk(
+            &self,
+            chunk: &AudioChunk,
+        ) -> Result<Vec<TranscriptSegment>, ProviderError> {
+            self.calls.lock().unwrap().push(AudioChunk {
+                channel: chunk.channel,
+                sample_rate_hz: chunk.sample_rate_hz,
+                pcm16: chunk.pcm16.clone(),
+            });
+            Err(ProviderError::Unreachable("batch unavailable".into()))
+        }
+        async fn open_streaming_session(
+            &self,
+            _channel: AudioChannel,
+            _sample_rate_hz: u32,
+        ) -> Result<Box<dyn StreamingSession>, ProviderError> {
+            Ok(Box::new(FakeStreamingSession {
+                outbox: std::collections::VecDeque::new(),
+                closed: false,
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn unreadable_stream_backfill_retains_the_gap_for_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(BackfillFailureTranscriber {
+                calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+            }),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline.store.append_audio(id, MIC_FILE, &[1, 2]).unwrap();
+        pipeline.mic_stream_gap_start = Some(2);
+        let messages = pipeline
+            .handle_persisted_audio_chunk(id, AudioChannel::Mic, &[3, 4], 16_000, 10)
+            .await;
+        assert_eq!(pipeline.mic_stream_gap_start, Some(2));
+        assert!(matches!(
+            messages.as_slice(),
+            [HelperToExtension::Error {
+                code: ErrorCode::StorageError,
+                ..
+            }]
+        ));
+    }
+
+    #[tokio::test]
+    async fn long_stream_backfill_is_bounded_and_retries_exact_channel_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_path = dir.path().join("retry.json");
+        let retry_queue = RetryQueue::load_or_create(&retry_path).unwrap();
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(BackfillFailureTranscriber {
+                calls: calls.clone(),
+            }),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        let sample_rate = 16_000;
+        let batch_bytes = sample_rate as usize * 2 * STREAM_BACKFILL_BATCH_SECONDS;
+        // Start after audio that has already been streamed. Each channel's
+        // outage exceeds two batches and must retain its own byte boundaries.
+        let mic = vec![7; batch_bytes * 2 + 4];
+        let speaker = vec![8; batch_bytes + 6];
+        for (channel_file, bytes) in [(MIC_FILE, &mic), (SPEAKER_FILE, &speaker)] {
+            pipeline
+                .store
+                .append_audio(id, channel_file, &[1, 2])
+                .unwrap();
+            pipeline
+                .store
+                .append_audio(id, channel_file, bytes)
+                .unwrap();
+        }
+        pipeline.mic_stream_gap_start = Some(2);
+        pipeline.speaker_stream_gap_start = Some(2);
+        for channel in [AudioChannel::Mic, AudioChannel::Speaker] {
+            pipeline
+                .handle_audio_chunk(id, channel, &[9, 10], sample_rate)
+                .await;
+        }
+        {
+            let captured = calls.lock().unwrap();
+            assert_eq!(captured.len(), 5);
+            assert!(captured
+                .iter()
+                .all(|chunk| chunk.pcm16.len() <= batch_bytes));
+            for (channel, expected) in
+                [(AudioChannel::Mic, &mic), (AudioChannel::Speaker, &speaker)]
+            {
+                let actual: Vec<u8> = captured
+                    .iter()
+                    .filter(|chunk| chunk.channel == channel)
+                    .flat_map(|chunk| chunk.pcm16.iter().copied())
+                    .collect();
+                assert_eq!(&actual, expected);
+            }
+        }
+        // Failed batches survive restart as small range descriptors, and
+        // re-read exactly the original bytes, excluding the new live frame.
+        let persisted: RetryQueue<RetryableChunk> =
+            RetryQueue::load_or_create(&retry_path).unwrap();
+        assert_eq!(persisted.len(), 5);
+        for job in persisted.due_jobs(Utc::now()) {
+            let RetryAudioRef::FileRange {
+                channel_file,
+                start,
+                end,
+            } = &job.payload.audio_ref;
+            assert!(*start >= 2);
+            assert!(*end - *start <= batch_bytes);
+            let expected = if job.payload.channel == AudioChannel::Mic {
+                &mic
+            } else {
+                &speaker
+            };
+            assert!(*end <= expected.len() + 2);
+            assert_eq!(
+                pipeline
+                    .store
+                    .read_audio_range(id, channel_file, *start, *end)
+                    .unwrap(),
+                expected[*start - 2..*end - 2]
+            );
+        }
+        pipeline.process_due_retries(Utc::now()).await;
+        let captured = calls.lock().unwrap();
+        assert_eq!(captured.len(), 10);
+        for (original, retried) in captured[..5].iter().zip(&captured[5..]) {
+            assert_eq!(original.channel, retried.channel);
+            assert_eq!(original.pcm16, retried.pcm16);
+        }
     }
 
     #[tokio::test]

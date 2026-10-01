@@ -4,6 +4,7 @@ import { DeepgramLiveTranscriber, type DeepgramLiveEvent } from "../src/meet/dee
 class FakeSocket {
   static instances: FakeSocket[] = [];
   readyState = 0;
+  bufferedAmount = 0;
   sent: Array<string | ArrayBufferLike | Blob | ArrayBufferView> = [];
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -40,6 +41,22 @@ function makeTranscriber(events: DeepgramLiveEvent[]) {
 }
 
 describe("DeepgramLiveTranscriber", () => {
+  it("closes a stalled open connection before audio can accumulate without a bound", async () => {
+    FakeSocket.reset();
+    const events: DeepgramLiveEvent[] = [];
+    const stream = makeTranscriber(events);
+    const connected = stream.connect({ kind: "apiKey", token: "local-key" });
+    FakeSocket.instances.forEach((socket) => socket.open());
+    await connected;
+    const mic = FakeSocket.instances[0]!;
+    mic.bufferedAmount = 480_000;
+    stream.send("mic", new Uint8Array([1, 2]));
+    stream.send("speaker", new Uint8Array([3, 4]));
+    expect(FakeSocket.instances.every((socket) => socket.sent.length === 0)).toBe(true);
+    expect(FakeSocket.instances.every((socket) => socket.close.mock.calls.length === 1)).toBe(true);
+    expect(events).toContainEqual(expect.objectContaining({ type: "status", status: "unavailable" }));
+  });
+
   it("streams mic and speaker audio separately using BYOK credentials", async () => {
     FakeSocket.reset();
     const events: DeepgramLiveEvent[] = [];

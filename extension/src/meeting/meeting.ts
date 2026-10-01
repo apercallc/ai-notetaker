@@ -307,24 +307,19 @@ async function render(focusActionId?: string): Promise<void> {
     [...document.querySelectorAll<HTMLInputElement>(".action-toggle")].find((input) => input.dataset.actionId === focusActionId)?.focus({ preventScroll: true });
   }
 
-  // A meeting opened mid-summarization showed "Still processing…" forever
-  // with no way to see the finished summary short of manually reloading
-  // the tab (found in design review) — listen for the same SUMMARY_READY
-  // event the popup already reacts to, and re-render once it lands.
-  if (meeting.status === "processing") {
-    function liveListener(message: BackgroundToUiMessage): void {
-      if (message.type === "SUMMARY_READY" && message.meetingId === id) {
-        removeLiveListener?.();
-        removeLiveListener = null;
-        void render().catch(renderFailure);
-      }
-      if (message.type === "DRIVE_EXPORT" && message.meetingId === id) {
-        void render().catch(renderFailure);
-      }
+  // Keep processing outcomes and Drive export feedback current even when
+  // the meeting page stays open after its summary has finished.
+  function liveListener(message: BackgroundToUiMessage): void {
+    if (
+      (message.type === "SUMMARY_READY" || message.type === "RECORDING_ERROR" ||
+        message.type === "DRIVE_EXPORT" || message.type === "MEETING_STATE_CHANGED") &&
+      message.meetingId === id
+    ) {
+      void render().catch(renderFailure);
     }
-    chrome.runtime.onMessage.addListener(liveListener);
-    removeLiveListener = () => chrome.runtime.onMessage.removeListener(liveListener);
   }
+  chrome.runtime.onMessage.addListener(liveListener);
+  removeLiveListener = () => chrome.runtime.onMessage.removeListener(liveListener);
 }
 
 /** Inline title editing: Enter saves, Escape cancels, and the text is stored as a single line. */

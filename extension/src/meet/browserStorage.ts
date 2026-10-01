@@ -61,12 +61,24 @@ export async function appendBrowserMeetChunk(
   sequence: number,
   bytes: Uint8Array,
   capturedAt: number = Date.now(),
+  chunkId?: string,
 ): Promise<void> {
   const db = await openDatabase();
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, "readwrite");
-      transaction.objectStore(STORE_NAME).put({ id: `${meetingId}:${sequence}`, meetingId, channel, sequence, bytes: bytes.slice().buffer, capturedAt } satisfies StoredChunk);
+      const store = transaction.objectStore(STORE_NAME);
+      const id = chunkId === undefined ? `${meetingId}:${sequence}` : `${meetingId}:capture:${chunkId}`;
+      const record = { id, meetingId, channel, sequence, bytes: bytes.slice().buffer, capturedAt } satisfies StoredChunk;
+      if (chunkId === undefined) store.put(record);
+      else {
+        // Lookup and insertion share one readwrite transaction: concurrent
+        // retransmissions and worker restarts retain the first durable copy.
+        const existing = store.getKey(id);
+        existing.onsuccess = () => {
+          if (existing.result === undefined) store.put(record);
+        };
+      }
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error ?? new Error("Meet audio could not be saved"));
       transaction.onabort = () => reject(transaction.error ?? new Error("Meet audio could not be saved"));

@@ -17,13 +17,13 @@ const state = {
   helperInfo: null,
 };
 
-async function loadPopup(activeTab: { id: number; url: string } | undefined, sessionSeed?: Record<string, unknown>): Promise<void> {
+async function loadPopup(activeTab: { id: number; url: string } | undefined, sessionSeed?: Record<string, unknown>, stateOverride?: Record<string, unknown>): Promise<void> {
   vi.resetModules();
   document.body.innerHTML = '<main id="app"></main>';
   chromeMock.reset();
   chromeMock.tabs.query.mockResolvedValue(activeTab ? [activeTab] : []);
   chromeMock.runtime.sendMessage.mockImplementation(async (message: { type?: string }) => {
-    if (message.type === "GET_STATE") return state;
+    if (message.type === "GET_STATE") return { ...state, ...stateOverride };
     if (message.type === "START_RECORDING") return { meetingId: "auto-started" };
     return {};
   });
@@ -37,6 +37,30 @@ async function loadPopup(activeTab: { id: number; url: string } | undefined, ses
 describe("popup capture routing", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("opens Meet from the desktop view even when the helper is connected", async () => {
+    vi.spyOn(window, "close").mockImplementation(() => undefined);
+    await loadPopup({ id: 1, url: "chrome://newtab" }, undefined, { helperStatus: "connected" });
+    await vi.waitFor(() => expect(document.querySelector("#use-meet")).not.toBeNull());
+    (document.querySelector("#use-meet") as HTMLButtonElement).click();
+    expect(chromeMock.tabs.create).toHaveBeenCalledWith({ url: "https://meet.google.com/" });
+  });
+
+  it("shows helperless Meet live captions", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, {
+      activeMeeting: { id: "m-live" },
+    });
+    // Seed the local meeting before the background GET_STATE continuation.
+    await new Promise<void>((resolve) => chromeMock.storage.local.set({
+      "notetaker.meeting.m-live": { id: "m-live", captureSource: "meet", liveTranscriptStatus: "available", transcript: [] },
+    }, resolve));
+    const listener = chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)?.[0];
+    await vi.waitFor(() => expect(chromeMock.runtime.onMessage.addListener).toHaveBeenCalled());
+    (listener ?? chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)![0])({ type: "MEETING_STATE_CHANGED", meetingId: "m-live" });
+    await vi.waitFor(() => expect(document.querySelector("#transcript-view")).not.toBeNull());
+    chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)![0]({ type: "TRANSCRIPT_UPDATE", meetingId: "m-live", speaker: "you", text: "Browser captions", isFinal: true });
+    expect(document.querySelector("#transcript-view")?.textContent).toContain("Browser captions");
   });
 
   it("detects the active tab: a non-Meet tab shows the way to Meet, not a dead Start", async () => {

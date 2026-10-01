@@ -24,6 +24,10 @@ export interface DeepgramLiveTranscriberOptions {
 
 const LIVE_URL = "wss://api.deepgram.com/v1/listen";
 const MAX_PENDING_CHUNKS_PER_CHANNEL = 8;
+// Five seconds of 48 kHz mono PCM16. Raw audio remains durable locally when
+// the optional live connection cannot keep up; never let WebSocket queue an
+// entire call in the extension's heap.
+const MAX_BUFFERED_AUDIO_BYTES = 480_000;
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const buffer = new ArrayBuffer(bytes.byteLength);
@@ -90,6 +94,10 @@ export class DeepgramLiveTranscriber {
     if (this.stopped) return;
     const socket = this.sockets.get(channel);
     if (socket?.readyState === WebSocket.OPEN) {
+      if (socket.bufferedAmount + pcm16.byteLength > MAX_BUFFERED_AUDIO_BYTES) {
+        this.fail("The live transcript connection could not keep up. Your audio is saved locally.");
+        return;
+      }
       try {
         socket.send(toArrayBuffer(pcm16));
       } catch {
@@ -148,6 +156,10 @@ export class DeepgramLiveTranscriber {
     const queue = this.pending.get(channel);
     if (!queue) return;
     for (const chunk of queue.splice(0)) {
+      if (socket.bufferedAmount + chunk.byteLength > MAX_BUFFERED_AUDIO_BYTES) {
+        this.fail("The live transcript connection could not keep up. Your audio is saved locally.");
+        return;
+      }
       try {
         socket.send(toArrayBuffer(chunk));
       } catch {

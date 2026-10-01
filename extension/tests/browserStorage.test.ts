@@ -17,6 +17,26 @@ async function collect(meetingId: string, batchSize?: number): Promise<number[]>
 }
 
 describe("browser Meet chunk storage", () => {
+  it("deduplicates a retried chunk after the worker lost its acknowledgement", async () => {
+    await appendBrowserMeetChunk("m1", "mic", 0, bytes(1, 2), 1000, "capture-1");
+    // A replacement worker allocates a new sequence; retain the original
+    // audio and capture time rather than appending it to the call twice.
+    await appendBrowserMeetChunk("m1", "mic", 1, bytes(1, 2), 2000, "capture-1");
+    await appendBrowserMeetChunk("m1", "mic", 2, bytes(3, 4), 2500, "capture-2");
+    expect((await listBrowserMeetChunks("m1")).map(({ sequence, capturedAt }) => ({ sequence, capturedAt })))
+      .toEqual([{ sequence: 0, capturedAt: 1000 }, { sequence: 2, capturedAt: 2500 }]);
+    await clearBrowserMeetChunks("m1");
+    expect(await listBrowserMeetChunks("m1")).toEqual([]);
+  });
+
+  it("deduplicates concurrent chunk retransmissions atomically", async () => {
+    await Promise.all([
+      appendBrowserMeetChunk("m1", "speaker", 0, bytes(1, 2), 1000, "capture-1"),
+      appendBrowserMeetChunk("m1", "speaker", 1, bytes(1, 2), 1000, "capture-1"),
+    ]);
+    expect(await listBrowserMeetChunks("m1")).toHaveLength(1);
+  });
+
   it("reads one meeting's chunks in numeric sequence order, never another meeting's", async () => {
     // Lexicographic key order would put "m1:10" before "m1:2".
     for (const sequence of [2, 10, 0, 1, 9]) await appendBrowserMeetChunk("m1", sequence % 2 === 0 ? "mic" : "speaker", sequence, bytes(sequence, 0));

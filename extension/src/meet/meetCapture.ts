@@ -8,6 +8,7 @@ export interface MeetAudioChunk {
   channel: BrowserAudioChannel;
   sampleRateHz: number;
   pcm16Base64: string;
+  chunkId?: string;
   /** Lets a restarted worker re-attach the capture to its tab. */
   tabId?: number;
 }
@@ -88,7 +89,7 @@ function callCodeOf(url: string | undefined): string | null {
 export class MeetCaptureController {
   private readonly activeMeetings = new Map<string, ActiveCapture>();
 
-  constructor(private readonly sendChunk: (chunk: Uint8Array, meetingId: string, channel: BrowserAudioChannel) => void | Promise<void> = () => {}) {}
+  constructor(private readonly sendChunk: (chunk: Uint8Array, meetingId: string, channel: BrowserAudioChannel, chunkId?: string) => void | Promise<void> = () => {}) {}
 
   /**
    * The active-capture map is process memory, and the MV3 service worker can
@@ -223,6 +224,10 @@ export class MeetCaptureController {
     return this.activeMeetings.has(meetingId);
   }
 
+  isActiveForTab(meetingId: string, tabId: number): boolean {
+    return this.activeMeetings.get(meetingId)?.tabId === tabId;
+  }
+
   /** Rehydrates the capture marker after an MV3 service-worker wake. */
   recover(meetingId: string, tabId = -1): void {
     this.activeMeetings.set(meetingId, { tabId, callCode: null });
@@ -230,6 +235,7 @@ export class MeetCaptureController {
 
   forwardChunk(message: MeetAudioChunk): void | Promise<void> {
     if (!this.activeMeetings.has(message.meetingId)) return;
+    if (message.chunkId !== undefined && (typeof message.chunkId !== "string" || message.chunkId.length === 0 || message.chunkId.length > 128)) throw new Error("Meet audio chunk identity is invalid");
     if (message.sampleRateHz !== SAMPLE_RATE_HZ) throw new Error("Meet capture must use 48 kHz audio");
     let binary: string;
     try {
@@ -241,6 +247,8 @@ export class MeetCaptureController {
       throw new Error("Meet audio chunks must be non-empty, even-length PCM16 data under 64 KiB");
     }
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return this.sendChunk(bytes, message.meetingId, message.channel);
+    return message.chunkId === undefined
+      ? this.sendChunk(bytes, message.meetingId, message.channel)
+      : this.sendChunk(bytes, message.meetingId, message.channel, message.chunkId);
   }
 }

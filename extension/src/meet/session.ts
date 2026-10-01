@@ -61,7 +61,12 @@ export async function startMeetRecording(
     // and desktop + Meet genuinely cannot run at once (both claim the mic),
     // so surface a busy error instead of silently doing nothing.
     const activeRecord = await getMeeting(active.id);
-    if (activeRecord?.captureSource === "meet") return active.id;
+    if (activeRecord?.captureSource === "meet") {
+      const requestedTabId = options.tabId ?? (await discoverActiveMeetTab())?.id;
+      if (requestedTabId !== undefined && capture.isActiveForTab(active.id, requestedTabId)) return active.id;
+      controller.reportStartFailure("Notes are already recording in another Google Meet tab. Stop that recording before starting notes for this call.");
+      return "";
+    }
     controller.reportStartFailure(
       "A desktop recording is already running in the AI Notetaker helper. Stop it before starting notes for this call.",
     );

@@ -173,15 +173,31 @@ struct ActiveRecording {
 
 struct PersistedAudioChunk {
     channel: notetaker_core::providers::AudioChannel,
-    pcm16: Vec<u8>,
     sample_rate_hz: u32,
     existing_len: usize,
+    end: usize,
+}
+
+impl PersistedAudioChunk {
+    fn read(&self, store: &MeetingStore, meeting_id: Uuid) -> Result<Vec<u8>, String> {
+        let channel_file = match self.channel {
+            notetaker_core::providers::AudioChannel::Mic => notetaker_core::storage::MIC_FILE,
+            notetaker_core::providers::AudioChannel::Speaker => {
+                notetaker_core::storage::SPEAKER_FILE
+            }
+        };
+        store
+            .read_audio_range(meeting_id, channel_file, self.existing_len, self.end)
+            .map_err(|error| format!("failed to read persisted audio: {error}"))
+    }
 }
 
 /// Separates durable audio ingress from provider work. The sender is removed
 /// during `finish`, so the worker drains every already-enqueued frame and then
 /// exits; a slow provider can no longer block the Native Messaging reader from
 /// persisting the next frame.
+/// Queued frames hold only disk ranges, so a stalled provider does not retain
+/// the call's raw audio in memory. The consumer loads one frame at a time.
 struct AudioProcessingQueue {
     sender: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<PersistedAudioChunk>>>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -1180,9 +1196,9 @@ async fn handle_message(
                     };
                     let _ = audio_processing_for_audio.enqueue(PersistedAudioChunk {
                         channel: frame.channel,
-                        pcm16: frame.pcm16,
                         sample_rate_hz: frame.sample_rate_hz,
                         existing_len,
+                        end: existing_len + frame.pcm16.len(),
                     });
                 }))
                 .await;
@@ -1285,9 +1301,9 @@ async fn handle_message(
             };
             let _ = active.audio_processing.enqueue(PersistedAudioChunk {
                 channel: provider_channel,
-                pcm16,
                 sample_rate_hz,
                 existing_len,
+                end: existing_len + pcm16.len(),
             });
             true
         }
@@ -1765,13 +1781,28 @@ fn spawn_audio_processing_queue(
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<PersistedAudioChunk>();
     let task = tokio::spawn(async move {
         while let Some(chunk) = receiver.recv().await {
+            let pcm16 = match chunk.read(&state.store, meeting_id) {
+                Ok(pcm16) => pcm16,
+                Err(message) => {
+                    send_meeting_message(
+                        &state,
+                        meeting_id,
+                        HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code: ErrorCode::StorageError,
+                            message,
+                        },
+                    );
+                    continue;
+                }
+            };
             let messages = pipeline
                 .lock()
                 .await
                 .handle_persisted_audio_chunk(
                     meeting_id,
                     chunk.channel,
-                    &chunk.pcm16,
+                    &pcm16,
                     chunk.sample_rate_hz,
                     chunk.existing_len,
                 )
@@ -2117,6 +2148,35 @@ fn build_audio_backend() -> Arc<dyn AudioCapture> {
 mod tests {
     use super::*;
     use notetaker_core::storage::MeetingStore;
+
+    #[test]
+    fn queued_audio_reads_exact_durable_ranges_after_capture_advances() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, chrono::Utc::now()).unwrap();
+        let mut queued = Vec::new();
+        for (channel, bytes) in [
+            (notetaker_core::providers::AudioChannel::Mic, vec![1, 2]),
+            (notetaker_core::providers::AudioChannel::Speaker, vec![3, 4]),
+            (notetaker_core::providers::AudioChannel::Mic, vec![5, 6]),
+        ] {
+            let start = persist_audio_frame(&store, id, channel, &bytes, 48_000).unwrap();
+            queued.push(PersistedAudioChunk {
+                channel,
+                sample_rate_hz: 48_000,
+                existing_len: start,
+                end: start + bytes.len(),
+            });
+        }
+        // Provider work starts only after more frames have reached disk. Each
+        // reference still addresses its own channel and original frame.
+        assert_eq!(queued[0].read(&store, id).unwrap(), vec![1, 2]);
+        assert_eq!(queued[1].read(&store, id).unwrap(), vec![3, 4]);
+        assert_eq!(queued[2].read(&store, id).unwrap(), vec![5, 6]);
+        std::fs::write(store.audio_path(id, notetaker_core::storage::MIC_FILE), []).unwrap();
+        assert!(queued[0].read(&store, id).is_err());
+    }
 
     #[test]
     fn a_truncated_pairing_token_file_reads_as_never_paired() {

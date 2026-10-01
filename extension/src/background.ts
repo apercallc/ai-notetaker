@@ -36,7 +36,7 @@ void restrictStorageToTrustedContexts();
 
 const client = new NativeMessagingClient();
 const controller = new BackgroundController(client, broadcastToUi);
-const meetCapture = new MeetCaptureController((pcm16, meetingId, channel) => controller.sendMeetAudioChunk(meetingId, channel, pcm16, 48_000));
+const meetCapture = new MeetCaptureController((pcm16, meetingId, channel, chunkId) => controller.sendMeetAudioChunk(meetingId, channel, pcm16, 48_000, chunkId));
 
 // Declared before any listener that needs it: a tab event can wake the
 // worker at any point during top-level execution, and referencing a later

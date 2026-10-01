@@ -3,6 +3,7 @@ import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT, desc
 import type { BackgroundController } from "../src/lib/backgroundController";
 import type { MeetCaptureController } from "../src/meet/meetCapture";
 import { chromeMock } from "./setup";
+import { saveMeeting } from "../src/lib/storage";
 
 function fakes(active: { id: string } | null = null) {
   const controller = {
@@ -19,6 +20,7 @@ function fakes(active: { id: string } | null = null) {
     start: vi.fn(async () => undefined),
     stop: vi.fn(async () => undefined),
     isActive: vi.fn(() => true),
+    isActiveForTab: vi.fn(() => true),
     preflight: vi.fn(async () => undefined),
     stopForTab: vi.fn(async () => [] as string[]),
   };
@@ -55,6 +57,26 @@ describe("describeCaptureFailure", () => {
 });
 
 describe("startMeetRecording", () => {
+  it("does not claim another Meet tab's recording when start is requested from a new call", async () => {
+    const { controller, capture, asTypes } = fakes({ id: "existing" });
+    await saveMeeting({ id: "existing", captureSource: "meet" } as Parameters<typeof saveMeeting>[0]);
+    capture.isActiveForTab.mockReturnValue(false);
+    const [c, k] = asTypes();
+    expect(await startMeetRecording(c, k, { tabId: 10 })).toBe("");
+    expect(controller.reportStartFailure).toHaveBeenCalledWith(expect.stringContaining("another Google Meet tab"));
+    expect(controller.startRecording).not.toHaveBeenCalled();
+    expect(capture.start).not.toHaveBeenCalled();
+  });
+
+  it("reuses the recording only when it belongs to the requested Meet tab", async () => {
+    const { controller, capture, asTypes } = fakes({ id: "existing" });
+    await saveMeeting({ id: "existing", captureSource: "meet" } as Parameters<typeof saveMeeting>[0]);
+    const [c, k] = asTypes();
+    expect(await startMeetRecording(c, k, { tabId: 9 })).toBe("existing");
+    expect(capture.isActiveForTab).toHaveBeenCalledWith("existing", 9);
+    expect(capture.start).not.toHaveBeenCalled();
+  });
+
   it("starts the meeting with the meet source and then the tab capture", async () => {
     const { controller, capture, asTypes } = fakes();
     const [c, k] = asTypes();

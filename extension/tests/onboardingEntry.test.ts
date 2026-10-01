@@ -71,4 +71,33 @@ describe("onboarding entry point", () => {
     await vi.waitFor(() => expect(document.querySelector("#onboarding-form")).not.toBeNull());
     expect(document.querySelector<HTMLButtonElement>("#use-desktop")?.textContent).toContain("Zoom, Teams, or Slack");
   });
+
+  it("does not approve keys changed while their previous test is pending", async () => {
+    const pending: Array<(result: { valid: boolean; message: string }) => void> = [];
+    await loadWizard("/onboarding/onboarding.html", () => {
+      chromeMock.runtime.sendMessage.mockImplementation(async (message: { type: string }) => {
+        if (message.type === "TEST_PROVIDER_KEY") {
+          return new Promise((resolve) => pending.push(resolve));
+        }
+        return helperState;
+      });
+    });
+    await vi.waitFor(() => expect(document.querySelector("#test-onboarding-keys")).not.toBeNull());
+    const transcriptKey = document.querySelector<HTMLInputElement>("#onboarding-deepgram-key")!;
+    const summaryKey = document.querySelector<HTMLInputElement>("#onboarding-claude-key")!;
+    transcriptKey.value = "original-key";
+    summaryKey.value = "summary-key";
+    document.querySelector<HTMLButtonElement>("#test-onboarding-keys")!.click();
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    transcriptKey.value = "replacement-key";
+    transcriptKey.dispatchEvent(new Event("input"));
+    pending.splice(0).forEach((resolve) => resolve({ valid: true, message: "Valid" }));
+    await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>("#test-onboarding-keys")!.disabled).toBe(false));
+    expect(document.querySelector("#onboarding-key-result")?.textContent).not.toContain("Valid");
+    document.querySelector<HTMLFormElement>("#onboarding-form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "TEST_PROVIDER_KEY", key: "replacement-key" }));
+    pending.splice(0).forEach((resolve) => resolve({ valid: false, message: "Invalid" }));
+    await vi.waitFor(() => expect(document.querySelector("#step-error")?.textContent).toContain("did not pass"));
+  });
 });

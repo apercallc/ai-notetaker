@@ -16,8 +16,9 @@ import { testProviderKeyDirect } from "./testProviderKey";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
-import { browserMeetChunkStats, clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
+import { clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
+import { managedAudioChunkSource } from "../meet/managedAudioChunks";
 import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedJob, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { reportManagedError } from "./errorReport";
 import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment, type LiveTranscriptStatus } from "../types";
@@ -379,7 +380,7 @@ export class BackgroundController {
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
   }
 
-  sendMeetAudioChunk(meetingId: string, channel: BrowserAudioChannel, pcm16: Uint8Array, sampleRateHz = 48_000): Promise<void> {
+  sendMeetAudioChunk(meetingId: string, channel: BrowserAudioChannel, pcm16: Uint8Array, sampleRateHz = 48_000, chunkId?: string): Promise<void> {
     if (sampleRateHz !== 48_000 || pcm16.byteLength === 0 || pcm16.byteLength > 64 * 1024 || pcm16.byteLength % 2 !== 0) {
       throw new Error("Meet audio chunks must be non-empty, even-length PCM16 data under 64 KiB at 48 kHz");
     }
@@ -388,7 +389,7 @@ export class BackgroundController {
     const previous = this.meetChunkWrites.get(meetingId) ?? Promise.resolve();
     const current = previous
       .catch(() => undefined)
-      .then(() => appendBrowserMeetChunk(meetingId, channel, sequence, pcm16));
+      .then(() => appendBrowserMeetChunk(meetingId, channel, sequence, pcm16, Date.now(), chunkId));
     this.meetChunkWrites.set(meetingId, current);
     const cleanup = () => {
       if (this.meetChunkWrites.get(meetingId) === current) this.meetChunkWrites.delete(meetingId);
@@ -472,21 +473,15 @@ export class BackgroundController {
         // Stream the chunks: materializing every raw chunk in the worker at
         // once (an hour of two-channel 48 kHz PCM16 is ~700 MB per
         // browserStorage's own sizing note) is a heap exhaustion mid-upload.
-        // The manifest totals come from a key-only stats pass and each chunk
-        // is pulled from IndexedDB only when it is about to be PUT.
-        const stats = await browserMeetChunkStats(meetingId);
+        // Pack frames into bounded channel chunks to avoid one HTTP request,
+        // object and database row per AudioWorklet frame.
+        const source = await managedAudioChunkSource(() => streamBrowserMeetChunks(meetingId));
         const endedAt = new Date().toISOString();
         await registerManagedMeeting(managed, meeting, endedAt, this.fetchImpl);
         const upload = await uploadManagedMeeting(
           managed,
           meetingId,
-          {
-            totalChunks: stats.totalChunks,
-            totalBytes: stats.totalBytes,
-            chunks: (async function* (stream) {
-              for await (const chunk of stream) yield { channel: chunk.channel, index: 0, bytes: chunk.bytes };
-            })(streamBrowserMeetChunks(meetingId)),
-          },
+          source,
           this.fetchImpl,
         );
         await updateMeeting(meetingId, (current) => ({

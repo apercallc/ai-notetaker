@@ -254,16 +254,18 @@ export async function registerManagedMeeting(
  * What gets uploaded. The array form is kept for small inputs and existing
  * callers; the streaming form is the only safe shape for a real Meet
  * recording — the manifest totals come from a key-only stats pass, and the
- * chunks are pulled one at a time from IndexedDB so the service worker's
- * heap never holds more than a single chunk (~48 kB) of audio.
+ * chunks are packed from IndexedDB into bounded channel buffers so a long
+ * recording never has to fit in the service worker's heap.
  */
 export type ManagedChunkSource = ManagedChunk[] | {
   totalChunks: number;
   totalBytes: number;
+  /** Versioned packing avoids conflicts with an older incomplete manifest. */
+  uploadLayout?: string;
   chunks: AsyncIterable<ManagedChunk>;
 };
 
-function isStreamingSource(source: ManagedChunkSource): source is { totalChunks: number; totalBytes: number; chunks: AsyncIterable<ManagedChunk> } {
+function isStreamingSource(source: ManagedChunkSource): source is Exclude<ManagedChunkSource, ManagedChunk[]> {
   return !Array.isArray(source);
 }
 
@@ -296,10 +298,11 @@ export async function uploadManagedMeeting(
     : { totalChunks: source.length, totalBytes: source.reduce((sum, chunk) => sum + chunk.bytes.byteLength, 0) };
   if (totalChunks === 0) throw new Error("A managed meeting must contain at least one audio chunk");
   const idempotencyKey = `meeting:${meetingId}`;
+  const uploadKey = isStreamingSource(source) && source.uploadLayout ? `${idempotencyKey}:${source.uploadLayout}` : idempotencyKey;
   const manifest = await requestJson(config, "/api/v1/uploads", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ meetingId, totalChunks, totalBytes, idempotencyKey }),
+    headers: { "Content-Type": "application/json", "Idempotency-Key": uploadKey },
+    body: JSON.stringify({ meetingId, totalChunks, totalBytes, idempotencyKey: uploadKey }),
   }, fetchImpl);
   const uploadId = typeof manifest.uploadId === "string" ? manifest.uploadId : "";
   if (!uploadId) throw new Error("Managed service returned no upload id");

@@ -137,16 +137,21 @@ function appendTranscriptLine(
 
 async function renderActiveRecording(meetingId: string, helperStatus: BackgroundState["helperStatus"]): Promise<void> {
   const meeting = await getMeeting(meetingId);
-  // Live captions come from the desktop helper; a browser-only recording is
-  // written up when it stops.
-  const liveCaptions = helperStatus === "connected";
+  const liveCaptions = meeting?.captureSource === "meet"
+    ? meeting.liveTranscriptStatus === "available" || meeting.liveTranscriptStatus === "connecting" || Boolean(meeting.transcript.length)
+    : helperStatus === "connected";
+  const recordingStatus = meeting?.captureSource === "meet" && meeting.liveTranscriptStatus === "connecting"
+    ? "Connecting live captions…"
+    : meeting?.captureSource === "meet" && meeting.liveTranscriptStatus === "unavailable"
+      ? "Live captions are unavailable. Your saved audio will be processed after you stop."
+      : liveCaptions ? "" : "Your transcript and notes are processed after you stop.";
   app.innerHTML = `
     ${renderHeader(true)}
     <div class="record-controls">
       <span class="recording-indicator">Recording</span>
       <button class="danger record-toggle" id="stop-recording">${STOP_LABEL}</button>
     </div>
-    <p id="recording-status" class="text-secondary" role="status" aria-live="polite">${liveCaptions ? "" : "Your notes are written when you stop. Live captions need the desktop helper."}</p>
+    <p id="recording-status" class="text-secondary" role="status" aria-live="polite">${recordingStatus}</p>
     ${liveCaptions ? `<div class="transcript-view" id="transcript-view" role="log" aria-label="Live transcript"></div>` : ""}
   `;
   const transcriptView = document.getElementById("transcript-view");
@@ -181,6 +186,10 @@ async function renderActiveRecording(meetingId: string, helperStatus: Background
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
   function liveListener(message: BackgroundToUiMessage): void {
+    if (message.type === "MEETING_STATE_CHANGED" && message.meetingId === meetingId) {
+      void renderSafely();
+      return;
+    }
     if (message.type === "TRANSCRIPT_UPDATE" && message.meetingId === meetingId && transcriptView) {
       appendTranscriptLine(transcriptView, message.speaker, message.text, message.isFinal, message.utteranceId);
     }
@@ -477,7 +486,8 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   document.getElementById("use-meet")?.addEventListener("click", () => {
     desktopChosen = false;
     startError = "";
-    void renderSafely();
+    chrome.tabs.create({ url: MEET_HOME });
+    window.close();
   });
   document.getElementById("check-audio")?.addEventListener("click", () => void renderAudioStatus(helperStatus));
   document.getElementById("test-audio")?.addEventListener("click", () => void runAudioProbe());

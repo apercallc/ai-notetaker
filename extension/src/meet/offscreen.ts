@@ -179,6 +179,9 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
     const pcm16 = float32ToPcm16(new Float32Array(event.data));
     const write: Promise<void> = sendChunkWithRetry({
       type: "MEET_AUDIO_CHUNK",
+      // Retry the same identity if the worker committed audio but its reply
+      // was lost during suspension. The durable store deduplicates it.
+      chunkId: crypto.randomUUID(),
       meetingId,
       channel,
       sampleRateHz: SAMPLE_RATE_HZ,

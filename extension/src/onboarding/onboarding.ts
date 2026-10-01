@@ -381,7 +381,9 @@ function readOnboardingProviderFields(): { transcription: ProviderKind; summariz
   return { ...providers, transcriptionKey, summarizationKey };
 }
 
+let keyTestRevision = 0;
 function resetKeyTest(): void {
+  keyTestRevision += 1;
   providerTestsPassed = false;
   keyResult = null;
 }
@@ -466,6 +468,7 @@ async function runKeyTest(): Promise<boolean> {
   const button = document.getElementById("test-onboarding-keys") as HTMLButtonElement | null;
   const resultEl = document.getElementById("onboarding-key-result");
   const providers = readOnboardingProviderFields();
+  const revision = keyTestRevision;
   const show = (ok: boolean | null, text: string): void => {
     keyResult = ok === null ? null : { ok, text };
     if (!resultEl) return;
@@ -483,7 +486,9 @@ async function runKeyTest(): Promise<boolean> {
     resultEl.className = "result";
   }
   try {
-    if (!(await requestOptionalPermission(providerHostPermissions([providers.transcription, providers.summarization])))) {
+    const allowed = await requestOptionalPermission(providerHostPermissions([providers.transcription, providers.summarization]));
+    if (revision !== keyTestRevision) return false;
+    if (!allowed) {
       providerTestsPassed = false;
       show(false, "Chrome access to the selected AI providers was not granted. Allow both provider sites to test keys and process your saved Meet audio.");
       return false;
@@ -495,10 +500,12 @@ async function runKeyTest(): Promise<boolean> {
       testApiKey(providers.summarization, providers.summarizationKey),
     ]);
     const bothValid = transcriptionResult.valid && summarizationResult.valid;
+    if (revision !== keyTestRevision) return false;
     providerTestsPassed = bothValid;
     show(bothValid, `Transcript: ${transcriptionResult.message} Summary: ${summarizationResult.message}`);
     return bothValid;
   } catch {
+    if (revision !== keyTestRevision) return false;
     providerTestsPassed = false;
     show(false, "The keys could not be tested. Check your connection and try again.");
     return false;
@@ -808,8 +815,7 @@ function wireEvents(): void {
   document.getElementById("test-onboarding-keys")?.addEventListener("click", () => void runKeyTest());
   for (const input of document.querySelectorAll<HTMLInputElement>("[data-onboarding-provider]")) {
     input.addEventListener("input", () => {
-      providerTestsPassed = false;
-      keyResult = null;
+      resetKeyTest();
       const resultEl = document.getElementById("onboarding-key-result");
       if (resultEl) {
         resultEl.textContent = "";

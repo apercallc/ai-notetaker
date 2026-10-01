@@ -32,6 +32,24 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
+describe("meeting page: background updates", () => {
+  it("replaces processing with the saved error and offers retry", async () => {
+    await openMeeting({ ...base, summary: null, status: "processing", captureSource: "meet" });
+    await saveMeeting({ ...base, summary: null, status: "error", captureSource: "meet", errorMessage: "Provider unavailable" });
+    chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)![0]({ type: "RECORDING_ERROR", meetingId: "m1", message: "Provider unavailable" });
+    await vi.waitFor(() => expect(document.querySelector("#retry-processing")).not.toBeNull());
+    expect(document.body.textContent).toContain("Provider unavailable");
+    expect(document.body.textContent).not.toContain("Still processing");
+  });
+
+  it("updates Drive export after notes are complete", async () => {
+    await openMeeting({ ...base, driveExport: { status: "pending" } });
+    await saveMeeting({ ...base, driveExport: { status: "exported", webViewLink: "https://docs.google.com/document/d/notes" } });
+    chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)![0]({ type: "DRIVE_EXPORT", meetingId: "m1", status: "exported" });
+    await vi.waitFor(() => expect(document.querySelector(".drive-export-status")?.textContent).toContain("Saved to"));
+  });
+});
+
 describe("meeting page: summary", () => {
   it("renders structured sections and hides the summary's own action items while the interactive list is shown", async () => {
     await openMeeting();
