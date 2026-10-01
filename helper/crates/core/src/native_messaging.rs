@@ -169,7 +169,7 @@ pub enum ProcessingMode {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedServiceConfig {
     #[serde(rename = "baseUrl")]
     pub base_url: String,
@@ -180,6 +180,19 @@ pub struct ManagedServiceConfig {
     #[serde(rename = "workspaceId")]
     pub workspace_id: String,
     pub plan: String,
+}
+
+// Hand-written so a stray `{:?}` in a log line can never print the session token.
+impl std::fmt::Debug for ManagedServiceConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ManagedServiceConfig")
+            .field("base_url", &self.base_url)
+            .field("access_token", &"<redacted>")
+            .field("account_id", &self.account_id)
+            .field("workspace_id", &self.workspace_id)
+            .field("plan", &self.plan)
+            .finish()
+    }
 }
 
 /// A flagged moment as the extension sends it at stop time.
@@ -379,7 +392,7 @@ pub enum ProviderKind {
     Deepseek,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ApiKeys {
     pub deepgram: Option<String>,
     pub claude: Option<String>,
@@ -388,10 +401,38 @@ pub struct ApiKeys {
     pub deepseek: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+impl std::fmt::Debug for ApiKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mark = |key: &Option<String>| {
+            if key.is_some() {
+                "<redacted>"
+            } else {
+                "<unset>"
+            }
+        };
+        f.debug_struct("ApiKeys")
+            .field("deepgram", &mark(&self.deepgram))
+            .field("claude", &mark(&self.claude))
+            .field("groq", &mark(&self.groq))
+            .field("gemini", &mark(&self.gemini))
+            .field("deepseek", &mark(&self.deepseek))
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebappConfig {
     pub url: String,
     pub token: String,
+}
+
+impl std::fmt::Debug for WebappConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebappConfig")
+            .field("url", &self.url)
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -452,6 +493,28 @@ pub fn generate_pairing_token() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn debug_output_never_contains_secrets() {
+        let keys = ApiKeys {
+            deepgram: Some("dg-secret".into()),
+            ..ApiKeys::default()
+        };
+        let managed = ManagedServiceConfig {
+            base_url: "https://notes.example.com".into(),
+            access_token: "session-secret".into(),
+            account_id: "a".into(),
+            workspace_id: "w".into(),
+            plan: "hosted_pro".into(),
+        };
+        let webapp = WebappConfig {
+            url: "https://u".into(),
+            token: "webapp-secret".into(),
+        };
+        let printed = format!("{keys:?} {managed:?} {webapp:?}");
+        assert!(!printed.contains("secret"), "{printed}");
+        assert!(printed.contains("<redacted>"));
+    }
+
     use super::*;
     use std::io::Cursor;
 

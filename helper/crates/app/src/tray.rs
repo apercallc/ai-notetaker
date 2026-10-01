@@ -25,6 +25,11 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Runtime};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+
+/// Mirrors the tray's recording state so the menu's Quit handler (which has no
+/// controller handle) can ask before ending a live capture.
+static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 const TRAY_ID: &str = "ai-notetaker-tray";
 
@@ -92,6 +97,7 @@ impl<R: Runtime> TrayController<R> {
     }
 
     pub fn set_recording(&self, recording: bool) {
+        RECORDING_ACTIVE.store(recording, Ordering::Release);
         self.recording.store(recording, Ordering::Release);
         self.refresh();
     }
@@ -177,6 +183,17 @@ fn try_initialize<R: Runtime>(
         true,
         None::<&str>,
     )?;
+    let daily_updates = MenuItem::with_id(
+        app,
+        "daily-update-check",
+        if crate::update_check::background_checks_enabled(&data_dir) {
+            "Daily Update Check (On)"
+        } else {
+            "Daily Update Check (Off)"
+        },
+        true,
+        None::<&str>,
+    )?;
     let pair_browser =
         MenuItem::with_id(app, "pair-browser", "Pair New Browser…", true, None::<&str>)?;
     let launch_at_login = MenuItem::with_id(
@@ -204,6 +221,7 @@ fn try_initialize<R: Runtime>(
             &open_folder,
             &open_logs,
             &check_updates,
+            &daily_updates,
             &pair_browser,
             &launch_at_login,
             &quit,
@@ -232,6 +250,16 @@ fn try_initialize<R: Runtime>(
                     crate::update_check::check_now(&app, &data_dir).await;
                 });
             }
+            "daily-update-check" => {
+                let enable = !crate::update_check::background_checks_enabled(&data_dir);
+                if crate::update_check::set_background_checks(&data_dir, enable) {
+                    let _ = daily_updates.set_text(if enable {
+                        "Daily Update Check (On)"
+                    } else {
+                        "Daily Update Check (Off)"
+                    });
+                }
+            }
             "pair-browser" => {
                 // User-gesture re-pairing. The IPC layer cannot tell a fresh
                 // Chrome profile that lost its token copy from a rogue
@@ -258,7 +286,7 @@ fn try_initialize<R: Runtime>(
                 }
             }
             "launch-at-login" => toggle_autostart(app, &launch_at_login),
-            "quit" => app.exit(0),
+            "quit" => quit_with_confirmation(app),
             _ => {}
         })
         .build(app)?;
@@ -270,6 +298,28 @@ fn try_initialize<R: Runtime>(
         recording: AtomicBool::new(false),
         attention: AtomicBool::new(false),
     }))
+}
+
+/// Quitting mid-call stops capture. The audio already on disk is kept and offered for
+/// resume on the next start, but the user should choose that, not trigger it by a stray click.
+fn quit_with_confirmation<R: Runtime>(app: &AppHandle<R>) {
+    if !RECORDING_ACTIVE.load(Ordering::Acquire) {
+        app.exit(0);
+        return;
+    }
+    let handle = app.clone();
+    app.dialog()
+        .message("A recording is in progress. Quitting stops capturing audio. What was recorded so far is saved and can be resumed when AI Notetaker starts again.")
+        .title("Quit during a recording?")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Quit".into(),
+            "Keep recording".into(),
+        ))
+        .show(move |confirmed| {
+            if confirmed {
+                handle.exit(0);
+            }
+        });
 }
 
 fn toggle_autostart<R: Runtime>(app: &AppHandle<R>, item: &MenuItem<R>) {

@@ -1,4 +1,4 @@
-//! Daily, opt-in release checks for the unsigned direct-download channel.
+//! Daily release checks (off until the user enables them in the tray) for the unsigned direct-download channel.
 //!
 //! This module never downloads or installs an update. It compares the latest
 //! stable GitHub release with this build, asks once per version, and opens the
@@ -32,7 +32,32 @@ struct ReleaseResponse {
     prerelease: bool,
 }
 
+/// Marker file: the daily background check runs only after the user turned it
+/// on from the tray. Manual "Check for Updates…" always works.
+const BACKGROUND_CHECK_MARKER: &str = "update-check-enabled";
+
+pub fn background_checks_enabled(data_dir: &Path) -> bool {
+    data_dir.join(BACKGROUND_CHECK_MARKER).exists()
+}
+
+/// Turns the daily background check on or off. Returns whether the setting now matches `enabled`.
+pub fn set_background_checks(data_dir: &Path, enabled: bool) -> bool {
+    let marker = data_dir.join(BACKGROUND_CHECK_MARKER);
+    let result = if enabled {
+        std::fs::write(&marker, b"enabled")
+    } else {
+        match std::fs::remove_file(&marker) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        }
+    };
+    result.is_ok()
+}
+
 pub async fn check_if_due<R: Runtime>(app: &AppHandle<R>, data_dir: &Path) {
+    if !background_checks_enabled(data_dir) {
+        return;
+    }
     check(app, data_dir, false).await;
 }
 
@@ -190,10 +215,8 @@ fn write_state(path: &Path, state: &CheckState) {
         }
         #[cfg(not(unix))]
         std::fs::write(&temp_path, contents)?;
-        #[cfg(windows)]
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
+        // std's rename replaces an existing file on every platform, so a crash can never
+        // leave the state missing between a remove and a rename.
         std::fs::rename(&temp_path, path)
     })();
     if let Err(error) = result {

@@ -844,11 +844,8 @@ fn main() {
             ))?;
 
             let root = root.clone();
-            use tauri_plugin_autostart::ManagerExt;
-            let autostart_marker = root.join("autostart-configured");
-            if !autostart_marker.exists() && app.autolaunch().enable().is_ok() {
-                std::fs::write(&autostart_marker, b"configured")?;
-            }
+            // Launch-at-login is the user's choice (tray toggle, off by default). The extension
+            // starts the helper through Native Messaging when it needs it, so nothing depends on it.
             secure_data_dir(&root).map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
             let store = Arc::new(
                 MeetingStore::new(&root)
