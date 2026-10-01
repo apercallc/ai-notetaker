@@ -65,9 +65,17 @@ export async function throttleStatus(rules: ThrottleRule[], now: number = Date.n
  * replicas on the primary key so no increment is lost, and an idle counter
  * restarts at 1 inside the same statement.
  */
+const CLEANUP_INTERVAL_MS = 60_000;
+let lastCleanupAt = 0;
+
 export async function recordThrottleHit(rules: ThrottleRule[], now: number = Date.now()): Promise<void> {
   const timestamp = new Date(now);
-  await prisma.loginThrottle.deleteMany({ where: { updatedAt: { lte: new Date(now - CLEANUP_AGE_MS) } } });
+  // Sweeping stale rows on every failed attempt turned a credential-stuffing burst into a write storm
+  // on this table. Once a minute per process is plenty for rows that live for hours.
+  if (now - lastCleanupAt >= CLEANUP_INTERVAL_MS || now < lastCleanupAt) {
+    lastCleanupAt = now;
+    await prisma.loginThrottle.deleteMany({ where: { updatedAt: { lte: new Date(now - CLEANUP_AGE_MS) } } });
+  }
   for (const rule of rules) {
     const windowStart = new Date(now - rule.windowMs);
     await prisma.$executeRaw`
