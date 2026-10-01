@@ -881,8 +881,20 @@ fn secure_data_dir(root: &std::path::Path) -> std::io::Result<()> {
 }
 
 fn main() {
-    let root = paths::data_dir().expect("per-user data directory is required");
-    secure_data_dir(&root).expect("could not secure app data directory");
+    let root = match paths::data_dir().and_then(|root| secure_data_dir(&root).map(|()| root)) {
+        Ok(root) => root,
+        Err(error) => {
+            // A read-only or missing profile folder used to panic here with nothing on screen, and the
+            // extension then only ever saw "helper not running". Say what is wrong, then stop cleanly.
+            eprintln!("AI Notetaker cannot use its data folder: {error}");
+            notify::Notifier::default().notify_deduped(
+                "data-dir-unusable",
+                "AI Notetaker",
+                &format!("The helper cannot use its data folder ({error}). Check the folder's permissions and free disk space, then start it again."),
+            );
+            std::process::exit(1);
+        }
+    };
     logging::init(&root);
     let _instance = match single_instance::acquire(&root) {
         Ok(single_instance::Acquired::Yes(lock)) => lock,
@@ -999,7 +1011,7 @@ async fn handle_message(
                 {
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: None,
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!("could not persist pairing token: {error}"),
                     });
                     return false;
@@ -1155,7 +1167,7 @@ async fn handle_message(
                     Err(e) => {
                         let _ = out_tx.send(HelperToExtension::Error {
                             meeting_id: Some(meeting_id),
-                            code: ErrorCode::DeviceNotFound,
+                            code: ErrorCode::StorageError,
                             message: e.to_string(),
                         });
                         return true;
@@ -1218,7 +1230,7 @@ async fn handle_message(
                 if let Err(error) = mark_result {
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: format!("could not persist managed processing state: {error}"),
                     });
                     let _ = pipeline.stop_capture_only(meeting_id);
@@ -1674,7 +1686,7 @@ async fn handle_message(
                 Err(error) => {
                     let _ = out_tx.send(HelperToExtension::Error {
                         meeting_id: Some(meeting_id),
-                        code: ErrorCode::DeviceNotFound,
+                        code: ErrorCode::StorageError,
                         message: error.to_string(),
                     });
                 }
@@ -1712,7 +1724,7 @@ async fn handle_message(
             if let Err(error) = state.store.delete_meeting(meeting_id) {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("could not delete recovered recording: {error}"),
                 });
             }
@@ -1734,7 +1746,7 @@ async fn handle_message(
             if let Err(error) = state.store.delete_meeting(meeting_id) {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
-                    code: ErrorCode::DeviceNotFound,
+                    code: ErrorCode::StorageError,
                     message: format!("could not delete meeting data: {error}"),
                 });
             }
