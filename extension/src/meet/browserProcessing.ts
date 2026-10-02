@@ -735,7 +735,7 @@ export async function processBrowserMeetRecording(
     // microphone, silent tab), not that nobody spoke. Say so rather than presenting it as a quiet meeting.
     const minutes = Math.round(timeline.endMs / 60_000);
     const summary = minutes >= LONG_SILENT_CALL_MINUTES
-      ? `${NO_SPEECH_SUMMARY} This was a ${minutes}-minute recording, so Notetaker may not have been able to hear the call. Check that your microphone was not muted and that the Meet tab was audible, then try a short test recording.`
+      ? `${NO_SPEECH_SUMMARY} This was a ${minutes}-minute recording, so AI Notetaker may not have been able to hear the call. Check that your microphone was not muted and that the Meet tab was audible, then try a short test recording.`
       : NO_SPEECH_SUMMARY;
     return { transcript, summary, actionItems: [], noSpeech: true };
   }

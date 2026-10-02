@@ -239,7 +239,7 @@ function renderKeysSection(): string {
   const summarizer = onboardingSummarizer === "deepseek" ? "DeepSeek" : "Gemini";
   const sends = desktop
     ? "Your keys stay in this browser's local extension storage. Desktop calls send audio to these providers through the native helper."
-    : "Your keys stay in this browser's local extension storage. When you stop, Notetaker sends your saved call audio straight to these providers.";
+    : "Your keys stay in this browser's local extension storage. When you stop, AI Notetaker sends your saved call audio straight to these providers.";
   return `
     <p class="text-secondary">Two keys: one service turns audio into a transcript, another writes the summary and action items.</p>
     <div class="tier-toggle" role="group" aria-label="Provider tier">
@@ -302,7 +302,7 @@ function renderMicSection(): string {
 
 function renderSetupStep(): string {
   return `
-    <h1 tabindex="-1" data-view-heading>Set up Notetaker</h1>
+    <h1 tabindex="-1" data-view-heading>Set up AI Notetaker</h1>
     <p>${desktop ? "Last step: how notes are written, and a one-line notice." : "One screen, about a minute. Notes are written when you stop the recording."}</p>
     <section class="setup-section">
       <h2>How should notes be written?</h2>
@@ -335,7 +335,7 @@ function renderDoneStep(): string {
     ? MEET_AUTO_RECORD_GUIDANCE
     : keys
       ? `In a call, press ${keys} or click the toolbar icon to start notes.`
-      : "In a call, click the Notetaker toolbar icon to start notes.";
+      : "In a call, click the AI Notetaker toolbar icon to start notes.";
   const transcriptLine = settings.processingMode.kind === "local_byok" && settings.transcriptionProvider === "deepgram"
     ? "With your Deepgram key, the transcript appears live when the connection is available; otherwise it is ready after you stop."
     : "Your full transcript is ready after you stop recording.";
@@ -343,7 +343,7 @@ function renderDoneStep(): string {
     <h1 tabindex="-1" data-view-heading>You're all set</h1>
     <p>${startLine}</p>
     <p class="text-secondary">${transcriptLine}</p>
-    <p class="text-secondary">Tip: pin Notetaker from Chrome's puzzle-piece menu so the icon is always one click away. Your notes are written when you stop, and Chrome shows a notification when they are ready.</p>
+    <p class="text-secondary">Tip: pin AI Notetaker from Chrome's puzzle-piece menu so the icon is always one click away. Your notes are written when you stop, and Chrome shows a notification when they are ready.</p>
     ${desktop ? `<p class="text-secondary">For Zoom, Teams, or Slack, click the toolbar icon during your call and choose Start notes.</p>` : ""}
     <p><button type="button" class="primary" id="open-meet">Open Google Meet</button></p>
   `;

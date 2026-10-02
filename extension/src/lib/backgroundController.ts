@@ -113,7 +113,7 @@ export class BackgroundController {
       this.broadcast({
         type: "RECORDING_ERROR",
         meetingId: meetingId ?? null,
-        message: "Notetaker could not save an update from the helper. Your recording is safe; reopen the extension if this keeps happening.",
+        message: "AI Notetaker could not save an update from the helper. Your recording is safe; reopen the extension if this keeps happening.",
       });
     });
   }

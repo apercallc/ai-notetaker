@@ -37,8 +37,7 @@ def render(size: int) -> Image.Image:
 def main() -> None:
     mark = MARK.read_bytes()
     for path in (
-        ROOT / "site" / "favicon.svg",
-        ROOT / "site" / "icons" / "ai-notetaker-mark.svg",
+        ROOT / "webapp" / "src" / "app" / "icon.svg",
         ROOT / "webapp" / "public" / "ai-notetaker-mark.svg",
     ):
         path.parent.mkdir(parents=True, exist_ok=True)

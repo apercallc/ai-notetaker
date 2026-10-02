@@ -87,7 +87,7 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
     case "disconnected":
       return `
           <div class="stack">
-            <div><h2>Notetaker was updated</h2><p class="sub">Reload this tab to reconnect. Reloading rejoins your call.</p></div>
+            <div><h2>AI Notetaker was updated</h2><p class="sub">Reload this tab to reconnect. Reloading rejoins your call.</p></div>
             <button type="button" class="btn secondary block" id="reload">Reload tab</button>
           </div>`;
     case "setup":
@@ -105,7 +105,7 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
       return `
           <div class="stack">
             <div><h2>Writing your notes…</h2><p class="sub">This usually takes under a minute. You can leave the call; the notes will be waiting.</p></div>
-            ${ctx.ui.warning ? `<p class="note warn" role="status">Still trying: ${escapeHtml(ctx.ui.warning)} If this keeps happening, check your API keys in Notetaker settings.</p>` : ""}
+            ${ctx.ui.warning ? `<p class="note warn" role="status">Still trying: ${escapeHtml(ctx.ui.warning)} If this keeps happening, check your API keys in AI Notetaker settings.</p>` : ""}
             <button type="button" class="btn secondary block" id="open-notes">Open notes</button>
             <button type="button" class="btn secondary block" id="dismiss">Hide and keep going</button>
           </div>`;
@@ -197,7 +197,7 @@ function renderReady(ctx: TemplateContext): string {
   // button that would fail on its first press.
   const startHint = state?.shortcuts.toggle
     ? `Press ${keysHtml(state.shortcuts.toggle)} or click the toolbar icon to start notes.`
-    : `Click the Notetaker toolbar icon to start notes. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
+    : `Click the AI Notetaker toolbar icon to start notes. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
   return `
       <div class="stack">
         <div><h2>Ready when you are</h2><p class="sub">${intro}</p></div>

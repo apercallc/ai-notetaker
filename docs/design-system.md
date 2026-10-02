@@ -8,9 +8,10 @@ and marketing site.
 ## Brand assets
 
 - Canonical mark: `branding/ai-notetaker-mark.svg`.
-- Website and app use the SVG directly; extension and desktop PNG, ICO, and
-  ICNS files are rendered from the same shape by
+- Website, app header, and browser-tab icon use the SVG directly; extension
+  and desktop PNG, ICO, and ICNS files are rendered from the same shape by
   `python3 scripts/generate-brand-icons.py` (requires Pillow).
+- The extension uses `AI Notetaker` as its display name and short name.
 - The system tray uses its platform-native idle, recording, and recovery
   status glyphs. A recording state must remain visibly red.
 - Keep illustrations labeled as examples. Do not add fabricated customer

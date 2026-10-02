@@ -34,7 +34,7 @@ export function reminderId(event: CalendarEvent): string {
 export function reminderCopy(event: CalendarEvent): { title: string; message: string } {
   return {
     title: `${event.title || "Your call"} is starting`,
-    message: "Open the call, then press Start on the Notetaker pill to take notes.",
+    message: "Open the call, then press Start on the AI Notetaker pill to take notes.",
   };
 }
 

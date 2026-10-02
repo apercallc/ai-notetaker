@@ -197,7 +197,7 @@ function render(options: RenderOptions = {}): void {
         </label>
         <p class="field-hint text-secondary">
           Chrome requires one click on a call tab before it allows capture: the first time you
-          join a call, click the Notetaker icon once and recording starts on that click. After
+          join a call, click the AI Notetaker icon once and recording starts on that click. After
           that, joining a call in the same tab records automatically.
         </p>
       </div>

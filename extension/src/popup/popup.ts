@@ -75,7 +75,7 @@ async function renderOnboardingPrompt(): Promise<void> {
     <div class="empty-state">
       <h2>Take notes on your calls, no bot</h2>
       <p>Setup takes about a minute: add your AI keys (or sign in to Hosted AI), allow the microphone, and you're ready for your next Google Meet.</p>
-      <button class="primary" id="start-onboarding">Set up Notetaker</button>
+      <button class="primary" id="start-onboarding">Set up AI Notetaker</button>
     </div>
   `;
   document.getElementById("start-onboarding")?.addEventListener("click", () => {
@@ -370,7 +370,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   const autoRecordGuidance = settings.autoRecordOnMeetJoin
     ? onMeet
       ? "Auto-record on join is on. If Chrome blocks the first start, one toolbar click starts it—no second Start notes step."
-      : "Auto-record on join is on. Join a Google Meet call to start notes automatically; if Chrome blocks the first start, click Notetaker once on the call tab."
+      : "Auto-record on join is on. Join a Google Meet call to start notes automatically; if Chrome blocks the first start, click AI Notetaker once on the call tab."
     : "Auto-record on join is off. Start notes from the call widget or toolbar, or enable auto-record in Settings.";
   const controls = onMeet || desktop
     ? `
@@ -611,7 +611,7 @@ function renderFailure(error: unknown): void {
   app.innerHTML = `
     ${renderHeader(true)}
     <div class="empty-state error-state" role="alert">
-      <p>Something went wrong loading the notetaker.</p>
+      <p>Something went wrong loading AI Notetaker.</p>
       <button type="button" class="primary" id="retry-render">Try again</button>
     </div>
   `;

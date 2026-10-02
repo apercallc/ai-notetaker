@@ -198,7 +198,7 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
       void chrome.runtime.sendMessage({
         type: "MEET_CAPTURE_ERROR",
         meetingId,
-        message: "Notetaker lost its connection to the call audio. What was recorded so far is safe; start notes again.",
+        message: "AI Notetaker lost its connection to the call audio. What was recorded so far is safe; start notes again.",
       }).catch(() => undefined);
       void stop();
     });

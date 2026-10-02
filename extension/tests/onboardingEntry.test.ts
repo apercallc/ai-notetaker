@@ -63,7 +63,7 @@ describe("onboarding entry point", () => {
     expect(document.querySelector("#onboarding-mode-local")).not.toBeNull();
     expect(document.querySelector("#allow-microphone")).not.toBeNull();
     expect(document.querySelector("#consent-ack")).not.toBeNull();
-    expect(document.querySelector("h1")?.textContent).toContain("Set up Notetaker");
+    expect(document.querySelector("h1")?.textContent).toContain("Set up AI Notetaker");
   });
 
   it("rejects a copied desktop URL without an explicit session intent", async () => {

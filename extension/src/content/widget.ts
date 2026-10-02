@@ -527,7 +527,7 @@ export class MeetWidget {
     try {
       await this.deps.send({ type: "STOP_RECORDING", meetingId: id });
     } catch {
-      this.ui = { ...this.ui, error: "Stopping could not be confirmed. Your audio is safe. Click the Notetaker icon in the Chrome toolbar to check on it." };
+      this.ui = { ...this.ui, error: "Stopping could not be confirmed. Your audio is safe. Click the AI Notetaker icon in the Chrome toolbar to check on it." };
     }
     this.expanded = true;
     await this.refresh();

@@ -1,5 +1,13 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Brand consistency — 2026-10-01
+
+- [x] Make the web app browser-tab icon use the canonical green note-and-waveform mark.
+- [x] Use `AI Notetaker` for the extension's full and compact display names.
+- [x] Align extension setup, permission, notification, and recovery copy on `AI Notetaker`.
+- [x] Update the brand asset generator and design-system guidance so future icon
+      generation keeps the website and browser-tab artwork aligned.
+
 ## Mac installation repair — 2026-10-01
 
 - [x] Confirm v0.15.0 DMG checksum matches the published asset; its app fails

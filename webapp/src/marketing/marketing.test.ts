@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import robots from "../app/robots";
 import sitemap from "../app/sitemap";
 import { GET as llms } from "../app/llms.txt/route";
@@ -9,6 +11,7 @@ import { chromeWebStoreUrl, formatBytes, pickAssets } from "./release";
 
 const ORIGIN = "https://notes.example.test";
 const originals = { managed: process.env.MANAGED_HOSTING, url: process.env.APP_URL };
+const canonicalBrandMark = readFileSync(fileURLToPath(new URL("../../../branding/ai-notetaker-mark.svg", import.meta.url)), "utf8");
 
 beforeEach(() => {
   process.env.MANAGED_HOSTING = "true";
@@ -28,6 +31,13 @@ describe("marketing paths", () => {
     for (const path of ["/meetings", "/pricing/", "/pricing/x", "/Pricing", "/login", "/api/health", "//", ""]) {
       expect(isMarketingPath(path), path).toBe(false);
     }
+  });
+});
+
+describe("brand assets", () => {
+  it("uses the canonical mark for the app icon and public logo", () => {
+    expect(readFileSync(fileURLToPath(new URL("../app/icon.svg", import.meta.url)), "utf8")).toBe(canonicalBrandMark);
+    expect(readFileSync(fileURLToPath(new URL("../../public/ai-notetaker-mark.svg", import.meta.url)), "utf8")).toBe(canonicalBrandMark);
   });
 });
 

@@ -43,7 +43,7 @@ function render(outcome: Outcome | "asking"): void {
   const copy = {
     asking: {
       title: "Allow your microphone",
-      body: "Chrome is asking for permission. Choose <strong>Allow</strong> so Notetaker can hear you in Google Meet. Your microphone is only used while you are taking notes.",
+      body: "Chrome is asking for permission. Choose <strong>Allow</strong> so AI Notetaker can hear you in Google Meet. Your microphone is only used while you are taking notes.",
       action: false,
     },
     granted: {

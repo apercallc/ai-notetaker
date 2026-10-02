@@ -49,7 +49,7 @@ function openDatabase(): Promise<IDBDatabase> {
     // this the open never settles, and every chunk write (and so the recording) hangs behind it.
     request.onblocked = () => {
       abandoned = true;
-      reject(new Error("Meet audio storage is busy because another Notetaker tab is using an older version. Reload the extension and try again."));
+      reject(new Error("Meet audio storage is busy because another AI Notetaker tab is using an older version. Reload the extension and try again."));
     };
   });
 }
