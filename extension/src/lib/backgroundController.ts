@@ -18,6 +18,7 @@ import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
 import { clearBrowserMeetChunks, appendBrowserMeetChunk, streamBrowserMeetChunks, lastBrowserMeetSequence } from "../meet/browserStorage";
 import { processBrowserMeetRecording } from "../meet/browserProcessing";
+import { isHostedQuotaExhaustion, notifyHostedQuotaExhausted, notifyHostedQuotaLow } from "./hostedQuotaNotice";
 import { managedAudioChunkSource } from "../meet/managedAudioChunks";
 import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedJob, ManagedAuthError, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { reportManagedError } from "./errorReport";
@@ -256,6 +257,7 @@ export class BackgroundController {
 
   private async startRecordingUnguarded(meetingMode: MeetingMode, captureSource: CaptureSource, titleHint?: string): Promise<string> {
     const needsHelper = captureSource !== "meet";
+    let hostedQuotaWarning: Awaited<ReturnType<typeof getManagedEntitlements>> | null = null;
     if (needsHelper && (this.helperStatus !== "connected" || !this.helperInfo)) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -300,6 +302,7 @@ export class BackgroundController {
           this.broadcast({ type: "RECORDING_ERROR", meetingId: null, phase: "start", message, recovery: "check_billing" });
           return "";
         }
+        if (entitlements.warning === "low" || entitlements.audio.warning === "low") hostedQuotaWarning = entitlements;
       } catch (error) {
         // Only a rejected session needs a new sign-in; an offline or unavailable service is worth a plain retry.
         const sessionRejected = error instanceof ManagedAuthError;
@@ -378,6 +381,7 @@ export class BackgroundController {
         return meetingId;
       }
     }
+    if (hostedQuotaWarning) notifyHostedQuotaLow(hostedQuotaWarning);
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
     return meetingId;
   }
@@ -645,6 +649,9 @@ export class BackgroundController {
       await this.clearCompletedMeetChunks(meetingId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Meet processing failed";
+      if (meeting.processingMode?.kind === "managed" && isHostedQuotaExhaustion(message)) {
+        notifyHostedQuotaExhausted();
+      }
       // Hosted-mode critical failure: the user's recording produced no notes.
       // Report for diagnosis (no-op in local BYOK mode), then persist the
       // recoverable state exactly as before.
@@ -1060,6 +1067,9 @@ export class BackgroundController {
       },
     }));
     if (!meeting) return;
+    if (msg.status === "error" && meeting.processingMode?.kind === "managed" && isHostedQuotaExhaustion(msg.message ?? "")) {
+      notifyHostedQuotaExhausted();
+    }
     if (msg.status !== "error" && this.activeMeetingId === msg.meetingId) this.activeMeetingId = null;
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId: msg.meetingId });
     if (msg.status === "complete" && msg.summary !== undefined) {

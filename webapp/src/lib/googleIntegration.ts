@@ -12,6 +12,7 @@ const REQUEST_TIMEOUT_MS = 10_000;
 /** Drive imports a whole transcript as a Doc; give that upload longer than a lookup. */
 const UPLOAD_TIMEOUT_MS = 60_000;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1_000;
+export const GOOGLE_EXTENSION_CODE_TTL_MS = 5 * 60 * 1_000;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 const ENCRYPTION_VERSION = "v1";
 
@@ -65,6 +66,10 @@ export interface OAuthState {
   /** Terms/recording consent captured on our page before leaving for Google. */
   termsAccepted?: boolean;
   workspaceName?: string;
+  /** Extension-only callback target and PKCE challenge, validated at OAuth start. */
+  extensionRedirectUri?: string;
+  extensionCodeChallenge?: string;
+  extensionClientState?: string;
 }
 
 interface GoogleTokenResponse {
@@ -157,11 +162,19 @@ export function createSignInState(options: {
   next?: string;
   termsAccepted?: boolean;
   workspaceName?: string;
+  extension?: { redirectUri: string; codeChallenge: string; clientState: string };
 }): { state: OAuthState; authorizationUrl: string } {
-  return buildAuthorization({ userId: "", purpose: options.mode, next: options.next, termsAccepted: options.termsAccepted, workspaceName: options.workspaceName });
+  return buildAuthorization({
+    userId: "", purpose: options.mode, next: options.next, termsAccepted: options.termsAccepted, workspaceName: options.workspaceName,
+    ...(options.extension ? {
+      extensionRedirectUri: options.extension.redirectUri,
+      extensionCodeChallenge: options.extension.codeChallenge,
+      extensionClientState: options.extension.clientState,
+    } : {}),
+  });
 }
 
-function buildAuthorization(input: Pick<OAuthState, "userId" | "next" | "termsAccepted" | "workspaceName"> & { purpose: OAuthPurpose }): { state: OAuthState; authorizationUrl: string } {
+function buildAuthorization(input: Pick<OAuthState, "userId" | "next" | "termsAccepted" | "workspaceName" | "extensionRedirectUri" | "extensionCodeChallenge" | "extensionClientState"> & { purpose: OAuthPurpose }): { state: OAuthState; authorizationUrl: string } {
   const config = getGoogleConfig();
   const verifier = base64Url(randomBytes(32));
   const identityOnly = input.purpose !== "connect";
@@ -174,6 +187,9 @@ function buildAuthorization(input: Pick<OAuthState, "userId" | "next" | "termsAc
     ...(input.next ? { next: input.next } : {}),
     ...(input.termsAccepted ? { termsAccepted: true } : {}),
     ...(input.workspaceName ? { workspaceName: input.workspaceName } : {}),
+    ...(input.extensionRedirectUri ? { extensionRedirectUri: input.extensionRedirectUri } : {}),
+    ...(input.extensionCodeChallenge ? { extensionCodeChallenge: input.extensionCodeChallenge } : {}),
+    ...(input.extensionClientState ? { extensionClientState: input.extensionClientState } : {}),
   };
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -206,10 +222,41 @@ export function openOAuthState(value: string): OAuthState | null {
       parsed.expiresAt < Date.now()
     ) return null;
     if (parsed.purpose !== undefined && parsed.purpose !== "connect" && parsed.purpose !== "signin" && parsed.purpose !== "signup") return null;
+    if (parsed.extensionRedirectUri !== undefined && (typeof parsed.extensionRedirectUri !== "string" || typeof parsed.extensionCodeChallenge !== "string" || typeof parsed.extensionClientState !== "string")) return null;
     return parsed as OAuthState;
   } catch {
     return null;
   }
+}
+
+/** Issue a short-lived, single-use handoff code. Only its hash is persisted. */
+export async function createGoogleExtensionCode(input: { userId: string; workspaceId: string; codeChallenge: string }): Promise<string> {
+  const code = base64Url(randomBytes(32));
+  const now = Date.now();
+  await prisma.googleExtensionAuthCode.deleteMany({ where: { expiresAt: { lte: new Date(now) } } });
+  await prisma.googleExtensionAuthCode.create({
+    data: {
+      codeHash: createHash("sha256").update(code).digest("hex"),
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      codeChallenge: input.codeChallenge,
+      expiresAt: new Date(now + GOOGLE_EXTENSION_CODE_TTL_MS),
+    },
+  });
+  return code;
+}
+
+/** Verify extension PKCE then atomically consume the exchange code. */
+export async function consumeGoogleExtensionCode(code: string, verifier: string): Promise<{ userId: string; workspaceId: string } | null> {
+  if (!/^[A-Za-z0-9_-]{32,128}$/u.test(code) || !/^[A-Za-z0-9._~-]{43,128}$/u.test(verifier)) return null;
+  const codeHash = createHash("sha256").update(code).digest("hex");
+  const row = await prisma.googleExtensionAuthCode.findUnique({ where: { codeHash } });
+  if (!row || row.expiresAt.getTime() <= Date.now()) return null;
+  const expected = Buffer.from(row.codeChallenge);
+  const actual = Buffer.from(sha256Base64Url(verifier));
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+  const consumed = await prisma.googleExtensionAuthCode.deleteMany({ where: { codeHash, expiresAt: { gt: new Date() } } });
+  return consumed.count === 1 ? { userId: row.userId, workspaceId: row.workspaceId } : null;
 }
 
 export function oauthStateMatches(expected: string, received: string | null): boolean {

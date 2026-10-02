@@ -37,10 +37,10 @@ describe("settings page: modes", () => {
     expect(document.getElementById("managed-sign-in")).toBeNull();
   });
 
-  it("uses one vocabulary: 'Your own API keys (free)' and 'Hosted (paid)', never BYOK or managed", async () => {
+  it("uses clear vocabulary for both processing modes without internal implementation terms", async () => {
     await openSettings(DEFAULT_SETTINGS);
-    expect($("mode-local").textContent).toBe("Your own API keys (free)");
-    expect($("mode-managed").textContent).toBe("Hosted (paid)");
+    expect($("mode-local").textContent).toBe("Your own API keys");
+    expect($("mode-managed").textContent).toBe("Hosted AI");
     expect(document.body.textContent).not.toMatch(/BYOK|managed/i);
 
     $("mode-managed").click();

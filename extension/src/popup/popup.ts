@@ -4,6 +4,7 @@ import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMess
 import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
 import { getExtensionOnboardingUrl } from "../lib/install";
+import { managedBillingUrl } from "../lib/managedClient";
 import { isMeetUrl, meetTitleForTab } from "../meet/meetContext";
 import { takePendingMeetStart } from "../meet/pendingStart";
 import { HISTORY_PAGE_SIZE, HISTORY_RECENT_COUNT, SEARCH_DEBOUNCE_MS, historyHeading, pageOf, resultsSummary } from "./historyModel";
@@ -12,6 +13,7 @@ import { sendToBackground } from "../lib/sendToBackground";
 
 const app = document.getElementById("app")!;
 let removeLiveListener: (() => void) | null = null;
+let quotaRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let historyQuery = "";
 /** True once the person asks to browse the whole archive instead of the newest few. */
 let historyAll = false;
@@ -44,6 +46,8 @@ async function markDesktopOnboardingIntent(): Promise<void> {
 function clearLiveListener(): void {
   removeLiveListener?.();
   removeLiveListener = null;
+  if (quotaRefreshTimer) clearInterval(quotaRefreshTimer);
+  quotaRefreshTimer = null;
 }
 
 function formatMeetingTime(iso: string): string {
@@ -135,7 +139,7 @@ function appendTranscriptLine(
   container.scrollTop = container.scrollHeight;
 }
 
-async function renderActiveRecording(meetingId: string, helperStatus: BackgroundState["helperStatus"]): Promise<void> {
+async function renderActiveRecording(meetingId: string, helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
   const meeting = await getMeeting(meetingId);
   const liveCaptions = meeting?.captureSource === "meet"
     ? meeting.liveTranscriptStatus === "available" || meeting.liveTranscriptStatus === "connecting" || Boolean(meeting.transcript.length)
@@ -150,10 +154,15 @@ async function renderActiveRecording(meetingId: string, helperStatus: Background
     <div class="record-controls">
       <span class="recording-indicator">Recording</span>
       <button class="danger record-toggle" id="stop-recording">${STOP_LABEL}</button>
+      ${modeChip(settings)}
     </div>
     <p id="recording-status" class="text-secondary" role="status" aria-live="polite">${recordingStatus}</p>
     ${liveCaptions ? `<div class="transcript-view" id="transcript-view" role="log" aria-label="Live transcript"></div>` : ""}
   `;
+  void refreshHostedQuota(settings);
+  if (settings.processingMode.kind === "managed") {
+    quotaRefreshTimer = setInterval(() => void refreshHostedQuota(settings), 60_000);
+  }
   const transcriptView = document.getElementById("transcript-view");
   if (transcriptView) {
     for (const segment of meeting?.transcript ?? []) {
@@ -327,8 +336,71 @@ async function activeMeetTab(): Promise<chrome.tabs.Tab | undefined> {
 }
 
 function modeChip(settings: Awaited<ReturnType<typeof getSettings>>): string {
-  const label = settings.processingMode.kind === "managed" ? "Hosted AI" : "Your own API keys";
-  return `<p class="mode-chip" id="mode-chip"><span class="sr-only">Notes are written with: </span>${label}</p>`;
+  const hosted = settings.processingMode.kind === "managed";
+  const providerLabels: Record<string, string> = {
+    deepgram: "Deepgram",
+    groq: "Groq",
+    claude: "Claude",
+    gemini: "Gemini",
+    deepseek: "DeepSeek",
+  };
+  const label = hosted
+    ? "Using Hosted AI"
+    : `Using ${providerLabels[settings.transcriptionProvider] ?? "your transcription provider"} + ${providerLabels[settings.summarizationProvider] ?? "your summary provider"}`;
+  const detail = hosted
+    ? "Counts against your Hosted AI plan allowance."
+    : "Your providers may bill you directly; Hosted AI allowance is not used.";
+  const quota = hosted ? `<span class="mode-chip-quota" id="hosted-quota" role="status" aria-live="polite">Checking plan allowance…</span>` : "";
+  return `<div class="mode-chip${hosted ? " mode-chip--hosted" : ""}" id="mode-chip"><strong>${label}</strong><span>${detail}</span>${quota}</div>`;
+}
+
+async function refreshHostedQuota(settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
+  if (settings.processingMode.kind !== "managed" || !settings.managedService) return;
+  const quota = document.getElementById("hosted-quota");
+  if (!quota) return;
+  try {
+    const entitlements = await sendToBackground<import("../lib/internalMessages").ManagedEntitlementsResponse>({ type: "GET_MANAGED_ENTITLEMENTS" });
+    if (!entitlements || !document.getElementById("hosted-quota")) return;
+    const hours = Math.floor(entitlements.audio.remainingSeconds / 3600);
+    const minutes = Math.floor((entitlements.audio.remainingSeconds % 3600) / 60);
+    const audioRemaining = entitlements.audio.remainingSeconds < 60
+      ? `${entitlements.audio.remainingSeconds}s audio`
+      : hours > 0 ? `${hours}h ${minutes}m audio` : `${minutes}m audio`;
+    quota.textContent = `${entitlements.remaining} ${entitlements.remaining === 1 ? "meeting" : "meetings"} and ${audioRemaining} left this period.`;
+    const low = entitlements.warning === "low" || entitlements.audio.warning === "low";
+    const exhausted = entitlements.warning === "exhausted" || entitlements.audio.warning === "exhausted" || !entitlements.canProcess;
+    const chip = document.getElementById("mode-chip");
+    chip?.classList.remove("mode-chip--warning", "mode-chip--low");
+    chip?.querySelectorAll(".mode-chip-notice, .mode-chip-actions").forEach((node) => node.remove());
+    if (low || exhausted) {
+      chip?.classList.add(exhausted ? "mode-chip--warning" : "mode-chip--low");
+      const help = document.createElement("span");
+      help.className = "mode-chip-notice";
+      help.textContent = exhausted
+        ? "Hosted processing is unavailable. Saved recordings never switch providers automatically."
+        : "Hosted allowance is running low. Check your plan; allowance is checked again when notes are processed.";
+      const actions = document.createElement("span");
+      actions.className = "mode-chip-actions";
+      const billing = document.createElement("a");
+      billing.href = managedBillingUrl(settings.managedService!.baseUrl);
+      billing.target = "_blank";
+      billing.rel = "noreferrer";
+      billing.textContent = "View plan";
+      actions.append(billing);
+      if (exhausted) {
+        const switchButton = document.createElement("button");
+        switchButton.type = "button";
+        switchButton.className = "text-link";
+        switchButton.textContent = "Switch to my API keys";
+        switchButton.addEventListener("click", () => void sendToBackground({ type: "OPEN_PAGE", page: "settings" }));
+        actions.append(switchButton);
+      }
+      chip?.append(help, actions);
+    }
+  } catch {
+    const current = document.getElementById("hosted-quota");
+    if (current) current.textContent = "Could not check Hosted AI allowance. It will be checked again before recording.";
+  }
 }
 
 /**
@@ -421,6 +493,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
       <button type="button" class="secondary history-more" id="history-more" hidden></button>
     </div>
   `;
+  void refreshHostedQuota(settings);
 
   let results = meetings;
   let shown = HISTORY_PAGE_SIZE;
@@ -582,7 +655,7 @@ async function render(): Promise<void> {
   const state = await sendToBackground<BackgroundState>({ type: "GET_STATE" });
 
   if (state.activeMeeting) {
-    await renderActiveRecording(state.activeMeeting.id, state.helperStatus);
+    await renderActiveRecording(state.activeMeeting.id, state.helperStatus, settings);
   } else {
     await renderIdleState(state.helperStatus, settings);
     // Chrome just granted this popup's click as the tab invocation — the one

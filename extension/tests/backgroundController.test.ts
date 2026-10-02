@@ -731,6 +731,33 @@ describe("BackgroundController", () => {
     expect(clearChunks).toHaveBeenCalledWith(meetingId);
   });
 
+  it("alerts desktop recordings when the managed job reports exhausted quota", async () => {
+    const managedService = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" };
+    const processingMode = { kind: "managed", accountId: "acct", workspaceId: "workspace", plan: "hosted_pro" } as const;
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, processingMode, managedService });
+    controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }), { status: 200 })));
+    const createNotification = vi.fn();
+    Object.defineProperty(chrome, "notifications", { configurable: true, value: { create: createNotification, clear: vi.fn() } });
+    try {
+      const meetingId = await controller.startRecording("general", "desktop");
+      client.emit("managed_job_status", {
+        meetingId,
+        jobId: "job-quota",
+        status: "error",
+        message: "Your plan has no hosted processing left. Upgrade under Plans & usage to keep processing meetings.",
+      });
+      await vi.waitFor(() => expect(createNotification).toHaveBeenCalledWith("hosted-quota-low", expect.objectContaining({
+        title: "Hosted AI allowance is exhausted",
+        message: expect.stringContaining("Your recording is saved on this device"),
+      })));
+    } finally {
+      delete (chrome as unknown as { notifications?: unknown }).notifications;
+    }
+  });
+
   it("keeps local completion successful when Drive export fails", async () => {
     vi.mocked(exportMeetingToDrive).mockRejectedValue(new Error("Drive request failed: 503"));
     const client = createFakeClient();

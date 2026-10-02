@@ -113,9 +113,9 @@ export async function setSessionActiveWorkspace(sessionId: string, workspaceId: 
 }
 
 /**
- * Housekeeping on sign-in: drop every expired browser session, API token and
- * spent/expired auth token. All three are indexed on expiry, so this is a
- * cheap bounded delete that needs no cron.
+ * Housekeeping on sign-in: drop every expired browser session, API token,
+ * spent/expired auth token, and Google extension handoff code. These are
+ * indexed on expiry, so this is a cheap bounded delete that needs no cron.
  */
 export async function cleanupExpiredAuth(now: number = Date.now()): Promise<void> {
   const cutoff = new Date(now);
@@ -123,6 +123,7 @@ export async function cleanupExpiredAuth(now: number = Date.now()): Promise<void
     prisma.session.deleteMany({ where: { expiresAt: { lt: cutoff } } }),
     prisma.apiToken.deleteMany({ where: { expiresAt: { lt: cutoff } } }),
     prisma.authToken.deleteMany({ where: { expiresAt: { lt: new Date(now - 24 * 60 * 60 * 1000) } } }),
+    prisma.googleExtensionAuthCode.deleteMany({ where: { expiresAt: { lt: cutoff } } }),
   ]);
 }
 

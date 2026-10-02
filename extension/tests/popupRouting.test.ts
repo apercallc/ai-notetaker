@@ -74,7 +74,8 @@ describe("popup capture routing", () => {
     expect(document.querySelector("#desktop-helper-actions")).toBeNull();
     expect(document.querySelector("#use-desktop")?.textContent).toContain("Zoom or Teams");
     expect(document.body.textContent).not.toContain("Install desktop helper");
-    expect(document.querySelector("#mode-chip")?.textContent).toContain("Your own API keys");
+    expect(document.querySelector("#mode-chip")?.textContent).toContain("Using Deepgram + Claude");
+    expect(document.querySelector("#mode-chip")?.textContent).toContain("Hosted AI allowance is not used");
     expect(document.querySelector("#meet-auto-record-guidance")?.textContent).toContain("Auto-record on join is on");
   });
 

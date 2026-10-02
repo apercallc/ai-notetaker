@@ -80,7 +80,7 @@ body {
 }
 
 .tier-toggle button.active {
-  background: var(--color-accent);
+  background: var(--color-action);
   color: var(--color-accent-text);
 }
 

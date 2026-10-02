@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { cookies, getSessionContext, createSession, resolveGoogleAccount, createSignInState, completeGoogleSignIn, googleOAuthConfigured, createOAuthState, sealOAuthState, completeOAuthConnection, oauthStateMatches, openOAuthState } = vi.hoisted(() => ({
+const { cookies, getSessionContext, createSession, resolveGoogleAccount, createSignInState, completeGoogleSignIn, createGoogleExtensionCode, googleOAuthConfigured, createOAuthState, sealOAuthState, completeOAuthConnection, oauthStateMatches, openOAuthState } = vi.hoisted(() => ({
   createSession: vi.fn(),
   resolveGoogleAccount: vi.fn(),
   createSignInState: vi.fn(),
   completeGoogleSignIn: vi.fn(),
+  createGoogleExtensionCode: vi.fn(),
   googleOAuthConfigured: vi.fn(),
   cookies: vi.fn(),
   getSessionContext: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@/lib/accounts", () => ({ resolveGoogleAccount }));
 vi.mock("@/lib/googleIntegration", () => ({
   createSignInState,
   completeGoogleSignIn,
+  createGoogleExtensionCode,
   googleOAuthConfigured,
   createOAuthState,
   sealOAuthState,
@@ -166,6 +168,7 @@ describe("redirects behind the platform proxy", () => {
 describe("Google sign-in start route", () => {
   beforeEach(() => {
     googleOAuthConfigured.mockReturnValue(true);
+    createGoogleExtensionCode.mockResolvedValue("opaque-onetime-code");
     createSignInState.mockReturnValue({ state: { ...state, userId: "", purpose: "signin" }, authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=state-1" });
   });
 
@@ -196,6 +199,25 @@ describe("Google sign-in start route", () => {
     const response = await start(new Request("https://app.example.com/api/google/oauth/start?mode=signin"));
     expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe("google-unavailable");
   });
+
+  it("accepts only the configured Chrome identity redirect and extension PKCE inputs", async () => {
+    const response = await start(new Request("https://app.example.com/api/google/oauth/start?mode=signin&client=extension&redirect_uri=https%3A%2F%2Fjidooookkdbbbhkkdmcajnnnhhphodok.chromiumapp.org%2Fhosted-auth&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&client_state=client-state-123456"));
+    expect(response.headers.get("location")).toContain("accounts.google.com");
+    expect(createSignInState).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "signin",
+      extension: {
+        redirectUri: "https://jidooookkdbbbhkkdmcajnnnhhphodok.chromiumapp.org/hosted-auth",
+        codeChallenge: "A".repeat(43),
+        clientState: "client-state-123456",
+      },
+    }));
+  });
+
+  it("rejects arbitrary extension redirect URLs before contacting Google", async () => {
+    const response = await start(new Request("https://app.example.com/api/google/oauth/start?mode=signin&client=extension&redirect_uri=https%3A%2F%2Fevil.example%2Fhosted-auth&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&client_state=client-state-123456"));
+    expect(createSignInState).not.toHaveBeenCalled();
+    expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe("google-failed");
+  });
 });
 
 describe("Google sign-in callback", () => {
@@ -219,6 +241,23 @@ describe("Google sign-in callback", () => {
     expect(response.cookies.get("google_oauth_state")?.maxAge).toBe(0);
     expect(createSession).toHaveBeenCalledWith("user-9", expect.objectContaining({ activeWorkspaceId: "ws-9" }));
     expect(resolveGoogleAccount).toHaveBeenCalledWith(expect.objectContaining({ email: "person@example.test", emailVerified: true, mode: "signin", termsAccepted: false }));
+  });
+
+  it("redirects extension Google sign-in with only an opaque short-lived code in the fragment", async () => {
+    openOAuthState.mockReturnValue({
+      ...signinState,
+      extensionRedirectUri: "https://jidooookkdbbbhkkdmcajnnnhhphodok.chromiumapp.org/hosted-auth",
+      extensionCodeChallenge: "A".repeat(43),
+      extensionClientState: "client-state-123456",
+    });
+    const response = await call();
+    const target = new URL(response.headers.get("location")!);
+    expect(target.origin).toBe("https://jidooookkdbbbhkkdmcajnnnhhphodok.chromiumapp.org");
+    expect(target.search).toBe("");
+    expect(new URLSearchParams(target.hash.slice(1)).get("code")).toBe("opaque-onetime-code");
+    expect(new URLSearchParams(target.hash.slice(1)).get("state")).toBe("client-state-123456");
+    expect(createGoogleExtensionCode).toHaveBeenCalledWith({ userId: "user-9", workspaceId: "ws-9", codeChallenge: "A".repeat(43) });
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("does not need, and ignores, an existing session", async () => {

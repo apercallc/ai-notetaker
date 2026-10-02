@@ -71,8 +71,17 @@ for every managed upload, processing, and job-status request.
 
 - `POST /api/v1/auth/login` — exchange an email/password for a short-lived
   opaque session id and workspace/plan metadata.
+- `POST /api/v1/auth/google/exchange` — exchange a one-use Google OAuth
+  handoff code and PKCE verifier for the same extension session response.
+  Extension OAuth starts at `/api/google/oauth/start` with the fixed extension
+  redirect URI, an S256 challenge and random client state. The callback puts
+  only the short-lived code and state in the redirect fragment; the bearer
+  token is returned only by this authenticated exchange response. Google
+  account linking for Calendar/Drive remains a separate flow.
 - `GET /api/v1/entitlements` — read the server-authoritative plan, payment
-  status, usage, and remaining processing allowance before starting capture.
+  status, usage, and remaining meeting/audio allowance before starting
+  capture. `warning` is `none`, `low`, or `exhausted`; the nested `audio`
+  object reports audio seconds and its warning separately.
 - `POST /api/v1/meetings` — create the workspace-scoped meeting shell before
   audio upload.
 - `POST /api/v1/uploads` — create or replay an idempotent upload manifest. An

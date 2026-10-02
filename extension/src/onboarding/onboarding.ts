@@ -4,7 +4,8 @@ import { DEFAULT_SETTINGS, type AudioProbeResult, type AudioStatus, type Notetak
 import { escapeHtml } from "../lib/html";
 import { detectInstallPlatform, getInstallPageUrl, type InstallPlatform } from "../lib/install";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
-import { loginManaged, MANAGED_SERVICE_ORIGIN, managedSignupUrl } from "../lib/managedClient";
+import { loginManaged, loginManagedWithGoogle, MANAGED_SERVICE_ORIGIN, managedSignupUrl } from "../lib/managedClient";
+import { renderManagedSignInControls } from "../lib/managedAuthForm";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { MEET_AUTO_RECORD_GUIDANCE } from "../lib/autoRecord";
 import { microphoneAlreadyAllowed, requestMicrophone, type MicOutcome } from "../meet/micPermission";
@@ -219,19 +220,16 @@ function renderModeToggle(): string {
 }
 
 function renderManagedSection(): string {
-  const managed = settings.processingMode.kind === "managed" && settings.managedService;
+  const managed = settings.managedService?.accessToken ? settings.managedService : null;
   if (managed) {
-    return `<div class="callout"><strong>Hosted AI is connected.</strong><p class="text-secondary">Workspace ${escapeHtml(managed.workspaceId)} · plan ${escapeHtml(managed.plan)}</p></div>
+    return `<div class="callout"><strong>Hosted AI is connected.</strong><p class="text-secondary">Workspace ${escapeHtml(managed.workspaceId)} · plan ${escapeHtml(managed.plan)}. New recordings use this plan's allowance.</p></div>
       <p class="text-secondary">Audio is saved on this device first, then uploaded for processing. The service deletes it when notes are ready; failed uploads are cleared by the 24-hour cleanup. Your transcript and notes are saved to this workspace.</p>`;
   }
   return `
-    <p class="text-secondary">Hosted AI writes your notes on the service, so you do not need provider keys. Audio is saved on this device first, then uploaded for processing. The service deletes it when notes are ready; failed uploads are cleared by the 24-hour cleanup. Your transcript and notes are saved to this workspace.</p>
+    <p class="text-secondary">Hosted AI uses your account's plan allowance, so you do not need provider keys. Audio is saved on this device first, then uploaded for processing. The service deletes it when notes are ready; failed uploads are cleared by the 24-hour cleanup. Your transcript and notes are saved to this workspace.</p>
     <p class="text-secondary">Sign in below with your AI Notetaker account. Your service, <strong>ai-notetaker.apercallc.com</strong>, is already configured.</p>
-    <div class="field"><label for="onboarding-managed-email">Account email</label><input type="email" id="onboarding-managed-email" autocomplete="username" value="${escapeHtml(managedDraft.email)}" /></div>
-    <div class="field"><label for="onboarding-managed-password">Account password</label><input type="password" id="onboarding-managed-password" autocomplete="current-password" /></div>
-    <p><button type="button" class="secondary" id="onboarding-managed-sign-in">Sign in to Hosted AI</button>
-    <button type="button" class="secondary" id="onboarding-managed-signup">Create hosted account</button></p>
-    <p class="result" id="onboarding-managed-result" role="status" aria-live="polite"></p>`;
+    <p class="text-secondary">Sign in with Google or your AI Notetaker email and password. New to Hosted AI? Create an account first.</p>
+    ${renderManagedSignInControls({ prefix: "onboarding-managed", email: managedDraft.email, withinForm: true })}`;
 }
 
 function renderKeysSection(): string {
@@ -547,8 +545,11 @@ function updateMicUi(): void {
 async function signInManaged(): Promise<void> {
   const button = document.getElementById("onboarding-managed-sign-in") as HTMLButtonElement | null;
   const resultEl = document.getElementById("onboarding-managed-result");
-  const email = (document.getElementById("onboarding-managed-email") as HTMLInputElement | null)?.value.trim() ?? "";
-  const password = (document.getElementById("onboarding-managed-password") as HTMLInputElement | null)?.value ?? "";
+  const emailInput = document.getElementById("onboarding-managed-email") as HTMLInputElement | null;
+  const passwordInput = document.getElementById("onboarding-managed-password") as HTMLInputElement | null;
+  if (!emailInput?.reportValidity() || !passwordInput?.reportValidity()) return;
+  const email = emailInput.value.trim();
+  const password = passwordInput.value;
   if (button) button.disabled = true;
   if (resultEl) {
     resultEl.textContent = "Signing in…";
@@ -556,10 +557,7 @@ async function signInManaged(): Promise<void> {
   }
   try {
     const result = await loginManaged(MANAGED_SERVICE_ORIGIN, email, password);
-    settings.managedService = result.config;
-    settings.processingMode = { kind: "managed", accountId: result.config.accountId, workspaceId: result.config.workspaceId, plan: result.config.plan };
-    await sendToBackground({ type: "SAVE_SETTINGS", settings });
-    render();
+    await finishManagedSignIn(result);
   } catch (error) {
     if (resultEl) {
       resultEl.textContent = error instanceof Error ? error.message : "Hosted sign-in failed.";
@@ -568,6 +566,33 @@ async function signInManaged(): Promise<void> {
   } finally {
     if (button) button.disabled = false;
   }
+}
+
+async function signInManagedWithGoogle(): Promise<void> {
+  const button = document.getElementById("onboarding-managed-google-sign-in") as HTMLButtonElement | null;
+  const resultEl = document.getElementById("onboarding-managed-result");
+  if (button) button.disabled = true;
+  if (resultEl) {
+    resultEl.textContent = "Opening Google sign-in…";
+    resultEl.className = "test-result pending";
+  }
+  try {
+    await finishManagedSignIn(await loginManagedWithGoogle(MANAGED_SERVICE_ORIGIN));
+  } catch (error) {
+    if (resultEl) {
+      resultEl.textContent = error instanceof Error ? error.message : "Google sign-in failed.";
+      resultEl.className = "test-result invalid";
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function finishManagedSignIn(result: Awaited<ReturnType<typeof loginManaged>>): Promise<void> {
+  settings.managedService = result.config;
+  settings.processingMode = { kind: "managed", accountId: result.config.accountId, workspaceId: result.config.workspaceId, plan: result.config.plan };
+  await sendToBackground({ type: "SAVE_SETTINGS", settings });
+  render();
 }
 
 async function finishSetup(): Promise<void> {
@@ -584,7 +609,6 @@ async function finishSetup(): Promise<void> {
       return;
     }
     settings.processingMode = { kind: "local_byok" };
-    settings.managedService = null;
   }
   if (!desktop && micState !== "granted") {
     showStepError("Allow the microphone so your side of the call is heard.");
@@ -730,7 +754,6 @@ function wireEvents(): void {
     if (onboardingMode === "local_byok") return;
     onboardingMode = "local_byok";
     settings.processingMode = { kind: "local_byok" };
-    settings.managedService = null;
     resetKeyTest();
     render({ focus: "onboarding-mode-local" });
   });
@@ -738,19 +761,24 @@ function wireEvents(): void {
     if (onboardingMode === "managed") return;
     readOnboardingProviderFields();
     onboardingMode = "managed";
+    if (settings.managedService?.accessToken) {
+      const { accountId, workspaceId, plan } = settings.managedService;
+      settings.processingMode = { kind: "managed", accountId, workspaceId, plan };
+    }
     resetKeyTest();
     render({ focus: "onboarding-managed-email" });
   });
 
   document.getElementById("onboarding-managed-sign-in")?.addEventListener("click", () => void signInManaged());
-  // Pressing Enter in a sign-in field means "sign in", not "finish setup".
-  for (const id of ["onboarding-managed-email", "onboarding-managed-password"]) {
-    document.getElementById(id)?.addEventListener("keydown", (event) => {
-      if ((event as KeyboardEvent).key !== "Enter") return;
-      event.preventDefault();
-      void signInManaged();
+  for (const input of ["onboarding-managed-email", "onboarding-managed-password"]) {
+    document.getElementById(input)?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        document.getElementById("onboarding-managed-sign-in")?.click();
+      }
     });
   }
+  document.getElementById("onboarding-managed-google-sign-in")?.addEventListener("click", () => void signInManagedWithGoogle());
   const managedEmailInput = document.getElementById("onboarding-managed-email") as HTMLInputElement | null;
   managedEmailInput?.addEventListener("input", () => {
     managedDraft.email = managedEmailInput.value;

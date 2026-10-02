@@ -125,12 +125,47 @@ button.record-toggle.armed {
 }
 
 .mode-chip {
+  display: grid;
+  gap: 2px;
   margin: 0;
-  padding: 2px var(--space-2);
+  padding: var(--space-2) 10px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius);
+  background: var(--color-bg-elevated);
   font-size: 0.75rem;
   color: var(--color-text-secondary);
+}
+
+.mode-chip strong {
+  color: var(--color-text);
+  font-size: 0.8125rem;
+}
+
+.mode-chip-quota,
+.mode-chip-notice {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.mode-chip--low {
+  border-color: var(--color-warning);
+}
+
+.mode-chip--warning {
+  border-color: var(--color-danger);
+}
+
+.mode-chip-notice {
+  color: var(--color-text);
+}
+
+.mode-chip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.75rem;
 }
 
 .start-error {
@@ -190,6 +225,7 @@ button.record-toggle.armed {
 
 .meeting-search input {
   min-width: 0;
+  min-height: 40px;
   flex: 1;
   font: inherit;
   color: var(--color-text);

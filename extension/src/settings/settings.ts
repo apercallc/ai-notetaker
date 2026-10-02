@@ -6,7 +6,8 @@ import { estimateMeetingCost } from "../lib/costEstimate";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { hasOptionalPermission, providerHostPermission, providerHostPermissions, providerPermissionName, requestOptionalPermission } from "../lib/optionalPermissions";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
-import { loginManaged, MANAGED_SERVICE_ORIGIN, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl } from "../lib/managedClient";
+import { loginManaged, loginManagedWithGoogle, MANAGED_SERVICE_ORIGIN, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl } from "../lib/managedClient";
+import { renderManagedSignInControls } from "../lib/managedAuthForm";
 import {
   MODE_LABEL_HOSTED,
   MODE_LABEL_OWN_KEYS,
@@ -296,7 +297,8 @@ function renderOwnKeysSection(): string {
   return `
     <p class="text-secondary field-hint">
       Free, and no account needed. You use one transcription key and one summary key from providers you choose.
-      They stay on this device; Google Meet uses the browser and desktop calls use the helper.
+      They stay on this device; Google Meet uses the browser and desktop calls use the helper. Your providers may bill
+      you directly. Hosted AI plan allowance is not used in this mode.
     </p>
     <div class="tier-toggle" role="group" aria-label="Provider set">
       <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}" aria-pressed="${!budget}">Deepgram + Claude</button>
@@ -318,12 +320,12 @@ function renderHostedSection(): string {
     const active = isHostedActive(settings);
     return `
       <div class="callout ${active ? "" : "warning"}">
-        <p><strong>${active ? "Hosted is on for this device." : "You are signed in, but Hosted is not saved as your mode yet."}</strong></p>
+        <p><strong>${active ? "Hosted AI is on for this device." : "You are signed in, but Hosted AI is not saved as your mode yet."}</strong></p>
         <p class="text-secondary">
           Account <strong>${escapeHtml(service.accountId || "unknown")}</strong> · plan <strong>${escapeHtml(service.plan || "unknown")}</strong>.
-          Recordings are saved on this device first, then uploaded only to your signed-in workspace. Provider credentials stay on the hosted service.
+          New recordings use this plan's allowance. Audio is saved on this device first, then uploaded only to your signed-in workspace. Provider credentials stay on the hosted service.
         </p>
-        ${active ? "" : `<p class="text-secondary">Press <strong>Save settings</strong> to use Hosted.</p>`}
+        ${active ? "" : `<p class="text-secondary">Press <strong>Save settings</strong> to use Hosted AI. Until then, your own API keys are used and your providers may bill you directly.</p>`}
       </div>
       <div class="account-actions">
         ${billingLink ? `<a class="button-link" href="${escapeHtml(billingLink)}" target="_blank" rel="noreferrer">Manage billing</a>` : ""}
@@ -335,18 +337,12 @@ function renderHostedSection(): string {
   }
   return `
     <p class="text-secondary field-hint">
-      Paid. We transcribe and summarize for you, so you do not need provider keys. Your account, billing, Calendar, and Drive connections live at <strong>ai-notetaker.apercallc.com</strong>.
-      ${signedOutNotice ? `<br /><strong>${escapeHtml(signedOutNotice)}</strong>` : "Until then, your own API keys are used."}
+      Hosted AI uses your account's plan allowance, so you do not need provider keys. Sign in to use it. Until then,
+      recordings use your own API keys and your providers may bill you directly. Your account, billing, Calendar, and Drive
+      connections live at <strong>ai-notetaker.apercallc.com</strong>.
+      ${signedOutNotice ? `<br /><strong>${escapeHtml(signedOutNotice)}</strong>` : ""}
     </p>
-    <div class="account-form">
-      <div class="field"><label for="managed-email">Account email</label><input type="email" id="managed-email" autocomplete="username" value="${escapeHtml(drafts.managedEmail)}" /></div>
-      <div class="field"><label for="managed-password">Account password</label><input type="password" id="managed-password" autocomplete="current-password" /></div>
-    </div>
-    <div class="account-actions">
-      <button type="button" class="primary" id="managed-sign-in">Sign in to Hosted</button>
-      <button type="button" class="secondary" id="managed-signup">Create an account</button>
-    </div>
-    <p class="test-result" id="managed-sign-in-result" role="status" aria-live="polite"></p>
+    ${renderManagedSignInControls({ prefix: "managed", email: drafts.managedEmail })}
   `;
 }
 
@@ -485,7 +481,7 @@ function wireEvents(): void {
     const resultEl = document.getElementById("managed-sign-in-result");
     readFormIntoSettings();
     settings = signOutOfHosted(settings);
-    signedOutNotice = "Signed out. Your own API keys are used until you sign in again.";
+    signedOutNotice = "Signed out of Hosted AI.";
     try {
       await saveToBackground();
     } catch {
@@ -494,12 +490,16 @@ function wireEvents(): void {
     }
     render({ focus: "managed-email" });
   });
-  document.getElementById("managed-sign-in")?.addEventListener("click", async () => {
-    const resultEl = document.getElementById("managed-sign-in-result");
+  document.getElementById("managed-email-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const resultEl = document.getElementById("managed-result");
     const button = document.getElementById("managed-sign-in") as HTMLButtonElement;
+    const emailInput = document.getElementById("managed-email") as HTMLInputElement | null;
+    const passwordInput = document.getElementById("managed-password") as HTMLInputElement | null;
+    if (!emailInput?.reportValidity() || !passwordInput?.reportValidity()) return;
     readFormIntoSettings();
-    const email = drafts.managedEmail.trim();
-    const password = inputValue("managed-password") ?? "";
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
     button.disabled = true;
     setResult(resultEl, "Signing in…", "pending");
     try {
@@ -512,6 +512,24 @@ function wireEvents(): void {
       render({ focus: "managed-sign-out" });
     } catch (error) {
       setResult(resultEl, error instanceof Error ? error.message : "Sign-in failed.", "invalid");
+      button.disabled = false;
+    }
+  });
+  document.getElementById("managed-google-sign-in")?.addEventListener("click", async () => {
+    const resultEl = document.getElementById("managed-result");
+    const button = document.getElementById("managed-google-sign-in") as HTMLButtonElement;
+    button.disabled = true;
+    setResult(resultEl, "Opening Google sign-in…", "pending");
+    try {
+      const result = await loginManagedWithGoogle(MANAGED_SERVICE_ORIGIN);
+      settings.managedService = result.config;
+      settings = applyModeChoice(settings, true);
+      managedSetupVisible = true;
+      signedOutNotice = "";
+      await saveToBackground();
+      render({ focus: "managed-sign-out" });
+    } catch (error) {
+      setResult(resultEl, error instanceof Error ? error.message : "Google sign-in failed.", "invalid");
       button.disabled = false;
     }
   });

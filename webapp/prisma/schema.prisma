@@ -119,6 +119,7 @@ model User {
   apiTokens   ApiToken[]
   authTokens  AuthToken[]
   googleOAuthConnection GoogleOAuthConnection?
+  googleExtensionAuthCodes GoogleExtensionAuthCode[]
 }
 
 // Project-owned Google OAuth is person-scoped, not workspace-scoped. Tokens
@@ -139,6 +140,25 @@ model GoogleOAuthConnection {
   @@index([expiresAt])
 }
 
+// One-use, short-lived bridge from Google OAuth back into the extension.
+// The opaque code is hashed; Google credentials and API bearer tokens never
+// enter the browser redirect URL.
+model GoogleExtensionAuthCode {
+  id             String   @id @default(uuid())
+  codeHash       String   @unique
+  codeChallenge  String
+  userId         String
+  workspaceId    String
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
 model Workspace {
   id        String   @id @default(uuid())
   name      String
@@ -151,6 +171,7 @@ model Workspace {
   createdAt DateTime @default(now())
 
   memberships WorkspaceMembership[]
+  googleExtensionAuthCodes GoogleExtensionAuthCode[]
   uploads ManagedUpload[]
   processingJobs ProcessingJob[]
   usageEntries UsageLedgerEntry[]

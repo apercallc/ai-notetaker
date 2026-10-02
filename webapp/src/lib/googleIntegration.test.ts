@@ -115,6 +115,23 @@ describe("Google sign-in", () => {
     expect(state).toMatchObject({ purpose: "signup", userId: "", next: "/meetings", termsAccepted: true, workspaceName: "Acme" });
   });
 
+  it("binds extension OAuth state to the extension redirect, client state, and its separate PKCE challenge", () => {
+    configure();
+    const extension = {
+      redirectUri: "https://jidooookkdbbbhkkdmcajnnnhhphodok.chromiumapp.org/hosted-auth",
+      codeChallenge: "A".repeat(43),
+      clientState: "client-state-123456",
+    };
+    const { state, authorizationUrl } = createSignInState({ mode: "signin", extension });
+    expect(state).toMatchObject({
+      extensionRedirectUri: extension.redirectUri,
+      extensionCodeChallenge: extension.codeChallenge,
+      extensionClientState: extension.clientState,
+    });
+    expect(openOAuthState(sealOAuthState(state))).toEqual(state);
+    expect(new URL(authorizationUrl).searchParams.get("scope")).toBe("openid email");
+  });
+
   it("round-trips the sealed sign-in state and rejects an unknown purpose", () => {
     configure();
     const { state } = createSignInState({ mode: "signin" });

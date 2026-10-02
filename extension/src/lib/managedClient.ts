@@ -113,11 +113,14 @@ export function managedIntegrationsUrl(baseUrl: string): string {
  * keeps this library usable in Firefox/test harnesses that do not expose the
  * permissions API.
  */
-async function requestServiceOriginPermission(baseUrl: string): Promise<void> {
+export async function requestServiceOriginPermission(baseUrl: string, additional: chrome.permissions.Permissions = {}): Promise<void> {
   const permissions = chrome.permissions;
   if (!permissions?.request) return;
   const origin = new URL(serviceUrl(baseUrl)).origin;
-  const granted = await permissions.request({ origins: [`${origin}/*`] });
+  const granted = await permissions.request({
+    ...additional,
+    origins: [...new Set([...(additional.origins ?? []), `${origin}/*`])],
+  });
   if (!granted) throw new Error("Allow access to the hosted service origin to sign in to Hosted AI");
 }
 
@@ -210,19 +213,112 @@ export async function loginManaged(
     throw new Error(`Too many sign-in attempts.${wait}`);
   }
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok || typeof body.accessToken !== "string" || typeof body.accountId !== "string" || typeof body.workspaceId !== "string") {
-    throw new Error(typeof body.error === "string" ? body.error : "Managed service sign-in failed");
+  return managedLoginResult(normalizedBaseUrl, body, response.ok);
+}
+
+/** Normalize both password and Google sign-in responses into the saved local session contract. */
+export function managedLoginResult(baseUrl: string, body: Record<string, unknown>, ok = true): ManagedLoginResult {
+  if (!ok || typeof body.accessToken !== "string" || typeof body.accountId !== "string" || typeof body.workspaceId !== "string") {
+    throw new Error(typeof body.error === "string" ? body.error : "Hosted AI sign-in failed.");
   }
   return {
     expiresAt: typeof body.expiresAt === "string" ? body.expiresAt : "",
     config: {
-      baseUrl: normalizedBaseUrl,
+      baseUrl: serviceUrl(baseUrl),
       accessToken: body.accessToken,
       accountId: body.accountId,
       workspaceId: body.workspaceId,
       plan: typeof body.plan === "string" ? body.plan : "local",
     },
   };
+}
+
+function randomBase64Url(bytes: number): string {
+  const data = crypto.getRandomValues(new Uint8Array(bytes));
+  let binary = "";
+  for (const byte of data) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+async function pkceChallenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  let binary = "";
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function launchGoogleFlow(url: string): Promise<string> {
+  const identity = chrome.identity;
+  if (!identity?.launchWebAuthFlow || !identity.getRedirectURL) {
+    return Promise.reject(new Error("Google sign-in is not available in this browser."));
+  }
+  return new Promise((resolve, reject) => {
+    identity.launchWebAuthFlow({ url, interactive: true }, (callbackUrl) => {
+      const error = chrome.runtime.lastError;
+      if (error || !callbackUrl) {
+        reject(new Error("Google sign-in was closed before it finished. Try again, or sign in with email."));
+        return;
+      }
+      resolve(callbackUrl);
+    });
+  });
+}
+
+/** Sign into the hosted account in Google's browser flow without handing an API token through a URL. */
+export async function loginManagedWithGoogle(
+  baseUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManagedLoginResult> {
+  const normalizedBaseUrl = serviceUrl(baseUrl);
+  const identity = chrome.identity;
+  if (!identity?.getRedirectURL || !identity.launchWebAuthFlow) {
+    throw new Error("Google sign-in is not available in this browser.");
+  }
+  await requestServiceOriginPermission(normalizedBaseUrl, { permissions: ["identity"] });
+
+  const redirectUri = identity.getRedirectURL("hosted-auth");
+  const verifier = randomBase64Url(32);
+  const state = randomBase64Url(32);
+  const params = new URLSearchParams({
+    mode: "signin",
+    client: "extension",
+    redirect_uri: redirectUri,
+    code_challenge: await pkceChallenge(verifier),
+    client_state: state,
+  });
+  const startUrl = `${normalizedBaseUrl}/api/google/oauth/start?${params.toString()}`;
+  const callbackUrl = await launchGoogleFlow(startUrl);
+  const expected = new URL(redirectUri);
+  const returned = new URL(callbackUrl);
+  if (returned.origin !== expected.origin || returned.pathname !== expected.pathname) {
+    throw new Error("Google sign-in returned to an unexpected address. Try again.");
+  }
+  const result = new URLSearchParams(returned.hash.replace(/^#/u, ""));
+  if (result.get("state") !== state) throw new Error("Google sign-in could not be verified. Try again.");
+  if (result.has("error")) {
+    const error = result.get("error");
+    throw new Error(error === "google-no-account"
+      ? "No Hosted AI account is linked to this Google address yet. Create an account on the web, then try again."
+      : error === "google-cancelled"
+        ? "Google sign-in was cancelled."
+        : "Google sign-in could not be completed. Try again.");
+  }
+  const code = result.get("code");
+  if (!code) throw new Error("Google sign-in did not return a usable authorization code. Try again.");
+
+  let response: Response;
+  try {
+    response = await fetchImpl(`${normalizedBaseUrl}/api/v1/auth/google/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ code, codeVerifier: verifier }),
+      signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
+    });
+  } catch {
+    throw new Error("Could not finish Google sign-in. Check your connection and try again.");
+  }
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  return managedLoginResult(normalizedBaseUrl, body, response.ok);
 }
 
 /** Fetches server-authoritative plan/quota state before a managed recording starts. */
@@ -233,11 +329,21 @@ export async function getManagedEntitlements(
   const body = await requestJson(config, "/api/v1/entitlements", { method: "GET" }, fetchImpl);
   const numberField = (name: string): number => (typeof body[name] === "number" && Number.isFinite(body[name]) ? body[name] as number : 0);
   return {
+    planLabel: typeof body.planLabel === "string" ? body.planLabel : "Hosted AI plan",
     plan: typeof body.plan === "string" ? body.plan : "local",
     status: typeof body.status === "string" ? body.status : "inactive",
     used: numberField("used"),
     limit: numberField("limit"),
     remaining: numberField("remaining"),
+    warning: body.warning === "low" || body.warning === "exhausted" ? body.warning : "none",
+    audio: {
+      remainingSeconds: typeof (body.audio as Record<string, unknown> | undefined)?.remainingSeconds === "number"
+        ? (body.audio as { remainingSeconds: number }).remainingSeconds
+        : 0,
+      warning: ["low", "exhausted"].includes(String((body.audio as Record<string, unknown> | undefined)?.warning))
+        ? (body.audio as { warning: "low" | "exhausted" }).warning
+        : "none",
+    },
     canProcess: body.canProcess === true,
     inPaymentGrace: body.inPaymentGrace === true,
   };

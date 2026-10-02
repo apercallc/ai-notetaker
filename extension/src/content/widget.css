@@ -9,21 +9,21 @@
 }
 
 .nt {
-  --bg: #202124;
-  --bg-raised: #2d2e31;
-  --bg-input: #171819;
-  --line: #3c4043;
-  --text: #e8eaed;
-  --muted: #a0a6ad;
-  --accent: #82dba8;
-  --accent-ink: #103e2a;
+  --bg: #121a15;
+  --bg-raised: #1c2821;
+  --bg-input: #101712;
+  --line: #33443a;
+  --text: #f1f6f2;
+  --muted: #a9b8ad;
+  --accent: #83d9a8;
+  --accent-ink: #102016;
   --action: #176c4b;
   --action-ink: #ffffff;
   --danger: #c5221f;
   --warn: #fdd663;
   --recording: #f28b82;
   --ok: #81c995;
-  --radius: 14px;
+  --radius: 12px;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.5);
 
   position: relative;

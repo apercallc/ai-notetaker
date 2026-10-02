@@ -121,10 +121,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       if (request.method === "OPTIONS") {
         return new NextResponse(null, { status: 204, headers: { ...corsHeaders, "x-request-id": requestId } });
       }
-      // Login is the one managed API route that must be reachable before a
-      // session exists. The route itself performs password verification and
-      // creates the opaque session used by every other managed endpoint.
-      if (pathname === "/api/v1/auth/login") return NextResponse.next();
+      // Password and Google OAuth exchanges must be reachable before a
+      // managed token exists. Each route verifies its own credentials/code.
+      if (pathname === "/api/v1/auth/login" || pathname === "/api/v1/auth/google/exchange") return NextResponse.next();
       if ((WORKER_RUN_PATH.test(pathname) || pathname === "/api/v1/jobs/next") && isValidWorkerToken(request.headers.get("x-worker-token"))) {
         return NextResponse.next();
       }

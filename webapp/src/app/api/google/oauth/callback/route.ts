@@ -10,6 +10,7 @@ import { loginUrl } from "@/app/login/url";
 import {
   completeGoogleSignIn,
   completeOAuthConnection,
+  createGoogleExtensionCode,
   GoogleIntegrationError,
   oauthStateMatches,
   openOAuthState,
@@ -50,16 +51,25 @@ async function signInWithGoogle(request: Request, state: OAuthState, code: strin
   const next = safeNextPath(state.next || "/meetings");
   const fail = (error: string, extra: { retry?: number } = {}) =>
     clearState(NextResponse.redirect(publicUrl(loginUrl({ tab, error, next, ...extra }), request)));
+  const extensionRedirect = (values: { code?: string; error?: string }) => {
+    if (!state.extensionRedirectUri || !state.extensionClientState) return fail(values.error ?? "google-failed");
+    const target = new URL(state.extensionRedirectUri);
+    const fragment = new URLSearchParams({ state: state.extensionClientState });
+    if (values.code) fragment.set("code", values.code);
+    if (values.error) fragment.set("error", values.error);
+    target.hash = fragment.toString();
+    return clearState(NextResponse.redirect(target.toString()));
+  };
 
-  if (!oauthStateMatches(state.state, stateParam)) return fail("google-failed");
-  if (denied) return fail("google-cancelled");
-  if (!code) return fail("google-failed");
+  if (!oauthStateMatches(state.state, stateParam)) return state.extensionRedirectUri ? extensionRedirect({ error: "google-failed" }) : fail("google-failed");
+  if (denied) return state.extensionRedirectUri ? extensionRedirect({ error: "google-cancelled" }) : fail("google-cancelled");
+  if (!code) return state.extensionRedirectUri ? extensionRedirect({ error: "google-failed" }) : fail("google-failed");
 
   let identity;
   try {
     identity = await completeGoogleSignIn(code, state);
   } catch {
-    return fail("google-failed");
+    return state.extensionRedirectUri ? extensionRedirect({ error: "google-failed" }) : fail("google-failed");
   }
   const context = contextFromRequest(request);
   const result = await resolveGoogleAccount({
@@ -71,6 +81,10 @@ async function signInWithGoogle(request: Request, state: OAuthState, code: strin
     context,
   });
   if (!result.ok) {
+    if (state.extensionRedirectUri) {
+      const error = result.error === "throttled" ? "throttled" : result.error === "google-no-account" ? "google-no-account" : result.error;
+      return extensionRedirect({ error });
+    }
     if (result.error === "throttled") return fail("throttled", { retry: Math.ceil(result.retryAfterMs / 1000) });
     // A new Google user who used "Sign in" has not accepted our terms yet:
     // send them to the sign-up form, which collects that before Google.
@@ -78,6 +92,20 @@ async function signInWithGoogle(request: Request, state: OAuthState, code: strin
       return clearState(NextResponse.redirect(publicUrl(loginUrl({ tab: "signup", error: "google-no-account", next }), request)));
     }
     return fail(result.error);
+  }
+
+  if (state.extensionRedirectUri) {
+    if (result.mustChangePassword) return extensionRedirect({ error: "password-change-required" });
+    try {
+      const exchangeCode = await createGoogleExtensionCode({
+        userId: result.userId,
+        workspaceId: result.workspaceId,
+        codeChallenge: state.extensionCodeChallenge!,
+      });
+      return extensionRedirect({ code: exchangeCode });
+    } catch {
+      return extensionRedirect({ error: "google-failed" });
+    }
   }
 
   const session = await createSession(result.userId, { ...context, activeWorkspaceId: result.workspaceId });

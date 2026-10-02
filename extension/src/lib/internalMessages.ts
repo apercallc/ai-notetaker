@@ -6,10 +6,11 @@
  */
 import type { HelperConnectionStatus } from "./nativeMessaging";
 import type { Shortcuts } from "./shortcuts";
-import type { ActionItem, AudioProbeResult, AudioStatus, Bookmark, BrowserAudioChannel, CaptureSource, DriveExportState, ErrorRecoveryCategory, HelperInfo, LiveTranscriptStatus, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, Speaker } from "../types";
+import type { ActionItem, AudioProbeResult, AudioStatus, Bookmark, BrowserAudioChannel, CaptureSource, DriveExportState, ErrorRecoveryCategory, HelperInfo, LiveTranscriptStatus, ManagedEntitlements, MeetingMode, MeetingRecord, NotetakerSettings, ProviderKind, Speaker } from "../types";
 
 export type UiToBackgroundMessage =
   | { type: "GET_STATE" }
+  | { type: "GET_MANAGED_ENTITLEMENTS" }
   | { type: "CHECK_HELPER" }
   | { type: "GET_AUDIO_PREFLIGHT" }
   | { type: "RUN_AUDIO_PROBE" }
@@ -39,6 +40,8 @@ export interface BackgroundState {
   helperStatus: HelperConnectionStatus;
   helperInfo: HelperInfo | null;
 }
+
+export type ManagedEntitlementsResponse = ManagedEntitlements | null;
 
 /** Just enough of a meeting for the in-call widget; never the full transcript. */
 export interface WidgetMeeting {

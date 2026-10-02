@@ -144,7 +144,7 @@ Always tell participants you are recording and get the consent your local law an
 | Host permission `https://meet.google.com/*` | Runs the in-call Record button and reads the call title on Google Meet, the only site the extension acts on by default. |
 | `nativeMessaging` (optional) | Requested only when the user chooses desktop-call recording. Talks to the AI Notetaker desktop helper they installed, using Chrome Native Messaging. No network port is opened. |
 | `alarms` (optional) | Schedules bounded background retries and reminders while the service worker is asleep. |
-| `identity` (optional) | Runs the user-initiated Google sign-in for optional Calendar and Drive features. |
+| `identity` (optional) | Runs user-initiated Google sign-in for Hosted AI and optional Calendar or Drive features. Hosted sign-in returns a one-use code to the extension; it does not put a bearer token in the OAuth redirect. |
 | Optional host permissions (`https://*/*`, `http://localhost/*`, `http://127.0.0.1/*`) | Requested at runtime, never at install, and only for the single origin the user enters: the Hosted AI service when they sign in, or their own self-hosted history server. |
 | Optional provider hosts (Deepgram, Groq, Anthropic, Google Generative Language, DeepSeek) | In own-keys mode, requested only for the AI providers the user picks, so their audio and text can be sent to that provider with their own key. |
 

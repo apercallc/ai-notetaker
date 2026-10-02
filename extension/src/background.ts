@@ -7,10 +7,12 @@
  */
 import { maybeAutoStartMeetRecording, clearAutoRecordAttempt } from "./lib/autoRecord";
 import { getSettings } from "./lib/storage";
+import { getManagedEntitlements } from "./lib/managedClient";
 import { BackgroundController } from "./lib/backgroundController";
 import { getExtensionOnboardingUrl } from "./lib/install";
 import { handleInstalled } from "./lib/installHandler";
 import { notifyNotesReady, openNotesReady } from "./lib/notesReady";
+import { openHostedQuotaNotice } from "./lib/hostedQuotaNotice";
 import { setBadge, type BadgeState } from "./lib/recordingBadge";
 import type { BackgroundToUiMessage, UiToBackgroundMessage } from "./lib/internalMessages";
 import { NativeMessagingClient } from "./lib/nativeMessaging";
@@ -96,11 +98,12 @@ chrome.alarms?.onAlarm.addListener((alarm) => {
 });
 
 async function openNotification(notificationId: string): Promise<void> {
+  if (await openHostedQuotaNotice(notificationId)) return;
   if (!(await openNotesReady(notificationId))) await openReminderCall(notificationId);
 }
 chrome.notifications?.onClicked.addListener((notificationId) => void openNotification(notificationId));
-// Reminder buttons are handled by registerReminderNotificationHandlers; only notes-ready buttons come through here.
-chrome.notifications?.onButtonClicked?.addListener((notificationId) => void openNotesReady(notificationId));
+// Reminder buttons are handled by registerReminderNotificationHandlers.
+chrome.notifications?.onButtonClicked?.addListener((notificationId) => void openNotification(notificationId));
 
 chrome.runtime.onInstalled?.addListener((details) => {
   void handleInstalled(details).catch((error) => console.warn("Install handling failed", error));
@@ -189,6 +192,11 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       // Opening the popup acknowledges a failure badge; a live recording keeps its own.
       showBadge(controller.getState().activeMeeting ? "REC" : "");
       return controller.getState();
+    case "GET_MANAGED_ENTITLEMENTS": {
+      const settings = await getSettings();
+      if (!settings.managedService) return null;
+      return getManagedEntitlements(settings.managedService);
+    }
     case "CHECK_HELPER":
       return controller.checkHelper();
     case "GET_AUDIO_PREFLIGHT":

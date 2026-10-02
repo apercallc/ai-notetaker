@@ -11,11 +11,11 @@
      settings' budget-tier <select> stay bright white against a dark page. */
   color-scheme: light dark;
 
-  --color-bg: #ffffff;
-  --color-bg-elevated: #f5f5f7;
-  --color-text: #1d1d1f;
-  --color-text-secondary: #6e6e73;
-  --color-border: #d2d2d7;
+  --color-bg: #f7f8f4;
+  --color-bg-elevated: #edf2ec;
+  --color-text: #18241e;
+  --color-text-secondary: #57665e;
+  --color-border: #dce4dc;
   --color-accent: #176c4b;
   --color-action: #176c4b;
   --color-accent-text: #ffffff;
@@ -54,12 +54,12 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #1c1c1e;
-    --color-bg-elevated: #2c2c2e;
-    --color-text: #f5f5f7;
-    --color-text-secondary: #98989d;
-    --color-border: #38383a;
-    --color-accent: #78dba4;
+    --color-bg: #121a15;
+    --color-bg-elevated: #1c2821;
+    --color-text: #f1f6f2;
+    --color-text-secondary: #a9b8ad;
+    --color-border: #33443a;
+    --color-accent: #83d9a8;
     --color-action: #176c4b;
     --color-accent-text: #ffffff;
     /* #ff453a passes fine as plain text against this dark background
@@ -164,6 +164,7 @@ button:disabled {
 }
 
 input[type="text"],
+input[type="email"],
 input[type="password"],
 input[type="url"],
 input[type="search"],
@@ -175,9 +176,25 @@ textarea {
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-2);
+  min-height: 46px;
+  border-radius: 10px;
+  padding: 10px 14px;
   width: 100%;
+  box-shadow: 0 1px 2px #10201608;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="url"]:focus,
+input[type="search"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+  border-color: color-mix(in srgb, var(--color-accent) 65%, var(--color-border));
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 13%, transparent);
 }
 
 input[type="date"] {
@@ -200,6 +217,43 @@ input::placeholder,
 textarea::placeholder {
   color: var(--color-text-secondary);
   opacity: 1;
+}
+
+.managed-auth {
+  max-width: 28rem;
+}
+
+.managed-auth-form .field {
+  margin-bottom: var(--space-2);
+}
+
+.managed-google-button {
+  width: 100%;
+}
+
+.managed-auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.managed-auth-divider::before,
+.managed-auth-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--color-border);
+}
+
+.managed-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .recording-indicator {

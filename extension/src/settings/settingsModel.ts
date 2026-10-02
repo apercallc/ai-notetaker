@@ -6,8 +6,8 @@ import type { NotetakerSettings, WebappConfig } from "../types";
  * internal vocabulary (settings keys, the helper protocol) and must not appear
  * in copy; every surface in settings uses these two labels instead.
  */
-export const MODE_LABEL_OWN_KEYS = "Your own API keys (free)";
-export const MODE_LABEL_HOSTED = "Hosted (paid)";
+export const MODE_LABEL_OWN_KEYS = "Your own API keys";
+export const MODE_LABEL_HOSTED = "Hosted AI";
 
 /** Whether the saved settings mean Hosted is the active mode, i.e. what the page should open on. */
 export function isHostedActive(settings: Pick<NotetakerSettings, "processingMode">): boolean {

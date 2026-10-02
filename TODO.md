@@ -40,6 +40,25 @@
 - Deferred: Chrome Web Store link awaits the published listing from the owner.
       Native installer execution and real-device audio acceptance remain unverified.
 
+## Extension auth and processing choice — 2026-10-02
+
+- [x] Align email and password controls with the shared extension fields and
+      use the same Google-first Hosted AI sign-in form in onboarding and Settings.
+- [x] Add a short-lived, one-use PKCE Google sign-in handoff to the extension;
+      browser account linking remains separate from sign-in.
+- [x] Preserve the Hosted AI session while users switch to their own API keys,
+      then restore Hosted AI without requiring a second sign-in.
+- [x] Show the selected local provider pair or Hosted AI in the popup. Hosted
+      mode shows remaining meeting/audio allowance and low/exhausted warnings;
+      the browser notifies on low quota at start and on exhaustion discovered
+      after the call. Saved audio never silently switches processing providers.
+- Verified: extension typecheck, 605 tests, and production build pass; webapp
+      Prisma generation, typecheck, 776 tests with local Postgres, and production
+      build pass. Local builds do not prove live Google OAuth or Chrome UI.
+- Deferred: live Chrome Google OAuth interaction and cross-workspace quota-race
+      behavior require authenticated browser/service validation. A quota change
+      during a call is reported when server processing detects it after stop.
+
 ## Infrastructure implementation — 2026-10-01
 
 - [x] Durable provider-attempt accounting independent of customer quota refunds

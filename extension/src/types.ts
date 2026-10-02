@@ -58,11 +58,14 @@ export interface ManagedServiceConfig {
 }
 
 export interface ManagedEntitlements {
+  planLabel: string;
   plan: string;
   status: string;
   used: number;
   limit: number;
   remaining: number;
+  warning: "none" | "low" | "exhausted";
+  audio: { remainingSeconds: number; warning: "none" | "low" | "exhausted" };
   canProcess: boolean;
   inPaymentGrace: boolean;
 }

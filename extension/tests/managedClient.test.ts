@@ -1,11 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
-import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, loginManaged, ManagedAuthError, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl, registerManagedMeeting, uploadManagedMeeting } from "../src/lib/managedClient";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { chromeMock } from "./setup";
+import { exportManagedMeetingToGoogleDrive, getManagedEntitlements, loginManaged, loginManagedWithGoogle, ManagedAuthError, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl, registerManagedMeeting, uploadManagedMeeting } from "../src/lib/managedClient";
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
 describe("managedClient", () => {
+  beforeEach(() => {
+    chromeMock.reset();
+    Object.defineProperty(chrome, "permissions", { configurable: true, value: chromeMock.permissions });
+  });
+
   it("uploads directly without sharing credentials and verifies ambiguous PUT completion", async () => {
     const config = { baseUrl: "https://notes.example.com", accessToken: "secret-session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" };
     const fetchImpl = vi.fn()
@@ -43,23 +49,72 @@ describe("managedClient", () => {
 
   it("requests only the hosted service origin when Chrome exposes optional permissions", async () => {
     const request = vi.fn().mockResolvedValue(true);
-    Object.defineProperty(chrome, "permissions", { configurable: true, value: { request } });
+    const permissions = chrome.permissions;
+    const originalRequest = permissions.request;
+    Object.defineProperty(permissions, "request", { configurable: true, value: request });
     try {
       await loginManaged("https://notes.example.com/path", "owner@example.com", "password", vi.fn().mockResolvedValue(response({ accessToken: "session", accountId: "acct", workspaceId: "ws" })));
       expect(request).toHaveBeenCalledWith({ origins: ["https://notes.example.com/*"] });
     } finally {
-      delete (chrome as unknown as { permissions?: unknown }).permissions;
+      Object.defineProperty(permissions, "request", { configurable: true, value: originalRequest });
     }
+  });
+
+  it("exchanges Google sign-in with a short-lived code and the PKCE verifier", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response({ accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" }));
+    const launchFlow = chrome.identity.launchWebAuthFlow as unknown as { mockImplementation: (implementation: (details: { url: string }, callback: (url?: string) => void) => void) => void };
+    launchFlow.mockImplementation((details, callback) => {
+      const start = new URL(details.url);
+      callback(`${chrome.identity.getRedirectURL("hosted-auth")}#state=${start.searchParams.get("client_state")}&code=one-use-code`);
+    });
+
+    await expect(loginManagedWithGoogle("https://notes.example.com", fetchImpl)).resolves.toMatchObject({
+      config: { accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" },
+    });
+    expect(chrome.permissions.request).toHaveBeenCalledWith({
+      permissions: ["identity"],
+      origins: ["https://notes.example.com/*"],
+    });
+    expect(fetchImpl).toHaveBeenCalledWith("https://notes.example.com/api/v1/auth/google/exchange", expect.objectContaining({
+      method: "POST",
+      body: expect.stringMatching(/^\{"code":"one-use-code","codeVerifier":"[A-Za-z0-9_-]+"\}$/u),
+    }));
+  });
+
+  it("rejects a mismatched Google OAuth state without exchanging a code", async () => {
+    const fetchImpl = vi.fn();
+    const launchFlow = chrome.identity.launchWebAuthFlow as unknown as { mockImplementation: (implementation: (details: { url: string }, callback: (url?: string) => void) => void) => void };
+    launchFlow.mockImplementation((_details, callback) => {
+      const redirect = chrome.identity.getRedirectURL("hosted-auth");
+      callback(`${redirect}#state=wrong-state&code=one-use-code`);
+    });
+    await expect(loginManagedWithGoogle("https://notes.example.com", fetchImpl)).rejects.toThrow("could not be verified");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("stops Google sign-in if the user declines the required Chrome permission", async () => {
+    (chrome.permissions.request as unknown as { mockResolvedValue: (value: boolean) => void }).mockResolvedValue(false);
+    const fetchImpl = vi.fn();
+    await expect(loginManagedWithGoogle("https://notes.example.com", fetchImpl)).rejects.toThrow("Allow access");
+    expect(chrome.identity.launchWebAuthFlow).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("reads server-authoritative hosted quota before a recording starts", async () => {
     const config = { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "hosted_pro" };
-    await expect(getManagedEntitlements(config, vi.fn().mockResolvedValue(response({ plan: "hosted_pro", status: "active", used: 4, limit: 1_000, remaining: 996, canProcess: true, inPaymentGrace: false })))).resolves.toEqual({
+    await expect(getManagedEntitlements(config, vi.fn().mockResolvedValue(response({
+      plan: "hosted_pro", planLabel: "Hosted Pro", status: "active", used: 4, limit: 1_000,
+      remaining: 996, warning: "low", audio: { remainingSeconds: 7_200, warning: "none" },
+      canProcess: true, inPaymentGrace: false,
+    })))).resolves.toEqual({
+      planLabel: "Hosted Pro",
       plan: "hosted_pro",
       status: "active",
       used: 4,
       limit: 1_000,
       remaining: 996,
+      warning: "low",
+      audio: { remainingSeconds: 7_200, warning: "none" },
       canProcess: true,
       inPaymentGrace: false,
     });
@@ -151,12 +206,13 @@ describe("managedClient", () => {
   it("does not send hosted credentials when the origin permission is denied", async () => {
     const request = vi.fn().mockResolvedValue(false);
     const fetchImpl = vi.fn();
+    const originalPermissions = chrome.permissions;
     Object.defineProperty(chrome, "permissions", { configurable: true, value: { request } });
     try {
       await expect(loginManaged("https://notes.example.com", "owner@example.com", "password", fetchImpl)).rejects.toThrow("Allow access");
       expect(fetchImpl).not.toHaveBeenCalled();
     } finally {
-      delete (chrome as unknown as { permissions?: unknown }).permissions;
+      Object.defineProperty(chrome, "permissions", { configurable: true, value: originalPermissions });
     }
   });
 
