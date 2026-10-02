@@ -188,6 +188,20 @@ describe("BackgroundController", () => {
     finishConnect();
   });
 
+  it("keeps Meet/local startup available when desktop helper connection rejects", async () => {
+    const client = createFakeClient();
+    vi.mocked(client.connect).mockRejectedValue(new Error("helper unavailable"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const controller = new BackgroundController(client, vi.fn());
+
+    await expect(controller.init()).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(
+      "Helper connection could not start",
+      expect.any(Error),
+    ));
+    expect(controller.getState().helperStatus).toBe("connecting");
+  });
+
   it("creates a new meeting record and tells the helper to start recording", async () => {
     const client = createFakeClient();
     const broadcast = vi.fn();
