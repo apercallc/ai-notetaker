@@ -11,6 +11,7 @@ import { ACCOUNT_TABS, resolveAccountTab } from "./tabs";
 import { listIntegrations, listRecentDeliveries } from "@/lib/integrations";
 import { NotesDeliveryPanel } from "./NotesDeliveryPanel";
 import { LanguageSettingsForm } from "./LanguageSettingsForm";
+import { managedHostingEnabled } from "@/lib/managedAuth";
 
 export const metadata = { title: "Settings", referrer: "no-referrer", robots: { index: false, follow: false } };
 
@@ -53,6 +54,13 @@ export default async function AccountPage({
         <h1>Settings</h1>
         <p className="total-count">{session.email}</p>
       </div>
+
+      {managedHostingEnabled() && (
+        <p className="muted-copy">
+          Need to install or review setup?{" "}
+          <Link href="/download">Extension and desktop helper downloads &amp; setup</Link>
+        </p>
+      )}
 
       {required === "1" && (
         <p role="alert" className="error-text">

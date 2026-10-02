@@ -29,6 +29,8 @@
       signup is available without entering a server URL.
 - [x] Download page includes per-OS installation, browser connection, audio check,
       first-recording steps and a release link when direct downloads cannot load.
+- [x] Signed-in managed users can return to extension and helper downloads from
+      Settings without an onboarding prompt or added navigation tab.
 - [x] Homepage links directly to desktop setup; Mac instructions include the
       currently required one-time Native Messaging registration command.
 - Verified: 596 extension tests and 762 webapp tests with local Postgres; configured
