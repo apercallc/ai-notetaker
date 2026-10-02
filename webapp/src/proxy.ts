@@ -95,6 +95,13 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
+  // This private service-to-service namespace authenticates its dedicated
+  // bearer token inside each Route Handler; it must not fall through to the
+  // browser-session gate below.
+  if (pathname === "/internal/admin" || pathname.startsWith("/internal/admin/")) {
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/")) {
     // These browser OAuth endpoints validate the signed-in session and the
     // encrypted, one-time PKCE state themselves. Google must be able to

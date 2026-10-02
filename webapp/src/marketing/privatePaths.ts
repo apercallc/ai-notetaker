@@ -4,11 +4,12 @@
  * appears under src/app without being classified here or in paths.ts, so a
  * private area can never be crawl-allowed by default.
  */
-export const PRIVATE_PATHS = ["/api/", "/meetings", "/actions", "/account", "/billing", "/ask", "/import", "/trash", "/team", "/login", "/share/"] as const;
+export const PRIVATE_PATHS = ["/api/", "/internal/", "/meetings", "/actions", "/account", "/billing", "/ask", "/import", "/trash", "/team", "/login", "/share/"] as const;
 
 /** Top-level route folders under src/app and how each is treated. */
 export const ROUTE_FOLDERS: Record<string, "private" | "marketing" | "metadata"> = {
   api: "private",
+  internal: "private",
   meetings: "private",
   actions: "private",
   account: "private",

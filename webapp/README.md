@@ -182,7 +182,10 @@ parallel would let one file's cleanup race another's assertions.
   re-implemented per route. `/api/health` is public and reports managed
   readiness when `MANAGED_HOSTING=true`; legacy `/api/*` uses
   `AUTH_TOKEN`, managed `/api/v1/*` uses a per-user session, and expiring
-  `/share/*` links are bearer capabilities — see `docs/webapp-api.md`.
+  `/share/*` links are bearer capabilities — see `docs/webapp-api.md`. The
+  `/internal/admin/*` namespace uses its own `AI_NOTETAKER_ADMIN_API_TOKEN`
+  bearer credential in every route handler and returns only account metadata
+  and signup aggregates; meeting content is never returned.
 - Two auth mechanisms for two kinds of client: a `Bearer` token for the
   JSON API (`/api/*`, used by the extension and future mobile clients, per
   `docs/webapp-api.md`), and a session cookie for the browser UI (set once

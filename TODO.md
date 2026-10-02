@@ -485,6 +485,12 @@ Implementation plan:
 - [x] Explain the one-click Chrome capture gate accurately in onboarding and
       the in-call widget; if Chrome blocks auto-start, one toolbar click hands
       the pending recording directly to capture without a second Start action.
+- [x] Add Aperca Admin's dedicated bearer-token API for database health,
+      bounded account/signup aggregates, and minimal user search/profile. It
+      exposes no meeting content and advertises no account actions while the
+      service has no enforceable suspension or ban state.
+- [ ] **You:** Configure `AI_NOTETAKER_ADMIN_API_TOKEN` in the deployed webapp
+      and the matching `AI_NOTETAKER_ADMIN_API_URL` / token in Aperca Admin.
 - [ ] **You:** Complete real Chrome/Meet, provider, deployment, storage, and billing
       acceptance evidence before advertising hosted mode.
 
