@@ -268,6 +268,13 @@ impl StopGuard {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         in_flight.insert(meeting_id).then(|| Self(meeting_id))
     }
+
+    fn is_in_flight(meeting_id: Uuid) -> bool {
+        STOPS_IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&meeting_id)
+    }
 }
 
 impl Drop for StopGuard {
@@ -1165,7 +1172,9 @@ async fn handle_message(
             // capture (the session is shared) while it still looks active, silently losing its audio.
             // The extension retries a start it did not hear back about; the second one must not
             // build a second pipeline and audio queue over the same files.
-            if state.active.lock().await.contains_key(&meeting_id) {
+            if state.active.lock().await.contains_key(&meeting_id)
+                || StopGuard::is_in_flight(meeting_id)
+            {
                 return true;
             }
             if capture_source != CaptureSource::Meet
@@ -1259,11 +1268,8 @@ async fn handle_message(
                 custom_summary_instructions,
             ));
 
-            match pipeline.start_recording(meeting_id) {
-                Ok(started_msg) => {
-                    let _ = out_tx.send(started_msg);
-                    tray.set_recording(true);
-                }
+            let started_message = match pipeline.start_recording(meeting_id) {
+                Ok(started_msg) => started_msg,
                 Err(e) => {
                     tray.set_recording(false);
                     let _ = state.store.mark_stopped(meeting_id, chrono::Utc::now());
@@ -1280,7 +1286,7 @@ async fn handle_message(
                     });
                     return true;
                 }
-            }
+            };
 
             if matches!(processing_mode, ProcessingMode::Managed { .. }) {
                 let identity = match &processing_mode {
@@ -1344,6 +1350,7 @@ async fn handle_message(
                         processing_mode: processing_mode.clone(),
                     },
                 );
+                let _ = out_tx.send(started_message);
                 tray.set_recording(true);
                 return true;
             }
@@ -1440,6 +1447,8 @@ async fn handle_message(
                             processing_mode: processing_mode.clone(),
                         },
                     );
+                    let _ = out_tx.send(started_message);
+                    tray.set_recording(true);
                 }
                 Err(e) => {
                     audio_processing.finish().await;
@@ -1843,8 +1852,27 @@ async fn handle_message(
 
         ExtensionToHelper::AudioPreflight => {
             let audio = state.audio.clone();
-            let prepare_error = audio.prepare().err().map(|error| error.to_string());
-            let diagnostics = audio.diagnostics();
+            // Device discovery invokes native platform APIs and, on Linux,
+            // several pactl subprocesses. Keep that synchronous work off the
+            // Tokio IPC executor so a slow or wedged audio server cannot make
+            // unrelated helper messages appear frozen.
+            let probe = tokio::task::spawn_blocking(move || {
+                let prepare_error = audio.prepare().err().map(|error| error.to_string());
+                let diagnostics = audio.diagnostics();
+                (diagnostics, prepare_error)
+            })
+            .await;
+            let (diagnostics, prepare_error) = match probe {
+                Ok(result) => result,
+                Err(error) => {
+                    let _ = out_tx.send(HelperToExtension::Error {
+                        meeting_id: None,
+                        code: ErrorCode::DeviceNotFound,
+                        message: format!("Audio diagnostics could not finish: {error}"),
+                    });
+                    return true;
+                }
+            };
             let _ = out_tx.send(audio_status_message(diagnostics.clone(), prepare_error));
             let _ = out_tx.send(HelperToExtension::CaptureCapabilities {
                 capabilities: CaptureCapabilitiesMessage {
@@ -1966,17 +1994,25 @@ fn spawn_retry_worker(
         let mut summary_backoff_until: Option<tokio::time::Instant> = None;
         loop {
             ticker.tick().await;
+            // Retries hold the per-meeting pipeline mutex while provider calls
+            // run. Defer them during capture so they cannot stall live chunk
+            // transcription behind a slow network request; audio ranges stay
+            // durable and are retried as soon as capture stops.
+            if state.active.lock().await.contains_key(&meeting_id)
+                || StopGuard::is_in_flight(meeting_id)
+            {
+                continue;
+            }
             if let Some(until) = summary_backoff_until {
                 if tokio::time::Instant::now() >= until {
                     // Backoff elapsed — allow a fresh summary attempt.
                     summary_backoff_until = None;
                 }
             }
-            // Collect under the lock, process outside it. Holding the
-            // pipeline lock across process_due_retries/process_pending_summary
-            // network calls (120s timeouts, several jobs per tick) froze
-            // live transcript streaming for every frame that arrived during
-            // a retry burst.
+            // Retry and summary calls still serialize on the pipeline mutex,
+            // but they are gated above while capture is active or Stop is
+            // draining persisted audio. This prevents a slow network attempt
+            // from blocking the live audio consumer.
             let work = {
                 let mut pipeline = pipeline.lock().await;
                 let now = chrono::Utc::now();

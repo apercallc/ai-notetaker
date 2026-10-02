@@ -47,9 +47,13 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
   const meeting = await loadMeeting(workspaceId, id);
   if (!meeting) notFound();
 
-  const shares = await listActiveShares(workspaceId, meeting.id);
-  const crumbs = folderPath(await listFolders(workspaceId), meeting.folderId);
-  const summaryLanguage = (await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { summaryLanguage: true } }))?.summaryLanguage ?? "";
+  const [shares, folders, workspace] = await Promise.all([
+    listActiveShares(workspaceId, meeting.id),
+    listFolders(workspaceId),
+    prisma.workspace.findUnique({ where: { id: workspaceId }, select: { summaryLanguage: true } }),
+  ]);
+  const crumbs = folderPath(folders, meeting.folderId);
+  const summaryLanguage = workspace?.summaryLanguage ?? "";
   const summaryBlocks = parseSummary(meeting.summary);
   const turns = groupTurns(meeting.startedAt, meeting.endedAt, meeting.transcript);
   const mode = modeLabel(meeting.mode);

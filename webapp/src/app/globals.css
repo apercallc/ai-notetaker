@@ -400,6 +400,74 @@ a {
   text-align: center;
 }
 
+.route-loading {
+  min-height: 18rem;
+  padding-block: var(--space-5);
+  text-align: left;
+}
+
+.route-loading-placeholder {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.loading-bar {
+  display: block;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border) 72%, var(--color-surface));
+}
+
+.loading-heading {
+  width: min(15rem, 55%);
+  height: 1.8rem;
+  margin-bottom: var(--space-3);
+}
+
+.loading-copy {
+  width: min(24rem, 76%);
+  height: 0.8rem;
+  margin-bottom: var(--space-4);
+}
+
+.loading-panel {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.loading-row {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 4.25rem;
+  align-content: center;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.loading-row:last-child {
+  border-bottom: 0;
+}
+
+.loading-row-title {
+  width: min(19rem, 68%);
+  height: 0.8rem;
+}
+
+.loading-row-copy {
+  width: min(31rem, 86%);
+  height: 0.6rem;
+  opacity: 0.65;
+}
+
+.route-loading-meeting .loading-panel {
+  min-height: 16rem;
+}
+
+.route-loading-meeting .loading-row {
+  min-height: 6.5rem;
+}
+
 .error-state button {
   border: 0;
   border-radius: var(--radius);

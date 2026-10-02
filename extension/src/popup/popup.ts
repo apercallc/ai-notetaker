@@ -164,6 +164,20 @@ async function renderActiveRecording(meetingId: string, helperStatus: Background
     quotaRefreshTimer = setInterval(() => void refreshHostedQuota(settings), 60_000);
   }
   const transcriptView = document.getElementById("transcript-view");
+  const pendingTranscriptUpdates: Extract<BackgroundToUiMessage, { type: "TRANSCRIPT_UPDATE" }>[] = [];
+  const flushPendingTranscriptUpdates = async () => {
+    const view = document.getElementById("transcript-view");
+    if (!view) return;
+    const queued = pendingTranscriptUpdates.splice(0);
+    const meeting = await getMeeting(meetingId);
+    const persistedFinals = new Set((meeting?.transcript ?? [])
+      .filter((segment) => segment.isFinal && segment.utteranceId !== undefined)
+      .map((segment) => `${segment.speaker}:${segment.utteranceId}`));
+    for (const update of queued) {
+      if (update.utteranceId !== undefined && persistedFinals.has(`${update.speaker}:${update.utteranceId}`)) continue;
+      appendTranscriptLine(view, update.speaker, update.text, update.isFinal, update.utteranceId);
+    }
+  };
   if (transcriptView) {
     for (const segment of meeting?.transcript ?? []) {
       appendTranscriptLine(transcriptView, segment.speaker, segment.text, segment.isFinal, segment.utteranceId);
@@ -195,12 +209,19 @@ async function renderActiveRecording(meetingId: string, helperStatus: Background
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
   function liveListener(message: BackgroundToUiMessage): void {
-    if (message.type === "MEETING_STATE_CHANGED" && message.meetingId === meetingId) {
-      void renderSafely();
+    if (message.type === "HELPER_STATUS") {
+      void refreshRecordingStatus(meetingId, message.status).then(flushPendingTranscriptUpdates);
       return;
     }
-    if (message.type === "TRANSCRIPT_UPDATE" && message.meetingId === meetingId && transcriptView) {
-      appendTranscriptLine(transcriptView, message.speaker, message.text, message.isFinal, message.utteranceId);
+    if (message.type === "MEETING_STATE_CHANGED" && message.meetingId === meetingId) {
+      void refreshRecordingStatus(meetingId, helperStatus).then(flushPendingTranscriptUpdates);
+      void refreshIfNoLongerRecording(meetingId);
+      return;
+    }
+    if (message.type === "TRANSCRIPT_UPDATE" && message.meetingId === meetingId) {
+      const view = document.getElementById("transcript-view");
+      if (view) appendTranscriptLine(view, message.speaker, message.text, message.isFinal, message.utteranceId);
+      else pendingTranscriptUpdates.push(message);
     }
     // Notes finished, or the recording failed or was stopped elsewhere (the
     // in-call pill, the shortcut): leave this view instead of showing a
@@ -230,6 +251,31 @@ async function refreshIfNoLongerRecording(meetingId: string): Promise<void> {
     await renderSafely();
   } catch {
     // The next render will pick the state up.
+  }
+}
+
+async function refreshRecordingStatus(meetingId: string, helperStatus: BackgroundState["helperStatus"]): Promise<void> {
+  const meeting = await getMeeting(meetingId);
+  const status = document.getElementById("recording-status");
+  if (!meeting || !status) return;
+  const liveCaptions = meeting.captureSource === "meet"
+    ? meeting.liveTranscriptStatus === "available" || meeting.liveTranscriptStatus === "connecting" || meeting.transcript.length > 0
+    : helperStatus === "connected";
+  status.textContent = meeting.captureSource === "meet" && meeting.liveTranscriptStatus === "connecting"
+    ? "Connecting live captions…"
+    : meeting.captureSource === "meet" && meeting.liveTranscriptStatus === "unavailable"
+      ? "Live captions are unavailable. Your saved audio will be processed after you stop."
+      : liveCaptions ? "" : "Your transcript and notes are processed after you stop.";
+  if (liveCaptions && !document.getElementById("transcript-view")) {
+    const transcriptView = document.createElement("div");
+    transcriptView.id = "transcript-view";
+    transcriptView.className = "transcript-view";
+    transcriptView.setAttribute("role", "log");
+    transcriptView.setAttribute("aria-label", "Live transcript");
+    status.insertAdjacentElement("afterend", transcriptView);
+    for (const segment of meeting.transcript) {
+      appendTranscriptLine(transcriptView, segment.speaker, segment.text, segment.isFinal, segment.utteranceId);
+    }
   }
 }
 

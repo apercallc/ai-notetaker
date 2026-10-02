@@ -5,8 +5,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { getAppUrl } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { SESSION_COOKIE } from "@/lib/sessionCookie";
-import { getSessionUser } from "@/lib/sessions";
-import { getUserDefaultWorkspaceId, getUserRole } from "@/lib/workspaces";
+import { getSessionContextForRequest, resolveWorkspaceForRequest } from "@/lib/currentUser";
 import { MARKETING_HEADER } from "@/marketing/paths";
 
 /** Absolute URLs in canonical/OG metadata need the public origin; only the managed site publishes any. */
@@ -34,10 +33,10 @@ export const metadata: Metadata = {
 async function headerRole(): Promise<"owner" | "member" | null> {
   try {
     const store = await cookies();
-    const user = await getSessionUser(store.get(SESSION_COOKIE)?.value);
-    if (!user) return null;
-    const workspaceId = await getUserDefaultWorkspaceId(user.id);
-    return workspaceId ? await getUserRole(user.id, workspaceId) : null;
+    const session = await getSessionContextForRequest(store.get(SESSION_COOKIE)?.value);
+    if (!session || session.user.mustChangePassword) return null;
+    const active = await resolveWorkspaceForRequest(session.user.id, session.activeWorkspaceId);
+    return active?.role ?? null;
   } catch (error) {
     console.error("header session lookup failed", error instanceof Error ? error.message : String(error));
     return null;

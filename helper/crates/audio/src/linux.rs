@@ -740,19 +740,65 @@ fn pick_meeting_sink(inputs: &[SinkInput], sinks: &[(String, String)]) -> Option
 // ---------------------------------------------------------------------------
 
 fn run_pactl(args: &[&str]) -> Result<String, AudioError> {
-    let output = Command::new("pactl")
+    const COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+    let mut child = Command::new("pactl")
         .args(args)
         // Stable, unlocalized output so the text parsers below keep working.
         .env("LC_ALL", "C")
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| AudioError::DriverSetup(format!("failed to run pactl: {e}")))?;
-    if !output.status.success() {
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stderr = child.stderr.take().expect("stderr is piped");
+    // Drain both pipes while waiting so a verbose pactl response cannot fill
+    // the kernel pipe buffer and deadlock the child before its timeout.
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut std::io::BufReader::new(stdout), &mut bytes);
+        bytes
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut std::io::BufReader::new(stderr), &mut bytes);
+        bytes
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(AudioError::DriverSetup(format!(
+                    "could not inspect pactl: {error}"
+                )));
+            }
+        }
+        if started.elapsed() >= COMMAND_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(AudioError::DriverSetup(format!(
+                "pactl {args:?} timed out after {} seconds",
+                COMMAND_TIMEOUT.as_secs()
+            )));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if !status.success() {
         return Err(AudioError::DriverSetup(format!(
             "pactl {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&stderr)
         )));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(String::from_utf8_lossy(&stdout).to_string())
 }
 
 fn column(line: &str, index: usize) -> Option<&str> {

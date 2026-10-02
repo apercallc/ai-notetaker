@@ -1,5 +1,33 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Cross-surface latency and stability — 2026-10-02
+
+- [x] Reuse the browser session and workspace lookup between the shared web
+      header and the protected page render; run independent note/team reads in
+      parallel and move expired-trash cleanup after the page response.
+- [x] Keep route loading fallbacks page-shaped and the shared app header
+      stable instead of replacing route content with a generic loading line.
+- [x] Keep extension Meet popup hydration independent of the desktop-helper
+      handshake and update recording status in place instead of rebuilding the
+      active recording view on each state event; reconcile captions received
+      during view mounting with persisted final segments. Broadcast live
+      captions before the searchable meeting mirror write completes.
+- [x] Report desktop recording only after audio capture starts, and move
+      synchronous audio preflight diagnostics off the helper IPC executor.
+- Follow-up: add an incremental transcript search index and reduce repeated
+  full-meeting storage rewrites for large extension archives. Preserve a
+  migration path for existing local records and durable final transcript data.
+- [x] Defer helper retries while capture is active or Stop is draining the
+      persisted audio queue, so provider latency cannot block live transcript
+      updates.
+- [x] Run audio preflight outside the IPC executor and bound Linux `pactl`
+      discovery commands to two seconds each.
+- Follow-up: let Stop acknowledge promptly while a durable audio backlog
+  drains. Keep retries recoverable from raw audio and verify across devices.
+- Follow-up: bound platform audio discovery subprocess timeouts and verify
+  Windows and macOS diagnostics against slow device APIs; Linux `pactl` calls
+  now have a two-second per-command timeout.
+
 ## CI supply-chain hardening — 2026-10-02
 
 - [x] Pin every GitHub Actions workflow dependency to a verified full commit

@@ -26,13 +26,15 @@ export default async function TeamPage() {
     );
   }
 
-  const members = await prisma.workspaceMembership.findMany({
-    where: { workspaceId: session.workspaceId },
-    include: { user: { select: { email: true, createdAt: true } } },
-    orderBy: { createdAt: "asc" },
-  });
-  const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: session.workspaceId }, select: { retentionDays: true } });
-  const invites = await listPendingInvites(session.workspaceId);
+  const [members, workspace, invites] = await Promise.all([
+    prisma.workspaceMembership.findMany({
+      where: { workspaceId: session.workspaceId },
+      include: { user: { select: { email: true, createdAt: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.workspace.findUniqueOrThrow({ where: { id: session.workspaceId }, select: { retentionDays: true } }),
+    listPendingInvites(session.workspaceId),
+  ]);
 
   return (
     <div className="container">

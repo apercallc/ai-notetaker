@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import Link from "next/link";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { requireSession } from "@/lib/currentUser";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function TrashPage() {
   const { workspaceId, role } = await requireSession();
-  if (!managedHostingEnabled()) await purgeExpiredTrash().catch(() => undefined);
+  if (!managedHostingEnabled()) after(() => purgeExpiredTrash().catch(() => undefined));
   const items = await listTrash(workspaceId);
   const total = items.length >= 500 ? await countTrashRoots(workspaceId) : items.length;
 

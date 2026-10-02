@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { after } from "next/server";
 import { listMeetings } from "@/lib/meetings";
 import { MAX_SEARCH_LENGTH } from "@/lib/meetingConstants";
 import { requireSession } from "@/lib/currentUser";
@@ -66,7 +67,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 && parsedPage <= MAX_PAGE ? parsedPage : 1;
 
   // Self-hosted instances never run the worker that clears expired trash, so page loads do it (at most hourly). Managed hosting has the worker.
-  if (!managedHostingEnabled()) await purgeExpiredTrash().catch(() => undefined);
+  if (!managedHostingEnabled()) after(() => purgeExpiredTrash().catch(() => undefined));
   // Same reason: retry any due "note ready" deliveries when there is no worker.
   void runIntegrationMaintenance().catch(() => undefined);
   const folders = await listFolders(workspaceId);

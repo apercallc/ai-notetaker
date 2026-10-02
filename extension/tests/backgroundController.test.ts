@@ -173,6 +173,21 @@ describe("BackgroundController", () => {
     );
   });
 
+  it("hydrates local state without waiting for a slow desktop helper handshake", async () => {
+    let finishConnect!: () => void;
+    const client = createFakeClient();
+    vi.mocked(client.connect).mockImplementation(() => new Promise<void>((resolve) => {
+      finishConnect = resolve;
+    }));
+    const controller = new BackgroundController(client, vi.fn());
+
+    await expect(controller.init()).resolves.toBeUndefined();
+    expect(controller.getState().helperStatus).toBe("connecting");
+    expect(client.connect).toHaveBeenCalledOnce();
+
+    finishConnect();
+  });
+
   it("creates a new meeting record and tells the helper to start recording", async () => {
     const client = createFakeClient();
     const broadcast = vi.fn();
@@ -617,6 +632,9 @@ describe("BackgroundController", () => {
     const meetingId = await controller.startRecording();
 
     client.emit("transcript_partial", { meetingId, speaker: "you", text: "hello", isFinal: true });
+    expect(broadcast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "TRANSCRIPT_UPDATE", meetingId, text: "hello" }),
+    );
 
     // Storage round-trips inside the handler resolve over several
     // microtask hops (the chrome.storage.local mock resolves via a Promise
@@ -629,9 +647,10 @@ describe("BackgroundController", () => {
       );
     });
 
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.transcript).toHaveLength(1));
     const stored = await getMeeting(meetingId);
     expect(stored?.transcript).toEqual([
-      { speaker: "you", text: "hello", isFinal: true, timestamp: expect.any(String) },
+      { speaker: "you", text: "hello", isFinal: true, timestamp: expect.any(String), utteranceId: undefined },
     ]);
   });
 

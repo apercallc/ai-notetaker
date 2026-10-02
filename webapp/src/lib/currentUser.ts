@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { getSessionContext } from "./sessions";
 import { resolveActiveWorkspace } from "./workspaces";
 
@@ -24,11 +25,22 @@ export interface RequireSessionOptions {
   allowPasswordChange?: boolean;
 }
 
+// The root layout and the page/action both need the same session during one
+// render. Keep that lookup request-scoped so the shared app shell does not
+// add another session touch and workspace-membership round trip to navigation.
+export const getSessionContextForRequest = cache((sessionId: string | undefined) =>
+  getSessionContext(sessionId),
+);
+
+export const resolveWorkspaceForRequest = cache((userId: string, preferredWorkspaceId?: string | null) =>
+  resolveActiveWorkspace(userId, preferredWorkspaceId),
+);
+
 export async function requireSession(
   options: RequireSessionOptions = {},
 ): Promise<{ userId: string; workspaceId: string; role: "owner" | "member"; email: string; sessionId: string }> {
   const store = await cookies();
-  const context = await getSessionContext(store.get("session")?.value);
+  const context = await getSessionContextForRequest(store.get("session")?.value);
   if (!context) redirect("/login");
 
   // An owner-issued temporary password must be replaced before anything else
@@ -37,7 +49,7 @@ export async function requireSession(
 
   // Workspace switcher: honour the session's chosen workspace only while the
   // user is still a member; otherwise the deterministic default.
-  const active = await resolveActiveWorkspace(context.user.id, context.activeWorkspaceId);
+  const active = await resolveWorkspaceForRequest(context.user.id, context.activeWorkspaceId);
   if (!active) redirect("/login");
 
   return {

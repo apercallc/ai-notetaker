@@ -126,7 +126,6 @@ export class BackgroundController {
 
   async init(): Promise<void> {
     this.settings = await getSettings();
-    await this.client.connect();
     const latest = await listMeetings(1);
     const active = latest.find((meeting) => meeting.status === "recording" && meeting.captureSource === "meet");
     if (active) {
@@ -134,6 +133,12 @@ export class BackgroundController {
       this.meetChunkSequence.set(active.id, (await lastBrowserMeetSequence(active.id)) + 1);
     }
     this.pushCurrentSettings();
+    // Meet recording is extension-owned and does not require the desktop
+    // helper. Start its connection after local state has hydrated so a cold
+    // helper handshake cannot hold the popup (or Meet) behind it.
+    void this.client.connect().catch((error) => {
+      console.warn("Helper connection could not start", error);
+    });
     void flushWebappSyncOutbox(this.settings, this.fetchImpl);
     void this.drainManagedMeetOutbox().catch((error) => {
       console.warn("Managed Meet recovery could not start", error);
@@ -954,6 +959,17 @@ export class BackgroundController {
     offsetMs: number;
   }): Promise<void> {
     if (this.activeMeetingId !== update.meetingId || !update.text.trim()) return;
+    // Captions are already downstream of audio saved in IndexedDB. Paint them
+    // immediately, then persist the extension's searchable meeting mirror;
+    // a slow structured-clone/write must not make live captions feel laggy.
+    this.broadcast({
+      type: "TRANSCRIPT_UPDATE",
+      meetingId: update.meetingId,
+      speaker: update.speaker,
+      text: update.text,
+      isFinal: update.isFinal,
+      utteranceId: update.utteranceId,
+    });
     const meeting = await updateMeeting(update.meetingId, (current) => {
       if (current.status !== "recording") return current;
       const existingIndex = current.transcript.findIndex(
@@ -972,19 +988,21 @@ export class BackgroundController {
       return current;
     });
     if (!meeting || meeting.status !== "recording") return;
-    this.broadcast({
-      type: "TRANSCRIPT_UPDATE",
-      meetingId: update.meetingId,
-      speaker: update.speaker,
-      text: update.text,
-      isFinal: update.isFinal,
-      utteranceId: update.utteranceId,
-    });
   }
 
   private async handleTranscriptPartial(
     msg: Extract<IncomingMessage, { type: "transcript_partial" }>,
   ): Promise<void> {
+    // The helper emits this only after it has processed durable raw audio.
+    // Let open popup/widget views paint now while the local mirror write runs.
+    this.broadcast({
+      type: "TRANSCRIPT_UPDATE",
+      meetingId: msg.meetingId,
+      speaker: msg.speaker,
+      text: msg.text,
+      isFinal: msg.isFinal,
+      utteranceId: msg.utteranceId,
+    });
     const meeting = await updateMeeting(msg.meetingId, (current) => {
       const existingIndex = current.transcript.findIndex(
         (segment) => segment.speaker === msg.speaker && segment.utteranceId === msg.utteranceId && !segment.isFinal,
@@ -1004,14 +1022,6 @@ export class BackgroundController {
       return current;
     });
     if (!meeting) return;
-    this.broadcast({
-      type: "TRANSCRIPT_UPDATE",
-      meetingId: msg.meetingId,
-      speaker: msg.speaker,
-      text: msg.text,
-      isFinal: msg.isFinal,
-      utteranceId: msg.utteranceId,
-    });
   }
 
   private async handleSummaryReady(

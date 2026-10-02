@@ -63,6 +63,24 @@ describe("popup capture routing", () => {
     expect(document.querySelector("#transcript-view")?.textContent).toContain("Browser captions");
   });
 
+  it("does not duplicate a final caption that arrived while the live view mounted", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, {
+      activeMeeting: { id: "m-live" },
+    });
+    const segment = { speaker: "you", text: "Already saved", isFinal: true, utteranceId: 18, timestamp: new Date().toISOString() };
+    await new Promise<void>((resolve) => chromeMock.storage.local.set({
+      "notetaker.meeting.m-live": { id: "m-live", captureSource: "meet", liveTranscriptStatus: "available", transcript: [segment] },
+    }, resolve));
+    await vi.waitFor(() => expect(chromeMock.runtime.onMessage.addListener).toHaveBeenCalled());
+    const listener = chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)![0];
+    listener({ type: "MEETING_STATE_CHANGED", meetingId: "m-live" });
+    listener({ type: "TRANSCRIPT_UPDATE", meetingId: "m-live", ...segment, text: "Still being transcribed", isFinal: false });
+    listener({ type: "TRANSCRIPT_UPDATE", meetingId: "m-live", ...segment });
+
+    await vi.waitFor(() => expect(document.querySelectorAll("#transcript-view .transcript-line")).toHaveLength(1));
+    expect(document.querySelector("#transcript-view")?.textContent).toContain("Already saved");
+  });
+
   it("detects the active tab: a non-Meet tab shows the way to Meet, not a dead Start", async () => {
     await loadPopup({ id: 1, url: "chrome://newtab" });
 
