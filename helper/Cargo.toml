@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/core", "crates/audio", "crates/app"]
 
 [workspace.package]
-version = "0.16.3"
+version = "0.17.0"
 edition = "2021"
 license = "MIT"
 
