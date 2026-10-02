@@ -71,6 +71,32 @@ describe("Google extension code exchange", () => {
     expect(createApiToken).not.toHaveBeenCalled();
   });
 
+  it("rejects accounts that still need a password change", async () => {
+    findUser.mockResolvedValue({ id: "user-1", mustChangePassword: true });
+    const response = await POST(new Request("https://app.example.com/api/v1/auth/google/exchange", {
+      method: "POST", body: JSON.stringify({ code: "opaque-code", codeVerifier: "v".repeat(43) }),
+    }));
+    expect(response.status).toBe(403);
+    expect(createApiToken).not.toHaveBeenCalled();
+  });
+
+  it("rejects an account deleted before the extension completes sign-in", async () => {
+    findUser.mockResolvedValue(null);
+    const response = await POST(new Request("https://app.example.com/api/v1/auth/google/exchange", {
+      method: "POST", body: JSON.stringify({ code: "opaque-code", codeVerifier: "v".repeat(43) }),
+    }));
+    expect(response.status).toBe(403);
+    expect(createApiToken).not.toHaveBeenCalled();
+  });
+
+  it("routes malformed sign-in requests through the shared API error response", async () => {
+    readManagedJson.mockResolvedValue({ code: "opaque-code" });
+    const response = await POST(new Request("https://app.example.com/api/v1/auth/google/exchange", { method: "POST" }));
+    expect(response.status).toBe(500);
+    expect(apiErrorResponse).toHaveBeenCalledWith(expect.any(Error), { requestId: "request-1" });
+    expect(consumeGoogleExtensionCode).not.toHaveBeenCalled();
+  });
+
   it("keeps this exchange disabled on self-hosted deployments", async () => {
     managedHostingEnabled.mockReturnValue(false);
     const response = await POST(new Request("https://app.example.com/api/v1/auth/google/exchange", { method: "POST" }));

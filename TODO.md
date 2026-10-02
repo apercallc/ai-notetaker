@@ -33,7 +33,10 @@
       Settings without an onboarding prompt or added navigation tab.
 - [x] Homepage links directly to desktop setup; Mac instructions include the
       currently required one-time Native Messaging registration command.
-- Verified: 596 extension tests and 762 webapp tests with local Postgres; configured
+- [x] Website release tag and download links come from GitHub's latest published
+      release; tests guard the live lookup, and release metadata checks keep the
+      webapp, extension, helper, and release-manifest versions in lockstep.
+- Verified: 605 extension tests and 781 webapp tests with local Postgres; configured
       coverage floors, strict typechecks, webapp lint and both production builds pass.
       Download page browser-checked at desktop and 375 px; production preview loads
       without console errors. No standalone JS formatter is configured.
@@ -53,8 +56,9 @@
       the browser notifies on low quota at start and on exhaustion discovered
       after the call. Saved audio never silently switches processing providers.
 - Verified: extension typecheck, 605 tests, and production build pass; webapp
-      Prisma generation, typecheck, 776 tests with local Postgres, and production
-      build pass. Local builds do not prove live Google OAuth or Chrome UI.
+      Prisma generation, typecheck, 781 tests with local Postgres, 90% statement
+      coverage, and production build pass. Local builds do not prove live Google
+      OAuth or Chrome UI.
 - Deferred: live Chrome Google OAuth interaction and cross-workspace quota-race
       behavior require authenticated browser/service validation. A quota change
       during a call is reported when server processing detects it after stop.
