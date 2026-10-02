@@ -1,7 +1,9 @@
 # extension/ — Chrome Extension
 
 Manifest V3. This package owns the Google Meet browser path: its offscreen
-document captures the tab and microphone, and IndexedDB persists chunks before
+document receives remote Meet audio from a minimal MAIN-world receiver-track
+adapter (with tab capture as a fallback), captures the microphone separately,
+and IndexedDB persists chunks before
 local BYOK processing or Hosted AI upload. For desktop-call sources it is a
 **thin UI** that forwards start/stop and settings to the native helper. See the root `CLAUDE.md` and
 `docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`
@@ -10,6 +12,13 @@ desktop pipeline; the offscreen Meet path is explicitly durable and rehydrates
 from IndexedDB after service-worker suspension.
 
 ## Conventions
+
+- **The Meet page bridge carries bounded signaling only.** No provider keys,
+  tokens, storage access, or generic extension commands enter the MAIN world.
+  The local WebRTC relay is receive-only in the offscreen document; never
+  attach the microphone to it. Only offscreen-origin messages may persist
+  audio through the service worker. A changed page document invalidates its
+  old signaling session. Keep Meet's original tracks and playback untouched.
 
 - **Helper communication is Native Messaging only.** Never open a raw
   WebSocket to `127.0.0.1` for extension↔helper control — any webpage's JS

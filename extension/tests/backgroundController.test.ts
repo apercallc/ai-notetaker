@@ -64,10 +64,66 @@ function createFakeClient(): NativeClientLike & {
 beforeEach(async () => {
   chromeMock.reset();
   vi.restoreAllMocks();
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
   await saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true });
 });
 
 describe("BackgroundController", () => {
+  it("checks local Meet providers before starting and warns while preserving local audio capture", async () => {
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(createFakeClient(), broadcast);
+    const fetch = vi.fn(async () => new Response("", { status: 503 }));
+    controller.setFetchImpl(fetch);
+    await controller.init();
+    await controller.saveSettings({
+      ...DEFAULT_SETTINGS,
+      consentDisclosureAcknowledged: true,
+      transcriptionProvider: "groq",
+      summarizationProvider: "gemini",
+      apiKeys: { groq: "gsk-test", gemini: "gemini-test" },
+    });
+
+    expect(await controller.startRecording("general", "meet")).toBe("");
+    expect(controller.getState().activeMeeting).toBeNull();
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
+      type: "RECORDING_ERROR",
+      recovery: "provider_preflight",
+      message: expect.stringContaining("Recording has not started"),
+    }));
+
+    const meetingId = await controller.startRecording("general", "meet", undefined, true);
+    const meeting = await getMeeting(meetingId);
+
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(meeting).toMatchObject({
+      status: "recording",
+      providerPreflightWarning: expect.stringContaining("Groq: Groq could not check the key (HTTP 503)"),
+    });
+    expect(meeting?.providerPreflightWarning).toContain("audio will be saved on this device");
+  });
+
+  it("explains that a Meet timeout produced no notes and keeps audio available for retry", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    const clearChunks = vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(browserStorage, "streamBrowserMeetChunks").mockImplementation(async function* () {
+      yield { channel: "mic", sequence: 0, bytes: new Uint8Array([1, 2]) };
+    });
+    vi.spyOn(browserProcessing, "processBrowserMeetRecording").mockRejectedValue(new Error("Groq timed out"));
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
+    const meetingId = await controller.startRecording("general", "meet");
+    clearChunks.mockClear();
+
+    await controller.stopRecording(meetingId);
+
+    const meeting = await getMeeting(meetingId);
+    expect(meeting?.status).toBe("error");
+    expect(meeting?.errorMessage).toContain("Groq timed out");
+    expect(meeting?.errorMessage).toContain("No complete transcript or summary was produced");
+    expect(meeting?.errorMessage).toContain("retry from this meeting");
+    expect(clearChunks).not.toHaveBeenCalledWith(meetingId);
+  });
+
   it("processes Meet locally with a connected helper, preserving call times and model notes", async () => {
     const client = createFakeClient();
     const controller = new BackgroundController(client, vi.fn());
@@ -1418,13 +1474,16 @@ describe("BackgroundController: recovery and in-call widget support", () => {
     expect(broadcast).toHaveBeenCalledWith({ type: "RECORDING_ERROR", meetingId, message: "Meet capture permission was revoked." });
   });
 
-  it("aborts an unstarted Meet and removes its meeting and locally saved chunks", async () => {
+  it("aborts an unstarted Meet only after proving it has no saved audio", async () => {
     const client = createFakeClient();
     const broadcast = vi.fn();
     const clearChunks = vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    vi.spyOn(browserStorage, "lastBrowserMeetSequence").mockResolvedValue(-1);
     const controller = new BackgroundController(client, broadcast);
     await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
     const meetingId = await controller.startRecording("general", "meet");
+    expect(meetingId).not.toBe("");
     clearChunks.mockClear();
 
     await controller.abortStart(meetingId, "The Meet tab closed before capture started.");
@@ -1435,6 +1494,34 @@ describe("BackgroundController: recovery and in-call widget support", () => {
     expect(controller.getState().activeMeeting).toBeNull();
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", meetingId: null, phase: "start" }));
     expect(broadcast).toHaveBeenCalledWith({ type: "MEETING_STATE_CHANGED", meetingId });
+  });
+
+  it.each(["saved", "unreadable"])("preserves %s audio when an in-flight start is cancelled", async (state) => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    const clearChunks = vi.spyOn(browserStorage, "clearBrowserMeetChunks").mockResolvedValue();
+    const last = vi.spyOn(browserStorage, "lastBrowserMeetSequence");
+    if (state === "saved") last.mockResolvedValue(0);
+    else last.mockRejectedValue(new Error("storage busy"));
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
+    const meetingId = await controller.startRecording("general", "meet");
+    clearChunks.mockClear();
+    await controller.abortStart(meetingId, "Start cancelled");
+    expect(clearChunks).not.toHaveBeenCalled();
+    expect(await getMeeting(meetingId)).toMatchObject({ status: "error", errorMessage: expect.stringContaining("saved audio") });
+    expect(controller.getState().activeMeeting).toBeNull();
+  });
+
+  it("keeps all surfaces in Connecting until capture is confirmed", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    await controller.init();
+    await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
+    const meetingId = await controller.startRecording("general", "meet");
+    expect(controller.getState().activeMeeting).toEqual({ id: meetingId, starting: true });
+    expect((await controller.getWidgetState()).active?.captureStarting).toBe(true);
+    controller.confirmMeetCapture(meetingId);
+    expect(controller.getState().activeMeeting).toEqual({ id: meetingId });
+    expect((await controller.getWidgetState()).active?.captureStarting).toBeUndefined();
   });
 
   it("reports capture invocation requirements and retryable Drive export setup", async () => {

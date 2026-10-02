@@ -86,9 +86,13 @@ by this document. These safety boundaries remain:
 
 ### 4.1 Google Meet browser path
 
-When a tab is on `meet.google.com`, the extension offers an automatic
-“Record this Meet” control. An offscreen document uses Chrome tab capture for
-remote audio and the microphone path for the local speaker. The service worker
+When a tab is on `meet.google.com`, the extension offers a “Start notes”
+control. As of 2026-10-02, a minimal MAIN-world adapter observes remote WebRTC
+receiver tracks from document start and mixes them into a local WebRTC relay.
+The offscreen document is receive-only on that relay and independently
+captures the microphone. This supports widget starts without Chrome's toolbar
+invocation gate. Tabs where the adapter cannot connect use Chrome tab capture
+as a fallback, with its explicit toolbar/shortcut authorization. The service worker
 persists bounded chunks in extension IndexedDB before any BYOK provider call or
 Hosted AI upload. The helper is optional for Meet: when present it can receive
 the same chunks for live local processing; when absent the extension finishes
@@ -97,6 +101,15 @@ the browser-owned local or managed pipeline itself.
 The extension must handle tab navigation, capture permission denial, the Meet
 tab closing, one channel starting late, and service-worker reconnects without
 losing the already captured channel.
+
+The page adapter never receives provider keys or account tokens. It cannot
+directly submit persisted chunks or invoke privileged commands. Signaling is
+bounded and tied to the authorized tab, document, and recording session. Stop
+releases recorder-owned resources without stopping Meet's original tracks.
+The local relay re-encodes audio using the browser-negotiated WebRTC codec;
+saved PCM is the captured relay output, not a bit-exact copy of remote input.
+Synthetic Chromium verification is automated; actual Meet compatibility and
+long-call/device acceptance remain separate release checks.
 
 ### 4.2 Desktop universal path
 

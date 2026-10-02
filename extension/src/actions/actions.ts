@@ -150,8 +150,22 @@ async function render(focus?: FocusHint): Promise<void> {
 function renderFailure(): void {
   app.innerHTML = `
     <header class="action-header"><h1 tabindex="-1">Action items</h1></header>
-    <p class="empty-state error-state" role="alert">Action items could not be loaded. Reopen this page and try again.</p>
+    <div class="empty-state error-state" role="alert">
+      <p>Action items could not be loaded. Your saved meetings are unchanged.</p>
+      <button type="button" class="secondary" id="retry-actions">Try again</button>
+    </div>
   `;
+  document.getElementById("retry-actions")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    button.textContent = "Loading…";
+    try {
+      await render();
+      document.querySelector<HTMLElement>(".action-header h1")?.focus({ preventScroll: true });
+    } catch {
+      renderFailure();
+    }
+  });
 }
 
 void render().catch(renderFailure);

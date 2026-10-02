@@ -87,11 +87,39 @@ describe("onboarding entry point", () => {
     expect(chromeMock.storage.session._dump()).toEqual({});
   });
 
+  it("keeps helper status stable, and preserves errors until the user can continue", async () => {
+    await loadWizard("/onboarding/onboarding.html?mode=desktop&source=desktop", () => {
+      chromeMock.runtime.sendMessage.mockResolvedValue({ ...helperState, helperStatus: "disconnected" });
+      return new Promise<void>((resolve) => chromeMock.storage.session.set({ "notetaker.desktopOnboardingIntentAt": Date.now() }, resolve));
+    });
+    await vi.waitFor(() => expect(document.querySelector("#check-helper")).not.toBeNull());
+
+    const checkButton = document.querySelector("#check-helper");
+    expect((document.querySelector("#next-button") as HTMLButtonElement).disabled).toBe(true);
+    document.querySelector<HTMLFormElement>("#onboarding-form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await vi.waitFor(() => expect(document.querySelector("#step-error")?.textContent).toContain("not connected yet"));
+
+    const listener = chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)?.[0] as (message: unknown) => void;
+    listener({ type: "HELPER_STATUS", status: "connecting" });
+    expect(document.querySelector("#step-error")?.textContent).toContain("not connected yet");
+    expect(document.querySelector("#check-helper")).toBe(checkButton);
+    expect(document.querySelector("#helper-install-status")?.textContent).toContain("not responding");
+
+    listener({ type: "HELPER_STATUS", status: "connected" });
+    expect(document.querySelector("#step-error")?.textContent).toContain("not connected yet");
+    expect(document.querySelector("#helper-install-status")?.textContent).toContain("is connected");
+    expect((document.querySelector("#next-button") as HTMLButtonElement).disabled).toBe(false);
+    document.querySelector<HTMLButtonElement>("#next-button")!.click();
+    await vi.waitFor(() => expect(document.querySelector("h1")?.textContent).toContain("Check your audio"));
+    expect(document.querySelector("#step-error")?.textContent).toBe("");
+  });
+
   it("lets the mic section be skipped only on the desktop detour", async () => {
     await loadWizard("/onboarding/onboarding.html");
 
     await vi.waitFor(() => expect(document.querySelector("#onboarding-form")).not.toBeNull());
-    expect(document.querySelector<HTMLButtonElement>("#use-desktop")?.textContent).toContain("Zoom, Teams, or Slack");
+    expect(document.querySelector<HTMLButtonElement>("#use-desktop")?.textContent).toContain("Set up desktop calls");
+    expect(document.querySelector("#use-desktop")?.parentElement?.textContent).toContain("Using Zoom, Teams, or Slack");
   });
 
   it("does not approve keys changed while their previous test is pending", async () => {

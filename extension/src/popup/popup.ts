@@ -1,7 +1,7 @@
 import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import { createStopConfirm, STOP_CONFIRM_LABEL, STOP_LABEL } from "../lib/stopConfirm";
 import type { BackgroundState, BackgroundToUiMessage } from "../lib/internalMessages";
-import { speakerLabel, type AudioProbeResult, type AudioStatus, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
+import { speakerLabel, type AudioProbeResult, type AudioStatus, type ErrorRecoveryCategory, type MeetingMode, type MeetingRecord, type Speaker } from "../types";
 import { escapeHtml } from "../lib/html";
 import { getExtensionOnboardingUrl } from "../lib/install";
 import { managedBillingUrl } from "../lib/managedClient";
@@ -21,6 +21,11 @@ let historyAll = false;
 let desktopChosen = false;
 /** Why the last start did not begin; shown in place, since the popup has no other channel for it. */
 let startError = "";
+let startErrorRecovery: ErrorRecoveryCategory | undefined;
+/** Revision guards keep delayed audio checks from overwriting newer helper state. */
+let audioStatusRevision = 0;
+let audioHelperConnected = false;
+let desktopAudioReady = false;
 /** The Meet tab this popup most recently detected as active, kept for the pending-start handoff. */
 let lastActiveMeetTab: { id: number } | null = null;
 const MEET_HOME = "https://meet.google.com/";
@@ -156,7 +161,8 @@ async function renderActiveRecording(meetingId: string, helperStatus: Background
       <button class="danger record-toggle" id="stop-recording">${STOP_LABEL}</button>
       ${modeChip(settings)}
     </div>
-    <p id="recording-status" class="text-secondary" role="status" aria-live="polite">${recordingStatus}</p>
+    <p id="recording-status" class="${meeting?.captureSource === "desktop" && helperStatus !== "connected" ? "text-warning" : "text-secondary"}" role="status" aria-live="polite"><span id="recording-status-message">${escapeHtml(meeting?.captureSource === "desktop" && helperStatus !== "connected" ? "Can't confirm the desktop helper connection. If the helper app closed, capture may have stopped. Check the helper before ending the call; audio already saved stays on this device." : recordingStatus)}</span>${meeting?.captureSource === "desktop" ? ` <button type="button" class="text-link" id="recording-helper-setup"${helperStatus === "connected" ? " hidden" : ""}>Open helper setup</button>` : ""}</p>
+    ${meeting?.providerPreflightWarning ? `<p class="field-hint text-warning" role="alert">AI provider check: ${escapeHtml(meeting.providerPreflightWarning)}</p>` : ""}
     ${liveCaptions ? `<div class="transcript-view" id="transcript-view" role="log" aria-label="Live transcript"></div>` : ""}
   `;
   void refreshHostedQuota(settings);
@@ -207,6 +213,10 @@ async function renderActiveRecording(meetingId: string, helperStatus: Background
   });
   stopButton.addEventListener("click", stopConfirm.press);
   document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
+  document.getElementById("recording-helper-setup")?.addEventListener("click", async () => {
+    await markDesktopOnboardingIntent();
+    chrome.tabs.create({ url: getExtensionOnboardingUrl(chrome.runtime.getURL(""), "desktop") });
+  });
 
   function liveListener(message: BackgroundToUiMessage): void {
     if (message.type === "HELPER_STATUS") {
@@ -257,15 +267,22 @@ async function refreshIfNoLongerRecording(meetingId: string): Promise<void> {
 async function refreshRecordingStatus(meetingId: string, helperStatus: BackgroundState["helperStatus"]): Promise<void> {
   const meeting = await getMeeting(meetingId);
   const status = document.getElementById("recording-status");
-  if (!meeting || !status) return;
+  const statusMessage = document.getElementById("recording-status-message");
+  if (!meeting || !status || !statusMessage) return;
   const liveCaptions = meeting.captureSource === "meet"
     ? meeting.liveTranscriptStatus === "available" || meeting.liveTranscriptStatus === "connecting" || meeting.transcript.length > 0
     : helperStatus === "connected";
-  status.textContent = meeting.captureSource === "meet" && meeting.liveTranscriptStatus === "connecting"
+  const helperLost = meeting.captureSource === "desktop" && helperStatus !== "connected";
+  status.className = helperLost ? "text-warning" : "text-secondary";
+  statusMessage.textContent = helperLost
+    ? "Can't confirm the desktop helper connection. If the helper app closed, capture may have stopped. Check the helper before ending the call; audio already saved stays on this device."
+    : meeting.captureSource === "meet" && meeting.liveTranscriptStatus === "connecting"
     ? "Connecting live captions…"
     : meeting.captureSource === "meet" && meeting.liveTranscriptStatus === "unavailable"
       ? "Live captions are unavailable. Your saved audio will be processed after you stop."
       : liveCaptions ? "" : "Your transcript and notes are processed after you stop.";
+  const setupButton = document.getElementById("recording-helper-setup") as HTMLButtonElement | null;
+  if (setupButton) setupButton.hidden = !helperLost;
   if (liveCaptions && !document.getElementById("transcript-view")) {
     const transcriptView = document.createElement("div");
     transcriptView.id = "transcript-view";
@@ -307,21 +324,28 @@ function meetingModeOptions(selected: MeetingMode): string {
   return options.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
 }
 
+function desktopHelperStatusCopy(status: BackgroundState["helperStatus"]): string {
+  if (status === "connected") return "Desktop helper connected. Desktop calls can be started from the toolbar.";
+  if (status === "helper_not_found") return "Desktop helper is not registered with this browser. Install it, then check again.";
+  if (status === "needs_pairing") return "Pair the helper with this browser from its tray menu, then check again.";
+  if (status === "incompatible") return "This desktop helper needs an update. Install the current version from desktop setup.";
+  if (status === "permission_required") return "Allow Native Messaging from desktop setup so the extension can reach the helper.";
+  if (status === "connecting") return "Connecting to the desktop helper…";
+  return "Can't reach the desktop helper. Make sure AI Notetaker is open, then check again.";
+}
+
 /** Desktop calls only: the helper's view of the microphone and meeting audio. */
 async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]): Promise<void> {
+  const revision = ++audioStatusRevision;
   const statusEl = document.getElementById("audio-status");
   const checkButton = document.getElementById("check-audio") as HTMLButtonElement | null;
   const probeButton = document.getElementById("test-audio") as HTMLButtonElement | null;
   const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
   if (!statusEl) return;
+  audioHelperConnected = helperStatus === "connected";
+  desktopAudioReady = false;
   if (helperStatus !== "connected") {
-    statusEl.textContent = helperStatus === "incompatible"
-      ? "The desktop helper needs an update. Open desktop setup to install the current version."
-      : helperStatus === "needs_pairing"
-        ? "The helper is paired with a different browser. Open the helper's tray menu and choose 'Pair New Browser', then try again."
-        : helperStatus === "permission_required"
-          ? "Chrome has not granted Native Messaging access. Open desktop setup and choose Check desktop helper to allow it."
-          : "The desktop helper is not running. Open desktop setup to install it, then launch it.";
+    statusEl.textContent = desktopHelperStatusCopy(helperStatus);
     statusEl.className = "text-warning";
     if (checkButton) checkButton.disabled = true;
     if (probeButton) probeButton.disabled = true;
@@ -330,10 +354,14 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]):
   }
   statusEl.textContent = "Checking audio devices…";
   statusEl.className = "text-secondary";
-  if (checkButton) checkButton.disabled = false;
+  if (checkButton) checkButton.disabled = true;
+  if (probeButton) probeButton.disabled = true;
+  if (startButton) startButton.disabled = true;
   try {
     const response = await sendToBackground<{ status: AudioStatus }>({ type: "GET_AUDIO_PREFLIGHT" });
+    if (revision !== audioStatusRevision) return;
     const status = response.status;
+    desktopAudioReady = status.ready;
     const deviceLine = [status.microphone ? `Mic: ${status.microphone}` : "Mic: missing", status.speaker ? `Meeting audio: ${status.speaker}` : "Meeting audio: missing"].join(" · ");
     const capturePath = status.nativeLoopback ? "Native system-audio capture." : status.virtualDeviceFallback ? "Virtual-device fallback active." : "System-audio capture unavailable.";
     const readiness = !status.driverInstalled
@@ -347,10 +375,13 @@ async function renderAudioStatus(helperStatus: BackgroundState["helperStatus"]):
     if (probeButton) probeButton.disabled = !status.ready;
     if (startButton) startButton.disabled = !status.ready;
   } catch {
+    if (revision !== audioStatusRevision) return;
     statusEl.textContent = "Audio check failed. Confirm the desktop helper is running, then try again.";
     statusEl.className = "text-warning";
     if (probeButton) probeButton.disabled = true;
-    if (startButton) startButton.disabled = false;
+    if (startButton) startButton.disabled = true;
+  } finally {
+    if (revision === audioStatusRevision && checkButton) checkButton.disabled = !audioHelperConnected;
   }
 }
 
@@ -358,17 +389,21 @@ async function runAudioProbe(): Promise<void> {
   const statusEl = document.getElementById("audio-status");
   const probeButton = document.getElementById("test-audio") as HTMLButtonElement | null;
   if (!statusEl) return;
+  if (!audioHelperConnected || !desktopAudioReady || probeButton?.disabled) return;
+  const revision = audioStatusRevision;
   if (probeButton) probeButton.disabled = true;
   statusEl.textContent = "Listening for microphone and meeting audio for 2 seconds…";
   try {
     const response = await sendToBackground<{ result: AudioProbeResult }>({ type: "RUN_AUDIO_PROBE" });
+    if (revision !== audioStatusRevision || !audioHelperConnected) return;
     statusEl.textContent = response.result.message;
     statusEl.className = response.result.passed ? "text-success" : "text-warning";
   } catch {
+    if (revision !== audioStatusRevision || !audioHelperConnected) return;
     statusEl.textContent = "Audio test failed. Confirm the desktop helper is running, then try again.";
     statusEl.className = "text-warning";
   } finally {
-    if (probeButton) probeButton.disabled = false;
+    if (probeButton && revision === audioStatusRevision) probeButton.disabled = !audioHelperConnected || !desktopAudioReady;
   }
 }
 
@@ -478,7 +513,8 @@ async function resumePendingStart(intent: { tabId: number; meetingMode?: string;
 }
 
 /** The popup's idle view knows where the person is: on a Meet call, it is one button. */
-async function renderIdleState(helperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
+async function renderIdleState(initialHelperStatus: BackgroundState["helperStatus"], settings: Awaited<ReturnType<typeof getSettings>>): Promise<void> {
+  let helperStatus = initialHelperStatus;
   const meetings = await listMeetings(historyQuery || historyAll ? undefined : HISTORY_RECENT_COUNT, historyQuery || undefined);
   const meetTab = await activeMeetTab();
   lastActiveMeetTab = meetTab && typeof meetTab.id === "number" ? { id: meetTab.id } : null;
@@ -499,6 +535,7 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
         <select id="meeting-mode">${meetingModeOptions(settings.defaultMeetingMode)}</select>
       </label>
       <p id="start-error" class="start-error" role="alert"${startError ? "" : " hidden"}>${escapeHtml(startError)}</p>
+      ${onMeet ? `<div class="audio-check-actions" id="provider-preflight-actions"${startErrorRecovery === "provider_preflight" ? "" : " hidden"}><button type="button" class="secondary" id="open-provider-settings">Open AI settings</button><button type="button" class="primary" id="continue-provider-warning">Record anyway</button></div>` : ""}
       ${
         desktop
           ? `<div class="audio-check" aria-live="polite">
@@ -509,8 +546,8 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
         </div>
       </div>
       <div class="audio-check" id="desktop-helper-actions">
-        <p class="field-hint text-secondary">${helperReady ? "Recording a desktop call (Zoom, Teams, Slack)." : "Desktop calls need the native helper. Google Meet does not."}</p>
-        ${helperReady ? "" : `<button type="button" class="secondary" id="open-helper-setup">Set up desktop capture</button>`}
+        <p class="field-hint text-secondary" id="desktop-helper-status" role="status" aria-live="polite">${escapeHtml(desktopHelperStatusCopy(helperStatus))}</p>
+        <button type="button" class="secondary" id="open-helper-setup"${helperReady ? " hidden" : ""}>Set up desktop capture</button>
         <button type="button" class="text-link" id="use-meet">Recording Google Meet instead?</button>
       </div>`
           : ""
@@ -613,23 +650,44 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   // A start that never began is reported by the background as a broadcast, and
   // only this idle view can show it.
   function idleListener(message: BackgroundToUiMessage): void {
+    if (message.type === "HELPER_STATUS") {
+      if (desktop) {
+        // Ignore the intermediate retry state. The last confirmed condition
+        // remains stable until the helper actually connects or disconnects.
+        if (message.status !== "connecting" || helperStatus === "connecting") {
+          helperStatus = message.status;
+          const helperLine = document.getElementById("desktop-helper-status");
+          if (helperLine) helperLine.textContent = desktopHelperStatusCopy(helperStatus);
+          const setupButton = document.getElementById("open-helper-setup") as HTMLButtonElement | null;
+          if (setupButton) setupButton.hidden = helperStatus === "connected";
+          void renderAudioStatus(helperStatus);
+        }
+      }
+      return;
+    }
     if (message.type !== "RECORDING_ERROR" || (message.meetingId !== null && message.phase !== "start")) return;
     startError = message.message;
+    startErrorRecovery = message.recovery;
     const el = document.getElementById("start-error");
     if (el) {
       el.textContent = startError;
       el.hidden = false;
     }
+    const recoveryActions = document.getElementById("provider-preflight-actions");
+    if (recoveryActions) recoveryActions.hidden = startErrorRecovery !== "provider_preflight";
     const button = document.getElementById("start-recording") as HTMLButtonElement | null;
     if (button && onMeet) button.disabled = false;
   }
   chrome.runtime.onMessage.addListener(idleListener);
   removeLiveListener = () => chrome.runtime.onMessage.removeListener(idleListener);
 
-  document.getElementById("start-recording")?.addEventListener("click", async () => {
+  const startFromPopup = async (allowProviderWarning = false): Promise<void> => {
     const startButton = document.getElementById("start-recording") as HTMLButtonElement | null;
     if (startButton) startButton.disabled = true;
     startError = "";
+    startErrorRecovery = undefined;
+    const recoveryActions = document.getElementById("provider-preflight-actions");
+    if (recoveryActions) recoveryActions.hidden = true;
     const errorEl = document.getElementById("start-error");
     if (errorEl) errorEl.hidden = true;
     try {
@@ -652,14 +710,25 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
         type: "START_RECORDING",
         meetingMode,
         captureSource: onMeet ? "meet" : "desktop",
+        ...(allowProviderWarning ? { allowProviderWarning: true } : {}),
         ...(onMeet && typeof meetTab?.id === "number" ? { tabId: meetTab.id } : {}),
         ...(titleHint ? { titleHint } : {}),
       });
       await renderSafely();
     } catch (error) {
-      renderFailure(error);
+      startError = "Could not start notes. Check the required permissions and helper connection, then try again.";
+      startErrorRecovery = undefined;
+      if (errorEl) {
+        errorEl.textContent = startError;
+        errorEl.hidden = false;
+      }
+      if (startButton) startButton.disabled = false;
+      console.warn("Could not start recording", error);
     }
-  });
+  };
+  document.getElementById("start-recording")?.addEventListener("click", () => void startFromPopup());
+  document.getElementById("continue-provider-warning")?.addEventListener("click", () => void startFromPopup(true));
+  document.getElementById("open-provider-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
   document.getElementById("open-meet")?.addEventListener("click", () => {
     chrome.tabs.create({ url: MEET_HOME });
     window.close();
@@ -667,11 +736,13 @@ async function renderIdleState(helperStatus: BackgroundState["helperStatus"], se
   document.getElementById("use-desktop")?.addEventListener("click", () => {
     desktopChosen = true;
     startError = "";
+    startErrorRecovery = undefined;
     void renderSafely();
   });
   document.getElementById("use-meet")?.addEventListener("click", () => {
     desktopChosen = false;
     startError = "";
+    startErrorRecovery = undefined;
     chrome.tabs.create({ url: MEET_HOME });
     window.close();
   });
@@ -700,7 +771,15 @@ async function render(): Promise<void> {
 
   const state = await sendToBackground<BackgroundState>({ type: "GET_STATE" });
 
-  if (state.activeMeeting) {
+  if (state.activeMeeting?.starting) {
+    app.innerHTML = `${renderHeader(true)}<div class="empty-state" role="status"><h2 data-view-heading tabindex="-1">Connecting to the call audio…</h2><p>Recording will begin when the audio connection is ready.</p></div>`;
+    const listener = (message: BackgroundToUiMessage) => {
+      if (message.type === "MEETING_STATE_CHANGED" || message.type === "RECORDING_ERROR") void renderSafely();
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    removeLiveListener = () => chrome.runtime.onMessage.removeListener(listener);
+    document.getElementById("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
+  } else if (state.activeMeeting) {
     await renderActiveRecording(state.activeMeeting.id, state.helperStatus, settings);
   } else {
     await renderIdleState(state.helperStatus, settings);

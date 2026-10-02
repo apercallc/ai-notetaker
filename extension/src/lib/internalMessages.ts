@@ -14,9 +14,10 @@ export type UiToBackgroundMessage =
   | { type: "CHECK_HELPER" }
   | { type: "GET_AUDIO_PREFLIGHT" }
   | { type: "RUN_AUDIO_PROBE" }
-  | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number; titleHint?: string }
+  | { type: "START_RECORDING"; meetingMode?: MeetingMode; captureSource?: CaptureSource; tabId?: number; titleHint?: string; allowProviderWarning?: boolean }
   | { type: "MEET_AUDIO_CHUNK"; meetingId: string; channel: BrowserAudioChannel; sampleRateHz: number; pcm16Base64: string; tabId?: number; chunkId?: string }
   | { type: "MEET_CAPTURE_ERROR"; meetingId: string; message: string }
+  | { type: "MEET_DIRECT_ANSWER"; meetingId: string; sdp: string }
   | { type: "MEET_CAPTURE_WARNING"; meetingId: string; message: string }
   | { type: "MEET_LIVE_TRANSCRIPT_STATUS"; meetingId: string; status: LiveTranscriptStatus }
   | { type: "MEET_LIVE_TRANSCRIPT_UPDATE"; meetingId: string; channel: BrowserAudioChannel; speaker: Speaker; text: string; isFinal: boolean; utteranceId: number; offsetMs: number }
@@ -35,7 +36,7 @@ export type UiToBackgroundMessage =
   | { type: "TEST_PROVIDER_KEY"; provider: ProviderKind; key: string; desktop?: boolean };
 
 export interface BackgroundState {
-  activeMeeting: { id: string } | null;
+  activeMeeting: { id: string; starting?: boolean } | null;
   recoverableMeeting: { meetingId: string; startedAt: string } | null;
   helperStatus: HelperConnectionStatus;
   helperInfo: HelperInfo | null;
@@ -49,9 +50,11 @@ export interface WidgetMeeting {
   title: string;
   startedAt: string;
   status: MeetingRecord["status"];
+  captureStarting?: boolean;
   captureSource?: CaptureSource;
   liveTranscriptStatus?: LiveTranscriptStatus;
   errorMessage?: string;
+  providerPreflightWarning?: string;
   bookmarks: Bookmark[];
   transcript: Array<{ speaker: Speaker; text: string; isFinal: boolean; utteranceId?: number }>;
 }

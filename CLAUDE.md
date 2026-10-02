@@ -17,7 +17,10 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
   Self-hosted deployment remains supported for users who want their own
   storage and provider accounts.
 - **Capture ownership follows the source.** The Chrome extension owns
-  Google Meet tab capture: its offscreen document sends bounded mic/speaker
+  Google Meet capture: a Meet-only, credential-free page adapter relays remote
+  receiver audio to an extension-owned offscreen document over a local,
+  receive-only WebRTC connection. Chrome tab capture remains the compatibility
+  fallback. The offscreen document captures the mic and sends bounded mic/speaker
   chunks to the service worker, which persists them in extension IndexedDB
   before BYOK provider calls or Hosted AI uploads. The Rust/Tauri helper owns
   long-running desktop-call capture and local resilience for Zoom, Teams,

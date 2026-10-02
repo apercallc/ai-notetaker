@@ -13,6 +13,7 @@ import type { HelperConnectionStatus } from "./nativeMessaging";
 import { clearTranscriptionCache, deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, getTranscriptionSegment, listMeetings, saveMeeting, saveSettings, saveTranscriptionSegment, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import { testProviderKeyDirect } from "./testProviderKey";
+import { providerPermissionName } from "./optionalPermissions";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
@@ -22,7 +23,7 @@ import { isHostedQuotaExhaustion, notifyHostedQuotaExhausted, notifyHostedQuotaL
 import { managedAudioChunkSource } from "../meet/managedAudioChunks";
 import { createManagedMeetingShare, exportManagedMeetingToGoogleDrive, getManagedEntitlements, getManagedJob, ManagedAuthError, registerManagedMeeting, uploadManagedMeeting } from "./managedClient";
 import { reportManagedError } from "./errorReport";
-import { errorRecoveryCategory, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment, type LiveTranscriptStatus } from "../types";
+import { errorRecoveryCategory, HELPER_PROTOCOL_VERSION, type AudioProbeResult, type AudioStatus, type BrowserAudioChannel, type CaptureSource, type FlaggedMomentWire, type HelperInfo, type IncomingMessage, type MeetingMode, type MeetingRecord, type NotetakerSettings, type ProcessingMode, type ProviderKind, type TranscriptSegment, type LiveTranscriptStatus } from "../types";
 
 export interface NativeClientLike {
   connect(): Promise<void>;
@@ -72,10 +73,12 @@ const RETRYABLE_HELPER_ERROR_PREFIXES = [
 class HostedJobFailedError extends Error {}
 
 const MANAGED_JOB_POLL_ATTEMPTS = 300; // x 2 s = 10 minutes
+const MEET_PROVIDER_PREFLIGHT_TIMEOUT_MS = 4_000;
 
 export class BackgroundController {
   private settings: NotetakerSettings | null = null;
   private activeMeetingId: string | null = null;
+  private pendingMeetCaptureId: string | null = null;
   private recoverableMeeting: BackgroundState["recoverableMeeting"] = null;
   private helperStatus: HelperConnectionStatus = "connecting";
   private helperInfo: HelperInfo | null = null;
@@ -242,6 +245,7 @@ export class BackgroundController {
     meetingMode: MeetingMode = this.settings?.defaultMeetingMode ?? "general",
     captureSource: CaptureSource = "desktop",
     titleHint?: string,
+    allowProviderWarning = false,
   ): Promise<string> {
     if (this.activeMeetingId) return this.activeMeetingId;
     // activeMeetingId is only assigned after an await (the calendar lookup),
@@ -251,7 +255,7 @@ export class BackgroundController {
     // with different meeting ids and capture the same call twice. Claim the
     // slot synchronously instead.
     if (this.startInFlight) return this.startInFlight;
-    const start = this.startRecordingUnguarded(meetingMode, captureSource, titleHint);
+    const start = this.startRecordingUnguarded(meetingMode, captureSource, titleHint, allowProviderWarning);
     this.startInFlight = start;
     try {
       return await start;
@@ -260,9 +264,10 @@ export class BackgroundController {
     }
   }
 
-  private async startRecordingUnguarded(meetingMode: MeetingMode, captureSource: CaptureSource, titleHint?: string): Promise<string> {
+  private async startRecordingUnguarded(meetingMode: MeetingMode, captureSource: CaptureSource, titleHint?: string, allowProviderWarning = false): Promise<string> {
     const needsHelper = captureSource !== "meet";
     let hostedQuotaWarning: Awaited<ReturnType<typeof getManagedEntitlements>> | null = null;
+    let providerPreflightWarning: string | undefined;
     if (needsHelper && (this.helperStatus !== "connected" || !this.helperInfo)) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -337,6 +342,40 @@ export class BackgroundController {
         });
         return "";
       }
+      // Read-only checks catch revoked keys, missing browser access, and
+      // current provider outages before the call starts. They are advisory:
+      // raw audio is still recorded locally when a provider is unavailable.
+      const providers = [...new Set([this.settings.transcriptionProvider, this.settings.summarizationProvider])];
+      const settings = this.settings;
+      const results = await Promise.all(providers.map(async (provider) => {
+        try {
+          return {
+            provider,
+            result: await testProviderKeyDirect(
+              provider,
+              settings.apiKeys[provider]!,
+              this.fetchImpl,
+              MEET_PROVIDER_PREFLIGHT_TIMEOUT_MS,
+            ),
+          };
+        } catch {
+          return { provider, result: { valid: false, message: "The connection check could not be completed." } };
+        }
+      }));
+      const failed = results.filter(({ result }) => !result.valid);
+      if (failed.length > 0) {
+        providerPreflightWarning = `${failed.map(({ provider, result }) => `${providerPermissionName(provider)}: ${result.message}`).join(" ")} Your Meet audio will be saved on this device, but transcription or summary may fail. Check Settings or your connection; saved audio can be retried after the call.`;
+        if (!allowProviderWarning) {
+          this.broadcast({
+            type: "RECORDING_ERROR",
+            meetingId: null,
+            phase: "start",
+            recovery: "provider_preflight",
+            message: `${failed.map(({ provider, result }) => `${providerPermissionName(provider)}: ${result.message}`).join(" ")} Recording has not started. Open AI settings to fix this, or choose Record anyway to save audio locally. This quick access check cannot guarantee a full transcription or summary will finish.`,
+          });
+          return "";
+        }
+      }
     }
     const meetingId = generateMeetingId();
     let title = titleHint?.trim().slice(0, 200) || `Meeting on ${new Date().toLocaleString()}`;
@@ -364,6 +403,7 @@ export class BackgroundController {
       mode: meetingMode,
       status: "recording",
       captureSource,
+      ...(providerPreflightWarning ? { providerPreflightWarning } : {}),
       processingMode: this.settings.processingMode,
       consentAcknowledged: true,
       ...(attendees ? { attendees } : {}),
@@ -374,6 +414,7 @@ export class BackgroundController {
       this.meetChunkSequence.set(meetingId, 0);
     }
     this.activeMeetingId = meetingId;
+    this.pendingMeetCaptureId = captureSource === "meet" ? meetingId : null;
     if (captureSource !== "meet") {
       try {
         this.client.startRecording(meetingId, meetingMode, captureSource, this.settings.processingMode, title);
@@ -391,7 +432,13 @@ export class BackgroundController {
     return meetingId;
   }
 
-  /** Flags "this moment" in an active recording; a no-op once the meeting is no longer recording. */
+  /** Publish Recording only once the browser has acknowledged both capture channels. */
+  confirmMeetCapture(meetingId: string): void {
+    if (this.activeMeetingId !== meetingId || this.pendingMeetCaptureId !== meetingId) return;
+    this.pendingMeetCaptureId = null;
+    this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
+  }
+
   async addBookmark(meetingId: string, note?: string): Promise<boolean> {
     if (this.activeMeetingId !== meetingId) return false;
     const updated = await updateMeeting(meetingId, (current) => (current.status === "recording" ? withBookmark(current, note) : current));
@@ -437,6 +484,14 @@ export class BackgroundController {
    * no recording behind it.
    */
   async abortStart(meetingId: string, message: string, options: { silent?: boolean } = {}): Promise<void> {
+    await this.meetChunkWrites.get(meetingId)?.catch(() => undefined);
+    // A cancelled handshake can already have produced a partial chunk during
+    // teardown. Never delete that durable audio as if recording never began.
+    const lastSequence = await lastBrowserMeetSequence(meetingId).catch(() => null);
+    if (lastSequence === null || lastSequence >= 0) {
+      await this.failRecording(meetingId, `${message} Your saved audio is available for retry.`);
+      return;
+    }
     // A Meet start that reached meeting creation but never captured audio.
     // Worth reporting in hosted mode: repeated failures here are the top of
     // the "extension did nothing when I clicked start" funnel. Silent mode is
@@ -534,7 +589,7 @@ export class BackgroundController {
     const meeting = await getMeeting(meetingId);
     if (!meeting || meeting.captureSource !== "meet") throw new Error("Only a saved Google Meet recording can be retried here.");
     if (meeting.status !== "error") throw new Error("This meeting is not waiting for a processing retry.");
-    const processing = await updateMeeting(meetingId, (current) => ({ ...current, status: "processing", errorMessage: undefined }));
+    const processing = await updateMeeting(meetingId, (current) => ({ ...current, status: "processing", errorMessage: undefined, providerPreflightWarning: undefined }));
     if (!processing) throw new Error("Meeting could not be loaded for retry.");
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
     await this.finishBrowserMeetRecording(meetingId, processing);
@@ -639,6 +694,7 @@ export class BackgroundController {
       const completed = await updateMeeting(meetingId, (current) => ({
         ...current,
         status: "complete",
+        providerPreflightWarning: undefined,
         transcript: result.transcript,
         summary: result.summary,
         actionItems: result.actionItems,
@@ -673,7 +729,8 @@ export class BackgroundController {
       await updateMeeting(meetingId, (current) => ({
         ...current,
         status: "error",
-        errorMessage: `${message} Saved Meet audio is available for retry.`,
+        providerPreflightWarning: undefined,
+        errorMessage: `${message} No complete transcript or summary was produced. Your Meet audio remains saved on this device; fix the provider or connection, then retry from this meeting.`,
         ...(current.processingMode?.kind === "managed"
           ? {
               // Once the server accepted the upload, any failure other than the job itself failing
@@ -690,7 +747,7 @@ export class BackgroundController {
       this.broadcast({
         type: "RECORDING_ERROR",
         meetingId,
-        message: `${message} Saved Meet audio is available for retry.`,
+        message: `${message} No complete transcript or summary was produced. Your Meet audio remains saved on this device; fix the provider or connection, then retry from this meeting.`,
         ...(error instanceof ManagedAuthError ? { recovery: "sign_in" as const } : {}),
       });
     }
@@ -803,7 +860,7 @@ export class BackgroundController {
 
   getState(): BackgroundState {
     return {
-      activeMeeting: this.activeMeetingId ? { id: this.activeMeetingId } : null,
+      activeMeeting: this.activeMeetingId ? { id: this.activeMeetingId, ...(this.pendingMeetCaptureId === this.activeMeetingId ? { starting: true } : {}) } : null,
       recoverableMeeting: this.recoverableMeeting,
       helperStatus: this.helperStatus,
       helperInfo: this.helperInfo,
@@ -854,9 +911,11 @@ export class BackgroundController {
             title: activeRecord.title,
             startedAt: activeRecord.startedAt,
             status: activeRecord.status,
+            ...(this.pendingMeetCaptureId === activeRecord.id ? { captureStarting: true } : {}),
             ...(activeRecord.captureSource ? { captureSource: activeRecord.captureSource } : {}),
             ...(activeRecord.liveTranscriptStatus ? { liveTranscriptStatus: activeRecord.liveTranscriptStatus } : {}),
             ...(activeRecord.errorMessage ? { errorMessage: activeRecord.errorMessage } : {}),
+            ...(activeRecord.providerPreflightWarning ? { providerPreflightWarning: activeRecord.providerPreflightWarning } : {}),
             bookmarks: activeRecord.bookmarks ?? [],
             transcript: activeRecord.transcript.slice(-40).map(({ speaker, text, isFinal, utteranceId }) => ({
               speaker,
@@ -874,6 +933,7 @@ export class BackgroundController {
             endedAt: latestRecord.endedAt,
             status: latestRecord.status,
             ...(latestRecord.errorMessage ? { errorMessage: latestRecord.errorMessage } : {}),
+            ...(latestRecord.providerPreflightWarning ? { providerPreflightWarning: latestRecord.providerPreflightWarning } : {}),
           }
         : null,
     };
@@ -900,7 +960,7 @@ export class BackgroundController {
       protocolVersion: msg.protocolVersion,
       platform: msg.platform,
     };
-    this.helperStatus = msg.protocolVersion === 3 ? "connected" : "incompatible";
+    this.helperStatus = msg.protocolVersion === HELPER_PROTOCOL_VERSION ? "connected" : "incompatible";
     this.broadcast({ type: "HELPER_STATUS", status: this.helperStatus });
   }
 

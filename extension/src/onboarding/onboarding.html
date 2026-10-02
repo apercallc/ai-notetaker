@@ -7,8 +7,9 @@
     <link rel="stylesheet" href="onboarding.css" />
   </head>
   <body>
-    <main id="app">
-      <p class="text-secondary">Loading…</p>
+    <main id="app" aria-busy="true">
+      <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div>
+      <p class="text-secondary" role="status">Preparing setup…</p>
     </main>
     <script type="module" src="onboarding.js"></script>
   </body>

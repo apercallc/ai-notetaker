@@ -23,6 +23,7 @@ function fakes(active: { id: string } | null = null) {
     reportStartFailure: vi.fn(),
     reportCaptureInvocationRequired: vi.fn(),
     abortStart: vi.fn(async () => undefined),
+    confirmMeetCapture: vi.fn(),
     getState: vi.fn(() => ({ activeMeeting: active ?? (started && !ended ? { id: "m1" } : null) })),
   };
   const capture = {

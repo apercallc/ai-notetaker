@@ -1,6 +1,6 @@
 /** User-facing instructions for the two things Chrome makes a person do once before Meet capture works. */
 export const CAPTURE_PERMISSION_HINT =
-  "Chrome requires one AI Notetaker toolbar click before it can capture Meet audio. Click it once; recording will start automatically.";
+  "Couldn’t connect to this call’s audio. Click the AI Notetaker toolbar icon once; recording will start automatically.";
 
 export const ACTIVE_CAPTURE_HINT =
   "This tab is already being captured. Reload the Meet tab (you will rejoin the call), then start again.";

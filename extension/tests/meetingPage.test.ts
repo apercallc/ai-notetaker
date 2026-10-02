@@ -40,6 +40,8 @@ describe("meeting page: background updates", () => {
     await vi.waitFor(() => expect(document.querySelector("#retry-processing")).not.toBeNull());
     expect(document.body.textContent).toContain("Provider unavailable");
     expect(document.body.textContent).not.toContain("Still processing");
+    expect(document.querySelector("#open-provider-settings")).not.toBeNull();
+    expect(document.querySelector("#retry-processing")?.textContent).toContain("Retry saved Meet audio");
   });
 
   it("still shows the failure and offers retry when an earlier summary exists", async () => {

@@ -243,7 +243,7 @@ describe("MeetWidget: starting a recording", () => {
 
     expect($(".nt")?.dataset.view).toBe("error");
     expect($("h2")?.textContent).toBe("One Chrome step");
-    expect($(".note.warning")?.textContent).toContain("Click it once; recording will start automatically.");
+    expect($(".note.warning")?.textContent).toContain("toolbar icon once; recording will start automatically.");
     expect(Array.from($(".note.warning")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["Alt", "Shift", "R"]);
     expect($("#retry")).toBeNull();
     expect($("#dismiss")?.textContent).toBe("Got it");
@@ -330,6 +330,25 @@ describe("MeetWidget: starting a recording", () => {
     expect(harness.$(".note.error")?.textContent).toMatch(/could not start/i);
   });
 
+  it("requires a choice when the provider access check fails before recording", async () => {
+    harness = await createHarness();
+    harness.respond("START_RECORDING", () => ({ meetingId: "m1" }));
+    harness.widget.handleMessage({
+      type: "RECORDING_ERROR",
+      meetingId: null,
+      phase: "start",
+      recovery: "provider_preflight",
+      message: "Groq did not respond. Recording has not started.",
+    });
+    await harness.flush();
+
+    expect(harness.$("h2")?.textContent).toContain("Provider check needs attention");
+    expect(harness.$("#open-ai-settings")?.textContent).toContain("Open AI settings");
+    expect(harness.$("#continue-anyway")?.textContent).toContain("Record anyway");
+    await harness.click("#continue-anyway");
+    expect(harness.sent).toContainEqual(expect.objectContaining({ type: "START_RECORDING", allowProviderWarning: true }));
+  });
+
   it("does not start twice on a double click", async () => {
     harness = await createHarness();
     let release: (() => void) | undefined;
@@ -378,6 +397,14 @@ describe("MeetWidget: recording", () => {
     expect($("#elapsed")?.textContent).toBe("02:00");
     expect($("#pill-bookmark")?.getAttribute("aria-label")).toBe("Flag this moment");
     expect($("#pill-stop")?.getAttribute("aria-label")).toBe("Stop notes");
+  });
+
+  it("keeps a failed provider preflight warning visible during the call", async () => {
+    harness = await recording({ providerPreflightWarning: "Groq connection check timed out. Audio is saved locally for retry." });
+    await harness.click("#toggle");
+
+    expect(harness.$('[role="alert"]')?.textContent).toContain("AI provider check");
+    expect(harness.$('[role="alert"]')?.textContent).toContain("saved locally for retry");
   });
 
   it("shows the live transcript connection state without promising unavailable captions", async () => {
@@ -868,7 +895,8 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     harness.$<HTMLButtonElement>("#start")!.click();
     await harness.flush();
 
-    expect(harness.$(".panel")?.textContent).toMatch(/sent to your transcription and summary providers, using your own API keys/);
+    expect(harness.$(".panel")?.textContent).toMatch(/Checking your selected AI providers/);
+    expect(harness.$(".panel")?.textContent).toMatch(/saved on this device first/);
     release?.();
     await harness.flush();
   });

@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:direct-browser": "npm run build && node tests/browser/directCaptureSmoke.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -18,6 +19,7 @@
     "esbuild": "^0.28.2",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.1.1",
+    "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.2"
   }

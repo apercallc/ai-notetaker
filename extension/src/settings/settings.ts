@@ -55,6 +55,24 @@ function isBudgetTier(s: NotetakerSettings): boolean {
   return s.transcriptionProvider === "groq";
 }
 
+function missingSelectedProviderKeys(): ProviderKind[] {
+  const selected = [...new Set([settings.transcriptionProvider, settings.summarizationProvider])];
+  return selected.filter((provider) => {
+    const field = document.querySelector<HTMLInputElement>(`input[data-provider="${provider}"]`);
+    return !(field?.value ?? settings.apiKeys[provider] ?? "").trim();
+  });
+}
+
+function updateProviderKeyNotice(): void {
+  const notice = document.getElementById("provider-key-warning");
+  if (!notice) return;
+  const missing = missingSelectedProviderKeys();
+  notice.textContent = missing.length
+    ? `Add ${missing.map(providerPermissionName).join(" and ")} API ${missing.length === 1 ? "key" : "keys"} before recording in your own-keys mode.`
+    : "";
+  notice.hidden = missing.length === 0;
+}
+
 function safeManagedBillingUrl(baseUrl: string): string {
   try {
     return managedBillingUrl(baseUrl);
@@ -305,6 +323,7 @@ function renderOwnKeysSection(): string {
       <button type="button" id="tier-budget" class="${budget ? "primary active" : "secondary"}" aria-pressed="${budget}">Groq + Gemini or DeepSeek (lower cost)</button>
     </div>
     ${!budget ? renderDefaultTierFields() : renderBudgetTierFields()}
+    <p class="field-hint text-warning" id="provider-key-warning" role="status" aria-live="polite" hidden></p>
     <div class="cost-estimator">
       <label for="meeting-minutes">Estimate provider cost for a meeting of (minutes)</label>
       <input type="number" id="meeting-minutes" min="1" max="480" step="1" value="${escapeHtml(drafts.meetingMinutes)}" />
@@ -599,6 +618,11 @@ function wireEvents(): void {
     document.getElementById(id)?.addEventListener("input", () => showWebappErrors());
   }
 
+  for (const input of document.querySelectorAll<HTMLInputElement>("input[data-provider]")) {
+    input.addEventListener("input", updateProviderKeyNotice);
+  }
+  updateProviderKeyNotice();
+
   document.getElementById("test-webapp")?.addEventListener("click", async () => {
     const testButton = document.getElementById("test-webapp") as HTMLButtonElement;
     const url = (inputValue("webapp-url") ?? "").trim();
@@ -644,10 +668,11 @@ function wireEvents(): void {
     setResult(statusEl, "Saving…", "pending");
     try {
       let selected: ProviderKind[] = [];
+      let missingKeys: ProviderKind[] = [];
       if (settings.processingMode.kind === "local_byok") {
-        selected = [settings.transcriptionProvider, settings.summarizationProvider].filter((provider, index, all) =>
-          Boolean(settings.apiKeys[provider]?.trim()) && all.indexOf(provider) === index,
-        );
+        const requiredProviders = [...new Set([settings.transcriptionProvider, settings.summarizationProvider])];
+        missingKeys = requiredProviders.filter((provider) => !settings.apiKeys[provider]?.trim());
+        selected = requiredProviders.filter((provider) => Boolean(settings.apiKeys[provider]?.trim()));
       }
       const remindersNeedAlarm = settings.calendar?.provider === "google" && settings.calendarReminders;
       const providerRequest = providerHostPermissions(selected);
@@ -677,6 +702,7 @@ function wireEvents(): void {
         setResult(statusEl, "Settings were saved, but Chrome permission access could not be checked. Test your provider key and save again before recording.", "invalid");
       } else {
         const warnings = [
+          missingKeys.length ? `add ${missingKeys.map(providerPermissionName).join(" and ")} API ${missingKeys.length === 1 ? "key" : "keys"} before recording` : "",
           !providerAccessGranted ? "provider access was denied; Meet audio remains saved locally and can be retried after granting access" : "",
           !alarmAccessGranted ? "Chrome alarm access was denied; calendar reminders are paused until you allow it and save again" : "",
         ].filter(Boolean);

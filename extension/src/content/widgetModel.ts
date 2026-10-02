@@ -28,6 +28,7 @@ export const DONE_CARD_WINDOW_MS = 30 * 60_000;
 
 export function deriveView(state: WidgetState | null, ui: WidgetUi, now: number = Date.now()): WidgetView {
   if (ui.contextLost || !state) return "disconnected";
+  if (state.active?.captureStarting) return "starting";
   if (state.active?.status === "recording") return "recording";
   if (ui.starting) return "starting";
   if (ui.error) return "error";

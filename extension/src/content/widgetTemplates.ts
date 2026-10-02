@@ -101,14 +101,16 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
           <div class="stack">
             <div><h2>Connecting to the call audio…</h2><p class="sub">${startingCopy(ctx.state)}</p></div>
           </div>`;
-    case "processing":
+    case "processing": {
+      const preflightWarning = ctx.state?.latest?.providerPreflightWarning;
       return `
           <div class="stack">
-            <div><h2>Writing your notes…</h2><p class="sub">This usually takes under a minute. You can leave the call; the notes will be waiting.</p></div>
-            ${ctx.ui.warning ? `<p class="note warn" role="status">Still trying: ${escapeHtml(ctx.ui.warning)} If this keeps happening, check your API keys in AI Notetaker settings.</p>` : ""}
+            <div><h2>Writing your notes…</h2><p class="sub">${preflightWarning ? "Your audio is saved on this device. A provider check failed before recording, so notes may take longer or need a retry." : "Processing can take a few minutes. You can leave the call; notes will appear here when ready. If a provider fails, the audio stays available for retry."}</p></div>
+            ${preflightWarning ? `<p class="note warn" role="status">A provider connection check failed before recording: ${escapeHtml(preflightWarning)}</p>` : ctx.ui.warning ? `<p class="note warn" role="status">Still trying: ${escapeHtml(ctx.ui.warning)} If this keeps happening, check your API keys in AI Notetaker settings.</p>` : ""}
             <button type="button" class="btn secondary block" id="open-notes">Open notes</button>
             <button type="button" class="btn secondary block" id="dismiss">Hide and keep going</button>
           </div>`;
+    }
     case "done":
       return `
           <div class="stack">
@@ -121,6 +123,7 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
     case "recording":
       return `
           <div class="stack">
+            ${ctx.state?.active?.providerPreflightWarning ? `<p class="note warn" role="alert">AI provider check: ${escapeHtml(ctx.state.active.providerPreflightWarning)} <button type="button" class="link" id="open-ai-settings">Open AI settings</button></p>` : ""}
             ${
               ctx.state?.disclosureNoticeEnabled
                 ? `<div class="disclosure" id="disclosure-card">
@@ -152,7 +155,8 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
 function renderError(ctx: TemplateContext): string {
   const message = errorMessage(ctx);
   const needsCaptureInvocation = message === CAPTURE_PERMISSION_HINT;
-  const retryable = ctx.ui.error !== null && !needsCaptureInvocation;
+  const needsProviderConfirmation = ctx.ui.errorRecovery === "provider_preflight";
+  const retryable = ctx.ui.error !== null && !needsCaptureInvocation && !needsProviderConfirmation;
   const needsMic = message === MIC_PERMISSION_HINT;
   const shortcutHint =
     needsCaptureInvocation && ctx.state?.shortcuts.toggle ? ` Or press ${keysHtml(ctx.state.shortcuts.toggle)} on this tab.` : "";
@@ -170,9 +174,10 @@ function renderError(ctx: TemplateContext): string {
             : "";
   return `
           <div class="stack">
-            <div><h2>${needsCaptureInvocation ? "One Chrome step" : "Couldn't take notes"}</h2></div>
+            <div><h2>${needsCaptureInvocation ? "One Chrome step" : needsProviderConfirmation ? "Provider check needs attention" : "Couldn't take notes"}</h2></div>
             <p class="note ${needsCaptureInvocation ? "warning" : "error"}">${escapeHtml(message)}${shortcutHint}${recoveryHint ? ` ${escapeHtml(recoveryHint)}` : ""}</p>
             <div class="row">
+              ${needsProviderConfirmation ? `<button type="button" class="btn secondary" id="open-ai-settings">Open AI settings</button><button type="button" class="btn primary" id="continue-anyway">Record anyway</button>` : ""}
               ${needsMic ? `<button type="button" class="btn primary" id="allow-mic">Allow microphone</button>` : ""}
               ${retryable ? `<button type="button" class="btn ${needsMic ? "secondary" : "primary"}" id="retry">Try again</button>` : needsCaptureInvocation ? "" : `<button type="button" class="btn primary" id="open-notes">Open details</button>`}
               <button type="button" class="btn secondary" id="dismiss">${needsCaptureInvocation ? "Got it" : "Dismiss"}</button>
@@ -183,7 +188,7 @@ function renderError(ctx: TemplateContext): string {
 function startingCopy(state: WidgetState | null): string {
   return state?.processingKind === "managed"
     ? "Audio is saved on this device first, then uploaded to Hosted AI. The service deletes its temporary copy when your notes are ready."
-    : "Audio is saved on this device first. When you stop, it is sent to your transcription and summary providers, using your own API keys, to write your notes.";
+    : "Checking your selected AI providers. Audio is saved on this device first. If a provider is unavailable, we’ll warn you and keep the audio for retry.";
 }
 
 function renderReady(ctx: TemplateContext): string {
@@ -192,16 +197,14 @@ function renderReady(ctx: TemplateContext): string {
   const intro = state?.callTitle
     ? `Notes for <strong>${escapeHtml(state.callTitle)}</strong> appear right after the call.`
     : "Notes, decisions, and action items appear right after the call.";
-  // Chrome only lets an extension capture a tab after the person has invoked it
-  // there (toolbar icon or shortcut), so that is the first thing to say, not a
-  // button that would fail on its first press.
   const startHint = state?.shortcuts.toggle
-    ? `Press ${keysHtml(state.shortcuts.toggle)} or click the toolbar icon to start notes.`
-    : `Click the AI Notetaker toolbar icon to start notes. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
+    ? `Start notes here, or press ${keysHtml(state.shortcuts.toggle)}.`
+    : `Start notes here when everyone is ready. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
   return `
       <div class="stack">
         <div><h2>Ready when you are</h2><p class="sub">${intro}</p></div>
         <p class="note" id="start-hint">${startHint}</p>
+        <p class="sub">When you press Start, we check that your selected provider keys and browser access respond. This can’t predict a full-call timeout; your audio stays saved on this device for retry.</p>
         <div class="field">
           <label for="mode">Notes style</label>
           <select id="mode">${MODES.map(([value, label]) => `<option value="${value}"${value === mode ? " selected" : ""}>${label}</option>`).join("")}</select>

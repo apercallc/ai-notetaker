@@ -2,6 +2,7 @@ import type { BrowserAudioChannel } from "../types";
 import { getSettings } from "../lib/storage";
 import { MIC_PERMISSION_HINT } from "./hints";
 import { meetingCodeFromPath } from "./meetContext";
+import { bounded, validSdp, validSession, type DirectReply, type DirectRequest } from "./directProtocol";
 
 export interface MeetAudioChunk {
   type: "MEET_AUDIO_CHUNK";
@@ -77,6 +78,12 @@ interface ActiveCapture {
   tabId: number;
   /** The call being recorded (`abc-defg-hij`), when known. */
   callCode: string | null;
+  directSession?: string;
+  documentKey?: string;
+}
+
+async function directRequest(tabId: number, request: Omit<DirectRequest, "type">): Promise<DirectReply> {
+  return bounded(chrome.tabs.sendMessage(tabId, { type: "MEET_DIRECT_CONTROL", ...request }, { frameId: 0 }), 7_000);
 }
 
 function callCodeOf(url: string | undefined): string | null {
@@ -89,6 +96,7 @@ function callCodeOf(url: string | undefined): string | null {
 
 export class MeetCaptureController {
   private readonly activeMeetings = new Map<string, ActiveCapture>();
+  private starting: { meetingId: string; cancelled: boolean; task?: Promise<void> } | null = null;
 
   constructor(private readonly sendChunk: (chunk: Uint8Array, meetingId: string, channel: BrowserAudioChannel, chunkId?: string) => void | Promise<void> = () => {}) {}
 
@@ -119,7 +127,10 @@ export class MeetCaptureController {
       if (!Array.isArray(stored)) return;
       for (const [meetingId, capture] of stored) {
         if (typeof meetingId === "string" && capture && typeof capture.tabId === "number") {
-          this.activeMeetings.set(meetingId, { tabId: capture.tabId, callCode: capture.callCode ?? null });
+          const direct = capture as ActiveCapture;
+          this.activeMeetings.set(meetingId, { tabId: capture.tabId, callCode: capture.callCode ?? null,
+            ...(validSession(direct.directSession) && validSession(direct.documentKey) ? { directSession: direct.directSession, documentKey: direct.documentKey } : {}),
+          });
         }
       }
     } catch {
@@ -133,12 +144,18 @@ export class MeetCaptureController {
    * told to let us capture this tab (it refuses until the user has clicked the
    * toolbar icon or pressed the shortcut there).
    */
-  private async prepare(tabId: number): Promise<{ url: string | undefined; streamId: string }> {
+  private async prepare(tabId: number, preferDirect = true): Promise<{ url: string | undefined; streamId?: string; documentKey?: string }> {
     const tab = await chrome.tabs.get(tabId);
     const url = tab.url ? new URL(tab.url) : null;
     if (!url || !MEET_HOST.test(url.hostname)) throw new Error("Select an active Google Meet tab for browser capture.");
     if (!chrome.offscreen) throw new Error("This browser does not support the Google Meet capture mode.");
     await assertMicrophoneAllowed();
+    if (preferDirect) {
+      try {
+        const result = await directRequest(tabId, { operation: "probe" });
+        if (result?.ok && result.available && validSession(result.documentKey)) return { url: tab.url, documentKey: result.documentKey };
+      } catch { /* Older/open-before-install tabs can use ordinary tab capture. */ }
+    }
     // Fails fast, before any offscreen document exists.
     return { url: tab.url, streamId: await tabStreamId(tabId) };
   }
@@ -168,33 +185,69 @@ export class MeetCaptureController {
   }
 
   async start(tabId: number, meetingId: string): Promise<void> {
-    const { url, streamId } = await this.prepare(tabId);
-    const liveDeepgramKey = await this.liveDeepgramKey();
-    if (!(await chrome.offscreen.hasDocument())) {
-      await chrome.offscreen.createDocument({
-        url: "meet/offscreen.html",
-        reasons: [chrome.offscreen.Reason.USER_MEDIA],
-        justification: "Capture the Google Meet microphone and remote audio as two local note-taking channels.",
-      });
+    if (this.starting) {
+      if (this.starting.meetingId !== meetingId) throw new Error("Another Meet recording is starting.");
+      return this.starting.task;
     }
+    const start = { meetingId, cancelled: false, task: undefined as Promise<void> | undefined };
+    this.starting = start;
+    start.task = this.startAttempt(tabId, meetingId, true, start);
+    try { await start.task; }
+    finally { if (this.starting === start) this.starting = null; }
+  }
+
+  private async startAttempt(tabId: number, meetingId: string, preferDirect: boolean, start: { cancelled: boolean }): Promise<void> {
+    const assertCurrent = () => { if (start.cancelled) throw new Error("Meet recording start was cancelled."); };
+    const { url, streamId, documentKey } = await this.prepare(tabId, preferDirect);
+    assertCurrent();
+    const liveDeepgramKey = await this.liveDeepgramKey();
+    assertCurrent();
     // The offscreen page may emit a worklet chunk before its START reply gets
     // back to this worker. Mark the meeting active first so that the initial
     // audio is durably forwarded instead of silently dropped.
-    this.activeMeetings.set(meetingId, { tabId, callCode: callCodeOf(url) });
+    const capture: ActiveCapture = { tabId, callCode: callCodeOf(url),
+      ...(documentKey ? { documentKey, directSession: crypto.randomUUID() } : {}),
+    };
+    this.activeMeetings.set(meetingId, capture);
     try {
-      const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId, streamId, ...(liveDeepgramKey ? { liveDeepgramKey } : {}) });
+      if (!(await chrome.offscreen.hasDocument())) {
+        await chrome.offscreen.createDocument({
+          url: "meet/offscreen.html",
+          reasons: documentKey ? [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.WEB_RTC] : [chrome.offscreen.Reason.USER_MEDIA],
+          justification: "Capture the Google Meet microphone and remote audio as two local note-taking channels.",
+        });
+      }
+      assertCurrent();
+      let directOffer: string | undefined;
+      if (capture.directSession) {
+        const reply = await directRequest(tabId, { operation: "start", session: capture.directSession, documentKey });
+        if (!reply?.ok || !validSdp(reply.sdp)) throw new Error("Direct Meet audio could not start.");
+        directOffer = reply.sdp;
+      }
+      assertCurrent();
+      const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId,
+        ...(directOffer ? { directOffer } : { streamId }), ...(liveDeepgramKey ? { liveDeepgramKey } : {}) });
       if (response?.ok !== true) throw new Error(response?.error ?? "Google Meet capture could not start.");
+      assertCurrent();
       await this.persistCaptures();
     } catch (error) {
+      await sendMessage({ type: "MEET_CAPTURE_STOP", meetingId }).catch(() => undefined);
+      await this.stopDirect(capture);
       this.activeMeetings.delete(meetingId);
       await this.persistCaptures().catch(() => undefined);
       // Leave no half-started capture behind; the next attempt starts clean.
       await chrome.offscreen.closeDocument().catch(() => {});
+      if (capture.directSession && !start.cancelled) return this.startAttempt(tabId, meetingId, false, start);
       throw error;
     }
   }
 
   async stop(meetingId: string): Promise<void> {
+    if (this.starting?.meetingId === meetingId) {
+      this.starting.cancelled = true;
+      await this.starting.task?.catch(() => undefined);
+    }
+    const capture = this.activeMeetings.get(meetingId);
     if (!chrome.offscreen) {
       this.activeMeetings.delete(meetingId);
       return;
@@ -202,6 +255,7 @@ export class MeetCaptureController {
     try {
       await sendMessage({ type: "MEET_CAPTURE_STOP", meetingId });
     } finally {
+      if (capture) await this.stopDirect(capture);
       // A rejected runtime message must not leave the controller believing
       // that a tab is still captured. The next start should be allowed to
       // recreate the offscreen graph, and tab-removal cleanup must still be
@@ -210,6 +264,19 @@ export class MeetCaptureController {
       await this.persistCaptures();
       await chrome.offscreen.closeDocument().catch(() => {});
     }
+  }
+
+  private async stopDirect(capture: ActiveCapture): Promise<void> {
+    if (!capture.directSession) return;
+    await directRequest(capture.tabId, { operation: "stop", session: capture.directSession, documentKey: capture.documentKey }).catch(() => undefined);
+  }
+
+  /** Only the offscreen document may deliver an answer, for its active capture. */
+  async answerDirect(meetingId: string, sdp: string): Promise<void> {
+    const capture = this.activeMeetings.get(meetingId);
+    if (!capture?.directSession || !validSdp(sdp)) throw new Error("Meet audio session is no longer active.");
+    const result = await directRequest(capture.tabId, { operation: "answer", session: capture.directSession, documentKey: capture.documentKey, sdp });
+    if (!result?.ok) throw new Error("Meet audio connection could not be established.");
   }
 
   /**
@@ -238,7 +305,7 @@ export class MeetCaptureController {
   }
 
   isActive(meetingId: string): boolean {
-    return this.activeMeetings.has(meetingId);
+    return this.activeMeetings.has(meetingId) || this.starting?.meetingId === meetingId;
   }
 
   isActiveForTab(meetingId: string, tabId: number): boolean {

@@ -12,6 +12,7 @@ import { clearPairingToken, getPairingToken, savePairingToken } from "./storage"
 import { hasOptionalPermission } from "./optionalPermissions";
 import {
   isIncomingMessage,
+  HELPER_PROTOCOL_VERSION,
   type IncomingMessage,
   type AudioProbeResult,
   type AudioStatus,
@@ -245,11 +246,18 @@ export class NativeMessagingClient {
 
   private handleMessage(raw: unknown): void {
     if (!isIncomingMessage(raw)) return;
-    // Any real message proves the helper is genuinely there and
-    // responsive — reset the backoff so a helper that gets installed (or
-    // started) later doesn't stay throttled at a stale, longer delay.
-    this.reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
-    this.setStatus("connected");
+    // Only helper_info completes the version handshake. A paired response
+    // or an error proves that a process answered, but doesn't prove this
+    // extension can safely use it; treating those as connected caused brief
+    // success states before pairing/version errors arrived.
+    if (raw.type === "helper_info") {
+      this.reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
+      this.setStatus(raw.protocolVersion === HELPER_PROTOCOL_VERSION ? "connected" : "incompatible");
+    } else if (this.currentStatus === "connected") {
+      // Healthy traffic keeps the next reconnect responsive, without
+      // changing the already validated state.
+      this.reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
+    }
     if (raw.type === "paired") {
       // Losing the token means a re-pair on the next start, so a failed save must not be silent.
       void savePairingToken(raw.pairingToken).catch((error) => {

@@ -15,6 +15,8 @@ const entryPoints = [
   "src/meet/captureWorklet.ts",
   "src/meet/microphone.ts",
   "src/content/meetWidget.ts",
+  "src/content/directMain.ts",
+  "src/content/directBridge.ts",
 ];
 
 const buildOptions = {

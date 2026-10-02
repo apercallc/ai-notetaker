@@ -10,6 +10,8 @@ export interface StartMeetOptions {
   tabId?: number;
   meetingMode?: MeetingMode;
   titleHint?: string;
+  /** Explicit confirmation to capture locally even if a selected BYOK provider check fails. */
+  allowProviderWarning?: boolean;
   /**
    * Auto-attempt from the join watcher: failures are never broadcast (the
    * user did not click anything), and Chrome's invocation gate still saves
@@ -91,7 +93,10 @@ export async function startMeetRecording(
     else if (!options.silent) controller.reportStartFailure(description);
     return "";
   }
-  const meetingId = await controller.startRecording(options.meetingMode, "meet", titleHint);
+  const allowProviderWarning = options.allowProviderWarning === true || options.silent === true;
+  const meetingId = allowProviderWarning
+    ? await controller.startRecording(options.meetingMode, "meet", titleHint, true)
+    : await controller.startRecording(options.meetingMode, "meet", titleHint);
   if (!meetingId) return "";
   try {
     await capture.start(tabId, meetingId);
@@ -115,6 +120,7 @@ export async function startMeetRecording(
     await capture.stop(meetingId).catch(() => undefined);
     return meetingId;
   }
+  controller.confirmMeetCapture(meetingId);
   // A start that succeeded (from the widget, the popup, or the shortcut —
   // the shortcut press is itself the invocation) retires any remembered
   // handoff for this tab, so the next popup open never double-starts.

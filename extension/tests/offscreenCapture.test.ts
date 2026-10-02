@@ -70,6 +70,21 @@ afterEach(() => {
 });
 
 describe("offscreen capture", () => {
+  it("shares concurrent shutdown and waits for durable tail writes before releasing audio", async () => {
+    const track = fakeTrack();
+    const listener = await loadOffscreen(async () => ({ getTracks: () => [track] }));
+    await send(listener, { type: "MEET_CAPTURE_START", streamId: "s1", meetingId: "m1" });
+    const releases: Array<() => void> = [];
+    chromeMock.runtime.sendMessage.mockImplementation((message) => message.type === "MEET_AUDIO_CHUNK"
+      ? new Promise<void>(resolve => { releases.push(resolve); }) : Promise.resolve({}));
+    const first = send(listener, { type: "MEET_CAPTURE_STOP", meetingId: "m1" });
+    const second = send(listener, { type: "MEET_CAPTURE_STOP", meetingId: "m1" });
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    expect(track.stop).not.toHaveBeenCalled();
+    releases.forEach(release => release());
+    await Promise.all([first, second]);
+    expect(track.stop).toHaveBeenCalled();
+  });
   it("releases the captured tab when the microphone cannot be opened", async () => {
     // A tab whose stream is never released stays locked ("Cannot capture a tab
     // with an active stream") and cannot be captured again until reloaded.

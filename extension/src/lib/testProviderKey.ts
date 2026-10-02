@@ -87,16 +87,21 @@ export async function testProviderKeyDirect(
   provider: ProviderKind,
   key: string,
   fetchImpl: typeof fetch = fetch,
+  timeoutMs = KEY_CHECK_TIMEOUT_MS,
 ): Promise<KeyTestResult> {
   const trimmed = key.trim();
   if (trimmed.length === 0) return { valid: false, message: "Enter an API key first." };
   const name = PROVIDER_NAMES[provider];
-  if (!(await hasOptionalPermission(providerHostPermission(provider)))) {
-    return { valid: false, message: `Chrome access to ${providerPermissionName(provider)} was not granted. Allow it in Settings, then test again.` };
+  try {
+    if (!(await hasOptionalPermission(providerHostPermission(provider)))) {
+      return { valid: false, message: `Chrome access to ${providerPermissionName(provider)} was not granted. Allow it in Settings, then test again.` };
+    }
+  } catch {
+    return { valid: false, message: `Could not check Chrome access to ${providerPermissionName(provider)}. Open Settings and try again.` };
   }
   const request = keyCheckRequest(provider, trimmed);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), KEY_CHECK_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(request.url, { method: "GET", headers: request.headers, signal: controller.signal });
     if (response.ok) return { valid: true, message: `${name} accepted the key.` };
@@ -107,6 +112,9 @@ export async function testProviderKeyDirect(
     if (response.status === 429) return { valid: false, message: `${name} is rate limiting key checks. Wait a moment and test again.` };
     return { valid: false, message: `${name} could not check the key (HTTP ${response.status}). Try again in a moment.` };
   } catch {
+    if (controller.signal.aborted) {
+      return { valid: false, message: `${name} connection check timed out. Try again or check your connection.` };
+    }
     return { valid: false, message: `Could not reach ${name}. Check your connection and try again.` };
   } finally {
     clearTimeout(timeout);

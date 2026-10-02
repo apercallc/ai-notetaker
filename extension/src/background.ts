@@ -140,14 +140,16 @@ function updateBadge(message: BackgroundToUiMessage): void {
     showBadge("!");
     return;
   }
-  const recording = controller.getState().activeMeeting !== null;
+  const active = controller.getState().activeMeeting;
+  const recording = active !== null && !active.starting;
   if (recording) showBadge("REC");
   else if (badge === "REC") showBadge("");
 }
 
 void readyPromise.then(syncReminderAlarm);
 void readyPromise.then(() => {
-  if (controller.getState().activeMeeting) showBadge("REC");
+  const active = controller.getState().activeMeeting;
+  if (active && !active.starting) showBadge("REC");
 });
 
 chrome.runtime.onMessage.addListener((message: UiToBackgroundMessage, sender, sendResponse) => {
@@ -190,7 +192,7 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
   switch (message.type) {
     case "GET_STATE":
       // Opening the popup acknowledges a failure badge; a live recording keeps its own.
-      showBadge(controller.getState().activeMeeting ? "REC" : "");
+      showBadge(controller.getState().activeMeeting && !controller.getState().activeMeeting?.starting ? "REC" : "");
       return controller.getState();
     case "GET_MANAGED_ENTITLEMENTS": {
       const settings = await getSettings();
@@ -213,8 +215,9 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
               tabId,
               ...(message.meetingMode ? { meetingMode: message.meetingMode } : {}),
               ...(message.titleHint ? { titleHint: message.titleHint } : {}),
+              ...(message.allowProviderWarning ? { allowProviderWarning: true } : {}),
             })
-          : await controller.startRecording(message.meetingMode, captureSource, message.titleHint);
+          : await controller.startRecording(message.meetingMode, captureSource, message.titleHint, message.allowProviderWarning);
       return { meetingId };
     }
     case "STOP_RECORDING":
@@ -251,6 +254,9 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
         return { error: "Call audio could not be saved. Start notes again." };
       }
       return {};
+    case "MEET_DIRECT_ANSWER":
+      await meetCapture.answerDirect(message.meetingId, message.sdp);
+      return { ok: true };
     case "MEET_CAPTURE_ERROR":
       await meetCapture.stop(message.meetingId);
       await controller.failRecording(message.meetingId, message.message.slice(0, 500) || "Meet audio capture failed.");

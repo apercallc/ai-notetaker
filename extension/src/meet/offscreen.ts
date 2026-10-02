@@ -2,6 +2,8 @@ import { isFromExtensionWorker } from "../lib/senderPolicy";
 import { DeepgramLiveTranscriber, type DeepgramLiveEvent } from "./deepgramLiveTranscriber";
 import { float32ToPcm16 } from "./meetCapture";
 import type { BrowserAudioChannel } from "../types";
+import { DirectAudioReceiver } from "./directReceiver";
+import { bounded } from "./directProtocol";
 
 const SAMPLE_RATE_HZ = 48_000;
 /**
@@ -28,9 +30,12 @@ const pendingWrites = new Set<Promise<void>>();
 const pendingLiveMessages = new Set<Promise<void>>();
 const pendingLiveAudio = new Map<BrowserAudioChannel, Uint8Array[]>([["mic", []], ["speaker", []]]);
 const MAX_PENDING_CHUNKS_PER_CHANNEL = 8;
+const MAX_PENDING_WRITES = 64;
 let liveTranscriber: DeepgramLiveTranscriber | null = null;
 let captureGeneration = 0;
 let stoppingGeneration: number | null = null;
+let directReceiver: DirectAudioReceiver | null = null;
+let stopInFlight: Promise<void> | null = null;
 
 /** DOMException (what getUserMedia rejects with) is not always an Error across realms. */
 function errorMessage(error: unknown): string {
@@ -59,7 +64,7 @@ const CHUNK_SEND_BACKOFF_MS = 250;
 async function sendChunkWithRetry(payload: object): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      const response = (await chrome.runtime.sendMessage(payload)) as { error?: string } | undefined;
+      const response = (await bounded(chrome.runtime.sendMessage(payload), 8_000)) as { error?: string } | undefined;
       if (response?.error) throw new Error(response.error);
       return;
     } catch (reason) {
@@ -138,7 +143,15 @@ function flush(node: AudioWorkletNode): Promise<void> {
   });
 }
 
-async function stop(): Promise<void> {
+function stop(): Promise<void> {
+  if (stopInFlight) return stopInFlight;
+  const task = stopCapture();
+  stopInFlight = task;
+  void task.finally(() => { if (stopInFlight === task) stopInFlight = null; }).catch(() => undefined);
+  return task;
+}
+
+async function stopCapture(): Promise<void> {
   stoppingGeneration = captureGeneration;
   captureGeneration += 1;
   const nodes = captureNodes;
@@ -163,12 +176,14 @@ async function stop(): Promise<void> {
     });
     streams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
     streams = [];
+    directReceiver?.close();
+    directReceiver = null;
     if (context) await context.close().catch(() => {});
     context = null;
   }
 }
 
-function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetingId: string): void {
+function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetingId: string, restorePlayback = true): void {
   const generation = captureGeneration;
   if (!context) throw new Error("Meet audio context is not ready");
   const source = context.createMediaStreamSource(stream);
@@ -180,6 +195,14 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
   });
   node.port.onmessage = (event: MessageEvent) => {
     if (!(event.data instanceof ArrayBuffer)) return;
+    // A slow disk or unreachable worker must not grow an unbounded audio queue.
+    // Teardown still admits the final bounded partial buffer from each worklet.
+    if (pendingWrites.size >= MAX_PENDING_WRITES && stoppingGeneration === null) {
+      void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_ERROR", meetingId,
+        message: "Audio could not be saved fast enough. Recording stopped; audio already saved is available for retry." }).catch(() => undefined);
+      void stop();
+      return;
+    }
     const pcm16 = float32ToPcm16(new Float32Array(event.data));
     const write: Promise<void> = sendChunkWithRetry({
       type: "MEET_AUDIO_CHUNK",
@@ -222,7 +245,7 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
   source.connect(node);
   // tabCapture mutes the tab while it is captured; reconnecting this source
   // to the destination preserves ordinary Meet listening for the user.
-  if (channel === "speaker") source.connect(context.destination);
+  if (channel === "speaker" && restorePlayback) source.connect(context.destination);
   // The worklet only runs while its output reaches the destination; it writes no output, so the sink is silent anyway.
   const silentSink = context.createGain();
   silentSink.gain.value = 0;
@@ -231,7 +254,7 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
   captureNodes.push(node);
 }
 
-async function start(capturedStreamId: string, meetingId: string, tabId?: number, liveDeepgramKey?: string): Promise<void> {
+async function start(capturedStreamId: string | undefined, meetingId: string, tabId?: number, liveDeepgramKey?: string, directOffer?: string): Promise<void> {
   await stop();
   captureTabId = tabId;
   context = new AudioContext({ sampleRate: SAMPLE_RATE_HZ });
@@ -241,13 +264,32 @@ async function start(capturedStreamId: string, meetingId: string, tabId?: number
   // Each stream is tracked the moment it exists: a captured tab stays locked
   // ("Cannot capture a tab with an active stream") until its tracks stop, so a
   // failure on any later step must release everything acquired so far.
-  const speaker = await navigator.mediaDevices.getUserMedia({
-    audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: capturedStreamId } } as MediaTrackConstraints,
-  });
+  let speaker: MediaStream;
+  if (directOffer) {
+    const generation = captureGeneration;
+    directReceiver = new DirectAudioReceiver(() => {
+      if (generation !== captureGeneration) return;
+      void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_ERROR", meetingId,
+        message: "The connection to Meet audio stopped. Your saved audio is safe. Start notes again." }).catch(() => undefined);
+      void stop();
+    }, () => {
+      if (generation !== captureGeneration) return;
+      void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_WARNING", meetingId,
+        message: "Meet has no remote audio track right now. Your microphone is still recording; call audio will resume when a track returns." }).catch(() => undefined);
+    });
+    speaker = await directReceiver.connect(directOffer, async (sdp) => {
+      const result = await chrome.runtime.sendMessage({ type: "MEET_DIRECT_ANSWER", meetingId, sdp });
+      if (result?.ok !== true) throw new Error("Meet audio connection could not be established.");
+    });
+  } else {
+    speaker = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: capturedStreamId } } as MediaTrackConstraints,
+    });
+  }
   streams = [speaker];
   const mic = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: SAMPLE_RATE_HZ } });
   streams = [speaker, mic];
-  attachCapture(speaker, "speaker", meetingId);
+  attachCapture(speaker, "speaker", meetingId, !directOffer);
   attachCapture(mic, "mic", meetingId);
   void startLiveTranscription(meetingId, captureGeneration, liveDeepgramKey);
 }
@@ -256,10 +298,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   // Runtime messages reach every extension context, including the Meet content
   // script; only the service worker may drive capture.
   if (!isFromExtensionWorker(sender, { extensionId: chrome.runtime.id, extensionBaseUrl: chrome.runtime.getURL("") })) return false;
-  const value = message as { type?: string; streamId?: string; meetingId?: string; tabId?: number; liveDeepgramKey?: string };
-  if (value.type === "MEET_CAPTURE_START" && typeof value.streamId === "string" && typeof value.meetingId === "string") {
-    void start(value.streamId, value.meetingId, typeof value.tabId === "number" ? value.tabId : undefined, typeof value.liveDeepgramKey === "string" ? value.liveDeepgramKey.trim() : undefined).then(() => sendResponse({ ok: true })).catch((error: unknown) => {
-      void stop();
+  const value = message as { type?: string; streamId?: string; directOffer?: string; meetingId?: string; tabId?: number; liveDeepgramKey?: string };
+  if (value.type === "MEET_CAPTURE_START" && (typeof value.streamId === "string" || typeof value.directOffer === "string") && typeof value.meetingId === "string") {
+    void start(value.streamId, value.meetingId, typeof value.tabId === "number" ? value.tabId : undefined, typeof value.liveDeepgramKey === "string" ? value.liveDeepgramKey.trim() : undefined, value.directOffer).then(() => sendResponse({ ok: true })).catch(async (error: unknown) => {
+      await stop();
       sendResponse({ ok: false, error: errorMessage(error) });
     });
     return true;

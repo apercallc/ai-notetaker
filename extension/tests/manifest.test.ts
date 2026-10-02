@@ -17,9 +17,13 @@ describe("manifest.json cross-browser fields", () => {
   });
 
   it("injects the Meet widget only on meet.google.com, with capture kept to that host", () => {
-    expect(manifest.content_scripts).toHaveLength(1);
-    expect(manifest.content_scripts[0]?.matches).toEqual(["https://meet.google.com/*"]);
-    expect(manifest.content_scripts[0]?.js).toEqual(["content/meetWidget.js"]);
+    for (const script of manifest.content_scripts) {
+      expect(script.matches).toEqual(["https://meet.google.com/*"]);
+      expect(script.all_frames).toBe(false);
+    }
+    expect(manifest.content_scripts.find(script => script.js.includes("content/directMain.js"))).toMatchObject({ world: "MAIN", run_at: "document_start" });
+    expect(manifest.content_scripts.find(script => script.js.includes("content/directBridge.js"))).toMatchObject({ run_at: "document_start" });
+    expect(manifest.content_scripts.find(script => script.js.includes("content/meetWidget.js"))).toMatchObject({ run_at: "document_idle" });
     expect(manifest.host_permissions).toEqual(["https://meet.google.com/*"]);
     expect(manifest.optional_host_permissions).toEqual([
       "https://*/*",

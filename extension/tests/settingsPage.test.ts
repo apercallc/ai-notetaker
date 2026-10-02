@@ -143,12 +143,22 @@ describe("settings page: unsaved input", () => {
     $("save-settings").click();
     await vi.waitFor(() => expect(savedSettings()?.webapp).toEqual({ url: "https://app.example.com", token: "secret" }));
     // A second save while the first is still settling is ignored by design; wait for it to finish.
-    await vi.waitFor(() => expect($("save-status").textContent).toBe("Saved."));
+    await vi.waitFor(() => expect($("save-status").textContent).toContain("add Deepgram and Anthropic API keys before recording"));
 
     $<HTMLInputElement>("webapp-url").value = "";
     $<HTMLInputElement>("webapp-token").value = "";
     $("save-settings").click();
     await vi.waitFor(() => expect(savedSettings()?.webapp).toBeNull());
+  });
+
+  it("warns which provider keys are still required in your own-keys mode", async () => {
+    await openSettings(DEFAULT_SETTINGS);
+    expect($("provider-key-warning").textContent).toContain("Deepgram and Anthropic API keys before recording");
+
+    $<HTMLInputElement>("key-deepgram").value = "deepgram-test-key";
+    $<HTMLInputElement>("key-deepgram").dispatchEvent(new Event("input"));
+    expect($("provider-key-warning").textContent).toContain("Anthropic API key before recording");
+    expect($("provider-key-warning").textContent).not.toContain("Deepgram");
   });
 
   it("does not undo a Drive connection or consent made elsewhere while this page was open", async () => {

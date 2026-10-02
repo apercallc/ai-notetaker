@@ -394,7 +394,7 @@ describe("NativeMessagingClient", () => {
       expect(chromeMock.runtime.connectNative.mock.calls.length).toBeLessThan(10);
     });
 
-    it("reports connected once a real message arrives, and resets the backoff", async () => {
+    it("waits for a compatible helper handshake before reporting connected", async () => {
       const port = createFakePort();
       chromeMock.runtime.connectNative.mockReturnValue(port);
       const client = new NativeMessagingClient();
@@ -403,8 +403,25 @@ describe("NativeMessagingClient", () => {
       await client.connect();
 
       port._emitMessage({ type: "paired", pairingToken: "tok" });
+      expect(statuses).not.toContain("connected");
+
+      port._emitMessage({ type: "helper_info", helperVersion: "0.16.2", protocolVersion: 3, platform: "linux" });
 
       expect(statuses).toContain("connected");
+    });
+
+    it("never flashes connected for an incompatible helper protocol", async () => {
+      const port = createFakePort();
+      chromeMock.runtime.connectNative.mockReturnValue(port);
+      const client = new NativeMessagingClient();
+      const statuses: string[] = [];
+      client.onStatusChange((s) => statuses.push(s));
+      await client.connect();
+
+      port._emitMessage({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 2, platform: "linux" });
+
+      expect(statuses).toContain("incompatible");
+      expect(statuses).not.toContain("connected");
     });
   });
 

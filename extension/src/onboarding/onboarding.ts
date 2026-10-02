@@ -47,6 +47,9 @@ const managedDraft = { email: "" };
 let helperStatus: BackgroundState["helperStatus"] = "connecting";
 let helperInfo: BackgroundState["helperInfo"] = null;
 let helperAlarmPermissionMissing = false;
+let helperCheckInProgress = false;
+let helperStatusRevision = 0;
+let stepErrorMessage = "";
 let toggleShortcut = "";
 let busy = false;
 
@@ -94,6 +97,7 @@ function renderStepIndicator(): string {
 // ---------- desktop detour: helper, audio ----------
 
 function helperStatusCopy(): string {
+  if (helperCheckInProgress && helperStatus !== "connected") return "Checking for the desktop helper…";
   if (helperStatus === "connected") {
     return `Desktop helper ${helperInfo?.helperVersion ? `v${helperInfo.helperVersion} ` : ""}is connected. Continue to the audio check.${helperAlarmPermissionMissing ? " Chrome alarm access was denied, so retries may pause while this browser is closed." : ""}`;
   }
@@ -105,6 +109,14 @@ function helperStatusCopy(): string {
   if (helperStatus === "disconnected") return "Desktop helper is not responding. Launch it, then check again.";
   if (helperStatus === "permission_required") return "Allow Native Messaging so the extension can talk to the desktop helper. Chrome will ask when you check.";
   return "Checking for the desktop helper…";
+}
+
+/** Update the live status without replacing the onboarding form or its controls. */
+function updateHelperStatus(): void {
+  const status = document.getElementById("helper-install-status");
+  if (status) status.textContent = helperStatusCopy();
+  const next = document.getElementById("next-button") as HTMLButtonElement | null;
+  if (next && step === "helper") next.disabled = helperStatus !== "connected";
 }
 
 function renderHelperStep(): string {
@@ -122,7 +134,7 @@ function renderHelperStep(): string {
       <li>Launch <strong>AI Notetaker</strong>. It runs in your menu bar or system tray.</li>
       <li>Return here and choose <strong>Check desktop helper</strong>, then continue to the audio test.</li>
     </ol>
-    <p class="text-secondary">On Mac, use Install AI Notetaker.command if included in your download; it connects the app to Chrome for you. Older downloads have a manual connection step on the download page.</p>
+    ${platform === "macos" ? `<p class="text-secondary">On Mac, use Install AI Notetaker.command if included in your download; it connects the app to Chrome for you. Older downloads have a manual connection step on the download page.</p>` : ""}
     <p><button type="button" class="text-link" id="use-meet">Recording Google Meet instead?</button></p>
   `;
 }
@@ -302,6 +314,7 @@ function renderSetupStep(): string {
   return `
     <h1 tabindex="-1" data-view-heading>Set up AI Notetaker</h1>
     <p>${desktop ? "Last step: how notes are written, and a one-line notice." : "One screen, about a minute. Notes are written when you stop the recording."}</p>
+    ${desktop ? "" : `<p class="field-hint text-secondary">Using Zoom, Teams, or Slack? <button type="button" class="text-link" id="use-desktop">Set up desktop calls</button> instead.</p>`}
     <section class="setup-section">
       <h2>How should notes be written?</h2>
       ${renderModeToggle()}
@@ -323,27 +336,27 @@ function renderSetupStep(): string {
         and follow the law that applies to your recording.
       </div>
     </section>
-    ${desktop ? "" : `<p><button type="button" class="text-link" id="use-desktop">Recording Zoom, Teams, or Slack instead?</button></p>`}
   `;
 }
 
 function renderDoneStep(): string {
   const keys = toggleShortcut ? shortcutKeys(toggleShortcut).map((key) => `<kbd>${escapeHtml(key)}</kbd>`).join("") : "";
-  const startLine = settings.autoRecordOnMeetJoin
-    ? MEET_AUTO_RECORD_GUIDANCE
-    : keys
-      ? `In a call, press ${keys} or click the toolbar icon to start notes.`
-      : "In a call, click the AI Notetaker toolbar icon to start notes.";
+  const startLine = desktop
+    ? "Join your Zoom, Teams, or Slack call, then open AI Notetaker from the toolbar and choose Start notes."
+    : settings.autoRecordOnMeetJoin
+      ? MEET_AUTO_RECORD_GUIDANCE
+      : keys
+        ? `In a call, press ${keys} or click the toolbar icon to start notes.`
+        : "In a call, click the AI Notetaker toolbar icon to start notes.";
   const transcriptLine = settings.processingMode.kind === "local_byok" && settings.transcriptionProvider === "deepgram"
     ? "With your Deepgram key, the transcript appears live when the connection is available; otherwise it is ready after you stop."
     : "Your full transcript is ready after you stop recording.";
   return `
-    <h1 tabindex="-1" data-view-heading>You're all set</h1>
+    <h1 tabindex="-1" data-view-heading>${desktop ? "Desktop setup is ready" : "You're all set"}</h1>
     <p>${startLine}</p>
     <p class="text-secondary">${transcriptLine}</p>
     <p class="text-secondary">Tip: pin AI Notetaker from Chrome's puzzle-piece menu so the icon is always one click away. Your notes are written when you stop, and Chrome shows a notification when they are ready.</p>
-    ${desktop ? `<p class="text-secondary">For Zoom, Teams, or Slack, click the toolbar icon during your call and choose Start notes.</p>` : ""}
-    <p><button type="button" class="primary" id="open-meet">Open Google Meet</button></p>
+    ${desktop ? `<p><button type="button" class="primary" id="close-setup">Done</button></p>` : `<p><button type="button" class="primary" id="open-meet">Open Google Meet</button></p>`}
   `;
 }
 
@@ -417,12 +430,13 @@ function navButtons(): string {
   if (step === "done") return "";
   const canGoBack = step === "audio" || (step === "setup" && desktop);
   const label = step === "setup" ? "Finish setup" : "Continue";
+  const helperPending = step === "helper" && helperStatus !== "connected";
   return `
     <div class="step-nav">
       ${canGoBack ? `<button type="button" class="secondary" id="back-button">Back</button>` : "<span></span>"}
-      <button type="submit" class="primary" id="next-button">${label}</button>
+      <button type="submit" class="primary" id="next-button"${helperPending ? ' disabled aria-describedby="helper-install-status"' : ""}>${label}</button>
     </div>
-    <p id="step-error" class="result error" role="alert"></p>`;
+    <p id="step-error" class="result error" role="alert">${escapeHtml(stepErrorMessage)}</p>`;
 }
 
 /**
@@ -444,6 +458,7 @@ function render(options: { focus?: string } = {}): void {
     </form>
   `;
   wireEvents();
+  app.removeAttribute("aria-busy");
   if (stepChanged && !options.focus) {
     app.querySelector<HTMLElement>("[data-view-heading]")?.focus({ preventScroll: true });
     return;
@@ -453,11 +468,13 @@ function render(options: { focus?: string } = {}): void {
 }
 
 function showStepError(message: string): void {
+  stepErrorMessage = message;
   const error = document.getElementById("step-error");
   if (error) error.textContent = message;
 }
 
 function goTo(next: StepId): void {
+  if (next !== step) showStepError("");
   step = next;
   render();
 }
@@ -667,7 +684,7 @@ async function advance(): Promise<void> {
   } finally {
     busy = false;
     const button = document.getElementById("next-button") as HTMLButtonElement | null;
-    if (button) button.disabled = false;
+    if (button) button.disabled = step === "helper" && helperStatus !== "connected";
   }
 }
 
@@ -704,20 +721,29 @@ function wireEvents(): void {
     const button = document.getElementById("check-helper") as HTMLButtonElement;
     const status = document.getElementById("helper-install-status");
     button.disabled = true;
+    showStepError("");
+    const checkRevision = ++helperStatusRevision;
+    helperCheckInProgress = true;
     if (status) status.textContent = "Checking for the desktop helper…";
     try {
       const permissions = await requestDesktopHelperPermissions();
       if (!permissions.nativeMessaging) {
+        helperCheckInProgress = false;
         if (status) status.textContent = "Chrome did not grant Native Messaging access. Desktop calls need this permission; choose Allow and check again.";
         button.disabled = false;
         return;
       }
       helperAlarmPermissionMissing = !permissions.alarms;
       const state = await sendToBackground({ type: "CHECK_HELPER" }) as BackgroundState;
-      helperStatus = state.helperStatus;
-      helperInfo = state.helperInfo;
-      render({ focus: "check-helper" });
+      if (checkRevision === helperStatusRevision) {
+        helperStatus = state.helperStatus;
+        helperInfo = state.helperInfo;
+      }
+      helperCheckInProgress = false;
+      updateHelperStatus();
+      button.disabled = false;
     } catch {
+      helperCheckInProgress = false;
       if (status) status.textContent = "Could not check the helper. Launch it, then try again.";
       button.disabled = false;
     }
@@ -851,32 +877,61 @@ function wireEvents(): void {
     chrome.tabs.create({ url: MEET_HOME });
     window.close();
   });
+  document.getElementById("close-setup")?.addEventListener("click", () => window.close());
 }
 
 async function init(): Promise<void> {
-  settings = await getSettings();
-  desktop = await launchWantsDesktop();
+  const [loadedSettings, wantsDesktop] = await Promise.all([getSettings(), launchWantsDesktop()]);
+  settings = loadedSettings;
+  desktop = wantsDesktop;
   step = desktop ? "helper" : "setup";
   renderedStep = null;
   onboardingMode = settings.processingMode.kind === "managed" ? "managed" : "local_byok";
   onboardingTier = settings.transcriptionProvider === "groq" ? "budget" : "default";
   onboardingSummarizer = settings.summarizationProvider === "deepseek" ? "deepseek" : "gemini";
   consentAcknowledged = settings.consentDisclosureAcknowledged;
-  if (await microphoneAlreadyAllowed()) micState = "granted";
-  const state = await sendToBackground({ type: "GET_STATE" }) as BackgroundState;
-  helperStatus = state.helperStatus;
-  helperInfo = state.helperInfo;
   render();
+  void microphoneAlreadyAllowed()
+    .then((allowed) => {
+      if (!allowed) return;
+      micState = "granted";
+      updateMicUi();
+    })
+    .catch((error) => console.warn("Could not check microphone access", error));
+  const stateRevision = helperStatusRevision;
+  void sendToBackground({ type: "GET_STATE" })
+    .then((raw) => {
+      if (stateRevision !== helperStatusRevision) return;
+      const state = raw as BackgroundState;
+      helperStatus = state.helperStatus;
+      helperInfo = state.helperInfo;
+      if (step === "helper") updateHelperStatus();
+    })
+    .catch((error) => {
+      if (stateRevision !== helperStatusRevision) return;
+      console.warn("Could not check desktop helper state", error);
+      if (step === "helper") {
+        helperStatus = "disconnected";
+        updateHelperStatus();
+      }
+    });
 }
 
 chrome.runtime.onMessage.addListener((raw: unknown) => {
   const message = raw as Partial<BackgroundToUiMessage>;
   if (message.type !== "HELPER_STATUS" || !message.status) return;
+  // Keep the last useful status while automatic reconnects cycle through
+  // "connecting". Only a user-requested check should make the copy switch
+  // to its transient checking state.
+  if (message.status === "connecting" && !helperCheckInProgress && helperStatus !== "connecting") return;
+  helperStatusRevision += 1;
   helperStatus = message.status;
-  if (step === "helper") render();
+  if (message.status !== "connecting") helperCheckInProgress = false;
+  if (step === "helper") updateHelperStatus();
 });
 
 function renderFailure(): void {
+  app.removeAttribute("aria-busy");
   app.innerHTML = `
     <h1>AI Notetaker setup</h1>
     <div class="empty-state" role="alert">

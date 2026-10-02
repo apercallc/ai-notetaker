@@ -27,6 +27,17 @@ describe("direct provider key validation", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("reports a timeout distinctly from a rejected API key", async () => {
+    vi.useFakeTimers();
+    const request = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    const check = testProviderKeyDirect("groq", "secret", request, 1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(check).resolves.toEqual({ valid: false, message: "Groq connection check timed out. Try again or check your connection." });
+    vi.useRealTimers();
+  });
+
   it("does not send a key to a provider whose optional host permission is missing", async () => {
     chromeMock.permissions.contains.mockResolvedValue(false);
     const request = vi.fn();

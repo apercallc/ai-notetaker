@@ -25,15 +25,23 @@ const meeting: MeetingRecord = {
   status: "complete",
 };
 
-async function openActions(search = ""): Promise<void> {
+async function openActions(search = "", failFirstRead = false): Promise<void> {
   vi.resetModules();
   document.body.innerHTML = '<main id="app"></main>';
   chromeMock.reset();
   chromeMock.runtime.sendMessage.mockResolvedValue({});
   window.history.replaceState({}, "", `/actions/actions.html${search}`);
   await saveMeeting(meeting);
+  if (failFirstRead) {
+    chromeMock.storage.local.get.mockImplementationOnce((_keys, callback) => {
+      chromeMock.runtime.lastError = { message: "temporary storage failure" };
+      callback?.({});
+      chromeMock.runtime.lastError = undefined;
+      return Promise.resolve({});
+    });
+  }
   await import("../src/actions/actions");
-  await vi.waitFor(() => expect(document.querySelector(".action-list")).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector(".action-list, #retry-actions")).not.toBeNull());
 }
 
 const texts = (): string[] => [...document.querySelectorAll(".action-text")].map((el) => el.textContent ?? "");
@@ -82,5 +90,15 @@ describe("actions page", () => {
     await openActions("?status=bogus");
     expect(texts()).toHaveLength(4);
     expect(document.querySelector('a[aria-current="page"]')?.textContent).toBe("All");
+  });
+
+  it("offers an in-place retry when the action list cannot load", async () => {
+    await openActions("", true);
+    expect(document.body.textContent).toContain("Your saved meetings are unchanged");
+
+    (document.querySelector("#retry-actions") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => expect(document.querySelector(".action-list")).not.toBeNull());
+    expect(document.querySelector("#retry-actions")).toBeNull();
   });
 });

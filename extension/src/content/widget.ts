@@ -225,8 +225,11 @@ export class MeetWidget {
       // Recording is the one state that must be visible at a glance; a
       // finished/failed call is worth opening the panel for as well.
       if (next === "recording" && previous !== "recording") {
-        this.expanded = false;
-        this.pendingToast = "Recording started. Let everyone know.";
+        const providerWarning = this.state?.active?.providerPreflightWarning;
+        this.expanded = Boolean(providerWarning);
+        this.pendingToast = providerWarning
+          ? "Provider access needs attention. Your audio is being saved locally."
+          : "Recording started. Let everyone know.";
       }
       if (next === "processing" && previous !== null) this.announce("Writing your notes");
       if (next === "done" && previous !== null) this.announce("Your notes are ready");
@@ -355,6 +358,7 @@ export class MeetWidget {
       void this.deps.send({ type: "OPEN_PAGE", page }).catch(() => {});
     };
     on("#open-setup", () => openPage("onboarding"));
+    on("#open-ai-settings", () => chrome.runtime.openOptionsPage());
     on("#set-shortcut", () => openPage("shortcuts"));
     on("#allow-mic", () => openPage("microphone"));
     on("#open-notes", () => {
@@ -371,6 +375,7 @@ export class MeetWidget {
       this.render();
       if (canStart(this.state)) void this.start();
     });
+    on("#continue-anyway", () => void this.start(true));
     on("#start", () => void this.start());
     on("#pill-start", () => void this.start());
     this.bindStop("#stop", {
@@ -463,7 +468,7 @@ export class MeetWidget {
 
   // ---------- actions ----------
 
-  private async start(): Promise<void> {
+  private async start(allowProviderWarning = false): Promise<void> {
     if (!canStart(this.state) || this.ui.starting) return;
     this.ui = { ...this.ui, starting: true, error: null, warning: null };
     this.render();
@@ -474,6 +479,7 @@ export class MeetWidget {
         type: "START_RECORDING",
         captureSource: "meet",
         meetingMode: mode,
+        ...(allowProviderWarning ? { allowProviderWarning: true } : {}),
         ...(titleHint ? { titleHint } : {}),
       });
       this.ui = { ...this.ui, starting: false };

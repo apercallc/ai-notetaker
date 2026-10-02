@@ -1,5 +1,20 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Meet start without toolbar invocation — 2026-10-02
+
+- [x] Trace the extra toolbar click to Chrome's tabCapture invocation gate and
+      document alternatives in `docs/meet-one-click-capture-investigation.md`.
+- [x] Implement direct Meet receiver-track capture for widget-only Start, with
+      an offscreen recorder, separate mic, bounded signaling, local audio
+      persistence, and Chrome tab-capture fallback. Keep Connecting visible
+      until capture acknowledges; preserve partial audio on failed starts.
+- [x] Prove non-silent mic and speaker PCM in IndexedDB from a fresh synthetic
+      Meet-origin tab without a tabCapture invocation grant, including restored
+      capture metadata and stop/restart. See `npm run test:direct-browser`.
+- [ ] Verify an actual Google Meet call (multiple participants, reconnects,
+      presentation audio, headphones, mute/device changes, and long capture)
+      before publishing. Synthetic Chromium proof is not live Meet acceptance.
+
 ## Cross-surface latency and stability — 2026-10-02
 
 - [x] Reuse the browser session and workspace lookup between the shared web
@@ -12,6 +27,21 @@
       active recording view on each state event; reconcile captions received
       during view mounting with persisted final segments. Broadcast live
       captions before the searchable meeting mirror write completes.
+- [x] Update desktop-helper onboarding status in place during reconnects,
+      suppress automatic retry copy-flips, and preserve validation errors until
+      the user retries or the helper connects.
+- [x] Keep onboarding's initial loading shell stable, expose desktop setup near
+      the Meet-first path, gate Continue until the helper handshake succeeds,
+      and show a desktop-specific completion step.
+- [x] Keep desktop popup status and setup controls live as the helper
+      reconnects; prevent stale audio checks or a mid-test disconnect from
+      re-enabling recording controls.
+- [x] Keep recording-start and action-list failures visible with in-place
+      recovery, warn when desktop capture loses its helper, and identify
+      missing selected BYOK keys before the user starts a recording.
+- [x] Check selected Meet BYOK providers before recording; keep recording
+      locally when a check fails but show a persistent warning, and make
+      processing failures explicit with saved-audio retry and settings actions.
 - [x] Report desktop recording only after audio capture starts, and move
       synchronous audio preflight diagnostics off the helper IPC executor.
 - Follow-up: add an incremental transcript search index and reduce repeated
