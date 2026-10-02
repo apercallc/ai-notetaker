@@ -2,10 +2,10 @@
   "$schema": "./manifest.schema.json",
   "schemaVersion": 1,
   "product": "ai-notetaker",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "status": "unpublished",
   "extension": {
-    "version": "0.15.2",
+    "version": "0.15.3",
     "id": "jidooookkdbbbhkkdmcajnnnhhphodok",
     "chromeWebStoreUrl": null,
     "fallbackZipUrl": null
