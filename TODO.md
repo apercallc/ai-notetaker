@@ -6,11 +6,14 @@
       bundle signature validation with an unsealed linker-only signature.
 - [x] Ad-hoc sign the completed app and nested binaries, verify strictly, and
       package a guided installer in Mac CI and release builds.
-- [x] Installer explicitly approves only this app, connects it to Chrome and
-      opens it; rejects tampering, symlinks, unrelated apps and running capture.
+- [x] Installer uses the user's Applications folder without admin access,
+      approves only this app, connects it to Chrome and opens it; rejects
+      tampering, symlinks, unrelated apps and running capture.
 - [x] Keep older-release instructions until a guided DMG is actually published.
-- Pending: publish a new release; clean-machine Finder/Gatekeeper acceptance
-      across supported macOS versions. No Developer ID or notarization claim.
+- [x] Published and verified the guided Mac installer in v0.15.2; its release
+      checksum matches and the mounted app passes strict signature validation.
+- Pending: clean-machine Finder/Gatekeeper acceptance across supported macOS
+      versions. No Developer ID or notarization claim.
 
 ## Setup clarity — 2026-10-01
 

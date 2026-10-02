@@ -340,7 +340,7 @@ export function DownloadView({
                 <>
                   <ol>
                     <li>Download and open the Mac .dmg above.</li>
-                    <li>Double-click <strong>Install AI Notetaker.command</strong>. A Terminal window opens; choose <strong>Install</strong> in the confirmation dialog. It copies the app to Applications, connects it to Chrome, and opens it.</li>
+                    <li>Double-click <strong>Install AI Notetaker.command</strong>. A Terminal window opens; choose <strong>Install</strong> in the confirmation dialog. It copies the app to your Applications folder, connects it to Chrome, and opens it.</li>
                     <li>Look for AI Notetaker in your menu bar, then return to the extension and choose <strong>Check desktop helper</strong>.</li>
                   </ol>
                   <p>This release is not notarized by Apple. The installer asks you to approve this app only; your other Mac security settings stay unchanged. If macOS blocks the installer, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</p>

@@ -7,7 +7,7 @@ export PATH
 
 here=$(cd "$(dirname "$0")" && pwd -P)
 source_app="$here/AI Notetaker.app"
-destination=/Applications
+destination="${HOME:?Home folder is unavailable}/Applications"
 approved=0
 launch=1
 while [[ $# -gt 0 ]]; do
