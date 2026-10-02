@@ -1,5 +1,11 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## CI supply-chain hardening — 2026-10-02
+
+- [x] Pin every GitHub Actions workflow dependency to a verified full commit
+      SHA. Keep the matching release or ref beside each SHA; weekly Dependabot
+      updates continue to maintain these pins.
+
 ## Brand consistency — 2026-10-01
 
 - [x] Make the web app browser-tab icon use the canonical green note-and-waveform mark.
