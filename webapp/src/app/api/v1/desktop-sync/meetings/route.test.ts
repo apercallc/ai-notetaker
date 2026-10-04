@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { authenticateDesktopSync, upsertMeeting, listDesktopSyncMeetings, apiErrorResponse } = vi.hoisted(() => ({
+const { authenticateDesktopSync, upsertMeeting, listDesktopSyncMeetings, apiErrorResponse, DesktopSyncConflictError } = vi.hoisted(() => ({
   authenticateDesktopSync: vi.fn(),
   upsertMeeting: vi.fn(),
   listDesktopSyncMeetings: vi.fn(),
   apiErrorResponse: vi.fn(() => Response.json({ error: "internal error" }, { status: 500 })),
+  DesktopSyncConflictError: class DesktopSyncConflictError extends Error {},
 }));
 
 vi.mock("@/lib/desktopSyncAuth", () => ({ authenticateDesktopSync }));
-vi.mock("@/lib/meetings", () => ({ upsertMeeting, listDesktopSyncMeetings }));
+vi.mock("@/lib/meetings", () => ({ upsertMeeting, listDesktopSyncMeetings, DesktopSyncConflictError }));
 vi.mock("@/lib/apiErrors", () => ({
   apiErrorResponse,
   jsonError: (error: string, status: number, requestId: string) => Response.json({ error, requestId }, { status }),
@@ -22,7 +23,7 @@ const endpoint = "https://notes.example.test/api/v1/desktop-sync/meetings";
 beforeEach(() => {
   vi.clearAllMocks();
   authenticateDesktopSync.mockResolvedValue({ ok: true, auth: { userId: "user-1", workspaceId: "workspace-1", workspaceName: "Product" } });
-  upsertMeeting.mockResolvedValue({ id: "meeting-1", title: "Planning" });
+  upsertMeeting.mockResolvedValue({ id: "meeting-1", title: "Planning", updatedAt: new Date("2026-10-04T12:00:00.000Z") });
   listDesktopSyncMeetings.mockResolvedValue([]);
 });
 
@@ -77,7 +78,30 @@ describe("POST /api/v1/desktop-sync/meetings", () => {
 
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(upsertMeeting).toHaveBeenCalledWith(payload, "workspace-1", "user-1");
+    expect(await response.json()).toMatchObject({ updatedAt: "2026-10-04T12:00:00.000Z" });
+    expect(upsertMeeting).toHaveBeenCalledWith(payload, "workspace-1", "user-1", { expectedUpdatedAt: undefined });
+  });
+
+  it("passes the desktop version baseline and returns safe conflicts", async () => {
+    const payload = { id: "meeting-1", title: "Planning", transcript: [], summary: "Done", actionItems: [] };
+    const response = await POST(new Request(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-desktop-sync-version": "2026-10-04T11:00:00.000Z" },
+      body: JSON.stringify(payload),
+    }));
+    expect(response.status).toBe(201);
+    expect(upsertMeeting).toHaveBeenCalledWith(payload, "workspace-1", "user-1", {
+      expectedUpdatedAt: new Date("2026-10-04T11:00:00.000Z"),
+    });
+
+    upsertMeeting.mockRejectedValueOnce(new DesktopSyncConflictError("This workspace note changed online."));
+    const conflict = await POST(new Request(endpoint, {
+      method: "POST",
+      headers: { "x-desktop-sync-version": "new" },
+      body: JSON.stringify(payload),
+    }));
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ error: "This workspace note changed online.", requestId: "desktop-sync-test" });
   });
 
   it("rejects notes labeled for another capture or processing path", async () => {

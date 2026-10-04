@@ -26,10 +26,13 @@ The local BYOK desktop path does not need an account. Sync is explicitly
 optional. It sends completed note text to one selected workspace and imports
 workspace notes as local copies. It never sends audio, provider keys, or local
 file paths. A durable local outbox retries failed uploads after restart; an
-updatedAt/id cursor resumes note imports. Repeated POSTs with the same meeting
-ID upsert the same workspace record, while local imports skip existing IDs.
-Web edits and deletions are not propagated into desktop copies, and settings
-are not synchronized.
+updatedAt/id cursor resumes note imports. Desktop uploads include the server
+version last acknowledged for each note. The API rejects stale writes with
+HTTP 409 and accepts an identical retry after a lost response, so an online
+edit is not silently overwritten. First uploads create a note or accept an
+identical already-created note. Local imports skip existing IDs. Web edits and
+deletions are not yet propagated into desktop copies, and settings are not
+synchronized.
 
 `GET /api/v1/desktop-sync` checks the token and returns its bound workspace:
 
@@ -40,6 +43,10 @@ are not synchronized.
 `POST /api/v1/desktop-sync/meetings` accepts the same finished-note body as
 `POST /api/meetings`, including optional transcript timestamps. Missing times
 remain null and segment order is preserved; clients must not fabricate timing.
+Desktop clients send `X-Desktop-Sync-Version: new` for first uploads or the
+last acknowledged `updatedAt` value for later uploads. Stale versions return
+HTTP 409 and leave the local outbox item queued for review/retry. Clients that
+omit this header retain the legacy upsert behavior during the migration window.
 The route ignores browser CORS handling and authenticates the desktop token
 itself. It is available on managed and self-hosted hosting.
 

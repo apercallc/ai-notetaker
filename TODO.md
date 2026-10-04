@@ -25,7 +25,9 @@
       copies. Web edits do not update those copies, settings remain per app,
       and extension recordings still require archive export/import.
 - [ ] Define and implement safe conflict handling for web-edited notes and
-      deletions before updating existing desktop copies.
+      deletions before updating existing desktop copies. Desktop uploads now
+      use an optimistic version check and preserve an identical retry after a
+      lost response; updating/deleting imported desktop copies remains open.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
 - [ ] Show workspace notes in the extension through its authenticated desktop

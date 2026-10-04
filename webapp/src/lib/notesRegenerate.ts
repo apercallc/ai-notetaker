@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { nextMeetingVersion } from "./meetingVersion";
 import { recordAudit } from "./audit";
 import { managedHostingEnabled } from "./managedAuth";
 import { ManagedWorkerError, formatSummaryText, summarize, type ManagedUtterance } from "./managedWorker";
@@ -92,14 +93,21 @@ export async function regenerateNotes(
   const refund = () => prisma.meeting.updateMany({ where: { id: meeting.id, notesRegenerations: { gt: 0 } }, data: { notesRegenerations: { decrement: 1 } } }).catch(() => undefined);
   try {
     await prisma.$transaction(async (tx) => {
-      const current = await tx.meeting.findUniqueOrThrow({ where: { id: meeting.id }, select: { summary: true, summaryEditedAt: true } });
+      await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Meeting" WHERE "id" = ${meeting.id} FOR UPDATE`;
+      const current = await tx.meeting.findUniqueOrThrow({ where: { id: meeting.id }, select: { summary: true, summaryEditedAt: true, updatedAt: true } });
       if (current.summary !== meeting.summary || current.summaryEditedAt?.getTime() !== meeting.summaryEditedAt?.getTime()) {
         throw new RegenerateConflictError();
       }
       // Keep what was there once, so a regeneration can be undone like a hand edit.
       await tx.meeting.update({
         where: { id: meeting.id },
-        data: { summary: formatSummaryText(summary), mode: templateId, previousSummary: current.summary, summaryEditedAt: null },
+        data: {
+          summary: formatSummaryText(summary),
+          mode: templateId,
+          previousSummary: current.summary,
+          summaryEditedAt: null,
+          updatedAt: nextMeetingVersion(current.updatedAt),
+        },
       });
       const existing = await tx.actionItem.findMany({ where: { meetingId: meeting.id }, select: { text: true } });
       const known = new Set(existing.map((item) => item.text.trim().toLowerCase()));

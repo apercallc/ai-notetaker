@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { nextMeetingVersion } from "./meetingVersion";
 import { speakerLabel } from "./types";
 import { MAX_SPEAKER_NAME, MIN_SPEAKER_NAME, replaceLabel, validateSpeakerName, type RenameSpeakerResult } from "./speakers.shared";
 
@@ -23,11 +24,12 @@ export async function renameSpeaker(workspaceId: string, meetingId: string, spea
   }
 
   return prisma.$transaction(async (tx) => {
-    // Renames of one meeting run one at a time; the summary rewrite reads then writes.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${meetingId}, 1))`;
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "Meeting" WHERE "id" = ${meetingId} AND "workspaceId" = ${workspaceId} AND "deletedAt" IS NULL FOR UPDATE
+    `;
     const meeting = await tx.meeting.findFirst({
       where: { id: meetingId, workspaceId, deletedAt: null },
-      select: { summary: true, speakers: true, transcript: { select: { speaker: true }, distinct: ["speaker"] } },
+      select: { summary: true, updatedAt: true, speakers: true, transcript: { select: { speaker: true }, distinct: ["speaker"] } },
     });
     if (!meeting) return { ok: false as const, error: "This meeting no longer exists." };
     const keys = meeting.transcript.map((line) => line.speaker);
@@ -40,7 +42,10 @@ export async function renameSpeaker(workspaceId: string, meetingId: string, spea
 
     const current = names.get(speakerKey)?.appliedLabel ?? defaultLabel;
     if (current !== targetLabel) {
-      await tx.meeting.update({ where: { id: meetingId }, data: { summary: replaceLabel(meeting.summary, current, targetLabel) } });
+      await tx.meeting.update({
+        where: { id: meetingId },
+        data: { summary: replaceLabel(meeting.summary, current, targetLabel), updatedAt: nextMeetingVersion(meeting.updatedAt) },
+      });
       const items = await tx.actionItem.findMany({ where: { meetingId }, select: { id: true, text: true, owner: true } });
       for (const item of items) {
         const text = replaceLabel(item.text, current, targetLabel);

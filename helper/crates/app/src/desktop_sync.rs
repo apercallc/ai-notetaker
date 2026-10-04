@@ -6,7 +6,7 @@ use notetaker_core::native_messaging::{ActionItem, MeetingMode};
 use notetaker_core::providers::{http_client_builder, Summary, TranscriptSegment};
 use notetaker_core::storage::{ImportedMeetingNote, MeetingState, MeetingStore};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -37,6 +37,8 @@ struct PersistedSyncState {
     // provenance in the sync state before it moved into MeetingMeta.
     #[serde(default)]
     workspace_import_ids: HashSet<Uuid>,
+    #[serde(default)]
+    remote_versions: HashMap<Uuid, DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +54,12 @@ struct RemotePage {
     meetings: Vec<RemoteMeeting>,
     has_more: bool,
     next_cursor: Option<RemoteCursor>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadReceipt {
+    updated_at: DateTime<Utc>,
 }
 
 #[derive(Deserialize)]
@@ -226,20 +234,37 @@ impl DesktopSync {
                 return Err(error);
             }
 
+            let expected_version = {
+                self.lock_state()
+                    .remote_versions
+                    .get(&meeting_id)
+                    .map(DateTime::to_rfc3339)
+                    .unwrap_or_else(|| "new".to_string())
+            };
             let response = client
                 .post(&endpoint)
                 .bearer_auth(token)
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header("x-desktop-sync-version", expected_version)
                 .body(body)
                 .send()
                 .await;
             match response {
                 Ok(response) if response.status().is_success() => {
-                    self.record_success(meeting_id)?
+                    let receipt: UploadReceipt = match response.json().await {
+                        Ok(receipt) => receipt,
+                        Err(_) => {
+                            let error = "The web app saved the note without returning its sync version. Retry sync to confirm it safely.".to_string();
+                            self.record_error(error.clone());
+                            return Err(error);
+                        }
+                    };
+                    self.record_success(meeting_id, receipt.updated_at)?
                 }
                 Ok(response) => {
                     let status = response.status();
                     let message = match status.as_u16() {
+                        409 => "This note changed in the web app after its last sync. Review the web version before retrying.",
                         400 | 413 | 422 => "The web app rejected a saved note. Update the web app, then retry sync.",
                         401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
                         403 => "The desktop sync token no longer has access to its workspace. Create a token for the correct workspace.",
@@ -423,9 +448,10 @@ impl DesktopSync {
         }
     }
 
-    fn record_success(&self, meeting_id: Uuid) -> Result<(), String> {
+    fn record_success(&self, meeting_id: Uuid, updated_at: DateTime<Utc>) -> Result<(), String> {
         let mut state = self.lock_state();
         state.pending.retain(|id| *id != meeting_id);
+        state.remote_versions.insert(meeting_id, updated_at);
         state.last_error = None;
         state.last_success_at = Some(Utc::now());
         self.persist(&state)
@@ -605,6 +631,86 @@ mod tests {
 
         let sync = DesktopSync::load(directory.path());
         assert_eq!(sync.status(true).pending, 1);
+    }
+
+    #[test]
+    fn remote_upload_versions_survive_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let version = Utc::now();
+        let queue = DesktopSync::load(directory.path());
+        {
+            let mut state = queue.lock_state();
+            state.remote_versions.insert(id, version);
+            queue.persist(&state).unwrap();
+        }
+
+        let reopened = DesktopSync::load(directory.path());
+        assert_eq!(
+            reopened.lock_state().remote_versions.get(&id),
+            Some(&version)
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_sends_first_write_version_and_saves_server_receipt() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::new(directory.path()).unwrap());
+        let id = Uuid::new_v4();
+        let started = Utc::now();
+        store.create_meeting(id, started).unwrap();
+        store
+            .mark_stopped(id, started + chrono::Duration::minutes(10))
+            .unwrap();
+        store
+            .write_summary(
+                id,
+                &Summary {
+                    summary: "Ready".into(),
+                    action_items: vec![],
+                },
+            )
+            .unwrap();
+        store.mark_processed(id).unwrap();
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(id).unwrap();
+
+        let updated_at = Utc::now();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = BufReader::new(stream);
+            let mut headers = String::new();
+            loop {
+                let mut line = String::new();
+                let count = stream.read_line(&mut line).await.unwrap();
+                if count == 0 || line == "\r\n" {
+                    break;
+                }
+                headers.push_str(&line);
+            }
+            assert!(headers
+                .to_ascii_lowercase()
+                .contains("x-desktop-sync-version: new"));
+            let mut stream = stream.into_inner();
+            let body = serde_json::json!({ "updatedAt": updated_at }).to_string();
+            let response = format!(
+                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        sync.sync_pending(store, &format!("http://{address}"), "sync-token")
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let state = sync.lock_state();
+        assert_eq!(state.remote_versions.get(&id), Some(&updated_at));
+        assert!(!state.pending.contains(&id));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 import { authenticateDesktopSync } from "@/lib/desktopSyncAuth";
-import { listDesktopSyncMeetings, upsertMeeting } from "@/lib/meetings";
+import { DesktopSyncConflictError, listDesktopSyncMeetings, upsertMeeting } from "@/lib/meetings";
 
 const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 const PULL_PAGE_SIZE = 50;
@@ -131,7 +131,26 @@ export async function POST(request: Request) {
       }
     }
 
-    const meeting = await upsertMeeting(body, auth.auth.workspaceId, auth.auth.userId);
+    const versionHeader = request.headers.get("x-desktop-sync-version");
+    let expectedUpdatedAt: Date | null | undefined;
+    if (versionHeader === "new") {
+      expectedUpdatedAt = null;
+    } else if (versionHeader !== null) {
+      expectedUpdatedAt = new Date(versionHeader);
+      if (Number.isNaN(expectedUpdatedAt.getTime())) {
+        return jsonError("invalid desktop sync version", 400, requestId);
+      }
+    }
+
+    let meeting: Awaited<ReturnType<typeof upsertMeeting>>;
+    try {
+      meeting = await upsertMeeting(body, auth.auth.workspaceId, auth.auth.userId, { expectedUpdatedAt });
+    } catch (error) {
+      if (error instanceof DesktopSyncConflictError) {
+        return jsonError(error.message, 409, requestId);
+      }
+      throw error;
+    }
     return NextResponse.json(meeting, {
       status: 201,
       headers: { "x-request-id": requestId, "cache-control": "no-store" },

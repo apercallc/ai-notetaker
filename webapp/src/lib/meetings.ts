@@ -7,8 +7,10 @@ import { MAX_SEARCH_LENGTH } from "./meetingConstants";
 import { makeSnippet, type HighlightPart } from "./snippet";
 import { utcDateString } from "./actionItems";
 import { notifyNoteReady } from "./integrations";
+import { nextMeetingVersion } from "./meetingVersion";
 
 export class ValidationError extends Error {}
+export class DesktopSyncConflictError extends Error {}
 
 export async function listDesktopSyncMeetings(
   workspaceId: string,
@@ -171,7 +173,12 @@ function defaultTitle(startedAt: string): string {
   return `Meeting on ${new Date(startedAt).toISOString().slice(0, 10)}`;
 }
 
-export async function upsertMeeting(rawInput: unknown, workspaceId: string, userId = LOCAL_USER_ID): Promise<{ id: string; title: string }> {
+export async function upsertMeeting(
+  rawInput: unknown,
+  workspaceId: string,
+  userId = LOCAL_USER_ID,
+  options: { expectedUpdatedAt?: Date | null } = {},
+): Promise<{ id: string; title: string; updatedAt: Date }> {
   const input = assertValid(rawInput);
   const title = input.title?.trim() ? input.title.trim() : defaultTitle(input.startedAt);
   const captureSource: CaptureSource = input.captureSource ?? "desktop";
@@ -197,16 +204,70 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
       : [],
   );
 
-  await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       SELECT pg_advisory_xact_lock(hashtextextended(${input.id}, 0))
     `;
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "Meeting" WHERE "id" = ${input.id} FOR UPDATE
+    `;
     const existing = await tx.meeting.findUnique({
       where: { id: input.id },
-      select: { workspaceId: true, summary: true, startedAt: true, endedAt: true },
+      select: {
+        workspaceId: true,
+        summary: true,
+        startedAt: true,
+        endedAt: true,
+        updatedAt: true,
+        deletedAt: true,
+        title: true,
+        mode: true,
+        transcript: { orderBy: { order: "asc" }, select: { speaker: true, text: true, timestamp: true } },
+        actionItems: { select: { text: true, owner: true, status: true, dueAt: true, completedAt: true } },
+      },
     });
     if (existing && existing.workspaceId !== workspaceId) {
       throw new ValidationError("meeting belongs to another workspace");
+    }
+    if (options.expectedUpdatedAt !== undefined) {
+      if (existing?.deletedAt) {
+        throw new DesktopSyncConflictError("This workspace note is in trash. Restore it in the web app before syncing.");
+      }
+      if (!existing && options.expectedUpdatedAt !== null) {
+        throw new DesktopSyncConflictError("This workspace note was removed. Review it in the web app before syncing.");
+      }
+      if (existing) {
+        const currentActionContent = existing.actionItems.map((item) => JSON.stringify([
+          item.text, item.owner, item.status, item.dueAt?.getTime() ?? null, item.completedAt?.getTime() ?? null,
+        ])).sort();
+        const incomingActionContent = input.actionItems.map((item) => JSON.stringify([
+          item.text,
+          item.owner ?? null,
+          item.status ?? "open",
+          item.dueAt ? new Date(item.dueAt).getTime() : null,
+          item.completedAt ? new Date(item.completedAt).getTime() : null,
+        ])).sort();
+        const identical = existing.title === title
+          && existing.mode === (input.mode ?? "general")
+          && existing.startedAt.getTime() === new Date(input.startedAt).getTime()
+          && existing.endedAt.getTime() === new Date(input.endedAt).getTime()
+          && existing.summary === input.summary
+          && existing.transcript.length === input.transcript.length
+          && existing.transcript.every((segment, index) => {
+            const incoming = input.transcript[index];
+            return segment.speaker === incoming?.speaker
+              && segment.text === incoming?.text
+              && (segment.timestamp?.getTime() ?? null) === (incoming?.timestamp ? new Date(incoming.timestamp).getTime() : null);
+          })
+          && currentActionContent.length === incomingActionContent.length
+          && currentActionContent.every((item, index) => item === incomingActionContent[index]);
+        if (identical) {
+          return { updatedAt: existing.updatedAt, unchanged: true };
+        }
+        if (options.expectedUpdatedAt === null || existing.updatedAt.getTime() !== options.expectedUpdatedAt.getTime()) {
+          throw new DesktopSyncConflictError("This workspace note changed online after its last desktop sync. Review the web version before retrying.");
+        }
+      }
     }
     // Registration is deliberately idempotent: a retry must not erase a
     // transcript/summary that was already persisted by an earlier attempt,
@@ -222,7 +283,7 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
       await tx.transcriptSegment.deleteMany({ where: { meetingId: input.id } });
       await tx.actionItem.deleteMany({ where: { meetingId: input.id } });
     }
-    await tx.meeting.upsert({
+    const saved = await tx.meeting.upsert({
       where: { id: input.id },
       create: {
         id: input.id,
@@ -237,6 +298,7 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
         summary: storedSummary,
       },
       update: {
+        ...(existing ? { updatedAt: nextMeetingVersion(existing.updatedAt) } : {}),
         // A registration retry carries no title or mode of its own: keep what the user
         // already renamed or chose instead of resetting it to the placeholder.
         ...(preserveExistingContent && !input.title ? {} : { title }),
@@ -274,15 +336,16 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
         })),
       });
     }
+    return { updatedAt: saved.updatedAt, unchanged: false };
   });
 
   // A synced note that already has its summary is a finished note; announce it once.
-  if (input.summary.trim() && !isManagedRegistration) {
+  if (input.summary.trim() && !isManagedRegistration && !result.unchanged) {
     void notifyNoteReady(workspaceId, input.id).catch((error: unknown) => {
       console.error("note-ready notification failed", { meetingId: input.id, error: error instanceof Error ? error.message : String(error) });
     });
   }
-  return { id: input.id, title };
+  return { id: input.id, title, updatedAt: result.updatedAt };
 }
 
 export type ProcessingStatus = "processing" | "complete" | "error";
@@ -599,22 +662,46 @@ export async function updateActionItem(
   if (changes.dueAt !== undefined && changes.dueAt !== null && Number.isNaN(Date.parse(changes.dueAt))) {
     throw new ValidationError("dueAt must be an ISO 8601 string");
   }
-  const result = await prisma.actionItem.updateMany({
-    where: { id, meeting: { workspaceId, deletedAt: null } },
-    data: {
-      ...(changes.status ? { status: changes.status, completedAt: changes.status === "done" ? new Date() : null } : {}),
-      ...(changes.dueAt !== undefined ? { dueAt: changes.dueAt ? new Date(changes.dueAt) : null } : {}),
-    },
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.actionItem.findFirst({
+      where: { id, meeting: { workspaceId, deletedAt: null } },
+      select: { meetingId: true },
+    });
+    if (!item) return false;
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "Meeting" WHERE "id" = ${item.meetingId} FOR UPDATE
+    `;
+    const result = await tx.actionItem.updateMany({
+      where: { id, meetingId: item.meetingId, meeting: { workspaceId, deletedAt: null } },
+      data: {
+        ...(changes.status ? { status: changes.status, completedAt: changes.status === "done" ? new Date() : null } : {}),
+        ...(changes.dueAt !== undefined ? { dueAt: changes.dueAt ? new Date(changes.dueAt) : null } : {}),
+      },
+    });
+    if (result.count > 0) {
+      const meeting = await tx.meeting.findUniqueOrThrow({ where: { id: item.meetingId }, select: { updatedAt: true } });
+      await tx.meeting.update({
+        where: { id: item.meetingId },
+        data: { updatedAt: nextMeetingVersion(meeting.updatedAt) },
+      });
+    }
+    return result.count > 0;
   });
-  return result.count > 0;
 }
 
 export async function renameMeeting(workspaceId: string, id: string, title: string): Promise<boolean> {
   const trimmed = title.trim();
   if (!trimmed) throw new ValidationError("title is required");
   if (trimmed.length > MAX_TITLE_LENGTH) throw new ValidationError(`title must be ${MAX_TITLE_LENGTH} characters or fewer`);
-  const result = await prisma.meeting.updateMany({ where: { id, workspaceId, deletedAt: null }, data: { title: trimmed } });
-  return result.count > 0;
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "Meeting" WHERE "id" = ${id} AND "workspaceId" = ${workspaceId} AND "deletedAt" IS NULL FOR UPDATE
+    `;
+    const meeting = await tx.meeting.findFirst({ where: { id, workspaceId, deletedAt: null }, select: { updatedAt: true } });
+    if (!meeting) return false;
+    await tx.meeting.update({ where: { id }, data: { title: trimmed, updatedAt: nextMeetingVersion(meeting.updatedAt) } });
+    return true;
+  });
 }
 
 export async function deleteMeeting(workspaceId: string, id: string): Promise<void> {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "./db";
+import { nextMeetingVersion } from "./meetingVersion";
 import { recordAudit } from "./audit";
 import type { Fail, LibrarySession } from "./library";
 
@@ -76,7 +77,7 @@ export async function updateNoteBody(session: LibrarySession, meetingId: string,
   const checked = validateNoteBody(rawBody);
   if ("error" in checked) return fail(checked.error);
   const result = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${meetingId}, 2))`;
+    await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Meeting" WHERE "id" = ${meetingId} AND "workspaceId" = ${session.workspaceId} AND "deletedAt" IS NULL FOR UPDATE`;
     const note = await tx.meeting.findFirst({ where: { id: meetingId, workspaceId: session.workspaceId, deletedAt: null }, select: { summary: true, updatedAt: true } });
     if (!note) return fail("This note no longer exists.");
     if (note.updatedAt.toISOString() !== expectedVersion) {
@@ -85,7 +86,7 @@ export async function updateNoteBody(session: LibrarySession, meetingId: string,
     if (note.summary === checked.body) return { ok: true as const, version: note.updatedAt.toISOString() };
     const updated = await tx.meeting.update({
       where: { id: meetingId },
-      data: { summary: checked.body, previousSummary: note.summary, summaryEditedAt: new Date() },
+      data: { summary: checked.body, previousSummary: note.summary, summaryEditedAt: new Date(), updatedAt: nextMeetingVersion(note.updatedAt) },
       select: { updatedAt: true },
     });
     return { ok: true as const, version: updated.updatedAt.toISOString(), edited: true };
@@ -98,13 +99,13 @@ export async function updateNoteBody(session: LibrarySession, meetingId: string,
 /** Swaps the body with the one it replaced (an edit or a regeneration); doing it again swaps back. */
 export async function restorePreviousBody(session: LibrarySession, meetingId: string): Promise<{ ok: true; version: string } | Fail> {
   const result = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${meetingId}, 2))`;
-    const note = await tx.meeting.findFirst({ where: { id: meetingId, workspaceId: session.workspaceId, deletedAt: null }, select: { summary: true, previousSummary: true } });
+    await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Meeting" WHERE "id" = ${meetingId} AND "workspaceId" = ${session.workspaceId} AND "deletedAt" IS NULL FOR UPDATE`;
+    const note = await tx.meeting.findFirst({ where: { id: meetingId, workspaceId: session.workspaceId, deletedAt: null }, select: { summary: true, previousSummary: true, updatedAt: true } });
     if (!note) return fail("This note no longer exists.");
     if (note.previousSummary === null) return fail("There's no earlier version to restore.");
     const updated = await tx.meeting.update({
       where: { id: meetingId },
-      data: { summary: note.previousSummary, previousSummary: note.summary, summaryEditedAt: new Date() },
+      data: { summary: note.previousSummary, previousSummary: note.summary, summaryEditedAt: new Date(), updatedAt: nextMeetingVersion(note.updatedAt) },
       select: { updatedAt: true },
     });
     return { ok: true as const, version: updated.updatedAt.toISOString() };

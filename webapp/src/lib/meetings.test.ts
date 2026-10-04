@@ -11,6 +11,7 @@ import {
   updateActionItem,
   renameMeeting,
   ValidationError,
+  DesktopSyncConflictError,
 } from "./meetings";
 import type { CreateMeetingRequest } from "./types";
 
@@ -136,7 +137,10 @@ describe("upsertMeeting", () => {
     expect(openItems[0]?.id).toBe("action-1");
     expect(openItems[0]?.meeting.title).toBe("Weekly sync");
 
+    const meetingBeforeActionEdit = await prisma.meeting.findUniqueOrThrow({ where: { id: "11111111-1111-1111-1111-111111111111" } });
     expect(await updateActionItem(WORKSPACE_ID, "action-1", { status: "done", dueAt: null })).toBe(true);
+    const meetingAfterActionEdit = await prisma.meeting.findUniqueOrThrow({ where: { id: "11111111-1111-1111-1111-111111111111" } });
+    expect(meetingAfterActionEdit.updatedAt.getTime()).toBeGreaterThan(meetingBeforeActionEdit.updatedAt.getTime());
     await expect(
       updateActionItem(WORKSPACE_ID, "action-1", { status: "invalid" as "open" }),
     ).rejects.toThrow("status must be open or done");
@@ -185,6 +189,32 @@ describe("upsertMeeting", () => {
 
     const detail = await getMeeting(WORKSPACE_ID, input.id);
     expect(detail?.summary).toBe("Updated summary after re-sync.");
+  });
+
+  it("rejects stale desktop writes but accepts a retry whose content is already saved", async () => {
+    const input = sampleMeeting();
+    const created = await upsertMeeting(input, WORKSPACE_ID, undefined, { expectedUpdatedAt: null });
+    const retry = await upsertMeeting(input, WORKSPACE_ID, undefined, { expectedUpdatedAt: null });
+    expect(retry.updatedAt).toEqual(created.updatedAt);
+
+    await renameMeeting(WORKSPACE_ID, input.id, "Edited online");
+    await expect(
+      upsertMeeting({ ...input, summary: "Stale desktop edit" }, WORKSPACE_ID, undefined, { expectedUpdatedAt: created.updatedAt }),
+    ).rejects.toBeInstanceOf(DesktopSyncConflictError);
+    expect((await getMeeting(WORKSPACE_ID, input.id))?.title).toBe("Edited online");
+  });
+
+  it("allows a desktop update against the exact last-synced version", async () => {
+    const input = sampleMeeting();
+    const created = await upsertMeeting(input, WORKSPACE_ID, undefined, { expectedUpdatedAt: null });
+    const changed = await upsertMeeting(
+      { ...input, summary: "Updated from desktop." },
+      WORKSPACE_ID,
+      undefined,
+      { expectedUpdatedAt: created.updatedAt },
+    );
+    expect(changed.updatedAt.getTime()).toBeGreaterThan(created.updatedAt.getTime());
+    expect((await getMeeting(WORKSPACE_ID, input.id))?.summary).toBe("Updated from desktop.");
   });
 
   it("keeps a renamed title and chosen template when a managed registration is retried", async () => {
