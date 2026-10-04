@@ -66,10 +66,12 @@ call or real archive import was completed.
 - [x] Cover managed worker polling authorization, database-selected workspace
       dispatch, idle response, claim races, and safe unexpected-error handling;
       remove duplicate error logging from the polling route.
+- [x] Fix import duration rounding at the hour boundary and show correct byte
+      labels for empty and sub-kilobyte files.
 - Verified in this pass: helper fmt, Clippy, workspace tests and build; extension
   typecheck, 645 tests, coverage and build; webapp Prisma generation, lint,
-  typecheck, 818 PostgreSQL-backed tests (90.39% statement, 83.88% branch,
-  91.33% function, 93.80% line coverage), and production build. Live
+  typecheck, 822 PostgreSQL-backed tests (90.67% statement, 84.11% branch,
+  91.76% function, 94.02% line coverage), and production build. Live
   cross-platform audio, real workspace-token recovery,
   Chrome capture, and installed archive migration remain unverified.
 

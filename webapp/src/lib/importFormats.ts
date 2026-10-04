@@ -30,16 +30,19 @@ export const IMPORT_MAX_BYTES = 1_900_000_000;
 
 /** "1 h 5 min", "42 min", "under a minute". */
 export function formatImportDuration(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds));
+  const total = Number.isFinite(seconds) ? Math.max(0, Math.round(seconds)) : 0;
   if (total < 60) return "under a minute";
-  const hours = Math.floor(total / 3_600);
-  const minutes = Math.round((total % 3_600) / 60);
-  if (hours === 0) return `${minutes} min`;
+  const totalMinutes = Math.round(total / 60);
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
 }
 
 export function formatImportBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1_000) return `${Math.round(bytes)} B`;
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
   if (bytes >= 1_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1_000))} KB`;
+  return `${Math.round(bytes / 1_000)} KB`;
 }
