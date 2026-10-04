@@ -3,8 +3,10 @@
 Use the Chrome extension to capture browser-tab audio, or the Tauri desktop app
 to capture browser and desktop meetings and create local notes. Extension
 recordings must be exported and imported into desktop for transcription.
-Optional web-app sync sends finished desktop note text to one workspace; it
-does not sync notes or settings back to desktop or the extension.
+Optional workspace sync sends finished desktop notes to the web app and copies
+workspace notes into the desktop library. Later web edits, deletions, and
+settings do not sync back yet. Extension recordings still need archive export
+and import.
 
 For the release and installation model, including direct platform downloads,
 first-open warnings, checksums, and the Docker-only webapp option, see the
@@ -68,8 +70,9 @@ separate local tracks. The desktop app imports that audio and makes notes.
    Teams, Slack, and other standalone desktop calls directly.
 
 The optional webapp stores finished desktop notes synced to a workspace you
-choose. This is currently one-way sync; extension captures must be imported in
-desktop first, and settings are maintained separately in each app.
+choose. Workspace notes are also copied into the desktop library for local
+viewing. Web edits, deletions, and settings are not synchronized back, and extension
+captures must still be exported and imported in desktop.
 
 ### Recorder prerequisites
 

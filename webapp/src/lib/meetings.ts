@@ -10,6 +10,46 @@ import { notifyNoteReady } from "./integrations";
 
 export class ValidationError extends Error {}
 
+export async function listDesktopSyncMeetings(
+  workspaceId: string,
+  cursor: { updatedAt: Date; id?: string } | null,
+  limit: number,
+) {
+  return prisma.meeting.findMany({
+    where: {
+      workspaceId,
+      deletedAt: null,
+      ...(cursor ? (cursor.id
+        ? {
+            OR: [
+              { updatedAt: { gt: cursor.updatedAt } },
+              { updatedAt: cursor.updatedAt, id: { gt: cursor.id } },
+            ],
+          }
+        : { updatedAt: { gte: cursor.updatedAt } }) : {}),
+    },
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    take: limit,
+    select: {
+      id: true,
+      title: true,
+      mode: true,
+      startedAt: true,
+      endedAt: true,
+      summary: true,
+      updatedAt: true,
+      transcript: {
+        orderBy: { order: "asc" },
+        select: { speaker: true, text: true, timestamp: true },
+      },
+      actionItems: {
+        orderBy: { id: "asc" },
+        select: { id: true, text: true, owner: true, status: true, dueAt: true, completedAt: true },
+      },
+    },
+  });
+}
+
 const MAX_ID_LENGTH = 128;
 const MAX_TITLE_LENGTH = 200;
 const MAX_SUMMARY_LENGTH = 100_000;

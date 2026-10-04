@@ -3,6 +3,7 @@ import { prisma } from "./db";
 import { drainObjectDeletions, getObject, putObject } from "./objectStorage";
 import {
   upsertMeeting,
+  listDesktopSyncMeetings,
   listMeetings,
   getMeeting,
   deleteMeeting,
@@ -270,6 +271,28 @@ describe("upsertMeeting", () => {
     expect(meetings[0]?.actionItems[0]?.id).toBe("globally-owned-action");
     expect(meetings[1]?.actionItems[0]?.id).not.toBe("globally-owned-action");
     expect(meetings[1]?.actionItems[0]?.text).toBe("A different task");
+  });
+});
+
+describe("listDesktopSyncMeetings", () => {
+  it("pages workspace notes by update cursor and excludes other workspaces", async () => {
+    const firstId = "11111111-1111-1111-1111-111111111111";
+    const secondId = "22222222-2222-2222-2222-222222222222";
+    await upsertMeeting(sampleMeeting({ id: firstId }), WORKSPACE_ID);
+    await upsertMeeting(sampleMeeting({ id: secondId, title: "Second note" }), WORKSPACE_ID);
+    await upsertMeeting(sampleMeeting({ id: "33333333-3333-3333-3333-333333333333" }), OTHER_WORKSPACE_ID);
+
+    const firstPage = await listDesktopSyncMeetings(WORKSPACE_ID, null, 1);
+    expect(firstPage).toHaveLength(1);
+    expect(firstPage[0].id).toBe(firstId);
+    expect(firstPage[0].transcript).toHaveLength(2);
+    expect(firstPage[0].actionItems).toHaveLength(1);
+
+    const secondPage = await listDesktopSyncMeetings(WORKSPACE_ID, {
+      updatedAt: firstPage[0].updatedAt,
+      id: firstPage[0].id,
+    }, 10);
+    expect(secondPage.map((meeting) => meeting.id)).toEqual([secondId]);
   });
 });
 

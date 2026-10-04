@@ -1450,7 +1450,7 @@ async fn desktop_test_webapp(url: String, token: String) -> Result<WebappConnect
             .filter(|token| !token.trim().is_empty())
             .ok_or_else(|| "Enter a desktop sync token first.".to_string())?,
     };
-    let client = reqwest::Client::builder()
+    let client = notetaker_core::providers::http_client_builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none())
@@ -2044,6 +2044,7 @@ async fn desktop_sync_existing_notes(
     context: tauri::State<'_, DesktopCommandContext>,
 ) -> Result<usize, String> {
     let store = context.app.store.clone();
+    let sync = context.sync.clone();
     let ids = tokio::task::spawn_blocking(move || {
         let scan = store
             .scan_meetings()
@@ -2053,6 +2054,8 @@ async fn desktop_sync_existing_notes(
             if meta.state == notetaker_core::storage::MeetingState::Processed
                 && meta.managed_account_id.is_none()
                 && meta.managed_workspace_id.is_none()
+                && !meta.workspace_import
+                && !sync.is_legacy_workspace_import(meta.id)
                 && store.load_summary(meta.id).ok().flatten().is_some()
             {
                 ids.push(meta.id);
@@ -2142,6 +2145,13 @@ async fn run_desktop_sync(
     if let (Some(url), Some(token)) = (url, token.filter(|token| !token.trim().is_empty())) {
         if let Err(error) = sync.sync_pending(app.store.clone(), &url, &token).await {
             tracing::warn!(%error, "desktop note sync attempt failed");
+        }
+        if let Err(error) = sync
+            .pull_workspace_notes(app.store.clone(), &url, &token)
+            .await
+        {
+            sync.record_sync_error(error.clone());
+            tracing::warn!(%error, "workspace note pull failed");
         }
     }
     let configured = !preferences.webapp_url.is_empty()

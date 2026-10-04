@@ -10,7 +10,7 @@ export const SITE = {
   name: "AI Notetaker",
   tagline: "Meeting notes without the meeting bot.",
   description:
-    "Capture browser meetings with the Chrome extension or desktop app, and capture native desktop meetings with the macOS, Windows, or Linux app. The desktop app turns recordings into local notes; optional one-way workspace sync sends finished note text without raw audio or provider keys.",
+    "Capture browser meetings with the Chrome extension or desktop app, and capture native desktop meetings with the macOS, Windows, or Linux app. Optional workspace sync sends finished desktop note text to the web app and copies workspace notes into the desktop library. Raw audio and provider keys stay on the device.",
   repoUrl: "https://github.com/apercallc/ai-notetaker",
   releasesUrl: "https://github.com/apercallc/ai-notetaker/releases/latest",
   licenseUrl: "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE",
@@ -63,7 +63,7 @@ export const FAQS: Faq[] = [
     question: "What is the difference between Hosted AI and using my own keys?",
     topics: ["setup", "pricing"],
     answer:
-      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. You can separately sign in to a web-app workspace and create a revocable desktop sync token. That optional sync sends finished desktop notes to the web app; it does not sync web-app notes or settings back to the desktop app or extension.",
+      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. You can separately sign in to a web-app workspace and create a revocable desktop sync token. Sync sends finished desktop notes to the web app and copies workspace notes into the desktop library. Web edits, deletions, and settings do not sync back, and extension recordings still need archive export and import.",
   },
   {
     question: "How much does AI Notetaker cost?",
@@ -158,7 +158,7 @@ export const FAQS: Faq[] = [
   {
     question: "Where can I read my notes?",
     topics: ["setup"],
-    answer: "Desktop notes are available in the desktop app. If you enable desktop-to-web-app sync, finished note text appears in your selected workspace. Browser extension recordings remain in Chrome until you export and import them into the desktop app; the extension and desktop app do not yet share one live notes library or synchronized settings.",
+    answer: "If you enable workspace sync, finished desktop notes appear in your selected workspace, and workspace notes are copied into the desktop library for local viewing. Later web edits, deletions, and settings are not synced back. Browser extension recordings remain in Chrome until you export and import them into the desktop app, so the extension does not yet share the live library.",
   },
 ];
 

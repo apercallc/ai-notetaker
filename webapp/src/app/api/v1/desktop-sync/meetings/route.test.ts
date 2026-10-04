@@ -1,20 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { authenticateDesktopSync, upsertMeeting, apiErrorResponse } = vi.hoisted(() => ({
+const { authenticateDesktopSync, upsertMeeting, listDesktopSyncMeetings, apiErrorResponse } = vi.hoisted(() => ({
   authenticateDesktopSync: vi.fn(),
   upsertMeeting: vi.fn(),
+  listDesktopSyncMeetings: vi.fn(),
   apiErrorResponse: vi.fn(() => Response.json({ error: "internal error" }, { status: 500 })),
 }));
 
 vi.mock("@/lib/desktopSyncAuth", () => ({ authenticateDesktopSync }));
-vi.mock("@/lib/meetings", () => ({ upsertMeeting }));
+vi.mock("@/lib/meetings", () => ({ upsertMeeting, listDesktopSyncMeetings }));
 vi.mock("@/lib/apiErrors", () => ({
   apiErrorResponse,
   jsonError: (error: string, status: number, requestId: string) => Response.json({ error, requestId }, { status }),
   requestIdFrom: () => "desktop-sync-test",
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const endpoint = "https://notes.example.test/api/v1/desktop-sync/meetings";
 
@@ -22,6 +23,47 @@ beforeEach(() => {
   vi.clearAllMocks();
   authenticateDesktopSync.mockResolvedValue({ ok: true, auth: { userId: "user-1", workspaceId: "workspace-1", workspaceName: "Product" } });
   upsertMeeting.mockResolvedValue({ id: "meeting-1", title: "Planning" });
+  listDesktopSyncMeetings.mockResolvedValue([]);
+});
+
+describe("GET /api/v1/desktop-sync/meetings", () => {
+  it("returns authenticated workspace notes with a stable continuation cursor", async () => {
+    const updatedAt = new Date("2026-10-04T12:00:00.000Z");
+    listDesktopSyncMeetings.mockResolvedValueOnce([{
+      id: "meeting-1", title: "Planning", mode: "general",
+      startedAt: new Date("2026-10-04T10:00:00.000Z"), endedAt: new Date("2026-10-04T10:30:00.000Z"),
+      summary: "Plan", updatedAt,
+      transcript: [{ speaker: "you", text: "Ship it", timestamp: null }],
+      actionItems: [{ id: "action-1", text: "Ship", owner: null, status: "open", dueAt: null, completedAt: null }],
+    }]);
+    const response = await GET(new Request(endpoint + "?updatedAt=2026-10-03T12%3A00%3A00.000Z&id=meeting-0"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      hasMore: false,
+      nextCursor: { updatedAt: "2026-10-04T12:00:00.000Z", id: "meeting-1" },
+      meetings: [{ title: "Planning", transcript: [{ text: "Ship it", timestamp: null }], actionItems: [{ text: "Ship" }] }],
+    });
+    expect(listDesktopSyncMeetings).toHaveBeenCalledWith("workspace-1", {
+      updatedAt: new Date("2026-10-03T12:00:00.000Z"), id: "meeting-0",
+    }, 51);
+
+    await GET(new Request(endpoint + "?updatedAt=2026-10-03T12%3A00%3A00.000Z"));
+    expect(listDesktopSyncMeetings).toHaveBeenLastCalledWith("workspace-1", {
+      updatedAt: new Date("2026-10-03T12:00:00.000Z"),
+    }, 51);
+  });
+
+  it("rejects malformed cursors and propagates token scope failures", async () => {
+    const invalid = await GET(new Request(endpoint + "?updatedAt=bad&id=meeting-1"));
+    expect(invalid.status).toBe(400);
+    expect(listDesktopSyncMeetings).not.toHaveBeenCalled();
+
+    authenticateDesktopSync.mockResolvedValueOnce({ ok: false, status: 403, message: "workspace access removed" });
+    const denied = await GET(new Request(endpoint));
+    expect(denied.status).toBe(403);
+    expect(listDesktopSyncMeetings).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/v1/desktop-sync/meetings", () => {

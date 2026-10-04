@@ -78,7 +78,7 @@ export function softwareNode(origin: string): Node {
       "Keeps your microphone and the meeting's audio as separate channels",
       "Transcript, summary, decisions and action items for every meeting",
       "Local use with your own AI provider keys and no required account",
-      "Optional one-way sync from desktop to web workspace for finished note text",
+      "Optional workspace sync uploads finished desktop note text and imports workspace notes into the desktop library",
       "Open source under the MIT license",
     ],
     offers: [

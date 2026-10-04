@@ -6,8 +6,10 @@ Use the Chrome extension to capture a browser meeting tab, or the cross-platform
 desktop app to capture browser and desktop meetings and create local notes. The
 extension saves tab and microphone audio in Chrome; export its archive and
 import it in desktop for transcription. Add your own transcription and summary
-API keys in desktop Settings. Optional one-way workspace sync sends finished
-desktop notes to the web app. Audio and provider keys stay on this device.
+API keys in desktop Settings. Optional workspace sync sends finished desktop
+notes to the web app and copies workspace notes into the desktop library.
+Web edits, deletions, and settings do not sync back yet; extension recordings
+still need archive export and import. Audio and provider keys stay on this device.
 
 > **Status:** the desktop window and local recording flow are in development.
 > Installers and cross-platform acceptance are not ready yet. The Chrome

@@ -53,13 +53,13 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
               <ul className="mk-bullets">
                 <li>create a workspace token from web-app Settings → Integrations</li>
                 <li>connect that workspace in the desktop app</li>
-                <li>sync completed desktop transcripts, summaries and action items to the web app</li>
+                <li>sync completed desktop notes to the web app and import workspace notes into desktop</li>
                 <li>keep raw audio and provider keys on this device</li>
               </ul>
             </div>
           </div>
           <p className="mk-small mk-mt-m">
-            Sync currently sends finished desktop notes to the web app. Notes and settings do not sync back to the desktop app or extension. Browser extension recordings must be exported and imported into desktop first.
+            Sync sends finished desktop notes to the workspace and copies workspace notes into the desktop library. Web edits, deletions, and settings do not sync back yet. Browser extension recordings still need archive export and import.
           </p>
         </div>
       </section>
@@ -350,7 +350,7 @@ export function DownloadView({
               <p><a className="mk-btn mk-btn--solid" href={SITE.releasesUrl}>View all releases</a></p>
             </div>
           )}
-          <p className="mk-small mk-mt-m">Local desktop recording uses your provider keys and keeps audio on this device. Optional sync sends finished desktop notes to a web workspace. Notes and settings do not currently sync back to desktop.</p>
+          <p className="mk-small mk-mt-m">Local desktop recording uses your provider keys and keeps audio on this device. Optional sync sends finished desktop notes to a web workspace and copies workspace notes into desktop. Web edits, deletions, and settings do not sync back yet.</p>
         </div>
       </section>
       <section id="browser-extension" className="mk-section mk-section--flush" aria-labelledby="browser-extension-title">
@@ -581,8 +581,8 @@ export function PrivacyView() {
             <p>
               AI Notetaker has two modes and this notice covers both: free local mode with your own AI keys, and Hosted
               AI, the service we operate. Optional desktop sync is a separate authenticated connection that sends
-              finished note text from desktop to a workspace. It does not sync workspace notes or settings back to
-              desktop or the extension. This notice also covers the website.
+              finished note text from desktop to a workspace and copies workspace notes into the desktop library.
+              Web edits, deletions, and settings do not sync back yet, and extension recordings still need archive import. This notice also covers the website.
             </p>
 
             <h2>This website</h2>
@@ -598,7 +598,7 @@ export function PrivacyView() {
               <li>Raw microphone and meeting audio is saved on your device before any provider request. The two channels stay separate.</li>
               <li>Your provider keys stay in the desktop app&apos;s operating-system credential store. Existing extension users keep their keys in protected browser storage. We never receive them.</li>
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
-              <li>If you connect a web-app workspace, only finished desktop note text syncs there. Raw audio and provider keys stay on this device; workspace notes and settings do not sync back.</li>
+              <li>If you connect a web-app workspace, finished desktop note text syncs there and workspace notes are copied into the desktop library. Later web edits, deletions, and settings do not sync back. Raw audio and provider keys remain on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
               <li>Google Drive export and a self-hosted history server are optional. Their operators receive what you send them.</li>
             </ul>

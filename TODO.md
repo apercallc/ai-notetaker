@@ -20,9 +20,18 @@
 - [x] Align website, extension, desktop settings, README, and setup-guide copy:
       extension captures browser tabs, desktop captures browser and native
       desktop calls, and desktop creates/optionally syncs finished notes.
-- [ ] Build a shared notes/settings experience across extension, desktop, and
-      web app. Current desktop sync is one-way desktop → web app; extension
-      recordings require archive export/import, and settings remain per app.
+- [ ] Complete shared notes/settings across extension, desktop, and web app.
+      Desktop now uploads finished notes and imports workspace notes as local
+      copies. Web edits do not update those copies, settings remain per app,
+      and extension recordings still require archive export/import.
+- [ ] Define and implement safe conflict handling for web-edited notes and
+      deletions before updating existing desktop copies.
+- [ ] Sync an agreed set of non-secret preferences across web and desktop;
+      provider keys, auth tokens, and device-specific capture choices stay local.
+- [ ] Show workspace notes in the extension through its authenticated desktop
+      bridge, without copying secrets into extension storage.
+- [ ] Add resumable chunked extension-audio handoff over Native Messaging;
+      preserve IndexedDB source recordings until desktop durability is confirmed.
 - [ ] Verify the complete flow in an installed Chrome extension and live Google
       Meet call: record, stop, export `.ntarchive`, import in the desktop app,
       and create notes with real desktop provider keys. Unit tests and a build
@@ -38,6 +47,21 @@ browser smoke now connects its fake peer call after an ICE fixture fix, but its
 direct capture attempt fell back to tab capture and Chrome rejected the missing
 toolbar invocation. The smoke therefore does not prove recording. No live Meet
 call or real archive import was completed.
+
+## Cross-surface production hardening — 2026-10-04
+
+- [x] Keep imported-workspace provenance on each local meeting, retain the
+      legacy outbox index for upgrades, and validate imported text with the
+      same UTF-16 limits as the web API.
+- [x] Make the desktop sync action disclose that it uploads pending desktop
+      notes and imports workspace notes, with accessible progress and results.
+- [x] Align user-facing copy across desktop, extension, setup guides, and web
+      pages on web edits, deletions, settings, and extension archive import.
+- Verified in this pass: helper fmt, Clippy, workspace tests and build; extension
+  typecheck, 645 tests, coverage and build; webapp Prisma generation, lint,
+  typecheck, 804 PostgreSQL-backed tests, coverage, build, and the privacy-copy
+  regression test. Live cross-platform audio, real workspace-token recovery,
+  Chrome capture, and installed archive migration remain unverified.
 
 ## Desktop-first app migration — 2026-10-03
 
@@ -83,9 +107,17 @@ The one-app workflow is not shipped.
 - [x] Add workspace-bound `desktop_notes_sync` API tokens and authenticated
       `/api/v1/desktop-sync` endpoints. Tokens are revocable from web-app
       Settings → Integrations and recheck workspace membership on each request.
+- [x] Add authenticated workspace-to-desktop note import with a durable
+      updatedAt/id cursor and duplicate-safe local copies. This does not yet
+      propagate web edits or deletes into existing desktop notes.
+- [x] Store workspace-import provenance with each local note to avoid repeated
+      growth and scans in the sync outbox; retain reads of the legacy index for
+      local upgrade compatibility.
 - [x] Store the sync token in the OS credential vault; sync finished text only,
       with a durable ID-only outbox, restart retry, existing-note sync, and
       visible status. Raw audio and provider keys never leave the device.
+- [x] Label the combined upload/import action "Sync now", disable it while
+      running, and announce completion or failure accessibly.
 - [x] Allow nullable transcript timestamps so sync preserves segment order
       without inventing times. Existing exports and Google/Notion outputs handle
       untimed segments.

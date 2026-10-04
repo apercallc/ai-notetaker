@@ -3,7 +3,7 @@
 
   const invoke = window.__TAURI__?.core?.invoke;
   const listen = window.__TAURI__?.event?.listen;
-  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, noticeTimer: 0 };
+  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const prettyDate = (value) => {
@@ -469,11 +469,11 @@
         <div class="form-field wide"><label class="field-label" for="vocabulary">Custom vocabulary <span class="fine-print">one term per line</span></label><textarea class="text-area" id="vocabulary" placeholder="Product names, acronyms, and people">${esc(vocabulary)}</textarea></div>
         <div class="form-field wide"><label class="field-label" for="instructions">Summary instructions <span class="fine-print">optional</span></label><textarea class="text-area" id="instructions" maxlength="4000" placeholder="What should summaries focus on?">${esc(p.customSummaryInstructions)}</textarea></div></div>
       </section>
-      <section class="card settings-card" id="settings-sync"><h2 tabindex="-1">Web app sync</h2><p>Optional. Local recording works without an account. Send finished notes from this desktop app to a selected web workspace.</p>
+      <section class="card settings-card" id="settings-sync"><h2 tabindex="-1">Web app sync</h2><p>Optional. Local recording works without an account. Sync finished desktop notes to a workspace and copy workspace notes into this desktop library.</p>
         <div class="form-grid"><div class="form-field wide"><label class="field-label" for="webapp-url">Web-app URL</label><input class="text-input" id="webapp-url" type="url" value="${esc(p.webappUrl)}" placeholder="https://notes.example.com" autocomplete="url" /></div>
         <div class="form-field wide"><label class="field-label" for="webapp-token">Desktop sync token</label><div class="key-row"><input class="text-input" id="webapp-token" type="password" autocomplete="new-password" placeholder="${s.hasWebappToken ? "Saved securely · blank keeps current token" : "Paste desktop sync token"}" /><button type="button" class="secondary-button" id="test-webapp">Test connection</button></div><label class="key-status" id="webapp-status">${s.hasWebappToken ? (state.snapshot.webappSync.configured ? `Sync enabled · ${state.snapshot.webappSync.pending} note(s) pending` : "Token saved. Check the URL and connection.") : "No sync token saved."}</label><label class="fine-print"><input type="checkbox" id="clear-webapp-token" /> Remove saved token</label></div></div>
-        <div class="privacy-note">To connect: sign in to the web app, open Settings → Integrations, create a “Desktop note sync” token for the selected workspace, then paste it here. This is one-way sync from desktop to web app: only finished transcripts, summaries, and action items sync. Web-app notes and settings do not sync back to desktop or the extension. Raw audio and provider API keys stay on this device.</div>
-        ${state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last synced ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "No notes synced yet"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing">Sync existing notes</button><button type="button" class="small-button" id="retry-sync" ${state.snapshot.webappSync.pending ? "" : "disabled"}>Retry pending (${state.snapshot.webappSync.pending})</button></div></div>` : ""}
+        <div class="privacy-note">To connect: sign in to the web app, open Settings → Integrations, create a “Desktop note sync” token for the selected workspace, then paste it here. Finished desktop notes sync to the workspace, and workspace notes are copied into this desktop library for local viewing. Web edits, deletions, and settings are not synchronized back yet. Raw audio and provider API keys stay on this device. Extension recordings still need an archive import.</div>
+        ${state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Workspace notes are imported when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} upload(s) pending` : ""}</button></div><p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and importing workspace notes…" : state.syncAnnouncement)}</p><p class="fine-print">Sync now uploads pending desktop notes and copies workspace notes into this library.</p></div>` : ""}
       </section>
       <section class="card settings-card" id="settings-import"><h2 tabindex="-1">Import from the extension</h2><p>Import a full archive to bring over new browser meeting recordings, older notes, partial transcripts, and any raw audio still saved by the extension. Older completed-call audio may already have been removed after notes were saved. API keys, web-app credentials, and Google connections stay separate. Import copies data; it never removes the extension source.</p>
         <button type="button" class="secondary-button" id="import-desktop-audio-transfer">Choose full archive</button>
@@ -590,13 +590,33 @@
   }
 
   async function syncExisting() {
+    state.syncInProgress = true;
+    state.syncAnnouncement = "";
+    updateSyncFeedback();
     try { const count = await invoke("desktop_sync_existing_notes"); notify(`Queued ${count} finished note${count === 1 ? "" : "s"} for sync.`); await refresh(); }
-    catch (error) { notify(String(error), "error"); }
+    catch (error) { state.syncInProgress = false; state.syncAnnouncement = `Sync could not start: ${String(error)}`; updateSyncFeedback(); notify(String(error), "error"); }
   }
 
   async function retrySync() {
+    state.syncInProgress = true;
+    state.syncAnnouncement = "";
+    updateSyncFeedback();
     try { await invoke("desktop_retry_webapp_sync"); await refresh(); }
-    catch (error) { notify(String(error), "error"); }
+    catch (error) { state.syncInProgress = false; state.syncAnnouncement = `Sync could not start: ${String(error)}`; updateSyncFeedback(); notify(String(error), "error"); }
+  }
+
+  function updateSyncFeedback() {
+    const status = $("#sync-status");
+    if (status) status.textContent = state.syncInProgress
+      ? "Syncing desktop notes and importing workspace notes…"
+      : state.syncAnnouncement;
+    const retry = $("#retry-sync");
+    if (retry) {
+      retry.disabled = state.syncInProgress;
+      retry.textContent = state.syncInProgress ? "Syncing…" : "Sync now";
+    }
+    const existing = $("#sync-existing");
+    if (existing) existing.disabled = state.syncInProgress;
   }
 
   async function saveSettings(event) {
@@ -641,7 +661,13 @@
       refresh();
     }
   }).catch(() => {});
-  if (listen) listen("webapp-sync-updated", () => refresh()).catch(() => {});
+  if (listen) listen("webapp-sync-updated", (event) => {
+    state.syncInProgress = false;
+    const error = event.payload?.lastError;
+    state.syncAnnouncement = error ? `Sync finished with an issue: ${error}` : "Sync complete.";
+    updateSyncFeedback();
+    void refresh();
+  }).catch(() => {});
   refresh();
   setInterval(() => { if (!state.busy && state.page !== "settings") refresh(); }, 15000);
 })();

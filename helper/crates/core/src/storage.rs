@@ -42,6 +42,10 @@ pub struct MeetingMeta {
     pub id: Uuid,
     #[serde(default)]
     pub text_only_import: bool,
+    /// True when this note was copied from the optional web workspace.
+    /// Keeping provenance beside the note avoids an ever-growing sync index.
+    #[serde(default)]
+    pub workspace_import: bool,
     #[serde(default)]
     pub extension_source_status: Option<String>,
     #[serde(default)]
@@ -117,6 +121,7 @@ pub struct MeetingScan {
 #[derive(Debug, Clone)]
 pub struct ImportedMeetingNote {
     pub id: Uuid,
+    pub workspace_import: bool,
     pub title: String,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
@@ -199,6 +204,7 @@ impl MeetingStore {
         let meta = MeetingMeta {
             id,
             text_only_import: false,
+            workspace_import: false,
             extension_source_status: None,
             reprocessed_from: None,
             title: None,
@@ -236,6 +242,7 @@ impl MeetingStore {
         let meta = MeetingMeta {
             id: note.id,
             text_only_import: true,
+            workspace_import: note.workspace_import,
             extension_source_status: Some(note.extension_source_status),
             reprocessed_from: None,
             title: Some(note.title.trim().chars().take(200).collect()),
@@ -328,6 +335,7 @@ impl MeetingStore {
         let meta = MeetingMeta {
             id: note.id,
             text_only_import: false,
+            workspace_import: note.workspace_import,
             extension_source_status: Some(note.extension_source_status),
             reprocessed_from: None,
             title: Some(note.title.trim().chars().take(200).collect()),
@@ -469,6 +477,7 @@ impl MeetingStore {
         let meta = MeetingMeta {
             id,
             text_only_import: false,
+            workspace_import: false,
             extension_source_status: source.extension_source_status.clone(),
             reprocessed_from: Some(source_id),
             title: Some(title),
@@ -525,6 +534,7 @@ impl MeetingStore {
         let meta = MeetingMeta {
             id,
             text_only_import: false,
+            workspace_import: false,
             extension_source_status: None,
             reprocessed_from: None,
             title: None,
@@ -1382,6 +1392,20 @@ mod tests {
         (dir, store)
     }
 
+    #[test]
+    fn older_meeting_metadata_defaults_workspace_import_to_false() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        let path = store.meeting_dir(id).join("meta.json");
+        let mut meta: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        meta.as_object_mut().unwrap().remove("workspace_import");
+        fs::write(&path, serde_json::to_vec(&meta).unwrap()).unwrap();
+
+        assert!(!store.load_meta(id).unwrap().workspace_import);
+    }
+
     fn flag(offset_ms: u64, note: &str, position_percent: Option<u8>) -> FlaggedMoment {
         FlaggedMoment {
             offset_ms,
@@ -1495,6 +1519,7 @@ mod tests {
         let id = Uuid::new_v4();
         let note = ImportedMeetingNote {
             id,
+            workspace_import: false,
             title: "Imported meeting".into(),
             started_at: Utc::now(),
             ended_at: None,
@@ -1548,6 +1573,7 @@ mod tests {
             .import_note_with_audio(
                 ImportedMeetingNote {
                     id: source_id,
+                    workspace_import: false,
                     title: "Imported meeting".into(),
                     started_at: Utc::now(),
                     ended_at: None,

@@ -93,7 +93,10 @@ the one for whichever package you're touching in addition to this file.
 
 Capture, provider pipeline, Tauri app and tray, native loopback adapters,
 Native Messaging compatibility, and web-app APIs exist. The desktop app now
-owns setup, local recording/history, and optional workspace-scoped text sync.
+owns setup, local recording/history, and optional workspace-scoped note sync.
+Sync uploads finished desktop notes and imports workspace notes as local
+copies; later web edits, deletions, and settings do not sync back, and extension audio
+still uses manual archive export/import.
 Cross-platform release packaging, migration of raw extension audio and
 unfinished recordings, and real recording/sync acceptance remain open. A
 bounded transfer for completed text notes and non-secret preferences exists;

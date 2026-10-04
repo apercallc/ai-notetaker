@@ -8,8 +8,11 @@ under **Settings → Import from the extension** and select **Create notes from
 saved audio** on the imported recording. The desktop app owns transcription,
 summary generation, provider keys, and desktop-call capture.
 
-Extension recording controls stay in Chrome. Desktop provider settings, local
-notes, and optional one-way sync to a web workspace are configured separately.
+Extension recording controls stay in Chrome. Desktop provider settings and
+extension recordings remain local to their respective apps until you import an
+archive. Desktop workspace sync copies web-app notes into the desktop library,
+but the extension does not yet display that shared library. Web edits,
+deletions, and settings are not synchronized back.
 The extension retains older recordings, notes, provider settings, and Native
 Messaging compatibility during migration. **Open previous settings** provides
 access to those older controls. New browser recordings do not call an AI provider

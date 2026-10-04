@@ -23,10 +23,13 @@ public for setup diagnostics; no workspace-note route is anonymous.
 ### Desktop note sync
 
 The local BYOK desktop path does not need an account. Sync is explicitly
-optional. It sends completed note text to one selected workspace and never
-sends audio, provider keys, or local file paths. A durable local outbox retries
-failed requests after restart. Repeated POSTs with the same meeting ID upsert
-the same workspace record.
+optional. It sends completed note text to one selected workspace and imports
+workspace notes as local copies. It never sends audio, provider keys, or local
+file paths. A durable local outbox retries failed uploads after restart; an
+updatedAt/id cursor resumes note imports. Repeated POSTs with the same meeting
+ID upsert the same workspace record, while local imports skip existing IDs.
+Web edits and deletions are not propagated into desktop copies, and settings
+are not synchronized.
 
 `GET /api/v1/desktop-sync` checks the token and returns its bound workspace:
 
@@ -39,6 +42,13 @@ the same workspace record.
 remain null and segment order is preserved; clients must not fabricate timing.
 The route ignores browser CORS handling and authenticates the desktop token
 itself. It is available on managed and self-hosted hosting.
+
+`GET /api/v1/desktop-sync/meetings` returns up to 50 notes ordered by
+`updatedAt` and ID. Pass both `updatedAt` and `id` from `nextCursor` to fetch
+the next page. On a later sync, the desktop requests a one-second overlap by
+passing only `updatedAt`; duplicate local IDs are skipped. Every page is
+scoped to the token workspace and excludes trash. The desktop stores the
+cursor only after it has safely imported that page.
 
 ### `GET /api/health`
 
