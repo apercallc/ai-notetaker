@@ -22,8 +22,10 @@
       desktop calls, and desktop creates/optionally syncs finished notes.
 - [ ] Complete shared notes/settings across extension, desktop, and web app.
       Desktop now uploads finished notes and imports workspace notes as local
-      copies. Web edits do not update those copies, settings remain per app,
-      and extension recordings still require archive export/import.
+      copies; workspace pulls scan lightweight cursors and load note details in
+      small batches under the desktop response-size limit. Web edits do not
+      update those copies, settings remain per app, and extension recordings
+      still require archive export/import.
 - [ ] Define and implement safe conflict handling for web-edited notes and
       deletions before updating existing desktop copies. Desktop uploads now
       use an optimistic version check and preserve an identical retry after a

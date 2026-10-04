@@ -1,15 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { authenticateDesktopSync, upsertMeeting, listDesktopSyncMeetings, apiErrorResponse, DesktopSyncConflictError } = vi.hoisted(() => ({
+const {
+  authenticateDesktopSync,
+  upsertMeeting,
+  listDesktopSyncMeetingCandidates,
+  listDesktopSyncMeetingDetails,
+  apiErrorResponse,
+  DesktopSyncConflictError,
+} = vi.hoisted(() => ({
   authenticateDesktopSync: vi.fn(),
   upsertMeeting: vi.fn(),
-  listDesktopSyncMeetings: vi.fn(),
+  listDesktopSyncMeetingCandidates: vi.fn(),
+  listDesktopSyncMeetingDetails: vi.fn(),
   apiErrorResponse: vi.fn(() => Response.json({ error: "internal error" }, { status: 500 })),
   DesktopSyncConflictError: class DesktopSyncConflictError extends Error {},
 }));
 
 vi.mock("@/lib/desktopSyncAuth", () => ({ authenticateDesktopSync }));
-vi.mock("@/lib/meetings", () => ({ upsertMeeting, listDesktopSyncMeetings, DesktopSyncConflictError }));
+vi.mock("@/lib/meetings", () => ({
+  upsertMeeting,
+  listDesktopSyncMeetingCandidates,
+  listDesktopSyncMeetingDetails,
+  DesktopSyncConflictError,
+}));
 vi.mock("@/lib/apiErrors", () => ({
   apiErrorResponse,
   jsonError: (error: string, status: number, requestId: string) => Response.json({ error, requestId }, { status }),
@@ -24,13 +37,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   authenticateDesktopSync.mockResolvedValue({ ok: true, auth: { userId: "user-1", workspaceId: "workspace-1", workspaceName: "Product" } });
   upsertMeeting.mockResolvedValue({ id: "meeting-1", title: "Planning", updatedAt: new Date("2026-10-04T12:00:00.000Z") });
-  listDesktopSyncMeetings.mockResolvedValue([]);
+  listDesktopSyncMeetingCandidates.mockResolvedValue([]);
+  listDesktopSyncMeetingDetails.mockResolvedValue([]);
 });
 
 describe("GET /api/v1/desktop-sync/meetings", () => {
   it("returns authenticated workspace notes with a stable continuation cursor", async () => {
     const updatedAt = new Date("2026-10-04T12:00:00.000Z");
-    listDesktopSyncMeetings.mockResolvedValueOnce([{
+    listDesktopSyncMeetingCandidates.mockResolvedValueOnce([{
+      id: "meeting-1", updatedAt,
+    }]);
+    listDesktopSyncMeetingDetails.mockResolvedValueOnce([{
       id: "meeting-1", title: "Planning", mode: "general",
       startedAt: new Date("2026-10-04T10:00:00.000Z"), endedAt: new Date("2026-10-04T10:30:00.000Z"),
       summary: "Plan", updatedAt,
@@ -45,25 +62,84 @@ describe("GET /api/v1/desktop-sync/meetings", () => {
       nextCursor: { updatedAt: "2026-10-04T12:00:00.000Z", id: "meeting-1" },
       meetings: [{ title: "Planning", transcript: [{ text: "Ship it", timestamp: null }], actionItems: [{ text: "Ship" }] }],
     });
-    expect(listDesktopSyncMeetings).toHaveBeenCalledWith("workspace-1", {
+    expect(listDesktopSyncMeetingCandidates).toHaveBeenCalledWith("workspace-1", {
       updatedAt: new Date("2026-10-03T12:00:00.000Z"), id: "meeting-0",
     }, 51);
+    expect(listDesktopSyncMeetingDetails).toHaveBeenCalledWith("workspace-1", ["meeting-1"]);
 
     await GET(new Request(endpoint + "?updatedAt=2026-10-03T12%3A00%3A00.000Z"));
-    expect(listDesktopSyncMeetings).toHaveBeenLastCalledWith("workspace-1", {
+    expect(listDesktopSyncMeetingCandidates).toHaveBeenLastCalledWith("workspace-1", {
       updatedAt: new Date("2026-10-03T12:00:00.000Z"),
     }, 51);
+  });
+
+  it("loads note text in batches of four and preserves the cursor order", async () => {
+    const updatedAt = new Date("2026-10-04T12:00:00.000Z");
+    const candidates = Array.from({ length: 9 }, (_, index) => ({ id: `note-${index}`, updatedAt }));
+    listDesktopSyncMeetingCandidates.mockResolvedValueOnce(candidates);
+    listDesktopSyncMeetingDetails.mockImplementation(async (_workspaceId: string, ids: string[]) => ids.map((id) => ({
+      id,
+      title: id,
+      mode: "general",
+      startedAt: new Date("2026-10-04T10:00:00.000Z"),
+      endedAt: new Date("2026-10-04T10:30:00.000Z"),
+      summary: "Plan",
+      updatedAt,
+      transcript: [],
+      actionItems: [],
+    })));
+
+    const response = await GET(new Request(endpoint));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.meetings).toHaveLength(9);
+    expect(body.nextCursor).toEqual({ updatedAt: updatedAt.toISOString(), id: "note-8" });
+    expect(listDesktopSyncMeetingDetails.mock.calls.map(([, ids]) => ids)).toEqual([
+      ["note-0", "note-1", "note-2", "note-3"],
+      ["note-4", "note-5", "note-6", "note-7"],
+      ["note-8"],
+    ]);
+  });
+
+  it("returns a continuation cursor when every scanned note disappears before detail reads", async () => {
+    const updatedAt = new Date("2026-10-04T12:00:00.000Z");
+    listDesktopSyncMeetingCandidates.mockResolvedValueOnce(
+      Array.from({ length: 51 }, (_, index) => ({ id: `deleted-${index}`, updatedAt })),
+    );
+
+    const response = await GET(new Request(endpoint));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      meetings: [],
+      hasMore: true,
+      nextCursor: { updatedAt: updatedAt.toISOString(), id: "deleted-50" },
+    });
+    expect(listDesktopSyncMeetingDetails).toHaveBeenCalledTimes(13);
+  });
+
+  it("rejects one note that exceeds the desktop reader limit", async () => {
+    const updatedAt = new Date("2026-10-04T12:00:00.000Z");
+    listDesktopSyncMeetingCandidates.mockResolvedValueOnce([{ id: "large-note", updatedAt }]);
+    listDesktopSyncMeetingDetails.mockResolvedValueOnce([{
+      id: "large-note", title: "Large note", mode: "general",
+      startedAt: new Date("2026-10-04T10:00:00.000Z"), endedAt: new Date("2026-10-04T10:30:00.000Z"),
+      summary: "x".repeat(16 * 1024 * 1024), updatedAt, transcript: [], actionItems: [],
+    }]);
+
+    const response = await GET(new Request(endpoint));
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "workspace note is too large for desktop sync" });
   });
 
   it("rejects malformed cursors and propagates token scope failures", async () => {
     const invalid = await GET(new Request(endpoint + "?updatedAt=bad&id=meeting-1"));
     expect(invalid.status).toBe(400);
-    expect(listDesktopSyncMeetings).not.toHaveBeenCalled();
+    expect(listDesktopSyncMeetingCandidates).not.toHaveBeenCalled();
 
     authenticateDesktopSync.mockResolvedValueOnce({ ok: false, status: 403, message: "workspace access removed" });
     const denied = await GET(new Request(endpoint));
     expect(denied.status).toBe(403);
-    expect(listDesktopSyncMeetings).not.toHaveBeenCalled();
+    expect(listDesktopSyncMeetingCandidates).not.toHaveBeenCalled();
   });
 });
 

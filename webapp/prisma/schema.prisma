@@ -56,6 +56,7 @@ model Meeting {
 
   @@index([workspaceId, folderId, startedAt])
   @@index([workspaceId, deletedAt])
+  @@index([workspaceId, deletedAt, updatedAt, id])
   @@index([workspaceId, trashRootId])
   @@index([userId, startedAt])
   @@index([workspaceId, startedAt])

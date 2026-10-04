@@ -3,7 +3,8 @@ import { prisma } from "./db";
 import { drainObjectDeletions, getObject, putObject } from "./objectStorage";
 import {
   upsertMeeting,
-  listDesktopSyncMeetings,
+  listDesktopSyncMeetingCandidates,
+  listDesktopSyncMeetingDetails,
   listMeetings,
   getMeeting,
   deleteMeeting,
@@ -304,25 +305,45 @@ describe("upsertMeeting", () => {
   });
 });
 
-describe("listDesktopSyncMeetings", () => {
-  it("pages workspace notes by update cursor and excludes other workspaces", async () => {
+describe("desktop sync candidates", () => {
+  it("pages workspace notes by update cursor without loading note text", async () => {
     const firstId = "11111111-1111-1111-1111-111111111111";
     const secondId = "22222222-2222-2222-2222-222222222222";
     await upsertMeeting(sampleMeeting({ id: firstId }), WORKSPACE_ID);
     await upsertMeeting(sampleMeeting({ id: secondId, title: "Second note" }), WORKSPACE_ID);
     await upsertMeeting(sampleMeeting({ id: "33333333-3333-3333-3333-333333333333" }), OTHER_WORKSPACE_ID);
 
-    const firstPage = await listDesktopSyncMeetings(WORKSPACE_ID, null, 1);
+    const firstPage = await listDesktopSyncMeetingCandidates(WORKSPACE_ID, null, 1);
     expect(firstPage).toHaveLength(1);
     expect(firstPage[0].id).toBe(firstId);
-    expect(firstPage[0].transcript).toHaveLength(2);
-    expect(firstPage[0].actionItems).toHaveLength(1);
+    expect(firstPage[0]).not.toHaveProperty("summary");
+    const firstDetail = await listDesktopSyncMeetingDetails(WORKSPACE_ID, [firstPage[0].id]);
+    expect(firstDetail[0]?.transcript).toHaveLength(2);
+    expect(firstDetail[0]?.actionItems).toHaveLength(1);
 
-    const secondPage = await listDesktopSyncMeetings(WORKSPACE_ID, {
+    const secondPage = await listDesktopSyncMeetingCandidates(WORKSPACE_ID, {
       updatedAt: firstPage[0].updatedAt,
       id: firstPage[0].id,
     }, 10);
-    expect(secondPage.map((meeting) => meeting.id)).toEqual([secondId]);
+    expect(secondPage.map((candidate) => candidate.id)).toEqual([secondId]);
+  });
+});
+
+describe("bounded desktop sync reads", () => {
+  it("keeps candidate and detail reads scoped to the token workspace", async () => {
+    const firstId = "11111111-1111-1111-1111-111111111111";
+    const secondId = "22222222-2222-2222-2222-222222222222";
+    const foreignId = "33333333-3333-3333-3333-333333333333";
+    await upsertMeeting(sampleMeeting({ id: firstId }), WORKSPACE_ID);
+    await upsertMeeting(sampleMeeting({ id: secondId }), WORKSPACE_ID);
+    await upsertMeeting(sampleMeeting({ id: foreignId }), OTHER_WORKSPACE_ID);
+
+    const candidates = await listDesktopSyncMeetingCandidates(WORKSPACE_ID, null, 51);
+    expect(candidates.map((candidate) => candidate.id)).toEqual([firstId, secondId]);
+    expect(candidates[0]).not.toHaveProperty("summary");
+
+    const details = await listDesktopSyncMeetingDetails(WORKSPACE_ID, [firstId, foreignId]);
+    expect(details.map((meeting) => meeting.id)).toEqual([firstId]);
   });
 });
 

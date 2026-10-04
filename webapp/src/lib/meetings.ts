@@ -12,7 +12,8 @@ import { nextMeetingVersion } from "./meetingVersion";
 export class ValidationError extends Error {}
 export class DesktopSyncConflictError extends Error {}
 
-export async function listDesktopSyncMeetings(
+/** Lightweight ID scan lets desktop sync choose a bounded detail batch. */
+export async function listDesktopSyncMeetingCandidates(
   workspaceId: string,
   cursor: { updatedAt: Date; id?: string } | null,
   limit: number,
@@ -32,6 +33,16 @@ export async function listDesktopSyncMeetings(
     },
     orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
     take: limit,
+    select: { id: true, updatedAt: true },
+  });
+}
+
+/** Fetch full note text only for the current small sync batch. */
+export async function listDesktopSyncMeetingDetails(workspaceId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  return prisma.meeting.findMany({
+    where: { workspaceId, deletedAt: null, id: { in: ids } },
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
     select: {
       id: true,
       title: true,

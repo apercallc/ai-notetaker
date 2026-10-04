@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 import { authenticateDesktopSync } from "@/lib/desktopSyncAuth";
-import { DesktopSyncConflictError, listDesktopSyncMeetings, upsertMeeting } from "@/lib/meetings";
+import {
+  DesktopSyncConflictError,
+  listDesktopSyncMeetingCandidates,
+  listDesktopSyncMeetingDetails,
+  upsertMeeting,
+} from "@/lib/meetings";
 
 const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 const PULL_PAGE_SIZE = 50;
+const DETAIL_BATCH_SIZE = 4;
 
 export async function GET(request: Request) {
   const requestId = requestIdFrom(request);
@@ -25,50 +31,93 @@ export async function GET(request: Request) {
       return jsonError("invalid sync cursor", 400, requestId);
     }
 
-    const rows = await listDesktopSyncMeetings(
+    const candidates = await listDesktopSyncMeetingCandidates(
       auth.auth.workspaceId,
       updatedAt ? { updatedAt, ...(id ? { id } : {}) } : null,
       PULL_PAGE_SIZE + 1,
     );
-    const pageRows = rows.slice(0, PULL_PAGE_SIZE);
-    const meetings = pageRows.map((meeting) => ({
-      id: meeting.id,
-      title: meeting.title,
-      mode: meeting.mode,
-      startedAt: meeting.startedAt.toISOString(),
-      endedAt: meeting.endedAt.toISOString(),
-      summary: meeting.summary,
-      updatedAt: meeting.updatedAt.toISOString(),
-      transcript: meeting.transcript.map((segment) => ({
-        speaker: segment.speaker,
-        text: segment.text,
-        timestamp: segment.timestamp?.toISOString() ?? null,
-      })),
-      actionItems: meeting.actionItems.map((item) => ({
-        id: item.id,
-        text: item.text,
-        owner: item.owner,
-        status: item.status,
-        dueAt: item.dueAt?.toISOString() ?? null,
-        completedAt: item.completedAt?.toISOString() ?? null,
-      })),
-    }));
+    const meetings: Array<{
+      id: string;
+      title: string;
+      mode: string;
+      startedAt: string;
+      endedAt: string;
+      summary: string;
+      updatedAt: string;
+      transcript: Array<{ speaker: string; text: string; timestamp: string | null }>;
+      actionItems: Array<{ id: string; text: string; owner: string | null; status: string; dueAt: string | null; completedAt: string | null }>;
+    }> = [];
     // Reserve space for hasMore and the ID/timestamp cursor in the outer
     // response while keeping the body within the desktop's bounded reader.
     const pageLimit = MAX_REQUEST_BYTES - 512;
-    while (meetings.length > 1 && new TextEncoder().encode(JSON.stringify({ meetings })).byteLength > pageLimit) {
-      meetings.pop();
-      pageRows.pop();
+    const encoder = new TextEncoder();
+    let meetingsBytes = encoder.encode('{"meetings":[]}').byteLength;
+    let hasMore = false;
+    let processedCandidates = 0;
+    let lastCandidate: (typeof candidates)[number] | undefined;
+    let lastScannedCandidate: (typeof candidates)[number] | undefined;
+    for (let offset = 0; offset < candidates.length; offset += DETAIL_BATCH_SIZE) {
+      const batch = candidates.slice(offset, offset + DETAIL_BATCH_SIZE);
+      const details = await listDesktopSyncMeetingDetails(auth.auth.workspaceId, batch.map((candidate) => candidate.id));
+      const detailsById = new Map(details.map((meeting) => [meeting.id, meeting]));
+      for (const candidate of batch) {
+        processedCandidates += 1;
+        const meeting = detailsById.get(candidate.id);
+        if (!meeting) {
+          // This note was deleted between the candidate and detail reads, so
+          // it is safe to advance past it even though it is not in the page.
+          lastScannedCandidate = candidate;
+          continue;
+        }
+        const output = {
+          id: meeting.id,
+          title: meeting.title,
+          mode: meeting.mode,
+          startedAt: meeting.startedAt.toISOString(),
+          endedAt: meeting.endedAt.toISOString(),
+          summary: meeting.summary,
+          updatedAt: meeting.updatedAt.toISOString(),
+          transcript: meeting.transcript.map((segment) => ({
+            speaker: segment.speaker,
+            text: segment.text,
+            timestamp: segment.timestamp?.toISOString() ?? null,
+          })),
+          actionItems: meeting.actionItems.map((item) => ({
+            id: item.id,
+            text: item.text,
+            owner: item.owner,
+            status: item.status,
+            dueAt: item.dueAt?.toISOString() ?? null,
+            completedAt: item.completedAt?.toISOString() ?? null,
+          })),
+        };
+        const outputBytes = encoder.encode(JSON.stringify(output)).byteLength;
+        const projectedBytes = meetingsBytes + outputBytes + (meetings.length > 0 ? 1 : 0);
+        if (projectedBytes > pageLimit) {
+          if (meetings.length === 0) {
+            return jsonError("workspace note is too large for desktop sync", 413, requestId);
+          }
+          hasMore = true;
+          break;
+        }
+        meetings.push(output);
+        meetingsBytes = projectedBytes;
+        lastCandidate = candidate;
+        lastScannedCandidate = candidate;
+        if (meetings.length === PULL_PAGE_SIZE && processedCandidates < candidates.length) {
+          hasMore = true;
+          break;
+        }
+      }
+      if (hasMore) break;
     }
-    if (meetings.length === 1 && new TextEncoder().encode(JSON.stringify({ meetings })).byteLength > pageLimit) {
-      return jsonError("workspace note is too large for desktop sync", 413, requestId);
-    }
-    const hasMore = rows.length > pageRows.length;
-    const last = meetings.at(-1);
+    if (!hasMore && (processedCandidates < candidates.length || candidates.length > PULL_PAGE_SIZE)) hasMore = true;
     return NextResponse.json({
       meetings,
       hasMore,
-      nextCursor: last ? { updatedAt: last.updatedAt, id: last.id } : null,
+      nextCursor: lastScannedCandidate
+        ? { updatedAt: lastScannedCandidate.updatedAt.toISOString(), id: lastScannedCandidate.id }
+        : lastCandidate ? { updatedAt: lastCandidate.updatedAt.toISOString(), id: lastCandidate.id } : null,
     }, {
       headers: { "x-request-id": requestId, "cache-control": "no-store" },
     });
