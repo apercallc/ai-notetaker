@@ -61,10 +61,13 @@ call or real archive import was completed.
       notes and imports workspace notes, with accessible progress and results.
 - [x] Align user-facing copy across desktop, extension, setup guides, and web
       pages on web edits, deletions, settings, and extension archive import.
+- [x] Cover managed-job dispatch defaults, configured worker requests, invalid
+      URL configuration, and network-failure fallback.
 - Verified in this pass: helper fmt, Clippy, workspace tests and build; extension
   typecheck, 645 tests, coverage and build; webapp Prisma generation, lint,
-  typecheck, 804 PostgreSQL-backed tests, coverage, build, and the privacy-copy
-  regression test. Live cross-platform audio, real workspace-token recovery,
+  typecheck, 815 PostgreSQL-backed tests (90.27% statement, 83.76% branch,
+  91.33% function, 93.67% line coverage), and production build. Live
+  cross-platform audio, real workspace-token recovery,
   Chrome capture, and installed archive migration remain unverified.
 
 ## Desktop-first app migration — 2026-10-03
