@@ -32,10 +32,6 @@ export async function POST(request: Request) {
     if (isBenignJobRace(error)) {
       return new NextResponse(null, { status: 204, headers: { "x-request-id": requestId } });
     }
-    console.error("managed worker polling request failed", {
-      requestId,
-      error: error instanceof Error ? error.message : String(error),
-    });
     return apiErrorResponse(error, { requestId });
   }
 }

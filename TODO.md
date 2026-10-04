@@ -63,10 +63,13 @@ call or real archive import was completed.
       pages on web edits, deletions, settings, and extension archive import.
 - [x] Cover managed-job dispatch defaults, configured worker requests, invalid
       URL configuration, and network-failure fallback.
+- [x] Cover managed worker polling authorization, database-selected workspace
+      dispatch, idle response, claim races, and safe unexpected-error handling;
+      remove duplicate error logging from the polling route.
 - Verified in this pass: helper fmt, Clippy, workspace tests and build; extension
   typecheck, 645 tests, coverage and build; webapp Prisma generation, lint,
-  typecheck, 815 PostgreSQL-backed tests (90.27% statement, 83.76% branch,
-  91.33% function, 93.67% line coverage), and production build. Live
+  typecheck, 818 PostgreSQL-backed tests (90.39% statement, 83.88% branch,
+  91.33% function, 93.80% line coverage), and production build. Live
   cross-platform audio, real workspace-token recovery,
   Chrome capture, and installed archive migration remain unverified.
 
