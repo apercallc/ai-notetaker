@@ -34,8 +34,9 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           <div>
             <h1 className="mk-h1" id="hero-title">{SITE.tagline}</h1>
             <p className="mk-lede">
-              AI Notetaker is moving to one desktop app for setup, recording and local notes. Use your own AI keys;
-              no browser extension or AI Notetaker login is required. Nobody joins your call.
+              Record a meeting playing in a Chrome tab with the extension, or use the desktop app for browser and
+              desktop calls on macOS, Windows, or Linux. The desktop app creates local notes; optionally sync finished
+              notes to your web workspace. Nobody joins your call.
             </p>
             <div className="mk-cta-row">
               <Link className="mk-btn mk-btn--solid" href={start}>{startLabel}</Link>
@@ -54,30 +55,30 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
       <section className="mk-section mk-section--deep" id="setup" aria-labelledby="setup-title">
         <div className="mk-wrap">
           <div className="mk-section-head">
-            <h2 className="mk-h2" id="setup-title">Your own AI keys. Your recordings stay local.</h2>
+            <h2 className="mk-h2" id="setup-title">Choose how you capture the meeting.</h2>
             <p className="mk-lede">
-              Add transcription and summary provider keys in the desktop app. Connect a web workspace only if you
-              want finished notes available on more than one device.
+              Use the extension for a Chrome meeting tab, or the desktop app for a browser in any browser and for
+              native desktop meeting apps. Desktop notes can optionally sync to a web workspace.
             </p>
           </div>
           <div className="mk-choice">
             <article className="mk-panel mk-panel--lead" aria-labelledby="choice-hosted">
-              <h3 className="mk-h3" id="choice-hosted">Desktop app</h3>
+              <h3 className="mk-h3" id="choice-hosted">Desktop app · macOS, Windows, Linux</h3>
               <p className="mk-panel-price"><strong>Free with your API keys</strong></p>
               <p className="mk-panel-copy">
-                Choose transcription and summary providers, test your keys, and record from one app. Keys stay in the
-                operating-system credential store; audio is saved locally before provider calls.
+                Record browser or desktop meetings, choose transcription and summary providers, then review notes in
+                the app. Keys stay in the operating-system credential store; audio is saved locally before processing.
               </p>
               <Link className="mk-btn mk-btn--light" href={start}>{startLabel}</Link>
             </article>
             <article className="mk-panel" aria-labelledby="choice-keys">
-              <h3 className="mk-h3" id="choice-keys">Optional web-app sync</h3>
-              <p className="mk-panel-price"><strong>Connect one workspace</strong></p>
+              <h3 className="mk-h3" id="choice-keys">Chrome extension · browser meetings</h3>
+              <p className="mk-panel-price"><strong>Capture the current Chrome tab</strong></p>
               <p className="mk-panel-copy">
-                Create a revocable desktop sync token in the web app. Only finished transcripts, summaries, and
-                action items sync. Raw audio and provider keys stay on this device.
+                Save tab audio and your microphone separately in Chrome. Export the archive and import it in the
+                desktop app to transcribe and create notes. For direct system-audio capture, use the desktop app.
               </p>
-              <Link className="mk-btn mk-btn--ghost-on-deep" href="/how-it-works#own-keys">How setup works</Link>
+              <Link className="mk-btn mk-btn--ghost-on-deep" href="/download#browser-extension">Get the Chrome extension</Link>
             </article>
           </div>
           <p className="mk-choice-foot">
@@ -94,19 +95,19 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           </div>
           <ol className="mk-steps">
             <li className="mk-step">
-              <h3 className="mk-h3">Install one app</h3>
-              <p>Download AI Notetaker and use one app for setup, recording, and local notes. The downloads page shows which installers are currently available.</p>
+              <h3 className="mk-h3">Choose a capture path</h3>
+              <p>Use the Chrome extension for a browser tab, or the desktop app for browser and desktop calls. The downloads page shows available installers.</p>
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Record</h3>
               <p>
-                Add and test your transcription and summary API keys, then grant microphone and system-audio access.
+                In the desktop app, add and test provider keys, grant audio access, and record. Extension recordings are imported for processing.
               </p>
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Review</h3>
               <p>
-                Start and stop in the desktop app. Your transcript, summary and action items are saved in local history.
+                Review notes in desktop local history. If enabled, finished desktop notes sync to your selected web workspace.
               </p>
             </li>
           </ol>
@@ -179,8 +180,8 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
             <div>
               <dt><Icon as={HardDrive} size={22} />On your device first</dt>
               <dd>
-                Raw microphone and meeting audio is written to your device before anything is sent to a provider, so a
-                failed upload or crash never loses a recording.
+                Raw microphone and meeting audio is written to your device before a provider call. A failed upload
+                does not erase saved audio; after a crash, the app offers recovery of audio that was saved.
               </dd>
             </div>
             <div>
@@ -262,7 +263,7 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
             <h2 className="mk-h2" id="final-title">Be in the conversation. Get the notes.</h2>
             <div className="mk-cta-row">
               <Link className="mk-btn mk-btn--light" href={start}>{startLabel}</Link>
-              <Link className="mk-btn mk-btn--ghost-on-deep" href="/download#legacy-downloads">Existing extension downloads</Link>
+              <Link className="mk-btn mk-btn--ghost-on-deep" href="/download#browser-extension">Get the Chrome extension</Link>
             </div>
             <p className="mk-small mk-mt-m mk-on-deep">
               Free with your own keys. Open source under the {SITE.license} license. Delete your data any time.

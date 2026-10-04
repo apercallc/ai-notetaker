@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 const TITLE = "Download AI Notetaker";
 const DESCRIPTION =
-  "Download the AI Notetaker desktop app for setup, local meeting capture, and notes. Local use needs no browser extension or AI Notetaker account.";
+  "Download the AI Notetaker Chrome extension to capture browser meeting tabs, or the desktop app for browser and desktop meeting capture, local processing, and notes.";
 
 export const metadata = pageMetadata({ path: "/download", title: TITLE, description: DESCRIPTION });
 

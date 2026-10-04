@@ -41,9 +41,7 @@ export function ChannelDemo() {
   return (
     <figure className="mk-demo" aria-labelledby="mk-demo-caption">
       <div className="mk-demo-bar">
-        <span className="mk-rec-dot" aria-hidden="true" />
-        <span>Recording Google Meet</span>
-        <span className="mk-demo-time" aria-hidden="true">12:41</span>
+        <span>Example · after desktop import</span>
       </div>
       <div className="mk-lane mk-lane--you">
         <span className="mk-lane-name">You</span>
@@ -68,7 +66,7 @@ export function ChannelDemo() {
         </li>
       </ul>
       <figcaption id="mk-demo-caption" className="mk-demo-caption">
-        Example. Two separate channels, one set of notes.
+        The extension captures separate audio tracks; the desktop app creates notes after import.
       </figcaption>
     </figure>
   );

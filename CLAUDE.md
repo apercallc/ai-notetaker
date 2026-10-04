@@ -7,7 +7,7 @@ web-app sync. See
 and its active migration plan. The 2026-09-24 dual-mode and 2026-09-21 designs
 document existing contracts and implementation history; the desktop-first spec
 supersedes their extension-owned processing path for new product work. The
-optional Chrome extension is now a Google Meet audio recorder: it saves
+optional Chrome extension is now a browser meeting audio recorder: it saves
 separate local tracks for desktop import.
 
 ## Non-negotiable constraints (from the design review)
@@ -16,7 +16,7 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
 
 - **The Tauri desktop app is the primary product.** It owns setup, capture,
   provider calls, local notes, recovery, and optional web-app sync. The
-  extension records Google Meet audio only for new calls. Historical notes,
+  extension records browser meeting-tab audio only for new calls. Historical notes,
   credentials, and recovery controls remain accessible during migration.
 - **Local BYOK remains account-free.** The desktop app calls the user's
   selected providers directly. Optional web-app sync uses a separate

@@ -31,8 +31,8 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
   return (
     <>
       <PageHead
-        title="Set up once. Record from one desktop app."
-        lede="Choose your transcription and summary providers, add their API keys, and keep your meeting workflow in one place. No bot joins the call."
+        title="Local notes, with optional web access."
+        lede="Use the Chrome extension to capture a browser tab, or the desktop app to capture browser and desktop meetings on macOS, Windows, or Linux. No bot joins the call."
       />
 
       <section className="mk-section mk-section--flush" aria-labelledby="choose-title">
@@ -44,8 +44,8 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
               <ul className="mk-bullets">
                 <li>choose and pay your transcription and summary providers directly</li>
                 <li>keep provider keys in your operating-system credential store</li>
-                <li>record without an AI Notetaker account or browser extension</li>
-                <li>save raw audio and notes on this device first</li>
+                <li>record browser or desktop calls without an AI Notetaker account</li>
+                <li>in desktop, save raw audio and notes on this device first</li>
               </ul>
             </div>
             <div className="mk-guide">
@@ -53,13 +53,13 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
               <ul className="mk-bullets">
                 <li>create a workspace token from web-app Settings → Integrations</li>
                 <li>connect that workspace in the desktop app</li>
-                <li>sync completed transcripts, summaries and action items</li>
+                <li>sync completed desktop transcripts, summaries and action items to the web app</li>
                 <li>keep raw audio and provider keys on this device</li>
               </ul>
             </div>
           </div>
           <p className="mk-small mk-mt-m">
-            Local recording works without signing in. Workspace sync is optional and can be revoked from web-app Settings.
+            Sync currently sends finished desktop notes to the web app. Notes and settings do not sync back to the desktop app or extension. Browser extension recordings must be exported and imported into desktop first.
           </p>
         </div>
       </section>
@@ -68,7 +68,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
         <div className="mk-wrap">
           <div className="mk-section-head">
             <h2 className="mk-h2" id="hosted-title">Connect the web app (optional)</h2>
-            <p className="mk-lede">Use this only when you want a synced library across devices. Local recording stays account-free.</p>
+            <p className="mk-lede">Send finished desktop notes to a workspace so you can read them in the web app. Local recording stays account-free.</p>
           </div>
           <ol className="mk-steps">
             <li className="mk-step">
@@ -87,7 +87,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Connect it in the desktop app</h3>
-              <p>Paste the web-app address and token into desktop Settings, test the connection, then save. Finished notes sync; audio and provider keys stay local.</p>
+              <p>Paste the web-app address and token into desktop Settings, test the connection, then save. Finished desktop notes sync to the web app; raw audio and provider keys stay local.</p>
             </li>
           </ol>
         </div>
@@ -128,25 +128,25 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
       <section className="mk-section mk-section--tint" aria-labelledby="calls-title">
         <div className="mk-wrap">
           <div className="mk-section-head">
-            <h2 className="mk-h2" id="calls-title">Which calls can it record?</h2>
+            <h2 className="mk-h2" id="calls-title">Choose how to capture your meeting.</h2>
           </div>
           <div className="mk-split">
             <div className="mk-guide">
-              <h3 className="mk-h3">Browser meetings</h3>
-              <p className="mk-small">Use the desktop app&apos;s system-audio capture.</p>
+              <h3 className="mk-h3">Meetings in Chrome</h3>
+              <p className="mk-small">Use the extension for a meeting playing in the current Chrome tab, including web versions of Meet, Zoom, Teams, Slack, and Discord.</p>
               <ol>
-                <li>Join your browser meeting and keep its audio playing through your normal system output.</li>
-                <li>Start the desktop app recording and confirm the recording notice.</li>
-                <li>Stop in the app when the meeting ends.</li>
+                <li>Open the meeting in a secure Chrome tab and start the extension from that tab.</li>
+                <li>Confirm the recording notice. The extension saves tab and microphone audio separately in Chrome.</li>
+                <li>Export the archive and import it in the desktop app to transcribe the audio and create notes.</li>
               </ol>
             </div>
             <div className="mk-guide">
-              <h3 className="mk-h3">Zoom, Teams, Slack and other desktop calls</h3>
-              <p className="mk-small">One desktop app.</p>
+              <h3 className="mk-h3">Browser or desktop meeting</h3>
+              <p className="mk-small">Use AI Notetaker for macOS, Windows, or Linux for direct system-audio capture.</p>
               <ol>
-                <li>Choose a microphone and system audio source in the app.</li>
+                <li>Check the detected microphone and system audio in the app. Change your OS input or output if needed.</li>
                 <li>Grant OS audio permissions and run the audio check.</li>
-                <li>Start and stop from the desktop app.</li>
+                <li>Start and stop from the desktop app, then review notes locally.</li>
               </ol>
             </div>
           </div>
@@ -216,8 +216,8 @@ export function PricingView({ context, prices }: { context: ShellContext; prices
               <li>
                 Pro includes up to {LIMITS.pro.toLocaleString("en-US")} meetings or {LIMITS.proHours} meeting hours a
                 month, whichever comes first, and Team up to {LIMITS.team.toLocaleString("en-US")} meetings or{" "}
-                {LIMITS.teamHours} hours. Both reset each billing period, and the extension tells you before a meeting
-                starts if you have no meetings or hours left.
+                {LIMITS.teamHours} hours. Both reset each billing period. The workspace shows your remaining allowance
+                and stops additional hosted processing when it is used up.
               </li>
               <li>
                 Ask your notes is a Pro and Team perk: {LIMITS.proQuestions.toLocaleString("en-US")} questions a month on
@@ -276,8 +276,8 @@ export function DownloadView({
   return (
     <>
       <PageHead
-        title="One desktop app for meeting notes."
-        lede="Set up your AI providers, record, and find your notes in one place. Local use needs no browser extension or AI Notetaker account."
+        title="Record browser or desktop meetings."
+        lede="Use the desktop app for system-audio capture on macOS, Windows, or Linux, or use the Chrome extension to capture a browser tab and import it into desktop for notes."
       />
       <section className="mk-section mk-section--flush" aria-labelledby="desktop-app-availability">
         <div className="mk-wrap">
@@ -286,7 +286,7 @@ export function DownloadView({
           </h2>
           {hasDesktopAssets ? (
             <>
-              <p className="mk-lede">Choose the installer for your computer. One app handles setup, recording, and your local notes.</p>
+              <p className="mk-lede">Choose the installer for your computer. The desktop app handles setup, browser and desktop capture, processing, and local notes.</p>
               <div className="mk-downloads">
                 {desktopAssets.map(({ platform: assetPlatform, label, asset }) => (
                   <article className="mk-download" key={assetPlatform}>
@@ -335,7 +335,7 @@ export function DownloadView({
                 <ol>
                   <li>Install and open AI Notetaker. The app guides you through audio permissions and a microphone/system-audio check.</li>
                   <li>Choose transcription and summary providers, add and test your API keys, then start a recording in the app.</li>
-                  <li>Find your transcript, summary, and action items in local Notes. No browser extension or AI Notetaker account is needed.</li>
+                  <li>Find your transcript, summary, and action items in local Notes. No AI Notetaker account is needed.</li>
                 </ol>
               </div>
             </>
@@ -350,37 +350,29 @@ export function DownloadView({
               <p><a className="mk-btn mk-btn--solid" href={SITE.releasesUrl}>View all releases</a></p>
             </div>
           )}
-          <p className="mk-small mk-mt-m">Local recording uses your provider keys and keeps audio on this device. Optional web-app sync copies finished note text to a workspace; setup and recording do not require signing in.</p>
+          <p className="mk-small mk-mt-m">Local desktop recording uses your provider keys and keeps audio on this device. Optional sync sends finished desktop notes to a web workspace. Notes and settings do not currently sync back to desktop.</p>
+        </div>
+      </section>
+      <section id="browser-extension" className="mk-section mk-section--flush" aria-labelledby="browser-extension-title">
+        <div className="mk-wrap">
+          <div className="mk-download">
+            <h2 className="mk-h2" id="browser-extension-title"><Icon as={Puzzle} size={24} />Chrome extension for browser meetings</h2>
+            <p>Capture meeting audio playing in the current secure Chrome tab and your microphone as separate local tracks. This includes web versions of Google Meet, Zoom, Teams, Slack, Discord, and other sites; behavior can vary by site and browser. Export the archive, then import it in desktop to transcribe and create notes.</p>
+            <div className="mk-cta-row">
+              {store && <a className="mk-btn mk-btn--solid" href={store}>Add to Chrome</a>}
+              <AssetButton asset={release?.extension} label={store ? "Download extension ZIP" : "Download Chrome extension"} />
+            </div>
+            {!store && !release?.extension && <p className="mk-small">The extension download could not be loaded. Check the <a href={SITE.releasesUrl}>releases page</a>.</p>}
+            {!store && release?.extension && <p className="mk-small">Unzip the file, open <code>chrome://extensions</code>, turn on Developer mode, choose Load unpacked, and select the unzipped folder containing manifest.json.</p>}
+            <p className="mk-small">Extension recording settings stay in Chrome. Transcription providers, local notes, and optional web-app sync are managed in the desktop app.</p>
+          </div>
         </div>
       </section>
       <details id="legacy-downloads" className="mk-wrap mk-legacy-downloads">
-        <summary>Already use the Chrome extension? See legacy downloads and setup.</summary>
+        <summary>Already use the previous extension and helper setup?</summary>
       <section className="mk-section mk-section--flush" aria-label="Downloads">
         <div className="mk-wrap">
           <div className="mk-downloads">
-            <article className="mk-download" aria-labelledby="dl-ext">
-              <h2 className="mk-h3" id="dl-ext"><Icon as={Puzzle} size={22} />Chrome extension</h2>
-              <p>Legacy Google Meet capture for existing users. New desktop setups do not need the extension.</p>
-              <div className="mk-cta-row">
-                {store && (
-                  <a className="mk-btn mk-btn--solid" href={store}>Add to Chrome</a>
-                )}
-                <AssetButton asset={release?.extension} label={store ? "Download ZIP" : "Download extension ZIP"} />
-              </div>
-              {!store && !release?.extension && (
-                <p className="mk-small">
-                  The extension download could not be loaded. Check the{" "}
-                  <a href={SITE.releasesUrl}>releases page</a>.
-                </p>
-              )}
-              {!store && release?.extension && (
-                <p className="mk-small">
-                  Chrome Web Store link coming soon. For now, unzip the file, open <code>chrome://extensions</code>,
-                  turn on Developer mode, choose Load unpacked, and select the unzipped folder containing manifest.json.
-                </p>
-              )}
-            </article>
-
             <article className="mk-download" aria-labelledby="dl-helper">
               <h2 className="mk-h3" id="dl-helper"><Icon as={Laptop} size={22} />Desktop helper</h2>
               <p>For Zoom, Teams, Slack and other desktop calls. Captures your microphone and system audio.</p>
@@ -410,7 +402,7 @@ export function DownloadView({
 
           <div className="mk-prose mk-mt-l mk-setup" id="install-helper">
             <h2>Keep using your existing extension (legacy)</h2>
-            <p>This section is only for people who already use the Chrome extension. New setups use the desktop app above for browser and desktop calls, without a separate extension or helper connection.</p>
+            <p>This section explains the previous extension-to-helper connection for existing users. New browser-tab recordings can be exported from extension Settings and imported in the desktop app without Native Messaging.</p>
             <details open={platform === "macos"}>
               <summary>macOS · choose Apple silicon or Intel</summary>
               <div className="mk-cta-row">
@@ -470,7 +462,7 @@ export function DownloadView({
             <h2>Use API keys in the existing extension</h2>
             <p>In extension setup, choose <strong>Use my own API keys</strong>, add one transcription key and one summary key, then test them. This legacy path does not require an AI Notetaker account or Hosted AI sign-in.</p>
             <h2>Record with the existing extension</h2>
-            <p>For Google Meet, open a meeting in Chrome and choose <strong>Start notes</strong> in the call widget or extension. For a desktop call, open the extension from a tab outside Meet, choose <strong>Recording Zoom or Teams instead?</strong> if shown, then <strong>Start notes</strong>. Tell participants and confirm the recording notice. Stop when you finish; the extension shows processing progress and your notes when ready. For a new setup, use the desktop app controls above.</p>
+            <p>Earlier extension releases could process Google Meet calls or relay desktop capture through the helper. New browser-tab recordings only save audio in Chrome; export and import them in desktop to create notes. Use the desktop app controls above for new recordings and current provider settings.</p>
           </div>
 
           <div className="mk-prose mk-mt-l">
@@ -589,7 +581,8 @@ export function PrivacyView() {
             <p>
               AI Notetaker has two modes and this notice covers both: free local mode with your own AI keys, and Hosted
               AI, the service we operate. Optional desktop sync is a separate authenticated connection that sends
-              finished note text to a workspace. This notice also covers the website.
+              finished note text from desktop to a workspace. It does not sync workspace notes or settings back to
+              desktop or the extension. This notice also covers the website.
             </p>
 
             <h2>This website</h2>
@@ -605,7 +598,7 @@ export function PrivacyView() {
               <li>Raw microphone and meeting audio is saved on your device before any provider request. The two channels stay separate.</li>
               <li>Your provider keys stay in the desktop app&apos;s operating-system credential store. Existing extension users keep their keys in protected browser storage. We never receive them.</li>
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
-              <li>If you connect a web-app workspace, only finished note text syncs there. Raw audio and provider keys stay on this device.</li>
+              <li>If you connect a web-app workspace, only finished desktop note text syncs there. Raw audio and provider keys stay on this device; workspace notes and settings do not sync back.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
               <li>Google Drive export and a self-hosted history server are optional. Their operators receive what you send them.</li>
             </ul>

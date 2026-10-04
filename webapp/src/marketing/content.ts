@@ -10,7 +10,7 @@ export const SITE = {
   name: "AI Notetaker",
   tagline: "Meeting notes without the meeting bot.",
   description:
-    "AI Notetaker is moving to one cross-platform desktop app for setup, recording, and local meeting notes. Use your own AI provider keys; optional workspace sync sends finished note text without uploading raw audio or provider keys.",
+    "Capture browser meetings with the Chrome extension or desktop app, and capture native desktop meetings with the macOS, Windows, or Linux app. The desktop app turns recordings into local notes; optional one-way workspace sync sends finished note text without raw audio or provider keys.",
   repoUrl: "https://github.com/apercallc/ai-notetaker",
   releasesUrl: "https://github.com/apercallc/ai-notetaker/releases/latest",
   licenseUrl: "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE",
@@ -57,13 +57,13 @@ export const FAQS: Faq[] = [
   {
     question: "Does AI Notetaker join my meeting as a bot?",
     answer:
-      "No. The desktop app captures your microphone and system audio locally. Nothing joins the participant list. You are still responsible for telling participants and following the recording-consent rules that apply to you.",
+      "No. The Chrome extension captures browser-tab audio, and the desktop app captures browser or desktop audio from your device. Nothing joins the participant list. You are still responsible for telling participants and following the recording-consent rules that apply to you.",
   },
   {
     question: "What is the difference between Hosted AI and using my own keys?",
     topics: ["setup", "pricing"],
     answer:
-      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. If you want a cross-device library, you can separately sign in to a web-app workspace and create a revocable desktop sync token. That optional sync sends finished note text only.",
+      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. You can separately sign in to a web-app workspace and create a revocable desktop sync token. That optional sync sends finished desktop notes to the web app; it does not sync web-app notes or settings back to the desktop app or extension.",
   },
   {
     question: "How much does AI Notetaker cost?",
@@ -79,7 +79,7 @@ export const FAQS: Faq[] = [
     question: "Will I lose my notes if I clear my browser history?",
     topics: ["setup"],
     answer:
-      "No. Desktop recordings and notes are stored in the app's private data folder, not browser storage. They stay on the device unless you delete them, remove the app data, or lose the device. If you enable workspace sync, finished note text also appears in that web-app workspace.",
+      "Desktop recordings and notes are stored in the app's private data folder, not browser storage. Browser extension recordings stay in Chrome until exported and imported into the desktop app. If you enable workspace sync, finished desktop note text also appears in that web-app workspace; sync currently goes from desktop to web app only.",
   },
   {
     question: "Can I import a recording I already have?",
@@ -101,7 +101,7 @@ export const FAQS: Faq[] = [
     question: "Can I send notes to Slack, Notion or Zapier, or use them with an AI assistant?",
     topics: ["pricing"],
     answer:
-      "Yes. A workspace owner can set it up so that when a note is ready it is sent to to a signed webhook (use it with Zapier, Make or n8n), a Slack channel or a Notion page. Webhook signing secrets and tokens are stored encrypted and shown only once. For AI assistants, you can create a read-only token in Settings and connect an assistant that supports the Model Context Protocol (MCP) to search and read your own notes; it cannot change or delete anything, and you can revoke the token at any time.",
+      "Yes. A workspace owner can set it up so that when a note is ready it is sent to a signed webhook (use it with Zapier, Make or n8n), a Slack channel or a Notion page. Webhook signing secrets and tokens are stored encrypted and shown only once. For AI assistants, you can create a read-only token in Settings and connect an assistant that supports the Model Context Protocol (MCP) to search and read your own notes; it cannot change or delete anything, and you can revoke the token at any time.",
   },
   {
     question: "Can I organise notes into folders and recover deleted ones?",
@@ -131,15 +131,15 @@ export const FAQS: Faq[] = [
       "Transcription runs on Groq and summaries run on OpenAI. Both receive only what is needed to process your meeting. In free own-keys mode, audio and text go only to the providers you select, using the keys you supply.",
   },
   {
-    question: "Does it work with Zoom, Microsoft Teams and Slack?",
+    question: "Can I record browser meetings in Google Meet, Zoom, Teams, Slack or Discord?",
     topics: ["setup"],
     answer:
-      "The desktop app captures your microphone and system audio as separate channels on macOS, Windows, and Linux. Its audio check confirms the available sources before you record. We are still verifying every app on every operating system, so please tell us if something does not work.",
+      "Yes. In Chrome, start the extension on the secure browser tab where the meeting audio is playing. This works for web versions of Google Meet, Zoom, Microsoft Teams, Slack, Discord, and other meeting sites; exact behavior depends on the browser and site. For a meeting in a desktop app or another browser, use AI Notetaker for macOS, Windows, or Linux to capture system audio and your microphone. Cross-platform app and device checks are still in progress.",
   },
   {
-    question: "Do I need a browser extension?",
+    question: "When should I use the extension or desktop app?",
     topics: ["setup"],
-    answer: "No. The desktop app is intended to handle meeting audio directly. Public installers are still in development; existing extension users can continue using their current setup during migration.",
+    answer: "Use the Chrome extension for a meeting playing in a Chrome tab. It saves the tab and microphone audio in Chrome; export the archive and import it in the desktop app to transcribe and create notes. Use the desktop app for browser meetings in any browser and for meetings in desktop apps. The desktop app stores and processes its recordings locally, and can optionally sync finished notes to a web-app workspace.",
   },
   {
     question: "Is AI Notetaker open source?",
@@ -156,9 +156,9 @@ export const FAQS: Faq[] = [
       "Yes. You can delete any meeting, workspace owners can set how long hosted notes are kept, and you can export your data from your account page. Deleting a meeting or folder from the hosted library moves it to Trash, where you can restore it for 30 days before it is removed for good; delete it from Trash to remove its transcript and summary immediately.",
   },
   {
-    question: "Which browsers are supported?",
+    question: "Where can I read my notes?",
     topics: ["setup"],
-    answer: "AI Notetaker is moving to a desktop app for macOS, Windows, and Linux. The app captures system audio, so it can work alongside supported meeting apps in a browser or on the desktop. Cross-platform acceptance is still in progress.",
+    answer: "Desktop notes are available in the desktop app. If you enable desktop-to-web-app sync, finished note text appears in your selected workspace. Browser extension recordings remain in Chrome until you export and import them into the desktop app; the extension and desktop app do not yet share one live notes library or synchronized settings.",
   },
 ];
 

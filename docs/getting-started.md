@@ -1,27 +1,28 @@
 # Getting started
 
-AI Notetaker is moving to one Tauri desktop app for setup, audio capture, and
-local notes. Local use needs provider API keys, but no AI Notetaker account or
-browser extension. Optional web-app sync sends finished note text to one
-workspace; it never sends raw audio or provider keys.
+Use the Chrome extension to capture browser-tab audio, or the Tauri desktop app
+to capture browser and desktop meetings and create local notes. Extension
+recordings must be exported and imported into desktop for transcription.
+Optional web-app sync sends finished desktop note text to one workspace; it
+does not sync notes or settings back to desktop or the extension.
 
 For the release and installation model, including direct platform downloads,
 first-open warnings, checksums, and the Docker-only webapp option, see the
 [current distribution decision](superpowers/specs/2026-09-28-direct-download-distribution.md).
 
 > **Release status.** Desktop installers and cross-platform acceptance are
-> not ready. The desktop window is available as a development build. Existing
-> extension and helper installs remain supported during migration; new users
-> should wait for the single-app installers.
+> not ready. The desktop window is available as a development build. Browser
+> tab capture is available in the Chrome extension; the desktop app processes
+> those recordings and handles direct system-audio capture.
 
 ## Terms used in the product
 
-The desktop app, Meet recorder extension, and webapp use plain vocabulary. If
+The desktop app, browser recorder extension, and webapp use plain vocabulary. If
 you are contributing, keep user-facing copy consistent with each surface.
 
 | You will see | It means |
 | --- | --- |
-| **Start recording / Stop recording** | Begin or end saving Meet audio in the extension. |
+| **Start recording / Stop recording** | Begin or end saving the active Chrome tab and microphone audio in the extension. |
 | **Create notes from saved audio** | Use desktop provider keys to transcribe and summarize imported audio. |
 | **Notes style** | The summary template for a meeting: General, Standup, Sales call, 1:1, Interview, or your own. |
 | **Provider API keys** | You provide transcription and summarization keys and pay those providers directly. No AI Notetaker account or sign-in is needed. |
@@ -53,28 +54,34 @@ so "this is being recorded" always looks the same.
 The single-app installers are not published yet. This preview is for
 development and does not establish Windows/Linux or real-call acceptance.
 
-## Google Meet recorder extension
+## Browser meeting recorder extension
 
-The extension records Google Meet audio. It saves microphone and call audio as
+The extension records secure browser meeting tabs, including web versions of
+Google Meet, Teams, Zoom, Slack, and Discord in Chrome. It saves microphone and tab audio as
 separate local tracks. The desktop app imports that audio and makes notes.
 
 ### What existing users have installed
 
-1. The **Chrome extension** owns Google Meet tab capture and saves the audio in
-   browser storage (IndexedDB). New Meet recordings do not call AI providers.
-2. The **desktop app** imports Meet audio, makes notes, and records Zoom,
-   Teams, Slack, and other desktop calls directly.
+1. The **Chrome extension** records the current meeting tab and saves audio in
+   browser storage (IndexedDB). New browser recordings do not call AI providers.
+2. The **desktop app** imports browser audio, makes notes, and records Zoom,
+   Teams, Slack, and other standalone desktop calls directly.
 
-The optional webapp stores finished notes on a server/workspace you choose.
+The optional webapp stores finished desktop notes synced to a workspace you
+choose. This is currently one-way sync; extension captures must be imported in
+desktop first, and settings are maintained separately in each app.
 
 ### Recorder prerequisites
 
-### For Google Meet
+### For browser meetings
 
 - Chrome.
 - Microphone permission and available Chrome storage. Enter transcription and
   summary provider keys in the desktop app when you create notes.
 - Consent from the people you record when local law requires it.
+- Start and stop from the extension popup or shortcut on the meeting tab.
+  Google Meet also has an in-call control. Keep the popup's recording state
+  visible and stop manually when a same-site call ends.
 
 ### For desktop calls in the desktop app
 
@@ -93,19 +100,19 @@ The optional webapp stores finished notes on a server/workspace you choose.
 The desktop app uses native loopback where available and does not require
 Chrome or Native Messaging.
 
-### Move extension notes to the desktop app
+### Move extension recordings and older notes to the desktop app
 
 1. In extension **Settings → Move recordings to the desktop app**, choose
    **Save full archive** and save the `.ntarchive` file.
 2. In desktop app **Settings → Import from the extension**, choose **Full
    archive** and select that file.
-3. Select an imported recording and choose **Create notes from saved audio**.
-   Check the resulting transcript and summary. Matching meeting IDs are skipped,
+3. Select an imported browser recording and choose **Create notes from saved audio**.
+   That sends audio through the desktop transcription flow. Check the resulting transcript and summary. Matching meeting IDs are skipped,
    so importing the same file again is safe.
 4. Re-enter provider API keys in desktop Settings. Create a separate desktop
    sync token only if you want to connect a web-app workspace.
 
-The archive streams saved raw Meet audio in chunks, so long recordings do not
+The archive streams saved raw browser audio in chunks, so long recordings do not
 need to fit in memory. It also includes meeting text, partial transcripts, and
 portable preferences. The note manifest is limited to 20 MB and total archive
 size to 50 GB. Audio from older completed calls may have been removed after

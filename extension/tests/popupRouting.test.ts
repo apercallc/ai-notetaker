@@ -18,21 +18,28 @@ async function loadPopup(tab: { id: number; url: string } | null, settings = { .
   await vi.waitFor(() => expect(document.querySelector("#export-recordings")).not.toBeNull());
 }
 
-describe("Meet recorder popup", () => {
+describe("browser recorder popup", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("starts only from a Meet tab and asks for no provider setup", async () => {
+  it("starts from a Meet tab and asks for no provider setup", async () => {
     await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" });
-    expect(document.body.textContent).toContain("Google Meet recorder");
+    expect(document.body.textContent).toContain("Browser meeting recorder");
     expect(document.body.textContent).not.toContain("API key");
     (document.querySelector("#start-recording") as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "START_RECORDING", captureSource: "meet", tabId: 7 }));
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "START_RECORDING", captureSource: "meet", tabId: 7 })));
   });
 
-  it("disables Start outside Meet", async () => {
+  it("starts from a secure Teams tab", async () => {
+    await loadPopup({ id: 8, url: "https://teams.microsoft.com/v2/" });
+    expect((document.querySelector("#start-recording") as HTMLButtonElement).disabled).toBe(false);
+    (document.querySelector("#start-recording") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "START_RECORDING", captureSource: "meet", tabId: 8 })));
+  });
+
+  it("disables Start outside a secure web tab", async () => {
     await loadPopup({ id: 1, url: "chrome://newtab" });
     expect((document.querySelector("#start-recording") as HTMLButtonElement).disabled).toBe(true);
-    expect(document.body.textContent).toContain("Open a Google Meet call");
+    expect(document.body.textContent).toContain("Open a secure browser meeting tab");
     expect(document.querySelector("#use-desktop")).toBeNull();
   });
 

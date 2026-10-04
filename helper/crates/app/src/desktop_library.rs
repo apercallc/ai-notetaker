@@ -333,7 +333,12 @@ mod tests {
         assert_eq!(reopened.snapshot().unwrap().folders[0].name, "Clients");
         assert!(reopened.delete_empty(clients.id).is_err());
         assert!(reopened.delete_empty(acme.id).is_err());
-        reopened.move_meeting(meeting, None).unwrap();
+        reopened.forget_meeting(meeting).unwrap();
+        assert!(!reopened
+            .snapshot()
+            .unwrap()
+            .placements
+            .contains_key(&meeting));
         reopened.delete_empty(acme.id).unwrap();
         reopened.delete_empty(clients.id).unwrap();
     }

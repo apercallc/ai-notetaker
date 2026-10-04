@@ -538,7 +538,7 @@ export class BackgroundController {
   /** Reprocesses raw extension-owned Meet audio after a BYOK or hosted error. */
   async retryProcessing(meetingId: string): Promise<void> {
     const meeting = await getMeeting(meetingId);
-    if (!meeting || meeting.captureSource !== "meet") throw new Error("Only a saved Google Meet recording can be retried here.");
+    if (!meeting || meeting.captureSource !== "meet") throw new Error("Only a saved browser recording can be retried here.");
     if (meeting.status !== "error") throw new Error("This meeting is not waiting for a processing retry.");
     const processing = await updateMeeting(meetingId, (current) => ({ ...current, status: "processing", errorMessage: undefined, providerPreflightWarning: undefined }));
     if (!processing) throw new Error("Meeting could not be loaded for retry.");

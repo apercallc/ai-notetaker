@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMeetUrl, meetTitle, meetTitleForTab, meetingCodeFromPath } from "../src/meet/meetContext";
+import { browserTitleForTab, isMeetUrl, isRecordableTabUrl, meetTitle, meetTitleForTab, meetingCodeFromPath } from "../src/meet/meetContext";
 
 describe("meet context helpers", () => {
   it("recognises only https meet.google.com URLs", () => {
@@ -35,5 +35,14 @@ describe("meet context helpers", () => {
     expect(meetTitleForTab({ url: "https://meet.google.com/abc-defg-hij", title: "Retro - Google Meet" })).toBe("Retro");
     expect(meetTitleForTab({ url: "https://example.com/", title: "Retro" })).toBeUndefined();
     expect(meetTitleForTab(undefined)).toBeUndefined();
+  });
+
+  it("allows secure browser tabs and names non-Meet tabs from their title", () => {
+    expect(isRecordableTabUrl("https://teams.microsoft.com/v2/")).toBe(true);
+    expect(isRecordableTabUrl("https://app.zoom.us/wc/123")).toBe(true);
+    expect(isRecordableTabUrl("chrome://newtab")).toBe(false);
+    expect(isRecordableTabUrl("http://example.com/call")).toBe(false);
+    expect(browserTitleForTab({ url: "https://app.zoom.us/wc/123", title: "  Planning   - Zoom " })).toBe("Planning - Zoom");
+    expect(browserTitleForTab({ url: "https://teams.microsoft.com/v2/" })).toBe("teams.microsoft.com");
   });
 });

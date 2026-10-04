@@ -40,7 +40,7 @@ describe("Meet recorder history", () => {
   it("keeps archive export visible without a provider key", async () => {
     await loadPopup();
     expect(document.querySelector("#export-recordings")).not.toBeNull();
-    expect(document.body.textContent).toContain("import the archive");
+    expect(document.body.textContent).toContain("import it in the desktop app");
     expect(document.body.textContent).not.toContain("API key");
   });
 });

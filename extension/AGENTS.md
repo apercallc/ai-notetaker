@@ -2,7 +2,7 @@
 
 Read [`../CLAUDE.md`](../CLAUDE.md), [`../AGENTS.md`](../AGENTS.md), and this
 package's `CLAUDE.md` before changing the extension. New extension calls
-record Google Meet mic and call audio only; provider processing and desktop
+record mic and secure browser meeting-tab audio only; provider processing and desktop
 call controls belong in the Tauri app. Keep older notes, keys, and settings
 accessible during migration.
 

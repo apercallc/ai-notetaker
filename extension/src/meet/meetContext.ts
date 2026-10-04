@@ -20,6 +20,19 @@ export function isMeetUrl(value: string | undefined): boolean {
   }
 }
 
+/** Popup and shortcut capture the active secure web tab after a user gesture. */
+export function isRecordableTabUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  try { return new URL(value).protocol === "https:"; }
+  catch { return false; }
+}
+
+export function browserTitleForTab(tab: { url?: string; title?: string } | undefined): string | undefined {
+  if (!isRecordableTabUrl(tab?.url)) return undefined;
+  if (isMeetUrl(tab?.url)) return meetTitleForTab(tab);
+  return tab?.title?.replace(/\s+/g, " ").trim().slice(0, 200) || new URL(tab!.url!).hostname;
+}
+
 /** `abc-defg-hij` for a call route, `null` for the Meet home page or settings routes. */
 export function meetingCodeFromPath(pathname: string): string | null {
   const match = MEETING_CODE.exec(pathname);

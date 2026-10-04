@@ -444,18 +444,6 @@
   color: var(--mk-muted);
 }
 
-.mk-rec-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--mk-rec);
-}
-
-.mk-demo-time {
-  margin-inline-start: auto;
-  font-variant-numeric: tabular-nums;
-}
-
 .mk-lane {
   display: grid;
   grid-template-columns: 104px minmax(0, 1fr);

@@ -145,7 +145,7 @@ describe("desktop migration archive", () => {
 
     const manifestSize = new DataView(writes[0]!.buffer, writes[0]!.byteOffset).getUint32(8, true);
     const manifest = JSON.parse(new TextDecoder().decode(writes[1]!.subarray(0, manifestSize))) as { notes: { meetings: MeetingRecord[] } };
-    expect(manifest.notes.meetings[0]).toMatchObject({ id, title: "Recovered Google Meet audio", startedAt: new Date(2_000).toISOString(), status: "error" });
+    expect(manifest.notes.meetings[0]).toMatchObject({ id, title: "Recovered browser audio", startedAt: new Date(2_000).toISOString(), status: "error" });
   });
 
   it("aborts the archive when a saved PCM chunk is malformed", async () => {

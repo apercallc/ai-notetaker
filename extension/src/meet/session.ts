@@ -3,7 +3,7 @@ import { getMeeting } from "../lib/storage";
 import type { MeetingMode } from "../types";
 import type { MeetCaptureController } from "./meetCapture";
 import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "./hints";
-import { isMeetUrl, meetTitleForTab } from "./meetContext";
+import { browserTitleForTab, isRecordableTabUrl } from "./meetContext";
 import { savePendingMeetStart, clearPendingMeetStartFor } from "./pendingStart";
 
 export interface StartMeetOptions {
@@ -37,7 +37,7 @@ export function describeCaptureFailure(error: unknown): string {
   if (message === MIC_PERMISSION_HINT || MIC_DENIED_PATTERN.test(message)) return MIC_PERMISSION_HINT;
   if (ACTIVE_STREAM_PATTERN.test(message)) return ACTIVE_CAPTURE_HINT;
   if (NOT_INVOKED_PATTERN.test(message)) return CAPTURE_PERMISSION_HINT;
-  return message || "Google Meet capture could not start.";
+  return message || "Browser-tab capture could not start.";
 }
 
 /**
@@ -64,9 +64,9 @@ export async function startMeetRecording(
     // so surface a busy error instead of silently doing nothing.
     const activeRecord = await getMeeting(active.id);
     if (activeRecord?.captureSource === "meet") {
-      const requestedTabId = options.tabId ?? (await discoverActiveMeetTab())?.id;
+      const requestedTabId = options.tabId ?? (await discoverActiveBrowserTab())?.id;
       if (requestedTabId !== undefined && capture.isActiveForTab(active.id, requestedTabId)) return active.id;
-      controller.reportStartFailure("Another Google Meet tab is already recording. Stop it before starting this call.");
+      controller.reportStartFailure("Another browser tab is already recording. Stop it before starting this call.");
       return "";
     }
     controller.reportStartFailure(
@@ -74,11 +74,11 @@ export async function startMeetRecording(
     );
     return "";
   }
-  const discoveredTab = typeof options.tabId === "number" ? undefined : await discoverActiveMeetTab();
+  const discoveredTab = typeof options.tabId === "number" ? undefined : await discoverActiveBrowserTab();
   const tabId = options.tabId ?? discoveredTab?.id;
-  const titleHint = options.titleHint ?? (discoveredTab ? meetTitleForTab(discoveredTab) : undefined);
+  const titleHint = options.titleHint ?? (discoveredTab ? browserTitleForTab(discoveredTab) : undefined);
   if (typeof tabId !== "number") {
-    controller.reportStartFailure("Open the Google Meet call in this tab first, then start recording.");
+    controller.reportStartFailure("Open a secure browser meeting tab first, then start recording.");
     return "";
   }
   try {
@@ -133,10 +133,10 @@ export async function startMeetRecording(
  * focused browser window so starting from the toolbar behaves like starting
  * from the in-call widget, without asking the user to copy a tab id.
  */
-async function discoverActiveMeetTab(): Promise<{ id: number; url?: string; title?: string } | undefined> {
+async function discoverActiveBrowserTab(): Promise<{ id: number; url?: string; title?: string } | undefined> {
   try {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    const tab = tabs.find((candidate) => typeof candidate.id === "number" && isMeetUrl(candidate.url));
+    const tab = tabs.find((candidate) => typeof candidate.id === "number" && isRecordableTabUrl(candidate.url));
     return tab && typeof tab.id === "number" ? { id: tab.id, url: tab.url, title: tab.title } : undefined;
   } catch {
     return undefined;
@@ -197,7 +197,7 @@ export async function handleMeetCommand(
   }
   // The shortcut is global; outside a Meet tab there is nothing to capture, and
   // starting anyway would leave a failed meeting behind.
-  if (!isMeetUrl(tab?.url)) return;
-  const titleHint = meetTitleForTab(tab);
+  if (!isRecordableTabUrl(tab?.url)) return;
+  const titleHint = browserTitleForTab(tab);
   await startMeetRecording(controller, capture, { tabId: tab?.id, ...(titleHint ? { titleHint } : {}) });
 }

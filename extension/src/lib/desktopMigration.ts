@@ -128,7 +128,7 @@ export async function saveDesktopAudioArchive(
         const startedAt = firstDate && !Number.isNaN(firstDate.getTime()) ? firstDate.toISOString() : exportedAt;
         meetingById.set(audio.meetingId, {
           id: audio.meetingId,
-          title: "Recovered Google Meet audio",
+          title: "Recovered browser audio",
           startedAt,
           endedAt: null,
           transcript: [],

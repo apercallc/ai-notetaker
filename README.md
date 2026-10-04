@@ -2,25 +2,26 @@
 
 Private, botless meeting notes: no bot joins your call.
 
-AI Notetaker is moving to one cross-platform desktop app for setup, recording,
-and local notes. Add your own transcription and summary API keys; no
-AI Notetaker login or browser extension is needed for local use. Optional
-workspace sync copies finished note text to the web app. Audio and provider
-keys stay on this device.
+Use the Chrome extension to capture a browser meeting tab, or the cross-platform
+desktop app to capture browser and desktop meetings and create local notes. The
+extension saves tab and microphone audio in Chrome; export its archive and
+import it in desktop for transcription. Add your own transcription and summary
+API keys in desktop Settings. Optional one-way workspace sync sends finished
+desktop notes to the web app. Audio and provider keys stay on this device.
 
 > **Status:** the desktop window and local recording flow are in development.
 > Installers and cross-platform acceptance are not ready yet. The Chrome
-> extension remains available during migration so current users can keep
-> access to existing data. See the
+> extension captures browser meeting audio while new recordings are processed
+> in desktop. See the
 > [desktop-first migration plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md).
 
 ## Quickstart
 
-The intended setup is one desktop app: add and test provider API keys, grant
-audio permissions, then start and stop a meeting from the app. Installers are
+For browser-tab capture, start the extension from the Chrome meeting tab, then
+export and import the archive in the desktop app to create notes. For direct
+browser or desktop system-audio capture, use the desktop app. Installers are
 not published yet; see the [desktop-first migration plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md)
-for status. Existing extension users can follow the
-[Meet recorder guide](docs/getting-started.md#google-meet-recorder-extension).
+for status and the [recorder guide](docs/getting-started.md#browser-meeting-recorder-extension).
 
 ## What you get
 
@@ -37,20 +38,23 @@ for status. Existing extension users can follow the
 
 | You want to record | You need |
 | --- | --- |
-| **Any desktop or browser call** | The AI Notetaker desktop app, transcription and summary API keys, and operating-system audio permission. Native loopback is supported on macOS 13+, Windows, and Linux; see the [audio setup guide](docs/helper-packaging.md) for fallbacks. |
+| **A meeting playing in a Chrome tab** | The AI Notetaker extension to save tab and microphone audio, then the desktop app and provider keys to import and create notes. |
+| **A browser call in any browser or a desktop call** | The AI Notetaker desktop app, transcription and summary API keys, and operating-system audio permission. Native loopback is supported on macOS 13+, Windows, and Linux; see the [audio setup guide](docs/helper-packaging.md) for fallbacks. |
 
 Get permission from the people you record where local law requires it. AI
 Notetaker does not bundle a custom audio driver; see the
 [audio setup guide](docs/helper-packaging.md) for the fallbacks.
 
-## Google Meet recorder extension
+## Browser meeting recorder extension
 
-The Chrome extension records Google Meet microphone and call audio separately
+The Chrome extension records microphone and meeting-tab audio separately
 in local browser storage. Export a full `.ntarchive` from extension Settings,
 import it in the desktop app, then create notes from the saved audio. The
-desktop app handles AI processing and other call sources. Older extension
+desktop app handles AI processing and desktop call sources. Google Meet also
+has an in-call control; Teams, Zoom, and other secure web tabs use the popup
+or shortcut. Older extension
 notes and settings remain accessible during migration. See the
-[recorder guide](docs/getting-started.md#google-meet-recorder-extension).
+[recorder guide](docs/getting-started.md#browser-meeting-recorder-extension).
 
 To run from source today:
 
@@ -81,8 +85,8 @@ migration.
 | Piece | What it does |
 | --- | --- |
 | Desktop app | Owns setup, provider keys, microphone/system-audio capture, local notes, retries, and recovery. |
-| Web app (optional) | Stores synced finished note text in one authenticated workspace. |
-| Chrome extension | Records Google Meet audio locally and exports it to the desktop app; retains older data during migration. |
+| Web app (optional) | Shows finished desktop note text synced to one authenticated workspace. Sync is currently desktop to web app only. |
+| Chrome extension | Records secure Chrome meeting-tab audio locally and exports it to the desktop app for transcription and notes. Settings are separate. |
 
 The desktop window controls Rust through Tauri IPC; it does not open a
 TCP/localhost server. Provider API keys stay in the operating system credential
@@ -91,7 +95,7 @@ legacy extension compatibility during migration.
 
 ## Terms
 
-The Meet extension uses **Start recording / Stop recording**. After import, the
+The browser recorder extension uses **Start recording / Stop recording**. After import, the
 desktop app offers **Create notes from saved audio**. Desktop settings include
 notes style and provider API key setup.
 "Managed" and "BYOK" are internal engineering terms. See the
@@ -122,9 +126,10 @@ Railway deployment instructions.
 
 ## If something is not working
 
-- **Existing extension users cannot start notes:** check
-  `chrome://extensions/shortcuts`, or use the toolbar icon. New desktop
-  installs do not use the extension.
+- **The extension cannot start recording:** open the meeting in a secure
+  Chrome tab, then use the toolbar icon or check
+  `chrome://extensions/shortcuts`. Import the saved recording in desktop to
+  create notes.
 - **Provider test fails:** verify that the key belongs to the selected
   provider tier and test it again in Settings. Do not put provider keys in
   the webapp.

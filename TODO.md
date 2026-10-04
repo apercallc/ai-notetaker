@@ -1,13 +1,28 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
-## Google Meet recorder extension — 2026-10-04
+## Browser meeting recorder extension — 2026-10-04
 
 - [x] Make new extension Meet sessions audio-only: save separate mic/call PCM,
       stop in a saved state, and skip browser provider checks and processing.
-- [x] Limit new extension start controls to Google Meet; move provider controls
-      out of active setup/settings while preserving previous settings and notes.
+- [x] Keep automatic and in-page start controls specific to Google Meet; move
+      provider controls out of active setup/settings while preserving previous
+      settings and notes.
+- [x] Extend user-started tab capture to secure browser meeting tabs such as
+      Teams and Zoom. Keep Meet's in-call direct capture and auto-start specific
+      to Meet; other sites use the popup or shortcut and stop on tab close or
+      cross-origin navigation. The persisted capture source retains its legacy
+      `meet` identifier for archive compatibility.
+- [ ] Verify real Teams and Zoom browser calls in installed Chrome, including
+      mic/remote audio, same-origin navigation, tab close, export, and desktop
+      import. Browser-native app windows and standalone apps need desktop capture.
 - [x] Expose full archive export for desktop import and accept the saved audio
       state in desktop migration. Keep source browser data after export.
+- [x] Align website, extension, desktop settings, README, and setup-guide copy:
+      extension captures browser tabs, desktop captures browser and native
+      desktop calls, and desktop creates/optionally syncs finished notes.
+- [ ] Build a shared notes/settings experience across extension, desktop, and
+      web app. Current desktop sync is one-way desktop → web app; extension
+      recordings require archive export/import, and settings remain per app.
 - [ ] Verify the complete flow in an installed Chrome extension and live Google
       Meet call: record, stop, export `.ntarchive`, import in the desktop app,
       and create notes with real desktop provider keys. Unit tests and a build
@@ -15,8 +30,9 @@
 - [ ] Decide whether to add automatic extension-to-desktop handoff after the
       manual archive path passes end-to-end acceptance.
 
-Local gate: extension typecheck, 640 tests, 91.83% statement / 83.10% branch /
-90.34% function coverage, and build pass. Helper fmt, Clippy, and workspace
+Local gate: extension typecheck, 645 tests, 91.77% statement / 83.12% branch /
+90.38% function coverage, and build pass after broadening tab capture.
+Helper fmt, Clippy, and workspace
 tests pass, including saved-state desktop import parsing. The optional synthetic
 browser smoke now connects its fake peer call after an ICE fixture fix, but its
 direct capture attempt fell back to tab capture and Chrome rejected the missing
@@ -76,6 +92,15 @@ The one-app workflow is not shipped.
 - [ ] Verify against a real web-app workspace/token and prove recovery after a
       network failure and app restart. Automated route and outbox tests pass.
 - [x] Add local history detail/delete and open-notes-folder controls.
+- [x] Add nested local folders and sectioned desktop Settings. Folder moves
+      change a local index only; raw audio stays in its recovery location.
+      Searches can include a folder's descendants, and empty folders can be
+      renamed, moved, or deleted. Desktop and legacy deletion clear placements.
+- [ ] Decide how local folders map to web-app folders during optional sync.
+      Current text sync does not transfer desktop folder organization.
+- [ ] Exercise folder and Settings controls in the packaged desktop app,
+      including a large library and a damaged folder index. Source checks and
+      browser UI inspection do not prove the native runtime journey.
 - [x] Add a desktop Notes action to resume crash-interrupted recordings through
       the existing BYOK retry pipeline, with duplicate recovery guarded.
 - [x] Add bounded (20 MB) note-text and preference transfer. It preserves

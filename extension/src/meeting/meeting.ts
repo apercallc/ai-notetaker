@@ -151,7 +151,7 @@ async function render(focusActionId?: string): Promise<void> {
           : meeting.status === "error"
             ? `<p class="error-state meeting-error">Failed: ${escapeHtml(meeting.errorMessage ?? "unknown error")}</p>`
             : `<p class="text-secondary">No summary yet.</p>`}
-      ${meeting.status === "error" && meeting.captureSource === "meet" ? `<div class="row"><button type="button" class="secondary" id="retry-processing">Retry saved Meet audio</button>${meeting.processingMode?.kind !== "managed" ? `<button type="button" class="secondary" id="open-provider-settings">Open AI settings</button>` : ""}</div>` : ""}
+      ${meeting.status === "error" && meeting.captureSource === "meet" ? `<div class="row"><button type="button" class="secondary" id="retry-processing">Retry saved browser audio</button>${meeting.processingMode?.kind !== "managed" ? `<button type="button" class="secondary" id="open-provider-settings">Open AI settings</button>` : ""}</div>` : ""}
     </section>
 
     <section>

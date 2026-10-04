@@ -1,6 +1,6 @@
 import type { BrowserAudioChannel } from "../types";
 import { MIC_PERMISSION_HINT } from "./hints";
-import { meetingCodeFromPath } from "./meetContext";
+import { isMeetUrl, isRecordableTabUrl, meetingCodeFromPath } from "./meetContext";
 import { bounded, validSdp, validSession, type DirectReply, type DirectRequest } from "./directProtocol";
 
 export interface MeetAudioChunk {
@@ -14,7 +14,6 @@ export interface MeetAudioChunk {
   tabId?: number;
 }
 
-const MEET_HOST = /(^|\.)meet\.google\.com$/i;
 const SAMPLE_RATE_HZ = 48_000;
 /** chrome.storage.session key for the active-capture map. */
 const SESSION_CAPTURES_KEY = "meet-active-captures";
@@ -44,12 +43,12 @@ function sendMessage<T = unknown>(message: unknown): Promise<T | undefined> {
 function tabStreamId(tabId: number): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!chrome.tabCapture?.getMediaStreamId) {
-      reject(new Error("This browser does not support the Google Meet capture mode."));
+      reject(new Error("This browser does not support tab audio capture."));
       return;
     }
     chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (id) => {
       if (chrome.runtime.lastError || !id) {
-        reject(new Error(chrome.runtime.lastError?.message ?? "Google Meet tab audio could not be captured"));
+        reject(new Error(chrome.runtime.lastError?.message ?? "This tab's audio could not be captured"));
         return;
       }
       resolve(id);
@@ -75,6 +74,7 @@ async function assertMicrophoneAllowed(): Promise<void> {
 
 interface ActiveCapture {
   tabId: number;
+  origin?: string;
   /** The call being recorded (`abc-defg-hij`), when known. */
   callCode: string | null;
   directSession?: string;
@@ -121,13 +121,14 @@ export class MeetCaptureController {
   async restoreCaptures(): Promise<void> {
     try {
       const stored = (await chrome.storage.session?.get?.(SESSION_CAPTURES_KEY))?.[SESSION_CAPTURES_KEY] as
-        | Array<[string, { tabId: number; callCode: string | null }]>
+        | Array<[string, { tabId: number; callCode: string | null; origin?: string }]>
         | undefined;
       if (!Array.isArray(stored)) return;
       for (const [meetingId, capture] of stored) {
         if (typeof meetingId === "string" && capture && typeof capture.tabId === "number") {
           const direct = capture as ActiveCapture;
           this.activeMeetings.set(meetingId, { tabId: capture.tabId, callCode: capture.callCode ?? null,
+            ...(typeof capture.origin === "string" ? { origin: capture.origin } : {}),
             ...(validSession(direct.directSession) && validSession(direct.documentKey) ? { directSession: direct.directSession, documentKey: direct.documentKey } : {}),
           });
         }
@@ -146,10 +147,10 @@ export class MeetCaptureController {
   private async prepare(tabId: number, preferDirect = true): Promise<{ url: string | undefined; streamId?: string; documentKey?: string }> {
     const tab = await chrome.tabs.get(tabId);
     const url = tab.url ? new URL(tab.url) : null;
-    if (!url || !MEET_HOST.test(url.hostname)) throw new Error("Select an active Google Meet tab for browser capture.");
-    if (!chrome.offscreen) throw new Error("This browser does not support the Google Meet capture mode.");
+    if (!url || !isRecordableTabUrl(tab.url)) throw new Error("Select a secure browser meeting tab to record.");
+    if (!chrome.offscreen) throw new Error("This browser does not support tab audio capture.");
     await assertMicrophoneAllowed();
-    if (preferDirect) {
+    if (preferDirect && isMeetUrl(tab.url)) {
       try {
         const result = await directRequest(tabId, { operation: "probe" });
         if (result?.ok && result.available && validSession(result.documentKey)) return { url: tab.url, documentKey: result.documentKey };
@@ -187,7 +188,8 @@ export class MeetCaptureController {
     // The offscreen page may emit a worklet chunk before its START reply gets
     // back to this worker. Mark the meeting active first so that the initial
     // audio is durably forwarded instead of silently dropped.
-    const capture: ActiveCapture = { tabId, callCode: callCodeOf(url),
+    const capture: ActiveCapture = { tabId, callCode: isMeetUrl(url) ? callCodeOf(url) : null,
+      ...(url ? { origin: new URL(url).origin } : {}),
       ...(documentKey ? { documentKey, directSession: crypto.randomUUID() } : {}),
     };
     this.activeMeetings.set(meetingId, capture);
@@ -196,7 +198,7 @@ export class MeetCaptureController {
         await chrome.offscreen.createDocument({
           url: "meet/offscreen.html",
           reasons: documentKey ? [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.WEB_RTC] : [chrome.offscreen.Reason.USER_MEDIA],
-          justification: "Save the Google Meet microphone and remote audio as separate local recording channels.",
+          justification: "Save microphone and browser-tab audio as separate local recording channels.",
         });
       }
       assertCurrent();
@@ -209,7 +211,7 @@ export class MeetCaptureController {
       assertCurrent();
       const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId,
         ...(directOffer ? { directOffer } : { streamId }) });
-      if (response?.ok !== true) throw new Error(response?.error ?? "Google Meet capture could not start.");
+      if (response?.ok !== true) throw new Error(response?.error ?? "Browser-tab capture could not start.");
       assertCurrent();
       await this.persistCaptures();
     } catch (error) {
@@ -278,6 +280,10 @@ export class MeetCaptureController {
 
   private stillOnCall(capture: ActiveCapture, nextUrl: string | undefined): boolean {
     if (nextUrl === undefined) return false;
+    if (capture.origin && !isMeetUrl(capture.origin)) {
+      try { return new URL(nextUrl).origin === capture.origin; }
+      catch { return false; }
+    }
     try {
       if (new URL(nextUrl).hostname !== "meet.google.com") return false;
     } catch { return false; }

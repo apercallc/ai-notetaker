@@ -12,7 +12,7 @@ existing managed-service contracts and implementation history.
 AI Notetaker is a cross-platform Tauri desktop app. The app owns first-run
 setup, provider API keys, audio readiness, recording controls, local notes,
 recovery, and optional web-app sync. Customers do not need a browser extension
-to record a meeting. The optional Chrome extension records Google Meet tab
+to record a meeting. The optional Chrome extension records secure browser meeting-tab
 audio and microphone tracks when a user wants tab-specific capture; the
 desktop app processes an imported archive.
 
@@ -65,7 +65,7 @@ local BYOK.
 
 ## Extension transition and data safety
 
-- New extension calls record Google Meet audio locally and stop at a durable
+- New extension calls record browser meeting audio locally and stop at a durable
   saved-audio state. They do not require browser provider keys, upload audio to
   managed hosting, or start desktop calls. The desktop app remains the primary
   capture and processing product.

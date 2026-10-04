@@ -82,6 +82,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sidebar-footer { display: grid; gap: 10px; margin-top: auto; padding: 16px 4px 0; }
 .local-badge { display: flex; align-items: center; gap: 8px; color: #c5d8cb; font-size: 11px; }
 .status-dot { display: inline-block; flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: #6ca985; }
+.status-dot.needs-attention { background: #c08a47; }
 .status-dot.recording { background: #ed756f; box-shadow: 0 0 0 4px rgb(237 117 111 / 16%); }
 .sidebar-link { width: fit-content; padding: 2px 0; border: 0; color: #d9e8df; background: none; font-size: 12px; text-align: left; }
 .sidebar-link:hover { color: white; text-decoration: underline; }
@@ -246,6 +247,7 @@ p { line-height: 1.55; }
     --sidebar-ink: #f4faf5; --shadow: 0 14px 36px rgb(0 0 0 / 12%);
   }
   .text-input, .select-input, .text-area, .search-input { border-color: #435449; }
+  .primary-button { color: #10291f; }
   .readiness.warn { color: #f1d489; background: #42371e; }
   .setup-callout { border-color: #514526; color: #f1d489; background: #332d1e; }
   .notice.error { border-color: #573331; color: #f29b94; background: #382522; }

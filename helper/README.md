@@ -1,8 +1,11 @@
 # AI Notetaker — Desktop App
 
 Tauri/Rust desktop app for setup, recording controls, local notes, recovery,
-and optional authenticated web-app sync. It works locally with provider API
-keys; no browser extension or AI Notetaker account is required. See the
+and optional authenticated web-app sync. It imports Chrome extension meeting
+archives for transcription and can capture browser or desktop calls directly.
+Workspace sync sends finished desktop note text to the web app; it is not a
+round-trip sync. It works locally with provider API keys and no AI Notetaker
+account. See the
 architecture spec at
 `../docs/superpowers/specs/2026-10-03-desktop-first-product-design.md` and
 `CLAUDE.md` in this directory for the design this implements.
@@ -32,6 +35,13 @@ crates/
                                notetaker-nm-host as a legacy extension relay
 native-messaging-host-manifest/  — the Chrome host manifest template
 ```
+
+The desktop Library organizes recordings in nested local folders. Moving a
+note or folder updates `desktop-library.json` in the app data directory; it
+does not move the saved mic/speaker audio used for recovery. Deleting an empty
+folder never deletes recordings. Optional web-app sync currently sends finished
+note text, without the desktop folder organization. Settings groups provider
+keys, note preferences, web-app sync, and import controls.
 
 ## Building and testing
 

@@ -72,13 +72,13 @@ export function softwareNode(origin: string): Node {
     downloadUrl: url(origin, "/download"),
     publisher: { "@id": url(origin, "/#organization") },
     featureList: [
-      "One desktop app for setup, recording, and local meeting notes",
-      "Captures browser and desktop meetings from microphone and system audio",
+      "Chrome extension captures audio from browser meeting tabs, including Google Meet, Zoom, Teams, Slack, and Discord web",
+      "Desktop app captures browser and desktop meetings on macOS, Windows, and Linux",
       "Saves audio on your device before any AI provider is called",
       "Keeps your microphone and the meeting's audio as separate channels",
       "Transcript, summary, decisions and action items for every meeting",
       "Local use with your own AI provider keys and no required account",
-      "Optional workspace sync for finished note text",
+      "Optional one-way sync from desktop to web workspace for finished note text",
       "Open source under the MIT license",
     ],
     offers: [
@@ -131,12 +131,12 @@ export function howToNode(origin: string): Node {
       {
         "@type": "HowToStep",
         name: "Install",
-        text: "Download one desktop app for setup, recording, and local notes. The download page shows currently available installers.",
+        text: "Choose the Chrome extension to capture a browser meeting tab, or download the desktop app for browser and desktop capture, processing, and local notes. The download page shows currently available installers.",
       },
       {
         "@type": "HowToStep",
         name: "Record",
-        text: "Acknowledge the recording notice, then start. Your microphone and the meeting's audio are saved on your device as two channels.",
+        text: "Acknowledge the recording notice, then start. The Chrome extension saves tab and microphone audio for later import, while the desktop app can record and process browser or desktop calls locally.",
       },
       {
         "@type": "HowToStep",

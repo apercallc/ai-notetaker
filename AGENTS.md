@@ -16,10 +16,11 @@ continue with normal repository tools and do not create an index.
   local BYOK processing, local history, and recovery for browser and desktop
   calls. Local BYOK requires no AI Notetaker account. The web app is optional;
   desktop sync sends finalized note text through its authenticated API.
-- The browser extension records Google Meet audio into IndexedDB for desktop
-  import. It does not process new calls with browser provider keys or start
-  desktop calls. Keep older recordings and settings accessible until the
-  archive path and desktop acceptance gates pass.
+- The browser extension records secure browser meeting tabs into IndexedDB for
+  desktop import. Google Meet retains its in-call control; other browser calls
+  start from the popup or shortcut. It does not process new calls with browser
+  provider keys or start desktop calls. Keep older recordings and settings
+  accessible until the archive path and desktop acceptance gates pass.
 - Raw audio is persisted locally before any provider call or managed upload.
 - New desktop BYOK keys stay in the operating system credential vault; never
   send them to the web app. Existing extension keys remain in

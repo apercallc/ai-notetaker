@@ -177,10 +177,33 @@ describe("Google Meet capture orchestration", () => {
     expect(controller.isActive("meeting-1")).toBe(false);
   });
 
-  it("refuses a non-Meet tab before asking for capture permission", async () => {
-    chromeMock.tabs.get.mockResolvedValue({ id: 7, url: "https://zoom.us/j/123" });
+  it("captures a Zoom browser tab and keeps same-origin navigation recording", async () => {
+    grantStreamId("zoom-stream");
+    chromeMock.tabs.get.mockResolvedValue({ id: 7, url: "https://app.zoom.us/wc/123" });
     const controller = new MeetCaptureController(vi.fn());
-    await expect(controller.start(7, "meeting-1")).rejects.toThrow("Google Meet tab");
+    await controller.start(7, "meeting-1");
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "MEET_CAPTURE_START", streamId: "zoom-stream" }));
+    await expect(controller.stopForTab(7, "https://app.zoom.us/wc/456")).resolves.toEqual([]);
+    await expect(controller.stopForTab(7, "https://example.com/")).resolves.toEqual(["meeting-1"]);
+  });
+
+  it("restores a Teams capture after a worker restart before handling navigation", async () => {
+    grantStreamId("teams-stream");
+    chromeMock.tabs.get.mockResolvedValue({ id: 7, url: "https://teams.microsoft.com/v2/" });
+    await new MeetCaptureController(vi.fn()).start(7, "meeting-1");
+    const resumed = new MeetCaptureController(vi.fn());
+    await resumed.restoreCaptures();
+    await expect(resumed.stopForTab(7, "https://teams.microsoft.com/v2/call/123")).resolves.toEqual([]);
+    await expect(resumed.stopForTab(7, "https://example.com/")).resolves.toEqual(["meeting-1"]);
+  });
+
+  it("refuses an insecure or browser-internal tab before asking for capture permission", async () => {
+    grantStreamId("stream-abc");
+    chromeMock.tabs.get.mockResolvedValue({ id: 7, url: "http://example.com/call" });
+    const controller = new MeetCaptureController(vi.fn());
+    await expect(controller.start(7, "meeting-1")).rejects.toThrow("secure browser meeting tab");
+    chromeMock.tabs.get.mockResolvedValue({ id: 7, url: "chrome://newtab" });
+    await expect(controller.start(7, "meeting-1")).rejects.toThrow("secure browser meeting tab");
     expect(chromeMock.offscreen.createDocument).not.toHaveBeenCalled();
   });
 

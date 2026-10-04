@@ -234,6 +234,7 @@ impl AudioProcessingQueue {
 struct AppState {
     store: Arc<MeetingStore>,
     data_dir: std::path::PathBuf,
+    library: Arc<desktop_library::DesktopLibrary>,
     audio: Arc<dyn AudioCapture>,
     pairing_token: Mutex<Option<String>>,
     settings: Mutex<Option<Settings>>,
@@ -1151,9 +1152,11 @@ fn main() {
             );
             let existing_token = load_pairing_token(&pairing_token_path(&root));
             let audio: Arc<dyn AudioCapture> = build_audio_backend();
+            let library = Arc::new(desktop_library::DesktopLibrary::new(root.clone()));
             let state = Arc::new(AppState {
                 store,
                 data_dir: root.clone(),
+                library: library.clone(),
                 audio,
                 pairing_token: Mutex::new(existing_token),
                 settings: Mutex::new(None),
@@ -1178,7 +1181,6 @@ fn main() {
             let preferences = Arc::new(std::sync::Mutex::new(preferences));
             let key_storage_error = Arc::new(std::sync::Mutex::new(key_storage_error));
             let sync = DesktopSync::load(&root);
-            let library = Arc::new(desktop_library::DesktopLibrary::new(root.clone()));
             let tray = tray::initialize(app.handle(), root.clone());
             let (ui_output, mut ui_events) = tokio::sync::mpsc::unbounded_channel();
             app.manage(DesktopCommandContext {
@@ -1879,7 +1881,10 @@ async fn desktop_get_meeting(
     meeting_id: String,
 ) -> Result<DesktopMeetingDetail, String> {
     let meeting_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
-    let folder_id = context.library.snapshot().ok()
+    let folder_id = context
+        .library
+        .snapshot()
+        .ok()
         .and_then(|library| library.placements.get(&meeting_id).map(ToString::to_string));
     let store = context.app.store.clone();
     let active = context.app.active.lock().await.contains_key(&meeting_id);
@@ -1953,9 +1958,6 @@ async fn desktop_delete_meeting(
         .await
         .map_err(|error| format!("Recording could not be deleted: {error}"))?;
     let _ = context.sync.remove(meeting_id);
-    if let Err(error) = context.library.forget_meeting(meeting_id) {
-        tracing::warn!(%error, %meeting_id, "deleted recording remains in local folder index");
-    }
     Ok(())
 }
 
@@ -2243,6 +2245,9 @@ async fn delete_meeting_data(
     state.pipelines.lock().await.remove(&meeting_id);
     state.store.delete_meeting(meeting_id)?;
     let _ = std::fs::remove_file(state.data_dir.join(format!("retry-{meeting_id}.json")));
+    if let Err(error) = state.library.forget_meeting(meeting_id) {
+        tracing::warn!(%error, %meeting_id, "deleted recording remains in local folder index");
+    }
     Ok(())
 }
 

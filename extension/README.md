@@ -1,15 +1,18 @@
 # AI Notetaker — Chrome Extension
 
-The extension records Google Meet audio in Chrome. It saves microphone and call
-audio as separate local tracks. Stop recording, then use **Settings → Save full
+The extension records meetings playing in a secure Chrome tab, including the web
+versions of Google Meet, Zoom, Teams, Slack, and Discord. It saves microphone
+and tab audio as separate local tracks. Stop recording, then use **Settings → Save full
 archive** to export a `.ntarchive` file. Import that file in the desktop app
 under **Settings → Import from the extension** and select **Create notes from
 saved audio** on the imported recording. The desktop app owns transcription,
 summary generation, provider keys, and desktop-call capture.
 
+Extension recording controls stay in Chrome. Desktop provider settings, local
+notes, and optional one-way sync to a web workspace are configured separately.
 The extension retains older recordings, notes, provider settings, and Native
 Messaging compatibility during migration. **Open previous settings** provides
-access to those older controls. New Meet recordings do not call an AI provider
+access to those older controls. New browser recordings do not call an AI provider
 or require a provider key in Chrome.
 
 For the user-facing install and recording flow, start with
@@ -45,7 +48,9 @@ The extension's ID is fixed at `jidooookkdbbbhkkdmcajnnnhhphodok` (derived
 from the committed `key` field in `manifest.json` — see the architecture
 spec §3.2 for why this has to stay stable).
 
-Loading `dist/` is sufficient for Google Meet browser capture. The desktop app
+Loading `dist/` is sufficient for browser-tab capture. Start a secure Teams,
+Zoom, or other web meeting from the popup or recording shortcut; Google Meet
+also has an in-call control. The desktop app
 is needed to process imported audio into notes. Older extension and helper
 installs can still use Native Messaging during migration. See the
 [source-build steps](../docs/getting-started.md#build-from-source).

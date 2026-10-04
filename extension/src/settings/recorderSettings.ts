@@ -8,24 +8,25 @@ const app = document.getElementById("app")!;
 async function render(): Promise<void> {
   const settings = await getSettings();
   app.innerHTML = `
-    <header class="settings-header"><h1>Google Meet recorder</h1><p>Record Meet audio in Chrome. Your microphone and the call stay on separate local tracks.</p></header>
+    <header class="settings-header"><h1>Browser meeting recorder</h1><p>Capture a meeting playing in the current Chrome tab, including Google Meet, Zoom, Teams, Slack, and Discord web. Your microphone and tab audio stay on separate local tracks.</p></header>
     <section class="settings-section">
       <h2>Recording</h2>
-      <label><input id="show-widget" type="checkbox" ${settings.showMeetWidget ? "checked" : ""} /> Show the recording control in Google Meet</label>
-      <label><input id="auto-record" type="checkbox" ${settings.autoRecordOnMeetJoin ? "checked" : ""} /> Start recording when I join a Meet call</label>
+      <label><input id="show-widget" type="checkbox" ${settings.showMeetWidget ? "checked" : ""} /> Show the in-call recording control in Google Meet</label>
+      <label><input id="auto-record" type="checkbox" ${settings.autoRecordOnMeetJoin ? "checked" : ""} /> Start recording when I join a Google Meet call</label>
+      <p class="field-hint">For Zoom, Teams, Slack, and Discord web calls, use the popup or shortcut on the meeting tab. Behavior can vary by site.</p>
       <p class="field-hint">Tell everyone before recording. Chrome may ask for microphone access when capture starts.</p>
       <button class="primary" id="save-settings">Save recording settings</button>
       <p id="save-status" role="status" aria-live="polite"></p>
     </section>
     <section class="settings-section">
-      <h2>Move recordings to the desktop app</h2>
-      <p>Export your saved Meet audio and older notes as one archive. The source remains in Chrome. In the desktop app, open Settings → Import from the extension.</p>
+      <h2>Make notes in the desktop app</h2>
+      <p>Export saved browser audio and older notes as one archive. In the desktop app, open Settings → Import from the extension to transcribe new recordings. The archive is copied; your original stays in Chrome.</p>
       <button class="primary" id="export-archive">Save full archive</button>
       <p id="archive-status" role="status" aria-live="polite"></p>
     </section>
     <section class="settings-section">
       <h2>Earlier extension data</h2>
-      <p>Older notes, provider settings, and recovery controls remain available while you move to the desktop app.</p>
+      <p>Earlier notes, provider settings, and recovery controls remain available here. Desktop provider settings and web-app sync are configured separately in the desktop app.</p>
       <button class="secondary" id="open-previous-settings">Open previous settings</button>
     </section>`;
 

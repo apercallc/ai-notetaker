@@ -48,7 +48,7 @@
     } catch (error) {
       $("#content").innerHTML = `<div class="empty-state"><strong>Workspace could not open</strong>${esc(error)}<p><button class="secondary-button" id="retry-load">Try again</button></p></div>`;
       $("#retry-load")?.addEventListener("click", refresh);
-      $("#topbar-status").innerHTML = '<span class="status-dot"></span><span>Workspace unavailable</span>';
+      $("#topbar-status").innerHTML = '<span class="status-dot needs-attention"></span><span>Workspace unavailable</span>';
     }
   }
 
@@ -86,7 +86,8 @@
       && providerKeySaved(snapshot.settings, preferences.summarizationProvider);
     const appReady = !snapshot.credentialStoreError && providersReady;
     const processing = snapshot.meetings.some((meeting) => meeting.status === "processing");
-    $("#topbar-status").innerHTML = `<span class="status-dot ${recording ? "recording" : ""}"></span><span>${recording ? "Recording on this device" : processing ? "Preparing saved notes" : !appReady ? "Setup needed" : snapshot.audio.ready ? "Ready to record" : snapshot.audio.permissionRequired ? "Audio permission needed" : "Audio setup needed"}</span>`;
+    const needsAttention = !recording && !processing && (!appReady || !snapshot.audio.ready);
+    $("#topbar-status").innerHTML = `<span class="status-dot ${recording ? "recording" : needsAttention ? "needs-attention" : ""}"></span><span>${recording ? "Recording on this device" : processing ? "Preparing saved notes" : !appReady ? "Setup needed" : snapshot.audio.ready ? "Ready to record" : snapshot.audio.permissionRequired ? "Audio permission needed" : "Audio setup needed"}</span>`;
     $("#open-webapp").hidden = !snapshot.settings.preferences.webappUrl;
     if (snapshot.credentialStoreError) notify(snapshot.credentialStoreError, "error");
     else if (snapshot.unreadableRecordings) notify(`${snapshot.unreadableRecordings} recording${snapshot.unreadableRecordings === 1 ? "" : "s"} could not be read. Other notes remain available.`, "warn");
@@ -121,7 +122,7 @@
       ${processing ? `<p class="process-status" role="status">Preparing notes from ${processing} saved recording${processing === 1 ? "" : "s"}. You can keep using the app.</p>` : ""}
       <div class="record-grid">
         <section class="card record-card" aria-labelledby="record-heading">
-          <div class="record-intro"><h2 id="record-heading">${active ? "Recording is in progress" : "Start a recording"}</h2><p>${active ? "Audio is being saved on this device while your notes are prepared." : "Record a desktop call and keep the audio and notes on this device."}</p></div>
+          <div class="record-intro"><h2 id="record-heading">${active ? "Recording is in progress" : "Start a recording"}</h2><p>${active ? "Audio is being saved on this device while your notes are prepared." : "Record a browser or desktop call and keep the audio and notes on this device."}</p></div>
           <label class="field-label" for="meeting-title">Meeting title <span class="fine-print">(optional)</span></label>
           <input id="meeting-title" class="text-input" maxlength="200" value="${esc(state.recordTitle)}" placeholder="e.g. Product planning" ${active ? "disabled" : ""} />
           <label class="consent-row"><input id="record-consent" type="checkbox" ${state.recordConsentAcknowledged ? "checked" : ""} ${active ? "disabled" : ""} /><span>I’ve told everyone on the call that recording is starting.</span></label>
@@ -215,17 +216,16 @@
     const folders = state.snapshot.folders || [];
     if (state.currentFolderId && !folders.some((folder) => folder.id === state.currentFolderId)) state.currentFolderId = null;
     const current = folders.find((folder) => folder.id === state.currentFolderId);
-    const children = folders.filter((folder) => folder.parentId === state.currentFolderId)
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    const directNoteCount = meetings.filter((meeting) => meeting.folderId === state.currentFolderId).length;
     const path = folderPath(state.currentFolderId);
     const listScroll = $("#meeting-list")?.scrollTop || 0;
     $("#content").innerHTML = `<div class="notes-layout">
       <section class="card notes-list-panel"><div class="panel-heading">
-        ${state.snapshot.libraryError ? `<p class="library-error" role="alert">Folder organization could not be read. Recordings remain available here; the folder index was not overwritten. ${esc(state.snapshot.libraryError)}</p>` : ""}
+        ${state.snapshot.libraryError ? '<p class="library-error" role="alert">Folders could not be loaded. Your recordings are still available. Try restarting the app.</p>' : ""}
         <nav class="folder-breadcrumbs" aria-label="Folder path"><button type="button" data-folder-path="">Library</button>${path.map((folder) => `<span aria-hidden="true">/</span><button type="button" data-folder-path="${esc(folder.id)}" ${folder.id === state.currentFolderId ? 'aria-current="page"' : ""}>${esc(folder.name)}</button>`).join("")}</nav>
-        <div class="library-heading"><h2>${esc(current?.name || "Library")} <span class="fine-print">${meetings.length} total</span></h2><button type="button" class="small-button" id="new-folder">New folder</button></div>
+        <div class="library-heading"><h2>${esc(current?.name || "Library")} <span class="fine-print">${directNoteCount} ${directNoteCount === 1 ? "note" : "notes"}</span></h2><button type="button" class="small-button" id="new-folder">New folder</button></div>
         <form class="folder-form" id="new-folder-form" hidden><label class="field-label" for="folder-name">Folder name</label><div class="inline-actions"><input class="text-input" id="folder-name" maxlength="80" required /><button class="secondary-button" type="submit">Create</button><button class="small-button" type="button" id="cancel-folder">Cancel</button></div></form>
-        ${current ? `<button type="button" class="small-button" id="manage-folder">Manage this folder</button><div class="folder-manage" id="folder-manage" hidden><label class="field-label" for="rename-folder">Name</label><div class="inline-actions"><input class="text-input" id="rename-folder" maxlength="80" value="${esc(current.name)}" /><button type="button" class="small-button" id="apply-folder-name">Rename</button></div><label class="field-label" for="folder-parent">Move folder to</label><div class="inline-actions"><select class="select-input" id="folder-parent">${folderOptions(current.parentId, current.id)}</select><button type="button" class="small-button" id="apply-folder-parent">Move</button></div><button type="button" class="small-button folder-delete" id="delete-folder">Delete empty folder</button></div>` : ""}
+        ${current ? `<button type="button" class="small-button" id="manage-folder" aria-expanded="false" aria-controls="folder-manage">Manage this folder</button><div class="folder-manage" id="folder-manage" hidden><label class="field-label" for="rename-folder">Name</label><div class="inline-actions"><input class="text-input" id="rename-folder" maxlength="80" value="${esc(current.name)}" /><button type="button" class="small-button" id="apply-folder-name">Rename</button></div><label class="field-label" for="folder-parent">Move folder to</label><div class="inline-actions"><select class="select-input" id="folder-parent">${folderOptions(current.parentId, current.id)}</select><button type="button" class="small-button" id="apply-folder-parent">Move</button></div><button type="button" class="small-button folder-delete" id="delete-folder">Delete empty folder</button></div>` : ""}
         <input id="notes-search" class="search-input" type="search" value="${esc(state.notesQuery)}" placeholder="Search notes" aria-label="Search notes" />
         <p class="fine-print">${state.notesQuery ? "Search includes this folder and its subfolders." : "Browse folders or select a recording."}</p>
       </div><div id="meeting-list" class="meeting-list"></div></section>
@@ -240,16 +240,21 @@
     $("#cancel-folder")?.addEventListener("click", () => { $("#new-folder-form").hidden = true; });
     $("#new-folder-form")?.addEventListener("submit", async (event) => {
       event.preventDefault();
-      try { await invoke("desktop_create_folder", { parentId: state.currentFolderId, name: $("#folder-name").value }); notify("Folder created."); await refresh(); }
+      try { await invoke("desktop_create_folder", { parentId: state.currentFolderId, name: $("#folder-name").value }); $("#new-folder-form").hidden = true; notify("Folder created."); await refresh(); }
       catch (error) { notify(String(error), "error"); }
     });
-    $("#manage-folder")?.addEventListener("click", () => { $("#folder-manage").hidden = !$("#folder-manage").hidden; });
+    $("#manage-folder")?.addEventListener("click", () => {
+      const panel = $("#folder-manage");
+      panel.hidden = !panel.hidden;
+      $("#manage-folder").setAttribute("aria-expanded", String(!panel.hidden));
+      if (panel.hidden) $("#manage-folder").focus();
+    });
     $("#apply-folder-name")?.addEventListener("click", async () => {
-      try { await invoke("desktop_rename_folder", { folderId: state.currentFolderId, name: $("#rename-folder").value }); notify("Folder renamed."); await refresh(); }
+      try { await invoke("desktop_rename_folder", { folderId: state.currentFolderId, name: $("#rename-folder").value }); $("#folder-manage").hidden = true; notify("Folder renamed."); await refresh(); }
       catch (error) { notify(String(error), "error"); }
     });
     $("#apply-folder-parent")?.addEventListener("click", async () => {
-      try { await invoke("desktop_move_folder", { folderId: state.currentFolderId, parentId: $("#folder-parent").value || null }); notify("Folder moved."); await refresh(); }
+      try { await invoke("desktop_move_folder", { folderId: state.currentFolderId, parentId: $("#folder-parent").value || null }); $("#folder-manage").hidden = true; notify("Folder moved."); await refresh(); }
       catch (error) { notify(String(error), "error"); }
     });
     $("#delete-folder")?.addEventListener("click", async () => {
@@ -302,7 +307,7 @@
       && `${meeting.title} ${meeting.summary || ""}`.toLocaleLowerCase().includes(needle));
     const childFolders = needle ? [] : folders.filter((folder) => folder.parentId === state.currentFolderId)
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-    const folderRows = childFolders.map((folder) => `<button class="folder-list-item" data-open-folder="${esc(folder.id)}"><span aria-hidden="true">▤</span><strong>${esc(folder.name)}</strong><span>${state.snapshot.meetings.filter((meeting) => meeting.folderId === folder.id).length} notes</span></button>`).join("");
+    const folderRows = childFolders.map((folder) => { const count = state.snapshot.meetings.filter((meeting) => meeting.folderId === folder.id).length; return `<button class="folder-list-item" data-open-folder="${esc(folder.id)}"><span aria-hidden="true">▤</span><strong>${esc(folder.name)}</strong><span>${count} ${count === 1 ? "note" : "notes"}</span></button>`; }).join("");
     list.innerHTML = folderRows + (filtered.length ? filtered.map((meeting) => `<button class="meeting-list-item ${meeting.id === state.selectedId ? "selected" : ""}" data-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><span>${esc(prettyDate(meeting.startedAt))} · ${esc(statusLabel(meeting.status))}</span></button>`).join("") : !folderRows ? `<div class="empty-state">${state.snapshot.meetings.length ? needle ? "No matching notes." : "This folder is empty." : "No recordings yet."}</div>` : "");
     for (const button of list.querySelectorAll("[data-open-folder]")) button.addEventListener("click", () => openFolder(button.dataset.openFolder));
     for (const button of list.querySelectorAll("[data-id]")) button.addEventListener("click", () => openMeeting(button.dataset.id));
@@ -464,13 +469,13 @@
         <div class="form-field wide"><label class="field-label" for="vocabulary">Custom vocabulary <span class="fine-print">one term per line</span></label><textarea class="text-area" id="vocabulary" placeholder="Product names, acronyms, and people">${esc(vocabulary)}</textarea></div>
         <div class="form-field wide"><label class="field-label" for="instructions">Summary instructions <span class="fine-print">optional</span></label><textarea class="text-area" id="instructions" maxlength="4000" placeholder="What should summaries focus on?">${esc(p.customSummaryInstructions)}</textarea></div></div>
       </section>
-      <section class="card settings-card" id="settings-sync"><h2 tabindex="-1">Web app sync</h2><p>Optional. Local recording works without an account. Connect a workspace to sync finished notes across devices.</p>
+      <section class="card settings-card" id="settings-sync"><h2 tabindex="-1">Web app sync</h2><p>Optional. Local recording works without an account. Send finished notes from this desktop app to a selected web workspace.</p>
         <div class="form-grid"><div class="form-field wide"><label class="field-label" for="webapp-url">Web-app URL</label><input class="text-input" id="webapp-url" type="url" value="${esc(p.webappUrl)}" placeholder="https://notes.example.com" autocomplete="url" /></div>
         <div class="form-field wide"><label class="field-label" for="webapp-token">Desktop sync token</label><div class="key-row"><input class="text-input" id="webapp-token" type="password" autocomplete="new-password" placeholder="${s.hasWebappToken ? "Saved securely · blank keeps current token" : "Paste desktop sync token"}" /><button type="button" class="secondary-button" id="test-webapp">Test connection</button></div><label class="key-status" id="webapp-status">${s.hasWebappToken ? (state.snapshot.webappSync.configured ? `Sync enabled · ${state.snapshot.webappSync.pending} note(s) pending` : "Token saved. Check the URL and connection.") : "No sync token saved."}</label><label class="fine-print"><input type="checkbox" id="clear-webapp-token" /> Remove saved token</label></div></div>
-        <div class="privacy-note">To connect: sign in to the web app, open Settings → Integrations, create a “Desktop note sync” token for the selected workspace, then paste it here. Saving enables sync to that workspace. Only finished transcripts, summaries, and action items sync. Raw audio and provider API keys stay on this device.</div>
+        <div class="privacy-note">To connect: sign in to the web app, open Settings → Integrations, create a “Desktop note sync” token for the selected workspace, then paste it here. This is one-way sync from desktop to web app: only finished transcripts, summaries, and action items sync. Web-app notes and settings do not sync back to desktop or the extension. Raw audio and provider API keys stay on this device.</div>
         ${state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last synced ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "No notes synced yet"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing">Sync existing notes</button><button type="button" class="small-button" id="retry-sync" ${state.snapshot.webappSync.pending ? "" : "disabled"}>Retry pending (${state.snapshot.webappSync.pending})</button></div></div>` : ""}
       </section>
-      <section class="card settings-card" id="settings-import"><h2 tabindex="-1">Import from the extension</h2><p>Import a full archive to bring over new Meet recordings, older notes, partial transcripts, and any raw audio still saved by the extension. Older completed-call audio may already have been removed after notes were saved. API keys, web-app credentials, and Google connections stay separate. Import copies data; it never removes the extension source.</p>
+      <section class="card settings-card" id="settings-import"><h2 tabindex="-1">Import from the extension</h2><p>Import a full archive to bring over new browser meeting recordings, older notes, partial transcripts, and any raw audio still saved by the extension. Older completed-call audio may already have been removed after notes were saved. API keys, web-app credentials, and Google connections stay separate. Import copies data; it never removes the extension source.</p>
         <button type="button" class="secondary-button" id="import-desktop-audio-transfer">Choose full archive</button>
         <p class="key-status" id="desktop-audio-transfer-status" role="status" aria-live="polite"></p>
         <p class="fine-print">Older notes-only JSON transfer files can still be imported below.</p>
@@ -494,7 +499,7 @@
       for (const item of document.querySelectorAll("[data-settings-section]")) item.removeAttribute("aria-current");
       button.setAttribute("aria-current", "true");
       const section = document.getElementById(`settings-${button.dataset.settingsSection}`);
-      section?.scrollIntoView({ behavior: "smooth", block: "start" });
+      section?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
       section?.querySelector("h2")?.focus({ preventScroll: true });
     });
   }

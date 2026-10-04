@@ -19,7 +19,7 @@ async function loadWizard(url = "/onboarding/onboarding.html"): Promise<void> {
   await vi.waitFor(() => expect(document.querySelector("#allow-microphone")).not.toBeNull());
 }
 
-describe("Meet recorder setup", () => {
+describe("browser recorder setup", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     microphone.requestMicrophone.mockResolvedValue("granted");
@@ -28,7 +28,7 @@ describe("Meet recorder setup", () => {
 
   it("asks only for microphone and recording consent", async () => {
     await loadWizard();
-    expect(document.body.textContent).toContain("Set up Google Meet recording");
+    expect(document.body.textContent).toContain("Set up browser meeting recording");
     expect(document.querySelector("#onboarding-deepgram-key")).toBeNull();
     expect(document.querySelector("#download-helper")).toBeNull();
     expect((document.querySelector("#finish-setup") as HTMLButtonElement).disabled).toBe(true);

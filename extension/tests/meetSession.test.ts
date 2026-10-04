@@ -62,7 +62,7 @@ describe("describeCaptureFailure", () => {
 
   it("passes other messages through and has a default", () => {
     expect(describeCaptureFailure(new Error("Select an active Google Meet tab for browser capture."))).toBe("Select an active Google Meet tab for browser capture.");
-    expect(describeCaptureFailure("weird")).toBe("Google Meet capture could not start.");
+    expect(describeCaptureFailure("weird")).toBe("Browser-tab capture could not start.");
   });
 });
 
@@ -73,7 +73,7 @@ describe("startMeetRecording", () => {
     capture.isActiveForTab.mockReturnValue(false);
     const [c, k] = asTypes();
     expect(await startMeetRecording(c, k, { tabId: 10 })).toBe("");
-    expect(controller.reportStartFailure).toHaveBeenCalledWith(expect.stringContaining("Another Google Meet tab"));
+    expect(controller.reportStartFailure).toHaveBeenCalledWith(expect.stringContaining("Another browser tab"));
     expect(controller.startRecording).not.toHaveBeenCalled();
     expect(capture.start).not.toHaveBeenCalled();
   });
@@ -122,7 +122,7 @@ describe("startMeetRecording", () => {
     const [c, k] = asTypes();
 
     expect(await startMeetRecording(c, k, { tabId: undefined })).toBe("");
-    expect(controller.reportStartFailure).toHaveBeenCalledWith("Open the Google Meet call in this tab first, then start recording.");
+    expect(controller.reportStartFailure).toHaveBeenCalledWith("Open a secure browser meeting tab first, then start recording.");
     expect(controller.startRecording).not.toHaveBeenCalled();
     expect(controller.failRecording).not.toHaveBeenCalled();
     expect(capture.start).not.toHaveBeenCalled();
@@ -286,6 +286,14 @@ describe("handleMeetCommand", () => {
     expect(capture.start).toHaveBeenCalledWith(9, "m1");
   });
 
+  it("starts recording a Zoom browser tab with its tab title", async () => {
+    const { controller, capture, asTypes } = fakes();
+    const [c, k] = asTypes();
+    await handleMeetCommand("toggle-recording", { id: 12, url: "https://app.zoom.us/wc/123", title: "Planning - Zoom" }, c, k);
+    expect(controller.startRecording).toHaveBeenCalledWith(undefined, "meet", "Planning - Zoom");
+    expect(capture.start).toHaveBeenCalledWith(12, "m1");
+  });
+
   it("stops the active recording, wherever the shortcut is pressed", async () => {
     const { controller, asTypes } = fakes({ id: "live" });
     const [c, k] = asTypes();
@@ -296,11 +304,11 @@ describe("handleMeetCommand", () => {
     expect(controller.startRecording).not.toHaveBeenCalled();
   });
 
-  it("ignores the start shortcut outside a Meet tab instead of leaving a failed meeting behind", async () => {
+  it("ignores the start shortcut outside a secure web tab instead of leaving a failed meeting behind", async () => {
     const { controller, asTypes } = fakes();
     const [c, k] = asTypes();
 
-    await handleMeetCommand("toggle-recording", { id: 3, url: "https://example.com/" }, c, k);
+    await handleMeetCommand("toggle-recording", { id: 3, url: "chrome://newtab" }, c, k);
     await handleMeetCommand("toggle-recording", undefined, c, k);
 
     expect(controller.startRecording).not.toHaveBeenCalled();

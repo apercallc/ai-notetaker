@@ -1,9 +1,10 @@
 # extension/ — Chrome Extension
 
-Manifest V3. This package is an optional Google Meet recorder during the
+Manifest V3. This package is an optional browser meeting recorder during the
 desktop-first migration. New calls capture separate mic and meeting tracks in
 IndexedDB; the Tauri desktop app owns provider keys, notes, and desktop calls.
-Keep older recordings, notes, settings, and the explicit archive export
+Google Meet keeps its in-call control; other secure web tabs use the popup or
+shortcut. Keep older recordings, notes, settings, and the explicit archive export
 available until acceptance passes. Do not remove storage or alter the stable
 manifest key during the transition. See the root `CLAUDE.md` and
 `docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`.
