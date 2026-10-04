@@ -93,6 +93,12 @@ jobs:
       # execution require release-owner credentials and physical devices.
       - name: Build unsigned native bundle
         working-directory: helper/crates/app
+        env:
+          # Stripping Rust proc-macro dylibs makes Apple's macOS 27 loader
+          # reject their LINKEDIT string-pool alignment before app bundling.
+          # Keep release dylibs intact on macOS; other OSes retain Tauri's
+          # existing debuginfo stripping behavior.
+          CARGO_PROFILE_RELEASE_STRIP: ${{ runner.os == 'macOS' && 'none' || 'debuginfo' }}
         run: npx --yes @tauri-apps/cli@2.11.5 build --bundles ${{ matrix.bundle }}
 
       - name: Test Mac installer and package guided DMG

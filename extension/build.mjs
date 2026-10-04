@@ -8,6 +8,7 @@ const entryPoints = [
   "src/background.ts",
   "src/popup/popup.ts",
   "src/settings/settings.ts",
+  "src/settings/recorderSettings.ts",
   "src/onboarding/onboarding.ts",
   "src/meeting/meeting.ts",
   "src/actions/actions.ts",
@@ -40,6 +41,7 @@ async function copyStatic() {
     await cp(`src/${page}/${page}.html`, `dist/${page}/${page}.html`);
     await cp(`src/${page}/${page}.css`, `dist/${page}/${page}.css`);
   }
+  await cp("src/settings/legacy.html", "dist/settings/legacy.html");
   await cp("src/meet/offscreen.html", "dist/meet/offscreen.html");
   await cp("src/meet/microphone.html", "dist/meet/microphone.html");
   await cp("src/meet/microphone.css", "dist/meet/microphone.css");

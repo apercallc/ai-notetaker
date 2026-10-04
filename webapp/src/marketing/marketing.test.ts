@@ -42,23 +42,25 @@ describe("brand assets", () => {
 });
 
 describe("release assets", () => {
-  it("sorts a release's files into the four installers", () => {
+  it("sorts a release's files into platform installers, including both Mac architectures", () => {
     const picked = pickAssets([
       { name: "SHA256SUMS", browser_download_url: "https://x/sums", size: 1 },
       { name: "AI Notetaker_0.2.0_aarch64.dmg", browser_download_url: "https://x/mac", size: 5_000_000 },
+      { name: "AI.Notetaker_0.2.0_x86_64-installer.dmg", browser_download_url: "https://x/mac-intel", size: 5_100_000 },
       { name: "AI Notetaker_0.2.0_x64-setup.exe", browser_download_url: "https://x/win", size: 6_000_000 },
       { name: "ai-notetaker_0.2.0_amd64.deb", browser_download_url: "https://x/deb", size: 7_000_000 },
       { name: "ai-notetaker-extension-v0.2.0.zip", browser_download_url: "https://x/ext", size: 300_000 },
       { name: "manifest.json", browser_download_url: "https://x/m", size: 1 },
     ]);
     expect(picked.mac?.url).toBe("https://x/mac");
+    expect(picked.macIntel?.url).toBe("https://x/mac-intel");
     expect(picked.windows?.url).toBe("https://x/win");
     expect(picked.linux?.url).toBe("https://x/deb");
     expect(picked.extension?.url).toBe("https://x/ext");
   });
 
   it("ignores malformed assets instead of throwing", () => {
-    expect(pickAssets([{ name: 7 }, {}, { name: "a.dmg" }] as never)).toEqual({ extension: undefined, mac: undefined, windows: undefined, linux: undefined });
+    expect(pickAssets([{ name: 7 }, {}, { name: "a.dmg" }] as never)).toEqual({ extension: undefined, mac: undefined, macIntel: undefined, windows: undefined, linux: undefined });
   });
 
   it("accepts only a Chrome Web Store https URL", () => {

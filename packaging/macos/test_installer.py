@@ -100,8 +100,17 @@ class InstallerTests(unittest.TestCase):
         self.hook.write_text("#!/bin/sh\nexit 42\n")
         self.sign()
         result = self.install()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("browser setup failed", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("desktop app is installed", result.stderr)
+        self.assertIn("desktop recording works without it", result.stderr)
+        self.run_command("codesign", "--verify", "--deep", "--strict", str(self.target))
+
+    def test_missing_legacy_browser_resources_do_not_block_desktop_install(self):
+        (self.source / "Contents/MacOS/notetaker-nm-host").unlink()
+        self.hook.unlink()
+        self.sign()
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.run_command("codesign", "--verify", "--deep", "--strict", str(self.target))
 
 

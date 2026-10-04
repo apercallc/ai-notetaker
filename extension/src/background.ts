@@ -6,7 +6,7 @@
  * event (see extension/CLAUDE.md and the architecture spec §3.2).
  */
 import { maybeAutoStartMeetRecording, clearAutoRecordAttempt } from "./lib/autoRecord";
-import { getSettings } from "./lib/storage";
+import { getSettings, migrateSavedProcessingModeToApiKeys } from "./lib/storage";
 import { getManagedEntitlements } from "./lib/managedClient";
 import { BackgroundController } from "./lib/backgroundController";
 import { getExtensionOnboardingUrl } from "./lib/install";
@@ -49,6 +49,7 @@ const meetCapture = new MeetCaptureController((pcm16, meetingId, channel, chunkI
 // Each step is isolated: one transient storage error must not leave every
 // message handler awaiting a rejected promise until the worker restarts.
 const readyPromise = (async () => {
+  await migrateSavedProcessingModeToApiKeys().catch((error) => console.warn("API-key mode migration failed", error));
   await meetCapture.restoreCaptures().catch((error) => console.warn("Capture restore failed", error));
   await controller.init().catch((error) => console.warn("Controller init failed", error));
 })();
@@ -209,6 +210,7 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       // The in-call widget cannot know its own tab id; the sender does, and a
       // page-side sender is never allowed to name another one.
       const { captureSource, tabId } = resolveStartRequest(message, kind, sender.tab?.id);
+      if (captureSource !== "meet") throw new Error("Start desktop calls from the AI Notetaker desktop app.");
       const meetingId =
         captureSource === "meet"
           ? await startMeetRecording(controller, meetCapture, {
@@ -251,7 +253,7 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       } catch (error) {
         await controller.failRecording(message.meetingId, error instanceof Error ? error.message : "Meet audio capture failed.");
         void meetCapture.stop(message.meetingId).catch(() => {});
-        return { error: "Call audio could not be saved. Start notes again." };
+        return { error: "Call audio could not be saved. Start recording again." };
       }
       return {};
     case "MEET_DIRECT_ANSWER":

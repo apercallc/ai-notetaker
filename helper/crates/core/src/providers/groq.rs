@@ -138,6 +138,7 @@ fn parse_response(
         speaker: speaker.into(),
         text,
         is_final: true,
+        timestamp: None,
     }])
 }
 
@@ -181,7 +182,8 @@ mod tests {
             vec![TranscriptSegment {
                 speaker: "you".into(),
                 text: "hello from mic".into(),
-                is_final: true
+                is_final: true,
+                timestamp: None,
             }]
         );
     }

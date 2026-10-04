@@ -21,8 +21,8 @@ function PageHead({ title, lede }: { title: string; lede?: string }) {
   );
 }
 
-function startHref(context: ShellContext): string {
-  return context.signupOpen ? "/login?tab=signup" : "/download";
+function startHref(): string {
+  return "/download";
 }
 
 /* ------------------------------------------------------------------ */
@@ -31,35 +31,35 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
   return (
     <>
       <PageHead
-        title="Set up in a few minutes, your way."
-        lede="Choose who runs the AI. Capture works the same either way: it happens on your device, and nothing joins your call."
+        title="Set up once. Record from one desktop app."
+        lede="Choose your transcription and summary providers, add their API keys, and keep your meeting workflow in one place. No bot joins the call."
       />
 
       <section className="mk-section mk-section--flush" aria-labelledby="choose-title">
         <div className="mk-wrap">
-          <h2 className="mk-h2 mk-mb-l" id="choose-title">Which one fits you?</h2>
+          <h2 className="mk-h2 mk-mb-l" id="choose-title">Local setup is the default</h2>
           <div className="mk-split">
             <div className="mk-guide">
-              <h3 className="mk-h3">Choose Hosted AI if you</h3>
+              <h3 className="mk-h3">Use your provider API keys</h3>
               <ul className="mk-bullets">
-                <li>want it to work without opening AI provider accounts</li>
-                <li>want your notes in a searchable library on any device</li>
-                <li>are setting this up for a team</li>
-                <li>prefer one predictable monthly price</li>
+                <li>choose and pay your transcription and summary providers directly</li>
+                <li>keep provider keys in your operating-system credential store</li>
+                <li>record without an AI Notetaker account or browser extension</li>
+                <li>save raw audio and notes on this device first</li>
               </ul>
             </div>
             <div className="mk-guide">
-              <h3 className="mk-h3">Choose your own keys if you</h3>
+              <h3 className="mk-h3">Sync notes only if you want</h3>
               <ul className="mk-bullets">
-                <li>want audio and text to go only to providers you pick</li>
-                <li>already have provider keys, or want to shop on price</li>
-                <li>want no AI Notetaker account at all</li>
-                <li>like keeping everything on your own machine</li>
+                <li>create a workspace token from web-app Settings → Integrations</li>
+                <li>connect that workspace in the desktop app</li>
+                <li>sync completed transcripts, summaries and action items</li>
+                <li>keep raw audio and provider keys on this device</li>
               </ul>
             </div>
           </div>
           <p className="mk-small mk-mt-m">
-            You are never locked in. Switch modes any time in the extension&apos;s Settings.
+            Local recording works without signing in. Workspace sync is optional and can be revoked from web-app Settings.
           </p>
         </div>
       </section>
@@ -67,30 +67,27 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
       <section className="mk-section mk-section--tint" id="hosted" aria-labelledby="hosted-title">
         <div className="mk-wrap">
           <div className="mk-section-head">
-            <h2 className="mk-h2" id="hosted-title">Set up Hosted AI</h2>
-            <p className="mk-lede">Your first {LIMITS.trial} meetings are free, with no card.</p>
+            <h2 className="mk-h2" id="hosted-title">Connect the web app (optional)</h2>
+            <p className="mk-lede">Use this only when you want a synced library across devices. Local recording stays account-free.</p>
           </div>
           <ol className="mk-steps">
             <li className="mk-step">
-              <h3 className="mk-h3">Create your account</h3>
-              <p>Sign up with your email and confirm it from the message we send. Your free meetings are ready as soon as you confirm.</p>
+              <h3 className="mk-h3">Sign in to your web app</h3>
+              <p>Create or use an account on your web-app workspace. This account is only needed for optional note sync.</p>
               <ul>
-                <li>{context.signupOpen ? <Link href="/login?tab=signup">Create an account</Link> : "Sign-up is temporarily closed"}</li>
+                <li>{context.signupOpen ? <Link href="/login?tab=signup">Open web-app sign in</Link> : "Web-app sign-up is temporarily closed"}</li>
               </ul>
             </li>
             <li className="mk-step">
-              <h3 className="mk-h3">Add the extension</h3>
-              <p>Install AI Notetaker in Chrome. For Zoom, Teams or Slack, also install the desktop helper.</p>
+              <h3 className="mk-h3">Create a desktop sync token</h3>
+              <p>Open Settings → Integrations and create a token for the workspace where your notes should appear.</p>
               <ul>
                 <li><Link href="/download">Go to downloads</Link></li>
               </ul>
             </li>
             <li className="mk-step">
-              <h3 className="mk-h3">Sign in and record</h3>
-              <p>
-                Open the extension, choose Hosted AI, and sign in. Join a meeting, confirm the recording notice, and
-                start. Notes appear in your library a minute or two after the call ends.
-              </p>
+              <h3 className="mk-h3">Connect it in the desktop app</h3>
+              <p>Paste the web-app address and token into desktop Settings, test the connection, then save. Finished notes sync; audio and provider keys stay local.</p>
             </li>
           </ol>
         </div>
@@ -99,13 +96,13 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
       <section className="mk-section" id="own-keys" aria-labelledby="keys-title">
         <div className="mk-wrap">
           <div className="mk-section-head">
-            <h2 className="mk-h2" id="keys-title">Set up with your own keys</h2>
+            <h2 className="mk-h2" id="keys-title">Set up with API keys</h2>
             <p className="mk-lede">Free and account-free. You pay your AI providers directly.</p>
           </div>
           <ol className="mk-steps">
             <li className="mk-step">
-              <h3 className="mk-h3">Add the extension</h3>
-              <p>Install AI Notetaker in Chrome. You do not need an AI Notetaker account.</p>
+              <h3 className="mk-h3">Install the desktop app</h3>
+              <p>Public installers are in development. Local recording will not require an AI Notetaker account.</p>
               <ul>
                 <li><Link href="/download">Go to downloads</Link></li>
               </ul>
@@ -113,16 +110,15 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
             <li className="mk-step">
               <h3 className="mk-h3">Pick providers and paste keys</h3>
               <p>
-                In onboarding choose Use my own keys, pick a transcription and a summary provider, and paste each key.
-                Supported providers include Deepgram, Groq, Anthropic, Gemini and DeepSeek. The extension lets you test each
-                key before you finish.
+                In desktop Settings, choose transcription and summary providers, paste each key, and test them before saving.
+                Supported providers include Deepgram, Groq, Anthropic, Gemini and DeepSeek.
               </p>
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Record</h3>
               <p>
-                Confirm the recording notice and start. Keys stay in protected storage on your device and go only to the
-                providers you chose. Notes are saved on your device.
+                Confirm recording consent and start. Keys stay in protected storage on your device and go only to the
+                providers you chose. Raw audio and notes are saved locally first.
               </p>
             </li>
           </ol>
@@ -136,21 +132,21 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
           </div>
           <div className="mk-split">
             <div className="mk-guide">
-              <h3 className="mk-h3">Google Meet</h3>
-              <p className="mk-small">Just the Chrome extension.</p>
+              <h3 className="mk-h3">Browser meetings</h3>
+              <p className="mk-small">Use the desktop app&apos;s system-audio capture.</p>
               <ol>
-                <li>Open a Meet in Chrome.</li>
-                <li>Choose <strong>Record this Meet</strong> in the extension or the in-call widget.</li>
-                <li>If Chrome blocks auto-start, click the extension icon once and recording begins.</li>
+                <li>Join your browser meeting and keep its audio playing through your normal system output.</li>
+                <li>Start the desktop app recording and confirm the recording notice.</li>
+                <li>Stop in the app when the meeting ends.</li>
               </ol>
             </div>
             <div className="mk-guide">
               <h3 className="mk-h3">Zoom, Teams, Slack and other desktop calls</h3>
-              <p className="mk-small">The extension plus the desktop helper.</p>
+              <p className="mk-small">One desktop app.</p>
               <ol>
-                <li>Install the helper for macOS, Windows or Linux.</li>
-                <li>Run the guided audio check in onboarding.</li>
-                <li>Start recording from the extension or the tray icon.</li>
+                <li>Choose a microphone and system audio source in the app.</li>
+                <li>Grant OS audio permissions and run the audio check.</li>
+                <li>Start and stop from the desktop app.</li>
               </ol>
             </div>
           </div>
@@ -184,9 +180,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
           </div>
           <Faq topic="setup" />
           <div className="mk-cta-row">
-            <Link className="mk-btn mk-btn--solid" href={startHref(context)}>
-              {context.signupOpen ? "Try Hosted AI free" : "Get the extension"}
-            </Link>
+            <Link className="mk-btn mk-btn--solid" href={startHref()}>Get the desktop app</Link>
             <Link className="mk-btn mk-btn--quiet" href="/pricing">See pricing</Link>
           </div>
         </div>
@@ -266,25 +260,107 @@ function AssetButton({ asset, label, primary }: { asset?: { url: string; bytes: 
 export function DownloadView({
   release,
   platform,
-  focus,
 }: {
   release: DownloadLinks | null;
   platform?: "macos" | "windows" | "linux";
-  focus?: "desktop";
 }) {
   const store = chromeWebStoreUrl();
+  const desktopAssets = [
+    { platform: "macos", label: "macOS · Apple silicon", asset: release?.mac },
+    { platform: "macos-intel", label: "macOS · Intel", asset: release?.macIntel },
+    { platform: "windows", label: "Windows · 64-bit", asset: release?.windows },
+    { platform: "linux", label: "Linux · Debian or Ubuntu", asset: release?.linux },
+  ] as const;
+  const hasGuidedMacInstaller = [release?.mac, release?.macIntel].some((asset) => asset?.name.endsWith("-installer.dmg"));
+  const hasDesktopAssets = desktopAssets.some(({ asset }) => asset !== undefined);
   return (
     <>
       <PageHead
-        title="Set up AI Notetaker."
-        lede="Add the Chrome extension for Google Meet. Add the desktop helper only if you also meet in Zoom, Teams, Slack or other apps."
+        title="One desktop app for meeting notes."
+        lede="Set up your AI providers, record, and find your notes in one place. Local use needs no browser extension or AI Notetaker account."
       />
+      <section className="mk-section mk-section--flush" aria-labelledby="desktop-app-availability">
+        <div className="mk-wrap">
+          <h2 className="mk-h2" id="desktop-app-availability">
+            {hasDesktopAssets ? "Download AI Notetaker" : "Desktop app preview"}
+          </h2>
+          {hasDesktopAssets ? (
+            <>
+              <p className="mk-lede">Choose the installer for your computer. One app handles setup, recording, and your local notes.</p>
+              <div className="mk-downloads">
+                {desktopAssets.map(({ platform: assetPlatform, label, asset }) => (
+                  <article className="mk-download" key={assetPlatform}>
+                    <h3 className="mk-h3"><Icon as={Laptop} size={22} />{label}</h3>
+                    {asset ? (
+                      <>
+                        <AssetButton asset={asset} label={`Download for ${label}`} primary={platform === assetPlatform} />
+                        <details open={platform === (assetPlatform.startsWith("macos") ? "macos" : assetPlatform)}>
+                          <summary>Install on {label}</summary>
+                          {assetPlatform.startsWith("macos") ? (
+                            asset.name.endsWith("-installer.dmg") ? (
+                              <>
+                                <ol>
+                                  <li>Open the downloaded .dmg and double-click <strong>Install AI Notetaker.command</strong>.</li>
+                                  <li>Choose <strong>Install</strong> in the confirmation dialog. It copies the app to Applications and opens it.</li>
+                                </ol>
+                                <p>This release is not notarized by Apple. If macOS blocks it, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</p>
+                              </>
+                            ) : (
+                              <ol>
+                                <li>Open the downloaded .dmg and drag <strong>AI Notetaker</strong> into Applications.</li>
+                                <li>Open the app. If macOS blocks it, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
+                              </ol>
+                            )
+                          ) : assetPlatform === "windows" ? (
+                            <ol>
+                              <li>Run the downloaded installer and follow its prompts.</li>
+                              <li>Open <strong>AI Notetaker</strong> from the Start menu. If SmartScreen blocks the unsigned installer, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
+                            </ol>
+                          ) : (
+                            <ol>
+                              <li>Open the downloaded .deb with your system&apos;s Software Install app and choose Install.</li>
+                              <li>Open <strong>AI Notetaker</strong> from your applications menu.</li>
+                            </ol>
+                          )}
+                        </details>
+                      </>
+                    ) : (
+                      <p className="mk-small">Installer not published yet.</p>
+                    )}
+                  </article>
+                ))}
+              </div>
+              <div className="mk-prose mk-mt-l">
+                <h3 className="mk-h3">After download</h3>
+                <ol>
+                  <li>Install and open AI Notetaker. The app guides you through audio permissions and a microphone/system-audio check.</li>
+                  <li>Choose transcription and summary providers, add and test your API keys, then start a recording in the app.</li>
+                  <li>Find your transcript, summary, and action items in local Notes. No browser extension or AI Notetaker account is needed.</li>
+                </ol>
+              </div>
+            </>
+          ) : release ? (
+            <div className="mk-prose">
+              <p>Public desktop installers are still in development. We will publish them after cross-platform audio and recovery checks are complete.</p>
+              <p><a className="mk-btn mk-btn--quiet" href={release.pageUrl}>View release details</a></p>
+            </div>
+          ) : (
+            <div className="mk-prose">
+              <p>Release links could not be loaded. Check the releases page for current installers.</p>
+              <p><a className="mk-btn mk-btn--solid" href={SITE.releasesUrl}>View all releases</a></p>
+            </div>
+          )}
+          <p className="mk-small mk-mt-m">Local recording uses your provider keys and keeps audio on this device. Optional web-app sync copies finished note text to a workspace; setup and recording do not require signing in.</p>
+        </div>
+      </section>
+      <details id="legacy-downloads" className="mk-wrap mk-legacy-downloads">
+        <summary>Already use the Chrome extension? See legacy downloads and setup.</summary>
       <section className="mk-section mk-section--flush" aria-label="Downloads">
         <div className="mk-wrap">
-          <div className={`mk-downloads${focus === "desktop" ? " mk-downloads--desktop-first" : ""}`}>
+          <div className="mk-downloads">
             <article className="mk-download" aria-labelledby="dl-ext">
               <h2 className="mk-h3" id="dl-ext"><Icon as={Puzzle} size={22} />Chrome extension</h2>
-              <p>Records Google Meet with no helper. Required for every setup.</p>
+              <p>Legacy Google Meet capture for existing users. New desktop setups do not need the extension.</p>
               <div className="mk-cta-row">
                 {store && (
                   <a className="mk-btn mk-btn--solid" href={store}>Add to Chrome</a>
@@ -314,6 +390,7 @@ export function DownloadView({
               </p>
               <div className="mk-cta-row">
                 <AssetButton asset={release?.mac} label="macOS (Apple silicon)" primary={platform === "macos"} />
+                <AssetButton asset={release?.macIntel} label="macOS (Intel)" primary={platform === "macos"} />
                 <AssetButton asset={release?.windows} label="Windows (64-bit)" primary={platform === "windows"} />
                 <AssetButton asset={release?.linux} label="Linux (Debian, Ubuntu 64-bit)" primary={platform === "linux"} />
               </div>
@@ -326,20 +403,24 @@ export function DownloadView({
                 <p className="mk-small">Installers for this release are on the <a href={release.pageUrl}>release page</a>.</p>
               )}
               <p><a href={release?.pageUrl ?? SITE.releasesUrl}>All desktop downloads on GitHub</a></p>
-              <p className="mk-small">Macs with Intel chips are not supported yet.</p>
-              <a href="#install-helper">How to install and connect the helper →</a>
+              <p className="mk-small">Choose the Mac installer that matches your processor.</p>
+              <a href="#install-helper">Legacy setup for existing extension users →</a>
             </article>
           </div>
 
           <div className="mk-prose mk-mt-l mk-setup" id="install-helper">
-            <h2>Install the desktop helper</h2>
-            <p>Only recording Google Meet? <a href="#choose-ai">Skip to AI setup</a>. For desktop calls, keep the Chrome extension installed too: it controls the helper.</p>
+            <h2>Keep using your existing extension (legacy)</h2>
+            <p>This section is only for people who already use the Chrome extension. New setups use the desktop app above for browser and desktop calls, without a separate extension or helper connection.</p>
             <details open={platform === "macos"}>
-              <summary>macOS · Apple silicon (M1 or newer)</summary>
-              {release?.mac?.name.endsWith("-installer.dmg") ? (
+              <summary>macOS · choose Apple silicon or Intel</summary>
+              <div className="mk-cta-row">
+                <AssetButton asset={release?.mac} label="Apple silicon (M1 or newer)" />
+                <AssetButton asset={release?.macIntel} label="Intel" />
+              </div>
+              {hasGuidedMacInstaller ? (
                 <>
                   <ol>
-                    <li>Download and open the Mac .dmg above.</li>
+                    <li>Download the installer matching your Mac above and open the .dmg.</li>
                     <li>Double-click <strong>Install AI Notetaker.command</strong>. A Terminal window opens; choose <strong>Install</strong> in the confirmation dialog. It copies the app to your Applications folder, connects it to Chrome, and opens it.</li>
                     <li>Look for AI Notetaker in your menu bar, then return to the extension and choose <strong>Check desktop helper</strong>.</li>
                   </ol>
@@ -386,11 +467,10 @@ export function DownloadView({
           </div>
 
           <div className="mk-prose mk-mt-l mk-setup" id="choose-ai">
-            <h2>Choose how your notes are written</h2>
-            <p>In the extension setup, choose <strong>Hosted AI</strong> and sign in to your AI Notetaker account, or create one. Our service is already configured; there is no server URL to enter.</p>
-            <p>Prefer your own providers? Choose <strong>Use my own API keys</strong> and follow the key checks. This mode requires no AI Notetaker account. Connecting a self-hosted history server is optional, under Settings.</p>
-            <h2>Make your first recording</h2>
-            <p>For Google Meet, open a meeting in Chrome and choose <strong>Start notes</strong> in the call widget or extension. For a desktop call, open the extension from a tab outside Meet, choose <strong>Recording Zoom or Teams instead?</strong> if shown, then <strong>Start notes</strong>. Tell participants and confirm the recording notice. Stop when you finish; the extension shows processing progress and your notes when ready.</p>
+            <h2>Use API keys in the existing extension</h2>
+            <p>In extension setup, choose <strong>Use my own API keys</strong>, add one transcription key and one summary key, then test them. This legacy path does not require an AI Notetaker account or Hosted AI sign-in.</p>
+            <h2>Record with the existing extension</h2>
+            <p>For Google Meet, open a meeting in Chrome and choose <strong>Start notes</strong> in the call widget or extension. For a desktop call, open the extension from a tab outside Meet, choose <strong>Recording Zoom or Teams instead?</strong> if shown, then <strong>Start notes</strong>. Tell participants and confirm the recording notice. Stop when you finish; the extension shows processing progress and your notes when ready. For a new setup, use the desktop app controls above.</p>
           </div>
 
           <div className="mk-prose mk-mt-l">
@@ -409,6 +489,7 @@ export function DownloadView({
           </div>
         </div>
       </section>
+      </details>
     </>
   );
 }
@@ -420,7 +501,7 @@ const COMPARE_ROWS: { label: string; bot: string; ours: string }[] = [
   { label: "What others see", bot: "An extra attendee, often with a notice.", ours: "Nothing added to the call. You still need to tell people and get consent." },
   { label: "Where the recording lives", bot: "On the vendor's servers.", ours: "On your device first, before any provider is called." },
   { label: "Audio channels", bot: "Usually one mixed track.", ours: "Your microphone and the meeting's audio are kept separate, so \"you\" is never guessed." },
-  { label: "Desktop apps", bot: "Depends on the vendor's integrations.", ours: "Zoom, Teams, Slack and others through the desktop helper." },
+  { label: "Desktop apps", bot: "Depends on the vendor's integrations.", ours: "Records system audio and microphone from one desktop app." },
   { label: "Who runs the AI", bot: "The vendor.", ours: "Your choice: your own provider keys, or our Hosted AI." },
   { label: "Pricing", bot: "Commonly a per-seat subscription.", ours: "Free with your own keys, or a flat monthly price for Hosted AI." },
   { label: "Source code", bot: "Usually closed.", ours: `Open source under the ${SITE.license} license.` },
@@ -475,9 +556,7 @@ export function CompareView({ context }: { context: ShellContext }) {
             </p>
           </div>
           <div className="mk-cta-row">
-            <Link className="mk-btn mk-btn--solid" href={startHref(context)}>
-              {context.signupOpen ? "Try Hosted AI free" : "Get the extension"}
-            </Link>
+            <Link className="mk-btn mk-btn--solid" href={startHref()}>Get the desktop app</Link>
             <Link className="mk-btn mk-btn--quiet" href="/how-it-works">See how it works</Link>
           </div>
         </div>
@@ -509,7 +588,8 @@ export function PrivacyView() {
           <div className="mk-prose">
             <p>
               AI Notetaker has two modes and this notice covers both: free local mode with your own AI keys, and Hosted
-              AI, the service we operate. It also covers this website.
+              AI, the service we operate. Optional desktop sync is a separate authenticated connection that sends
+              finished note text to a workspace. This notice also covers the website.
             </p>
 
             <h2>This website</h2>
@@ -523,8 +603,9 @@ export function PrivacyView() {
             <h2>Local mode: your own keys</h2>
             <ul>
               <li>Raw microphone and meeting audio is saved on your device before any provider request. The two channels stay separate.</li>
-              <li>Your provider keys stay in protected extension storage. We never receive them.</li>
+              <li>Your provider keys stay in the desktop app&apos;s operating-system credential store. Existing extension users keep their keys in protected browser storage. We never receive them.</li>
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
+              <li>If you connect a web-app workspace, only finished note text syncs there. Raw audio and provider keys stay on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
               <li>Google Drive export and a self-hosted history server are optional. Their operators receive what you send them.</li>
             </ul>
@@ -630,13 +711,14 @@ export function PrivacyView() {
               <li>
                 <strong>Clearing your browser history does not delete your notes.</strong> Hosted AI notes live in your
                 workspace on our servers, so they are unaffected by anything you do in your browser; if you clear cookies
-                you only need to sign in again. In local mode, notes are stored in the extension on your device, and
-                clearing history, cookies or cache leaves them alone. They are removed if you uninstall the extension,
-                delete the Chrome profile, or reset or lose the device, and nothing is stored on our servers to restore
-                them. A self-hosted history server keeps its own copy of what was synced to it. To keep local notes
-                safe, sync them to Hosted AI or your own history server, or export the ones you need.
+                you only need to sign in again. The desktop app keeps new local recordings and notes in a private data
+                folder, so clearing browser history, cookies or cache leaves them alone. They are removed if you delete
+                that app data or reset or lose the device; nothing is stored on our servers to restore them. Existing
+                extension users keep their local notes in the browser profile until they export them to the desktop app.
+                A self-hosted history server keeps its own copy of what was synced to it. Export local notes you need
+                to preserve, or enable optional workspace sync for finished note text.
               </li>
-              <li>Deleting the extension does not delete files the helper saved on your device, provider account data, exported files, or data on a server you set up. Delete those where they live.</li>
+              <li>Deleting the legacy extension does not delete desktop app data, provider account data, exported files, or data on a server you set up. Delete those where they live.</li>
             </ul>
 
             <h2>Your rights</h2>
@@ -818,4 +900,3 @@ export function TermsView() {
     </>
   );
 }
-

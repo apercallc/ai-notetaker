@@ -25,6 +25,7 @@ export default defineConfig({
         // module the threshold did not actually apply to.
         "src/lib/calendar.ts",
         "src/lib/costEstimate.ts",
+        "src/lib/desktopMigration.ts",
         "src/lib/html.ts",
         "src/lib/install.ts",
         "src/lib/nativeMessaging.ts",

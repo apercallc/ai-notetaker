@@ -13,7 +13,6 @@ import type { HelperConnectionStatus } from "./nativeMessaging";
 import { clearTranscriptionCache, deleteMeeting as deleteLocalMeeting, getMeeting, getSettings, getTranscriptionSegment, listMeetings, saveMeeting, saveSettings, saveTranscriptionSegment, updateMeeting } from "./storage";
 import { normalizeWebappUrl } from "./providerTest";
 import { testProviderKeyDirect } from "./testProviderKey";
-import { providerPermissionName } from "./optionalPermissions";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "./webappSync";
 import { findCurrentEvent } from "./calendar";
 import { exportMeetingToDrive } from "./drive";
@@ -73,7 +72,6 @@ const RETRYABLE_HELPER_ERROR_PREFIXES = [
 class HostedJobFailedError extends Error {}
 
 const MANAGED_JOB_POLL_ATTEMPTS = 300; // x 2 s = 10 minutes
-const MEET_PROVIDER_PREFLIGHT_TIMEOUT_MS = 4_000;
 
 export class BackgroundController {
   private settings: NotetakerSettings | null = null;
@@ -266,8 +264,9 @@ export class BackgroundController {
 
   private async startRecordingUnguarded(meetingMode: MeetingMode, captureSource: CaptureSource, titleHint?: string, allowProviderWarning = false): Promise<string> {
     const needsHelper = captureSource !== "meet";
+    const recorderOnly = captureSource === "meet";
+    void allowProviderWarning;
     let hostedQuotaWarning: Awaited<ReturnType<typeof getManagedEntitlements>> | null = null;
-    let providerPreflightWarning: string | undefined;
     if (needsHelper && (this.helperStatus !== "connected" || !this.helperInfo)) {
       this.broadcast({
         type: "RECORDING_ERROR",
@@ -291,7 +290,7 @@ export class BackgroundController {
       });
       return "";
     }
-    if (this.settings.processingMode.kind === "managed") {
+    if (!recorderOnly && this.settings.processingMode.kind === "managed") {
       const managed = this.settings.managedService;
       if (!managed) {
         this.broadcast({
@@ -328,60 +327,11 @@ export class BackgroundController {
         return "";
       }
     }
-    if (captureSource === "meet" && this.settings.processingMode.kind === "local_byok") {
-      // Meet audio is processed in the browser only after the call ends. Without keys the user would
-      // record the whole meeting and learn at the end that nothing can turn it into notes.
-      const missing = [this.settings.transcriptionProvider, this.settings.summarizationProvider].filter((provider) => !this.settings?.apiKeys[provider]?.trim());
-      if (missing.length > 0) {
-        this.broadcast({
-          type: "RECORDING_ERROR",
-          meetingId: null,
-          phase: "start",
-          message: `Add your ${missing.join(" and ")} API key in Settings before recording, or switch to Hosted AI.`,
-          recovery: "check_provider_key",
-        });
-        return "";
-      }
-      // Read-only checks catch revoked keys, missing browser access, and
-      // current provider outages before the call starts. They are advisory:
-      // raw audio is still recorded locally when a provider is unavailable.
-      const providers = [...new Set([this.settings.transcriptionProvider, this.settings.summarizationProvider])];
-      const settings = this.settings;
-      const results = await Promise.all(providers.map(async (provider) => {
-        try {
-          return {
-            provider,
-            result: await testProviderKeyDirect(
-              provider,
-              settings.apiKeys[provider]!,
-              this.fetchImpl,
-              MEET_PROVIDER_PREFLIGHT_TIMEOUT_MS,
-            ),
-          };
-        } catch {
-          return { provider, result: { valid: false, message: "The connection check could not be completed." } };
-        }
-      }));
-      const failed = results.filter(({ result }) => !result.valid);
-      if (failed.length > 0) {
-        providerPreflightWarning = `${failed.map(({ provider, result }) => `${providerPermissionName(provider)}: ${result.message}`).join(" ")} Your Meet audio will be saved on this device, but transcription or summary may fail. Check Settings or your connection; saved audio can be retried after the call.`;
-        if (!allowProviderWarning) {
-          this.broadcast({
-            type: "RECORDING_ERROR",
-            meetingId: null,
-            phase: "start",
-            recovery: "provider_preflight",
-            message: `${failed.map(({ provider, result }) => `${providerPermissionName(provider)}: ${result.message}`).join(" ")} Recording has not started. Open AI settings to fix this, or choose Record anyway to save audio locally. This quick access check cannot guarantee a full transcription or summary will finish.`,
-          });
-          return "";
-        }
-      }
-    }
     const meetingId = generateMeetingId();
     let title = titleHint?.trim().slice(0, 200) || `Meeting on ${new Date().toLocaleString()}`;
     let attendees: string[] | undefined;
     const localCalendar = this.settings?.calendar;
-    if (localCalendar) {
+    if (!recorderOnly && localCalendar) {
       try {
         const event = await findCurrentEvent(localCalendar);
         if (event) {
@@ -403,8 +353,8 @@ export class BackgroundController {
       mode: meetingMode,
       status: "recording",
       captureSource,
-      ...(providerPreflightWarning ? { providerPreflightWarning } : {}),
-      processingMode: this.settings.processingMode,
+      processingMode: recorderOnly ? { kind: "local_byok" } : this.settings.processingMode,
+      ...(recorderOnly ? { recorderOnly: true as const } : {}),
       consentAcknowledged: true,
       ...(attendees ? { attendees } : {}),
     };
@@ -545,13 +495,14 @@ export class BackgroundController {
     if (existing && existing.status !== "recording") return;
     // Through the per-meeting queue, so a live-transcript or bookmark write in flight is not overwritten.
     const meeting = existing
-      ? await updateMeeting(meetingId, (current) => ({ ...current, status: "processing", endedAt: current.endedAt ?? new Date().toISOString() }))
+      ? await updateMeeting(meetingId, (current) => ({ ...current, status: current.recorderOnly ? "saved" : "processing", endedAt: current.endedAt ?? new Date().toISOString() }))
       : null;
     if (this.activeMeetingId === meetingId) this.activeMeetingId = null;
     if (meeting?.captureSource === "meet") {
       // Writing the notes can take a minute; let every open view move on from
       // "recording" now instead of when the summary lands.
       this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });
+      if (meeting.recorderOnly) return;
       await this.finishBrowserMeetRecording(meetingId, meeting);
       return;
     }
@@ -911,6 +862,7 @@ export class BackgroundController {
             title: activeRecord.title,
             startedAt: activeRecord.startedAt,
             status: activeRecord.status,
+            ...(activeRecord.recorderOnly ? { recorderOnly: true as const } : {}),
             ...(this.pendingMeetCaptureId === activeRecord.id ? { captureStarting: true } : {}),
             ...(activeRecord.captureSource ? { captureSource: activeRecord.captureSource } : {}),
             ...(activeRecord.liveTranscriptStatus ? { liveTranscriptStatus: activeRecord.liveTranscriptStatus } : {}),
@@ -932,6 +884,7 @@ export class BackgroundController {
             startedAt: latestRecord.startedAt,
             endedAt: latestRecord.endedAt,
             status: latestRecord.status,
+            ...(latestRecord.recorderOnly ? { recorderOnly: true as const } : {}),
             ...(latestRecord.errorMessage ? { errorMessage: latestRecord.errorMessage } : {}),
             ...(latestRecord.providerPreflightWarning ? { providerPreflightWarning: latestRecord.providerPreflightWarning } : {}),
           }

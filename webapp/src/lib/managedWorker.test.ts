@@ -458,7 +458,7 @@ describe("managed worker pipeline", () => {
     });
     // endedAt is startedAt + recording duration, not the processing wall clock.
     expect(meeting.endedAt.toISOString()).toBe("2026-09-24T15:01:05.000Z");
-    expect(meeting.transcript.map((segment) => [segment.speaker, segment.text, segment.timestamp.toISOString()])).toEqual([
+    expect(meeting.transcript.map((segment) => [segment.speaker, segment.text, segment.timestamp?.toISOString() ?? null])).toEqual([
       ["them-1", "Welcome, let's start", "2026-09-24T15:00:02.000Z"],
       ["you", "I will send the draft", "2026-09-24T15:00:12.000Z"],
       ["them-2", "Please send it by Friday", "2026-09-24T15:00:20.000Z"],

@@ -90,7 +90,7 @@ jobs:
             ai-notetaker-chrome-web-store-${{ github.ref_name }}.zip
 
   helper:
-    name: Build helper (${{ matrix.os }})
+    name: Build desktop app (${{ matrix.os }} ${{ matrix.architecture || 'x86_64' }})
     needs: metadata
     strategy:
       fail-fast: false
@@ -98,11 +98,20 @@ jobs:
         include:
           - os: ubuntu-latest
             bundle: deb
+            artifact: ubuntu-latest
           - os: macos-latest
             bundle: app
             target: aarch64-apple-darwin
+            architecture: arm64
+            artifact: macos-arm64
+          - os: macos-latest
+            bundle: app
+            target: x86_64-apple-darwin
+            architecture: x86_64
+            artifact: macos-x86_64
           - os: windows-latest
             bundle: nsis
+            artifact: windows-latest
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -151,18 +160,26 @@ jobs:
             -OutputDirectory "$env:GITHUB_WORKSPACE/helper/crates/app/resources/windows/vb-cable"
       - name: Build native bundles
         working-directory: helper/crates/app
+        env:
+          # Stripping Rust proc-macro dylibs makes Apple's macOS 27 loader
+          # reject their LINKEDIT string-pool alignment before app bundling.
+          # Other OSes retain Tauri's existing debuginfo stripping behavior.
+          CARGO_PROFILE_RELEASE_STRIP: ${{ runner.os == 'macOS' && 'none' || 'debuginfo' }}
         run: npx --yes @tauri-apps/cli@2.11.5 build --no-sign ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundle }}
       - name: Test Mac installer and package guided DMG
         if: runner.os == 'macOS'
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           python3 ../packaging/macos/test_installer.py
-          app="target/aarch64-apple-darwin/release/bundle/macos/AI Notetaker.app"
+          app="target/${TARGET}/release/bundle/macos/AI Notetaker.app"
           version=$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")
-          bash ../packaging/macos/build-dmg.sh "$app" "target/aarch64-apple-darwin/release/bundle/dmg/AI.Notetaker_${version}_aarch64-installer.dmg"
+          bash ../packaging/macos/build-dmg.sh "$app" "target/${TARGET}/release/bundle/dmg/AI.Notetaker_${version}_${ARCHITECTURE}-installer.dmg"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: helper-${{ matrix.os }}-${{ github.ref_name }}
+          name: helper-${{ matrix.artifact }}-${{ github.ref_name }}
           path: helper/target/**/bundle
 
   webapp-image:
@@ -287,8 +304,12 @@ jobs:
           path: release-assets/helper-ubuntu
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: helper-macos-latest-${{ github.ref_name }}
+          name: helper-macos-arm64-${{ github.ref_name }}
           path: release-assets/helper-macos-arm64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: helper-macos-x86_64-${{ github.ref_name }}
+          path: release-assets/helper-macos-x86_64
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: helper-windows-latest-${{ github.ref_name }}

@@ -19,6 +19,7 @@ import { prisma } from "./db";
 export const API_TOKEN_PREFIX = "ant_";
 export const API_TOKEN_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 export const API_TOKEN_SCOPE = "managed";
+export const DESKTOP_NOTES_SCOPE = "desktop_notes_sync";
 /**
  * Read-only access to a person's notes for AI assistants over MCP. A token of
  * this scope cannot sign in to the managed API (uploads, billing, ...) and a
@@ -43,16 +44,21 @@ export interface CreatedApiToken {
 
 export async function createApiToken(
   userId: string,
-  options: { label?: string | null; userAgent?: string | null; now?: number; scope?: typeof API_TOKEN_SCOPE | typeof READ_TOKEN_SCOPE } = {},
+  options: { label?: string | null; userAgent?: string | null; now?: number; scope?: typeof API_TOKEN_SCOPE | typeof READ_TOKEN_SCOPE | typeof DESKTOP_NOTES_SCOPE; workspaceId?: string | null } = {},
 ): Promise<CreatedApiToken> {
   const now = options.now ?? Date.now();
+  const scope = options.scope ?? API_TOKEN_SCOPE;
+  if (scope === DESKTOP_NOTES_SCOPE && !options.workspaceId) {
+    throw new Error("Desktop notes tokens must be bound to a workspace.");
+  }
   const token = `${API_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
   const expiresAt = new Date(now + API_TOKEN_LIFETIME_MS);
   const row = await prisma.apiToken.create({
     data: {
       userId,
       tokenHash: hashToken(token),
-      scope: options.scope ?? API_TOKEN_SCOPE,
+      scope,
+      workspaceId: options.workspaceId ?? null,
       label: options.label?.trim().slice(0, 80) || null,
       userAgent: options.userAgent?.slice(0, 300) ?? null,
       lastUsedAt: new Date(now),
@@ -83,6 +89,7 @@ export interface ApiTokenUser {
   id: string;
   email: string;
   tokenId: string;
+  workspaceId: string | null;
 }
 
 /**
@@ -108,7 +115,7 @@ export async function resolveApiToken(secret: string, now: number = Date.now(), 
       data: { lastUsedAt: new Date(now), expiresAt: new Date(now + API_TOKEN_LIFETIME_MS) },
     });
   }
-  return { id: row.user.id, email: row.user.email, tokenId: row.id };
+  return { id: row.user.id, email: row.user.email, tokenId: row.id, workspaceId: row.workspaceId };
 }
 
 /** Revokes one token, only if it belongs to `userId`. */
@@ -131,7 +138,7 @@ export async function listApiTokens(userId: string, now: number = Date.now()) {
   return prisma.apiToken.findMany({
     where: { userId, revokedAt: null, expiresAt: { gt: new Date(now) } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-    select: { id: true, label: true, scope: true, userAgent: true, createdAt: true, lastUsedAt: true, expiresAt: true },
+    select: { id: true, label: true, scope: true, workspaceId: true, userAgent: true, createdAt: true, lastUsedAt: true, expiresAt: true },
   });
 }
 

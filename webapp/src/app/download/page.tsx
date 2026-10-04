@@ -6,9 +6,9 @@ import { DownloadView } from "@/marketing/Views";
 
 export const dynamic = "force-dynamic";
 
-const TITLE = "Download AI Notetaker for Chrome, macOS, Windows and Linux";
+const TITLE = "Download AI Notetaker";
 const DESCRIPTION =
-  "Get the AI Notetaker Chrome extension for Google Meet and the desktop helper for Zoom, Teams and Slack on macOS, Windows and Linux. Free and open source.";
+  "Download the AI Notetaker desktop app for setup, local meeting capture, and notes. Local use needs no browser extension or AI Notetaker account.";
 
 export const metadata = pageMetadata({ path: "/download", title: TITLE, description: DESCRIPTION });
 
@@ -18,11 +18,11 @@ const first = (value: string | string[] | undefined): string | undefined => (Arr
 
 export default async function DownloadPage({ searchParams }: { searchParams: SearchParams }) {
   requireMarketing();
-  // The extension links here with hints about what the visitor needs. Only known values are used.
+  // Preserve old query parameters without steering desktop users into the
+  // legacy extension/helper setup.
   const query = await searchParams;
   const platformHint = first(query.platform);
   const platform = platformHint === "macos" || platformHint === "windows" || platformHint === "linux" ? platformHint : undefined;
-  const focus = first(query.mode) === "desktop" ? "desktop" : undefined;
   const [context, release] = [await marketingContext(), await latestRelease()];
   const origin = siteOrigin();
   return (
@@ -35,7 +35,7 @@ export default async function DownloadPage({ searchParams }: { searchParams: Sea
           breadcrumbNode(origin, [{ name: "AI Notetaker", path: "/" }, { name: "Download", path: "/download" }]),
         ]}
       />
-      <DownloadView release={release} platform={platform} focus={focus} />
+      <DownloadView release={release} platform={platform} />
     </MarketingShell>
   );
 }

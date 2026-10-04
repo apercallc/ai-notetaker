@@ -11,7 +11,7 @@ import { changePassword } from "@/lib/accounts";
 import { formatRetryAfter } from "@/lib/loginThrottle";
 import { passwordProblemMessage } from "@/lib/passwordPolicy";
 import { recordAudit } from "@/lib/audit";
-import { READ_TOKEN_SCOPE, createApiToken, revokeApiToken, revokeAllApiTokens } from "@/lib/apiTokens";
+import { DESKTOP_NOTES_SCOPE, READ_TOKEN_SCOPE, createApiToken, revokeApiToken, revokeAllApiTokens } from "@/lib/apiTokens";
 import { deleteObject } from "@/lib/objectStorage";
 import { deleteUserSessions, revokeUserSession, setSessionActiveWorkspace } from "@/lib/sessions";
 import { getUserRole, removeWorkspaceMember } from "@/lib/workspaces";
@@ -97,15 +97,18 @@ const MAX_TOKEN_LABEL_LENGTH = 80;
 export async function createApiTokenAction(formData: FormData): Promise<CreateApiTokenState> {
   const session = await requireSession();
   const context = await getRequestContext();
-  const readOnly = field(formData, "purpose") === "mcp";
+  const purpose = field(formData, "purpose");
+  const readOnly = purpose === "mcp";
+  const desktopSync = purpose === "desktop_sync";
   // The label is shown in lists and audit rows: bound it so a pasted wall of text cannot bloat them.
-  const label = (field(formData, "label").trim().slice(0, MAX_TOKEN_LABEL_LENGTH)) || (readOnly ? "AI assistant (read-only)" : "Extension sign-in");
+  const label = (field(formData, "label").trim().slice(0, MAX_TOKEN_LABEL_LENGTH)) || (readOnly ? "AI assistant (read-only)" : desktopSync ? "Desktop note sync" : "Extension sign-in");
   const created = await createApiToken(session.userId, {
     label,
     userAgent: context.userAgent,
     ...(readOnly ? { scope: READ_TOKEN_SCOPE } : {}),
+    ...(desktopSync ? { scope: DESKTOP_NOTES_SCOPE, workspaceId: session.workspaceId } : {}),
   });
-  await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "api_token.create", targetType: "api_token", metadata: { label, scope: readOnly ? "notes_read" : "managed" } });
+  await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "api_token.create", targetType: "api_token", metadata: { label, scope: desktopSync ? DESKTOP_NOTES_SCOPE : readOnly ? "notes_read" : "managed" } });
   revalidatePath("/account");
   return { ok: true, token: created.token, expiresAt: created.expiresAt.toISOString() };
 }

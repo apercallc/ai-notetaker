@@ -1085,11 +1085,6 @@
 .mk-footer-blurb { max-width: 26em; margin-top: 12px; }
 .mk .mk-on-deep { color: var(--mk-deep-muted); }
 
-/* /download?mode=desktop puts the desktop helper first, matching the extension's helper-install link. */
-.mk-downloads--desktop-first > :first-child {
-  order: 2;
-}
-
 .mk-visually-hidden {
   position: absolute;
   width: 1px;
@@ -1200,6 +1195,18 @@
 .mk-setup details {
   padding: 18px 0;
   border-bottom: 1px solid var(--mk-line);
+}
+
+.mk-legacy-downloads {
+  margin-block: 24px 48px;
+  padding-block: 16px;
+  border-top: 1px solid var(--mk-line);
+}
+
+.mk-legacy-downloads > summary {
+  min-height: 44px;
+  cursor: pointer;
+  font-weight: 650;
 }
 
 .mk-setup summary {

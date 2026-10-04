@@ -18,9 +18,9 @@ node scripts/validate-release-manifest.mjs release/manifest.json
 ## Release checklist
 
 1. Keep the helper, extension, webapp, and release manifest versions aligned.
-2. Push a version tag such as `v0.1.0`. The workflow builds an Apple-silicon
-   DMG, Windows 64-bit installer, Linux 64-bit Debian package, and Chrome
-   extension ZIP.
+2. Push a version tag such as `v0.1.0`. The workflow builds Apple-silicon and
+   Intel Mac DMGs, a Windows 64-bit installer, a Linux 64-bit Debian package,
+   and a legacy Chrome extension ZIP for existing users.
 3. Confirm the GitHub Release has the platform installers, `manifest.json`,
    `SHA256SUMS`, and extension ZIP. Verify the manifest marks the native
    artifacts `unsigned` and checksums match the uploaded files.

@@ -5,6 +5,10 @@ user-operated one-click self-hosted deployment. Managed hosting adds
 authenticated uploads, private object storage, processing jobs, usage, and
 billing; self-hosted deployments retain local/BYOK operation. See
 `docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`.
+The desktop client migration is defined in
+`docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`; the
+webapp is an optional authenticated notes destination for local-BYOK users,
+not a required login or processing dependency.
 
 ## Conventions
 
@@ -15,9 +19,10 @@ billing; self-hosted deployments retain local/BYOK operation. See
   Self-hosted deployments may remain single-workspace; managed hosting must
   enforce tenant/workspace isolation for every browser, upload, job, object,
   search, sharing, and billing operation.
-  The `/api/*` ingestion contract (desktop helper sync) is completely
-  separate and still uses the single deploy-time `AUTH_TOKEN` — never
-  conflate the two auth mechanisms.
+  Desktop sync uses `/api/v1/desktop-sync/*` and a revocable
+  `desktop_notes_sync` API token bound to one workspace. The legacy
+  self-hosted `/api/meetings` contract still uses the deploy-time `AUTH_TOKEN`.
+  Never conflate these auth mechanisms.
 - **The self-hosted Railway "Deploy" template must stay one-click.** Any new required
   environment variable or manual setup step is a regression against the
   "simple, straightforward install" pillar — document it clearly in
@@ -28,9 +33,11 @@ billing; self-hosted deployments retain local/BYOK operation. See
   adapters and workers with platform-owned credentials; provider keys never
   reach browser bundles or meeting records.
 - **Sessions, workspace authorization, signed upload/object access, and
-  server-side provider secrets secure managed hosting.** The deploy-time
-  `AUTH_TOKEN` continues to secure self-hosted ingestion. Never design a flow
-  where a provider key reaches the browser or a meeting record.
+  server-side provider secrets secure managed hosting.** User API tokens are
+  hashed, scoped, revocable, and workspace-bound for desktop sync. The
+  deploy-time `AUTH_TOKEN` continues to secure legacy self-hosted ingestion.
+  Never design a flow where a provider key reaches the browser or a meeting
+  record.
 - **Every route requires authentication, including reads.** There is no
   "public by default" page or API route — a self-hosted instance sits on a
   public Railway URL, and an unauthenticated read path would expose a

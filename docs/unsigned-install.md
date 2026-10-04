@@ -1,8 +1,9 @@
 # Installing an unsigned development build
 
-This page covers local source builds. The public desktop release is also
-unsigned; see [`code-signing-policy.md`](code-signing-policy.md) for its
-platform-specific first-open steps and checksum limits.
+This page covers local source builds of the Tauri desktop app. New users run
+setup, recording, and local notes in that app; no browser extension is needed.
+See [`code-signing-policy.md`](code-signing-policy.md) for release first-open
+steps and checksum limits.
 
 ## Linux
 
@@ -14,17 +15,19 @@ cargo deb --manifest-path crates/app/Cargo.toml
 sudo apt install ./target/debian/notetaker-app_0.1.0-1_amd64.deb
 ```
 
-The package installs the Native Messaging relay and declares
-`pulseaudio-utils` for `pactl`/`parec`. The extension still must be loaded
-separately from `extension/dist` for development.
+The package declares `pulseaudio-utils` for `pactl`/`parec`. It also retains
+the Native Messaging relay for existing extension users; new desktop use does
+not require browser registration or an extension. For development of the
+legacy extension path, load `extension/dist` separately.
 
 ## macOS
 
 Open the locally built `.app` from Finder. macOS may show an unidentified
 developer warning for an unsigned build. Only bypass that warning for a build
 whose source and checksum you have inspected: Control-click the app, choose
-**Open**, and confirm the warning. Run the bundled Native Messaging installer
-after copying the app to `/Applications`:
+**Open**, and confirm the warning. Desktop recording works without Native
+Messaging. Existing extension users who need to reconnect the browser bridge
+can run the bundled installer after copying the app to `/Applications`:
 
 ```sh
 sh "/Applications/AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh"

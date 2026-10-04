@@ -1,36 +1,29 @@
 # AI Notetaker — Project Guidance
 
-Open-source, local-first, botless AI meeting notetaker with a free local BYOK
-mode and an optional managed paid AI service. Full target architecture: see
-[`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-dual-mode-product-design.md).
-The 2026-09-21 document is the historical implementation baseline.
-Read it before making architectural changes — the decisions below exist for
-reasons documented there.
+Open-source, local-first, botless AI meeting notetaker. The approved product
+direction is one Tauri desktop app for setup, capture, local notes, and optional
+web-app sync. See
+[`docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`](docs/superpowers/specs/2026-10-03-desktop-first-product-design.md)
+and its active migration plan. The 2026-09-24 dual-mode and 2026-09-21 designs
+document existing contracts and implementation history; the desktop-first spec
+supersedes their extension-owned processing path for new product work. The
+optional Chrome extension is now a Google Meet audio recorder: it saves
+separate local tracks for desktop import.
 
 ## Non-negotiable constraints (from the design review)
 
 These were deliberate resolutions to specific gaps — don't reintroduce them:
 
-- **Two supported execution modes.** Local BYOK remains free and requires no
-  account. Managed mode is a project-operated, multi-tenant service where
-  the project owns provider credentials, meters usage, and bills users.
-  Self-hosted deployment remains supported for users who want their own
-  storage and provider accounts.
-- **Capture ownership follows the source.** The Chrome extension owns
-  Google Meet capture: a Meet-only, credential-free page adapter relays remote
-  receiver audio to an extension-owned offscreen document over a local,
-  receive-only WebRTC connection. Chrome tab capture remains the compatibility
-  fallback. The offscreen document captures the mic and sends bounded mic/speaker
-  chunks to the service worker, which persists them in extension IndexedDB
-  before BYOK provider calls or Hosted AI uploads. The Rust/Tauri helper owns
-  long-running desktop-call capture and local resilience for Zoom, Teams,
-  Slack, and other apps. MV3 restarts are handled by rehydrating the active
-  Meet record and chunk sequence from IndexedDB; the helper remains mandatory
-  for desktop sources.
-- **Extension↔helper communication uses Native Messaging, not an open
-  localhost WebSocket.** An open port is reachable by any webpage's
-  JavaScript (cross-site WebSocket hijacking); Native Messaging is
-  OS-enforced and allowlisted to this extension's ID.
+- **The Tauri desktop app is the primary product.** It owns setup, capture,
+  provider calls, local notes, recovery, and optional web-app sync. The
+  extension records Google Meet audio only for new calls. Historical notes,
+  credentials, and recovery controls remain accessible during migration.
+- **Local BYOK remains account-free.** The desktop app calls the user's
+  selected providers directly. Optional web-app sync uses a separate
+  authenticated API token; it never receives provider keys.
+- **Desktop UI ↔ Rust uses Tauri IPC.** Do not add an open TCP/localhost
+  listener. Native Messaging remains only as a temporary compatibility path
+  for installed extensions and is not required by new customers.
 - **Don't build a custom virtual-audio driver.** Prefer native OS loopback
   capture: ScreenCaptureKit/native audio on macOS, WASAPI loopback on Windows,
   and PipeWire/PulseAudio monitor sources on Linux. Keep BlackHole, VB-CABLE,
@@ -46,21 +39,23 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
   this is what makes "you vs. everyone else" diarization free.
 - **Raw audio is always saved locally first**, independent of any API call
   succeeding, so a transcription/summarization failure never loses data.
-- **Local BYOK keys live in protected local storage only** — never `.sync`.
-  Managed provider keys are server-side secrets and never reach the client.
-- **Helper is built on Tauri (Rust)**, not Electron — smaller install, one
+- **Local BYOK keys live in OS credential storage.** Never put them in synced
+  storage or web-app requests.
+- **The desktop app is built on Tauri (Rust)**, not Electron — smaller install, one
   shared codebase across OSes. Updates are an update-check tray item that opens
   the signed-release page (`docs/helper-packaging.md`); an in-place Tauri
   updater waits on release-signing keys.
-- **Extension `manifest.json` carries a committed, stable `key` field.**
-  Native Messaging's host allowlist is keyed to the extension ID that field
-  derives — regenerating it breaks every installed helper's handshake.
-- **Every webapp route checks the auth token, including reads.** No
-  "public by default" page — it sits on a public Railway URL. The only
-  exception is the managed deployment's static marketing pages: exact-path
-  allowlist in `webapp/src/marketing/paths.ts`, served only when
-  `MANAGED_HOSTING=true`, never showing user data. Self-hosted instances have
-  no public page.
+- **Preserve extension compatibility during migration.** Do not change the
+  committed manifest key, remove the Native Messaging relay, or delete
+  extension data until the desktop app and migration path pass acceptance.
+  New Meet captures do not call AI providers in Chrome or start desktop calls
+  through the extension.
+- **Every webapp data route authenticates its client.** Browser pages use a
+  user session; managed APIs use their scoped auth; desktop note sync uses a
+  revocable user token bound to one workspace. The legacy `/api/meetings`
+  contract keeps its self-hosted `AUTH_TOKEN`. The only public web routes are
+  the health check and the managed deployment's exact marketing allowlist in
+  `webapp/src/marketing/paths.ts`.
 - **Helper checks for and offers to resume an in-progress recording on
   startup** — an unclean shutdown must not silently orphan raw audio
   that's already on disk.
@@ -96,14 +91,16 @@ the one for whichever package you're touching in addition to this file.
 
 ## Current status
 
-Core capture, provider pipeline, Native Messaging, extension helper-detection
-UX, CI, Tauri tray/packaging, per-OS Native Messaging installer hooks, and the
-dual-mode managed processing contracts are implemented and tracked in
-`TODO.md`. The dual-mode migration is tracked in
-[`docs/superpowers/plans/2026-09-24-dual-mode-product-migration.md`](docs/superpowers/plans/2026-09-24-dual-mode-product-migration.md).
-Managed hosted processing, billing, and native loopback adapters have local
-tests and build gates; real deployment, provider, billing, browser, and native
-OS acceptance gates still remain before advertising hosted mode as released.
+Capture, provider pipeline, Tauri app and tray, native loopback adapters,
+Native Messaging compatibility, and web-app APIs exist. The desktop app now
+owns setup, local recording/history, and optional workspace-scoped text sync.
+Cross-platform release packaging, migration of raw extension audio and
+unfinished recordings, and real recording/sync acceptance remain open. A
+bounded transfer for completed text notes and non-secret preferences exists;
+the source extension data stays untouched. Desktop-first work is active in
+[`docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md`](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md).
+Do not describe the one-app workflow as shipped until native runtime and
+existing-data migration gates pass.
 
 ## Out of scope for now
 

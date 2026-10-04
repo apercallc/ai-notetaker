@@ -4,7 +4,7 @@
 export interface TranscriptSegmentInput {
   speaker: string;
   text: string;
-  timestamp: string; // ISO 8601
+  timestamp?: string | null; // ISO 8601 when provider timing exists
 }
 
 export interface ActionItemInput {
@@ -71,7 +71,7 @@ export interface MeetingDetailResponse {
   mode: MeetingMode;
   /** Person-chosen names by speaker key ("you", "them-1", ...); absent keys use the default label. */
   speakerNames?: Record<string, string>;
-  transcript: { speaker: string; text: string; timestamp: string }[];
+  transcript: { speaker: string; text: string; timestamp: string | null }[];
   actionItems: {
     id: string;
     text: string;

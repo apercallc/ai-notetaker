@@ -36,6 +36,16 @@ describe("managed API proxy boundaries", () => {
     expect(await response.json()).toEqual({ error: "managed session required", requestId: "proxy-managed-auth-test" });
   });
 
+  it("lets the dedicated desktop sync handler authenticate its workspace token", async () => {
+    const response = await proxy(request("/api/v1/desktop-sync/meetings", {
+      method: "POST",
+      headers: { authorization: "Bearer ant_desktop", origin: "tauri://localhost" },
+    }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
   it("answers 503 with Retry-After, not 401, when the session store is down", async () => {
     getSessionUser.mockRejectedValue(new Error("connection refused"));
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);

@@ -10,7 +10,7 @@ export interface StartMeetOptions {
   tabId?: number;
   meetingMode?: MeetingMode;
   titleHint?: string;
-  /** Explicit confirmation to capture locally even if a selected BYOK provider check fails. */
+  /** Kept for requests from an older popup; Meet capture no longer checks provider keys. */
   allowProviderWarning?: boolean;
   /**
    * Auto-attempt from the join watcher: failures are never broadcast (the
@@ -66,7 +66,7 @@ export async function startMeetRecording(
     if (activeRecord?.captureSource === "meet") {
       const requestedTabId = options.tabId ?? (await discoverActiveMeetTab())?.id;
       if (requestedTabId !== undefined && capture.isActiveForTab(active.id, requestedTabId)) return active.id;
-      controller.reportStartFailure("Notes are already recording in another Google Meet tab. Stop that recording before starting notes for this call.");
+      controller.reportStartFailure("Another Google Meet tab is already recording. Stop it before starting this call.");
       return "";
     }
     controller.reportStartFailure(
@@ -78,7 +78,7 @@ export async function startMeetRecording(
   const tabId = options.tabId ?? discoveredTab?.id;
   const titleHint = options.titleHint ?? (discoveredTab ? meetTitleForTab(discoveredTab) : undefined);
   if (typeof tabId !== "number") {
-    controller.reportStartFailure("Open the Google Meet call in this tab first, then start notes.");
+    controller.reportStartFailure("Open the Google Meet call in this tab first, then start recording.");
     return "";
   }
   try {

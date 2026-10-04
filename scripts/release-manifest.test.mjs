@@ -51,6 +51,7 @@ test("published manifests need a supported extension install channel and platfor
   const errors = validateManifest(published).join("\n");
   assert.match(errors, /Chrome Web Store URL or extension fallback ZIP URL/);
   assert.match(errors, /linux deb artifact/);
+  assert.match(errors, /x86_64 macos dmg artifact/);
 });
 
 test("only Chrome Web Store detail URLs and release ZIP fallback URLs are accepted", () => {
@@ -60,6 +61,7 @@ test("only Chrome Web Store detail URLs and release ZIP fallback URLs are accept
   published.extension.fallbackZipUrl = `https://example.com/ai-notetaker-extension-${TAG}.zip`;
   published.artifacts = [
     { platform: "macos", architecture: "arm64", format: "dmg", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.dmg`, sha256: "a".repeat(64), signatureStatus: "unsigned" },
+    { platform: "macos", architecture: "x86_64", format: "dmg", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a-intel.dmg`, sha256: "d".repeat(64), signatureStatus: "unsigned" },
     { platform: "windows", architecture: "x86_64", format: "nsis", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.exe`, sha256: "b".repeat(64), signatureStatus: "unsigned" },
     { platform: "linux", architecture: "x86_64", format: "deb", url: `https://github.com/apercallc/ai-notetaker/releases/download/${TAG}/a.deb`, sha256: "c".repeat(64), signatureStatus: "unsigned" },
   ];
@@ -70,11 +72,13 @@ test("only Chrome Web Store detail URLs and release ZIP fallback URLs are accept
 
 test("release metadata is generated from direct unsigned native assets", () => {
   const assets = fs.mkdtempSync(path.join(os.tmpdir(), "ai-notetaker-release-assets-"));
-  fs.mkdirSync(path.join(assets, "helper-macos"), { recursive: true });
+  fs.mkdirSync(path.join(assets, "helper-macos-arm64"), { recursive: true });
+  fs.mkdirSync(path.join(assets, "helper-macos-x86_64"), { recursive: true });
   fs.mkdirSync(path.join(assets, "helper-windows"), { recursive: true });
   fs.mkdirSync(path.join(assets, "helper-ubuntu"), { recursive: true });
   fs.mkdirSync(path.join(assets, "extension"), { recursive: true });
-  fs.writeFileSync(path.join(assets, "helper-macos", "AI Notetaker.dmg"), "mac");
+  fs.writeFileSync(path.join(assets, "helper-macos-arm64", "AI.Notetaker_aarch64-installer.dmg"), "mac arm");
+  fs.writeFileSync(path.join(assets, "helper-macos-x86_64", "AI.Notetaker_x86_64-installer.dmg"), "mac intel");
   fs.writeFileSync(path.join(assets, "helper-windows", "AI Notetaker.exe"), "windows");
   fs.writeFileSync(path.join(assets, "helper-ubuntu", "AI Notetaker.deb"), "linux");
   fs.writeFileSync(path.join(assets, "extension", `ai-notetaker-extension-${TAG}.zip`), "extension");
@@ -87,7 +91,9 @@ test("release metadata is generated from direct unsigned native assets", () => {
   });
 
   assert.equal(generated.status, "published");
-  assert.equal(generated.artifacts.length, 3);
+  assert.equal(generated.artifacts.length, 4);
+  assert.ok(generated.artifacts.some((artifact) => artifact.platform === "macos" && artifact.architecture === "arm64"));
+  assert.ok(generated.artifacts.some((artifact) => artifact.platform === "macos" && artifact.architecture === "x86_64"));
   assert.equal(generated.artifacts[0].signatureStatus, "unsigned");
   assert.match(generated.extension.fallbackZipUrl, /ai-notetaker-extension-.+\.zip/);
   assert.ok(generated.artifacts[0].url.includes(`/releases/download/${TAG}/`));

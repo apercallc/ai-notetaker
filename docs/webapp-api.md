@@ -5,22 +5,40 @@ This document covers two additive contracts:
 - `/api/meetings` is the existing self-hosted BYOK ingestion API.
 - `/api/v1/*` is the authenticated managed-service API used by the extension
   and helper when the user selects hosted AI.
+- `/api/v1/desktop-sync/*` is optional text-only sync from the Tauri desktop
+  app, authenticated by a revocable user token bound to one workspace.
 
 Local BYOK recording does not require an account or either API.
 
-Every request (reads included — see the architecture spec §3.5 and the
-non-negotiable constraint in root `CLAUDE.md`) must include:
+Every private API request (reads included — see the architecture spec §3.5
+and root `CLAUDE.md`) must authenticate its caller. Browser pages use their
+session cookie; managed APIs retain their established client/session auth;
+legacy self-hosted ingestion uses its `AUTH_TOKEN`.
+Desktop sync uses a hashed, revocable `desktop_notes_sync` token created in
+the signed-in web app at Settings → Integrations. The token is bound to that
+user's active workspace; the route rechecks membership on each request. Keep
+it in the desktop operating-system credential vault. `GET /api/health` stays
+public for setup diagnostics; no workspace-note route is anonymous.
 
-```
-Authorization: Bearer <token>
+### Desktop note sync
+
+The local BYOK desktop path does not need an account. Sync is explicitly
+optional. It sends completed note text to one selected workspace and never
+sends audio, provider keys, or local file paths. A durable local outbox retries
+failed requests after restart. Repeated POSTs with the same meeting ID upsert
+the same workspace record.
+
+`GET /api/v1/desktop-sync` checks the token and returns its bound workspace:
+
+```json
+{ "ok": true, "workspace": { "id": "...", "name": "Product" } }
 ```
 
-The token is generated once when the user deploys their webapp instance
-and pasted into the extension's settings. There is no unauthenticated
-API route for workspace data. `GET /api/health` is the one deliberate
-exception: it is public so the extension's settings page can validate
-"is this URL even a webapp instance" before asking for a token. Every other
-route requires auth.
+`POST /api/v1/desktop-sync/meetings` accepts the same finished-note body as
+`POST /api/meetings`, including optional transcript timestamps. Missing times
+remain null and segment order is preserved; clients must not fabricate timing.
+The route ignores browser CORS handling and authenticates the desktop token
+itself. It is available on managed and self-hosted hosting.
 
 ### `GET /api/health`
 
@@ -157,7 +175,7 @@ with the same `id` upserts rather than duplicating).
   "mode": "general" | "standup" | "sales" | "one_on_one" | "interview" | "custom",
   "startedAt": "<ISO 8601>",
   "endedAt": "<ISO 8601>",
-  "transcript": [{ "speaker": "you" | "them" | "them-2", "text": "...", "timestamp": "<ISO 8601>" }],
+  "transcript": [{ "speaker": "you" | "them" | "them-2", "text": "...", "timestamp": "<ISO 8601> | null" }],
   "summary": "string",
   "captureSource": "desktop" | "meet", // optional; managed Meet registration sends "meet"
   "processingMode": "local_byok" | "managed", // optional; preserved on legacy re-sync when omitted

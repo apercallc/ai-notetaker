@@ -3,8 +3,10 @@
 This runbook is for the optional project-operated managed service. Free local
 BYOK remains the default and does not require an account or this deployment.
 The hosted service owns provider credentials, usage limits, meeting notes,
-processing jobs, and billing; the helper still saves raw audio locally before
-uploading it for processing. Hosted audio is temporary staging only.
+processing jobs, and billing; the desktop app saves raw audio locally before
+uploading it for processing. Hosted audio is temporary staging only. Optional
+desktop-to-web-app note sync is a separate API path and sends finished text,
+not raw audio or provider keys.
 
 ## Required services
 
@@ -178,9 +180,10 @@ web replicas and survives a deployment.
 8. Delete the meeting and verify the database rows and every private object
    are removed. Any leftover temporary object is also deleted. Review logs for
    orphan cleanup failures.
-9. Run the OS/browser acceptance checklist in `TODO.md` and record real
-   Chrome/Meet, Native Messaging, microphone, loopback, and provider evidence
-   separately from unit/build output.
+9. Run the desktop-first acceptance checklist in `TODO.md` and record real
+   installer, microphone/system-audio capture, provider, and optional desktop
+   sync/recovery evidence separately from unit/build output. Verify Chrome and
+   Native Messaging only for existing extension users during migration.
 
 ## Operations
 

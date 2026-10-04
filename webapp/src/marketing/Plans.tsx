@@ -64,7 +64,7 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
           <li><Icon as={Check} /><span>Slack, Notion, webhooks and an MCP connection for AI assistants</span></li>
           <li><Icon as={Check} /><span>Audio deleted after processing</span></li>
         </ul>
-        <Link className="mk-btn mk-btn--solid" href={start}>{signupOpen ? "Try Hosted AI free" : "Get the extension"}</Link>
+        <Link className="mk-btn mk-btn--solid" href={start}>{signupOpen ? "Try Hosted AI free" : "Get the desktop app"}</Link>
       </article>
 
       <article className="mk-plan" aria-labelledby="plan-team">
@@ -79,7 +79,7 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
           <li><Icon as={Check} /><span>Owners set how long notes are kept</span></li>
           <li><Icon as={Check} /><span>Workspaces are fully isolated from each other</span></li>
         </ul>
-        <Link className="mk-btn mk-btn--quiet" href={start}>{signupOpen ? "Start a team workspace" : "Get the extension"}</Link>
+        <Link className="mk-btn mk-btn--quiet" href={start}>{signupOpen ? "Start a team workspace" : "Get the desktop app"}</Link>
       </article>
     </div>
   );

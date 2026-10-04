@@ -71,10 +71,12 @@ function assertValid(input: unknown): CreateMeetingRequest {
       segment === null ||
       typeof (segment as Record<string, unknown>).speaker !== "string" ||
       typeof (segment as Record<string, unknown>).text !== "string" ||
-      typeof (segment as Record<string, unknown>).timestamp !== "string" ||
       (segment as Record<string, string>).speaker.length > MAX_SPEAKER_LENGTH ||
       (segment as Record<string, string>).text.length > MAX_SEGMENT_TEXT_LENGTH ||
-      Number.isNaN(Date.parse((segment as Record<string, string>).timestamp))
+      ((segment as Record<string, unknown>).timestamp !== undefined &&
+        (segment as Record<string, unknown>).timestamp !== null &&
+        (typeof (segment as Record<string, unknown>).timestamp !== "string" ||
+          Number.isNaN(Date.parse((segment as Record<string, string>).timestamp))))
     ) {
       throw new ValidationError("each transcript segment needs speaker, text, and timestamp");
     }
@@ -213,7 +215,7 @@ export async function upsertMeeting(rawInput: unknown, workspaceId: string, user
           userId,
           speaker: segment.speaker,
           text: segment.text,
-          timestamp: new Date(segment.timestamp),
+          timestamp: segment.timestamp ? new Date(segment.timestamp) : null,
           order: index,
         })),
       });
@@ -471,7 +473,7 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,
-      timestamp: segment.timestamp.toISOString(),
+      timestamp: segment.timestamp?.toISOString() ?? null,
     })),
     actionItems: row.actionItems.map((item) => ({
       id: item.id,

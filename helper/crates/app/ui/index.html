@@ -2,9 +2,62 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>AI Notetaker</title>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <p>AI Notetaker runs from the system tray.</p>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="presentation">
+              <path d="M9 5h10l6 6v16H9a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+              <path class="brand-fold" d="M19 5v5a1 1 0 0 0 1 1h5" />
+              <path class="brand-wave" d="M12 17v5m4-8v9m4-6v4" />
+            </svg>
+          </div>
+          <div><strong>AI Notetaker</strong><span>Local-first meeting notes</span></div>
+        </div>
+
+        <nav class="nav-list" aria-label="Sections">
+          <button class="nav-button active" data-page="record" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">●</span><span>Record</span>
+          </button>
+          <button class="nav-button" data-page="notes">
+            <span class="nav-icon" aria-hidden="true">▤</span><span>Notes</span>
+          </button>
+          <button class="nav-button" data-page="settings">
+            <span class="nav-icon" aria-hidden="true">⚙</span><span>Settings</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="local-badge"><span class="status-dot"></span> Saved on this device</div>
+          <button id="open-notes-folder" class="sidebar-link">Open notes folder</button>
+          <button id="open-webapp" class="sidebar-link" hidden>Open web library ↗</button>
+          <span class="version-label" id="app-version">Starting…</span>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="page-eyebrow">YOUR DESKTOP NOTETAKER</p>
+            <h1 id="page-title">Record a meeting</h1>
+          </div>
+          <div class="topbar-status" id="topbar-status" role="status" aria-live="polite">
+            <span class="status-dot"></span><span>Checking audio</span>
+          </div>
+        </header>
+
+        <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+        <div id="content" class="content" aria-live="polite">
+          <div class="loading-state"><span class="spinner"></span><span>Opening your workspace…</span></div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
   </body>
 </html>

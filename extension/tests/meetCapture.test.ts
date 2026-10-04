@@ -68,11 +68,13 @@ describe("Google Meet capture orchestration", () => {
     });
   });
 
-  it("hands the offscreen page the Deepgram key for live captions, since it cannot read storage", async () => {
+  it("keeps old provider keys out of new recorder capture", async () => {
     grantStreamId("stream-abc");
     await saveSettings({ ...DEFAULT_SETTINGS, transcriptionProvider: "deepgram", apiKeys: { deepgram: " dg-key " } });
     await new MeetCaptureController(vi.fn()).start(7, "meeting-live");
-    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "MEET_CAPTURE_START", liveDeepgramKey: "dg-key" }));
+    const start = chromeMock.runtime.sendMessage.mock.calls.find(([message]) => message.type === "MEET_CAPTURE_START")?.[0];
+    expect(start).toMatchObject({ type: "MEET_CAPTURE_START", meetingId: "meeting-live" });
+    expect(start).not.toHaveProperty("liveDeepgramKey");
   });
 
   it("forwards the first chunk even when it arrives before the offscreen start reply", async () => {

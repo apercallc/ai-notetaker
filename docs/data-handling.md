@@ -1,29 +1,32 @@
 # Data handling
 
-AI Notetaker is local-first and supports both self-hosted BYOK operation and an
-optional managed hosted-AI service. Local mode does not send meeting data to
-the project. Managed mode sends encrypted, authenticated recording chunks to
-private temporary staging for processing and billing. The hosted library keeps
-meeting text, not the recording.
+The Tauri desktop app is the primary product. In local use, it stores recordings
+and notes on this device and sends audio or transcript text only to the selected
+AI provider. Optional web-app sync sends finished note text to one authenticated
+workspace; it does not send raw audio or provider keys. Existing extension data
+and the managed hosted-AI service remain supported during migration. Managed
+mode sends authenticated recording chunks to private temporary staging; the
+hosted library keeps meeting text, not the recording.
 
 ## Where data lives
 
 | Data | Location | Leaves the device when |
 | --- | --- | --- |
-| Provider API keys | Chrome extension `chrome.storage.local` in local mode; server secrets in managed mode | Local mode sends keys only to the selected provider; managed mode never sends provider keys to the extension |
-| Google Drive OAuth tokens | Chrome extension `chrome.storage.local` | Google receives them during OAuth/API calls; the project never sees them |
-| Native Messaging pairing token | Chrome extension `chrome.storage.local` and the local helper's private data directory | Never leaves the device; it is used only across the local extension/helper channel |
-| Raw mic/speaker PCM | Meet: extension IndexedDB; desktop calls: helper app-data directory under `ai-notetaker` | Local mode sends audio to the selected provider; managed mode uploads authenticated chunks to private processing staging, then sends them to the configured transcription provider (Groq by default). Our staging copy is deleted on success or expires within 24 hours; provider processing and retention follow that provider's account terms/settings |
-| Transcript and summary | Helper/extension local storage, optionally the user's own webapp/Postgres, managed workspace, or Google Drive Doc | Notes leave the device only through the selected local provider, managed workspace, optional webapp sync, or Drive export |
+| Provider API keys | Desktop app: operating-system credential store; legacy extension: `chrome.storage.local`; managed mode: server-side provider secrets | Local BYOK sends keys only to the selected provider. Optional web-app sync never receives them. Managed mode never sends server secrets to a client |
+| Google Drive credentials | Legacy extension storage or encrypted web-app credential storage, depending on which Google export flow is used | Used only for the user's Google export. The desktop-first local BYOK path does not require Google sign-in |
+| Native Messaging pairing token | Legacy extension `chrome.storage.local` and the helper's private data directory | Never leaves the device; used only by the legacy extension/helper connection |
+| Raw mic/speaker PCM | Desktop app: private app-data directory; legacy Meet: extension IndexedDB; legacy desktop calls: helper app-data directory | Local BYOK sends audio to the selected provider after saving it locally. Managed mode uploads authenticated chunks to private staging, then sends them to the configured transcription provider (Groq by default). Staging is deleted on success or expires within 24 hours; provider processing and retention follow that provider's terms/settings |
+| Transcript and summary | Desktop app local store; legacy extension/helper storage; optionally the user's webapp/Postgres, managed workspace, or Google Drive Doc | Optional desktop sync sends finished note text only. Other notes leave the device only through the selected provider, managed workspace, or Google Drive export |
 | Imported audio/video files | Browser upload to private processing staging, then a decoded 16 kHz mono copy on the processing server's temporary disk | Managed mode only. The staged original is deleted when notes are saved or after 24 hours; the decoded scratch copy is deleted when the job ends. Audio is sent to the configured transcription provider like a live recording. Only text notes are kept |
-| Retry queues | Meet: extension IndexedDB until processing succeeds; desktop calls: helper app-data directory | Never sent; they reference local audio ranges or resumable upload state |
-| Helper status/control | Native Messaging plus a local Unix socket/named pipe | Never to a project-operated server |
-| Error reports | Managed webapp server and worker: Sentry, only when the operator sets `SENTRY_DSN`; extension: a bounded error record (message, surface, optional stack/meeting id) posted to the hosted service's authenticated `/api/v1/client-errors` endpoint, only while signed in to Hosted AI | Local BYOK mode never sends error reports anywhere |
+| Retry queues | Desktop app local store; legacy extension IndexedDB and helper app-data directory | Never sent; they reference local audio ranges or resumable upload state |
+| Desktop UI control | Tauri IPC inside the desktop app; legacy extension control uses Native Messaging plus a local Unix socket/named pipe | Never sent to a project-operated server |
+| Error reports | Managed webapp server and worker: Sentry, only when the operator sets `SENTRY_DSN`; legacy extension: bounded client-error records under its authenticated managed flow | Local desktop BYOK does not send error reports to the project |
 
-For Google Meet, local BYOK provider requests go directly from the extension
-after the audio is in IndexedDB; desktop-call local BYOK requests go from the
-helper. In managed mode, the hosted worker calls providers with server-side
-credentials; the extension never receives those credentials. By default,
+For new recordings, the desktop app saves separate microphone and system-audio
+channels locally before making a BYOK provider request. Legacy extension BYOK
+requests originate from the extension after audio is saved in IndexedDB. In
+managed mode, the hosted worker calls providers with server-side credentials;
+the extension never receives those credentials. By default,
 managed transcription sends the meeting's separate microphone and speaker
 audio to Groq in short-lived WAV requests; summarization sends only the
 resulting transcript text to OpenAI. Choosing Deepgram or Anthropic changes
@@ -32,12 +35,12 @@ does not control provider-side processing or retention.
 
 ## Deletion
 
-Delete a meeting from the extension's meeting detail view; Meet audio is
-removed from extension IndexedDB and desktop audio is requested from the
-helper. If the helper is offline, the extension-local deletion still
-completes and the helper can be cleaned separately. For a complete local reset, stop and quit the helper,
-then remove its
-`ai-notetaker` app-data directory as described in
+Delete a meeting from the desktop app's Notes view to remove its local files.
+Legacy extension users can delete a meeting from the extension's detail view;
+Meet audio is removed from IndexedDB and desktop-call audio is requested from
+the helper. If the helper is offline, the extension-local deletion still
+completes and the helper can be cleaned separately. For a complete local reset,
+stop notes and quit AI Notetaker, then remove its private app-data directory as described in
 [`helper-packaging.md`](helper-packaging.md). Deleting a meeting or the data
 directory is permanent; export or copy data first when it must be retained.
 

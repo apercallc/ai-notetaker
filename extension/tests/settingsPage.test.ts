@@ -25,61 +25,30 @@ const savedSettings = (): NotetakerSettings | undefined =>
     .filter((message) => message.type === "SAVE_SETTINGS")
     .at(-1)?.settings;
 
-describe("settings page: modes", () => {
-  it("opens on Hosted for a signed-in hosted user and never presents your own keys as active", async () => {
+describe("settings page: API keys", () => {
+  it("moves existing users to API processing and removes sign-in controls", async () => {
     await openSettings(hosted);
-
-    expect($("mode-managed").getAttribute("aria-pressed")).toBe("true");
-    expect($("mode-local").getAttribute("aria-pressed")).toBe("false");
-    expect(document.getElementById("key-deepgram")).toBeNull();
-    expect(document.getElementById("meeting-minutes")).toBeNull();
-    expect(document.getElementById("managed-sign-out")).not.toBeNull();
+    expect(document.getElementById("key-deepgram")).not.toBeNull();
+    expect(document.getElementById("meeting-minutes")).not.toBeNull();
     expect(document.getElementById("managed-sign-in")).toBeNull();
+    expect(document.getElementById("managed-google-sign-in")).toBeNull();
+    await vi.waitFor(() => expect(savedSettings()?.processingMode).toEqual({ kind: "local_byok" }));
+    expect(savedSettings()?.managedService?.accessToken).toBe("tok");
   });
 
-  it("uses clear vocabulary for both processing modes without internal implementation terms", async () => {
+  it("explains key setup and links to the selected providers", async () => {
     await openSettings(DEFAULT_SETTINGS);
-    expect($("mode-local").textContent).toBe("Your own API keys");
-    expect($("mode-managed").textContent).toBe("Hosted AI");
-    expect(document.body.textContent).not.toMatch(/BYOK|managed/i);
-
-    $("mode-managed").click();
-    expect(document.body.textContent).not.toMatch(/BYOK|managed/i);
+    expect(document.body.textContent).toContain("No AI Notetaker account is needed");
+    expect(document.querySelector('a[href="https://console.deepgram.com/"]')).not.toBeNull();
+    expect(document.querySelector('a[href="https://console.anthropic.com/settings/keys"]')).not.toBeNull();
+    expect(document.getElementById("managed-email")).toBeNull();
+    expect(document.getElementById("mode-managed")).toBeNull();
   });
 
-  it("shows the sign-in form only when Hosted is selected", async () => {
-    await openSettings(DEFAULT_SETTINGS);
-    expect(document.getElementById("managed-email")).toBeNull();
-
-    $("mode-managed").click();
-    expect(document.getElementById("managed-email")).not.toBeNull();
-    $("mode-local").click();
-    expect(document.getElementById("managed-email")).toBeNull();
-  });
-
-  it("hides the self-hosted webapp in Hosted mode and keeps the cost estimator to your own keys", async () => {
+  it("keeps self-hosted history optional alongside API keys", async () => {
     await openSettings(DEFAULT_SETTINGS);
     expect(document.getElementById("webapp-url")).not.toBeNull();
     expect(document.getElementById("meeting-minutes")).not.toBeNull();
-
-    $("mode-managed").click();
-    expect(document.getElementById("webapp-url")).toBeNull();
-    expect(document.getElementById("meeting-minutes")).toBeNull();
-  });
-
-  it("switching modes keeps the hosted session; only the separate Sign out button removes it", async () => {
-    await openSettings(hosted);
-    $("mode-local").click();
-    expect(document.getElementById("key-deepgram")).not.toBeNull();
-    $("mode-managed").click();
-    expect(document.getElementById("managed-sign-out")).not.toBeNull();
-
-    $("managed-sign-out").click();
-    await vi.waitFor(() => expect(document.getElementById("managed-sign-in")).not.toBeNull());
-    expect(savedSettings()?.managedService).toBeNull();
-    expect(savedSettings()?.processingMode).toEqual({ kind: "local_byok" });
-    expect($<HTMLInputElement>("managed-email").value).toBe("");
-    expect($("mode-managed").getAttribute("aria-pressed")).toBe("true");
   });
 });
 
@@ -87,7 +56,7 @@ describe("settings page: structure", () => {
   it("keeps all optional connections collapsed and removes browser OAuth-client setup", async () => {
     await openSettings(DEFAULT_SETTINGS);
     const legends = [...document.querySelectorAll("legend")].map((legend) => legend.textContent);
-    expect(legends).toEqual(["How meetings are processed", "Notes preferences", "Shortcuts and Meet widget"]);
+    expect(legends).toEqual(["Provider API keys", "Notes preferences", "Shortcuts and Meet widget", "Move to the desktop app"]);
 
     const integrations = $<HTMLDetailsElement>("integrations");
     expect(integrations.open).toBe(false);
@@ -101,7 +70,7 @@ describe("settings page: structure", () => {
 });
 
 describe("settings page: unsaved input", () => {
-  it("keeps typed keys, vocabulary and hosted email across toggles and tier switches", async () => {
+  it("keeps typed keys and vocabulary across provider tier switches", async () => {
     await openSettings(DEFAULT_SETTINGS);
     $<HTMLInputElement>("key-deepgram").value = "dg-typed";
     $<HTMLTextAreaElement>("custom-vocabulary").value = "Kubernetes\nAcme";
@@ -113,11 +82,6 @@ describe("settings page: unsaved input", () => {
     $("tier-budget").click();
     expect($<HTMLInputElement>("key-groq").value).toBe("groq-typed");
 
-    $("mode-managed").click();
-    $<HTMLInputElement>("managed-email").value = "me@example.com";
-    $("mode-local").click();
-    $("mode-managed").click();
-    expect($<HTMLInputElement>("managed-email").value).toBe("me@example.com");
     expect($<HTMLTextAreaElement>("custom-vocabulary").value).toBe("Kubernetes\nAcme");
   });
 
@@ -174,11 +138,11 @@ describe("settings page: unsaved input", () => {
     expect(savedSettings()?.onboardingComplete).toBe(true);
   });
 
-  it("leaves a saved webapp connection untouched when saving in Hosted mode", async () => {
+  it("preserves saved history connection and selects API key processing", async () => {
     await openSettings({ ...hosted, webapp: { url: "https://app.example.com", token: "keep" } });
     $("save-settings").click();
     await vi.waitFor(() => expect(savedSettings()).toBeDefined());
     expect(savedSettings()?.webapp).toEqual({ url: "https://app.example.com", token: "keep" });
-    expect(savedSettings()?.processingMode.kind).toBe("managed");
+    expect(savedSettings()?.processingMode.kind).toBe("local_byok");
   });
 });

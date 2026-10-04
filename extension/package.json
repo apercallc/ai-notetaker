@@ -1,7 +1,7 @@
 {
   "name": "ai-notetaker-extension",
   "version": "0.17.0",
-  "description": "AI Notetaker Chrome extension — botless meeting notes with local BYOK or optional hosted AI.",
+  "description": "AI Notetaker Chrome extension — Google Meet audio recorder for desktop import.",
   "private": true,
   "type": "module",
   "scripts": {

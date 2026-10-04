@@ -1,167 +1,58 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
+import { DEFAULT_SETTINGS } from "../src/types";
 
-const helperState = {
-  helperStatus: "helper_not_found" as const,
-  helperInfo: null,
-  activeMeeting: null,
-  latest: null,
-  recoverableMeeting: null,
-  onboardingComplete: false,
-  consentAcknowledged: false,
-};
+const microphone = vi.hoisted(() => ({
+  requestMicrophone: vi.fn().mockResolvedValue("granted"),
+  microphoneAlreadyAllowed: vi.fn().mockResolvedValue(false),
+}));
+vi.mock("../src/meet/micPermission", () => microphone);
 
-async function loadWizard(url: string, beforeLoad?: () => Promise<void> | void): Promise<void> {
+async function loadWizard(url = "/onboarding/onboarding.html"): Promise<void> {
   vi.resetModules();
+  chromeMock.reset();
   document.body.innerHTML = '<main id="app"></main>';
   window.history.replaceState({}, "", url);
-  chromeMock.reset();
-  chromeMock.runtime.sendMessage.mockResolvedValue(helperState);
-  chromeMock.runtime.onMessage.addListener.mockReset();
-  await beforeLoad?.();
+  chromeMock.runtime.sendMessage.mockResolvedValue({});
+  await new Promise<void>((resolve) => chromeMock.storage.local.set({ "notetaker.settings": DEFAULT_SETTINGS }, resolve));
   await import("../src/onboarding/onboarding");
+  await vi.waitFor(() => expect(document.querySelector("#allow-microphone")).not.toBeNull());
 }
 
-describe("onboarding entry point", () => {
+describe("Meet recorder setup", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    microphone.requestMicrophone.mockResolvedValue("granted");
+    microphone.microphoneAlreadyAllowed.mockResolvedValue(false);
   });
 
-  it("opens hosted signup and signs in without asking for a server URL", async () => {
-    await loadWizard("/onboarding/onboarding.html");
-    await vi.waitFor(() => expect(document.querySelector("#onboarding-mode-managed")).not.toBeNull());
-    document.querySelector<HTMLButtonElement>("#onboarding-mode-managed")!.click();
-    expect(document.querySelector("#onboarding-managed-url")).toBeNull();
-    const signup = document.querySelector<HTMLButtonElement>("#onboarding-managed-signup")!;
-    expect(signup.disabled).toBe(false);
-    signup.click();
-    expect(chromeMock.tabs.create).toHaveBeenCalledWith({
-      url: "https://ai-notetaker.apercallc.com/login?tab=signup",
-    });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-      accessToken: "test-session", accountId: "acct", workspaceId: "ws", plan: "hosted_trial",
-    }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    document.querySelector<HTMLInputElement>("#onboarding-managed-email")!.value = "owner@example.test";
-    document.querySelector<HTMLInputElement>("#onboarding-managed-password")!.value = "test-password";
-    document.querySelector<HTMLButtonElement>("#onboarding-managed-sign-in")!.click();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://ai-notetaker.apercallc.com/api/v1/auth/login");
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Hosted AI is connected"));
-  });
-
-  it("keeps a stale desktop onboarding URL on the Meet-first single setup screen", async () => {
-    await loadWizard("/onboarding/onboarding.html?mode=desktop");
-
-    await vi.waitFor(() => {
-      expect(document.querySelector("#onboarding-form")).not.toBeNull();
-    });
-
-    // Meet path: one setup screen, no helper installer, no meeting-app detour.
+  it("asks only for microphone and recording consent", async () => {
+    await loadWizard();
+    expect(document.body.textContent).toContain("Set up Google Meet recording");
+    expect(document.querySelector("#onboarding-deepgram-key")).toBeNull();
     expect(document.querySelector("#download-helper")).toBeNull();
-    expect(document.querySelector("#meeting-app")).toBeNull();
-    expect(document.querySelector("#use-desktop")).not.toBeNull();
-    expect(document.querySelector("#onboarding-mode-local")).not.toBeNull();
-    expect(document.querySelector("#allow-microphone")).not.toBeNull();
-    expect(document.querySelector("#consent-ack")).not.toBeNull();
-    expect(document.querySelector("h1")?.textContent).toContain("Set up AI Notetaker");
+    expect((document.querySelector("#finish-setup") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("rejects a copied desktop URL without an explicit session intent", async () => {
+  it("saves setup only after microphone access and consent", async () => {
+    await loadWizard();
+    (document.querySelector("#allow-microphone") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toContain("Microphone ready"));
+    expect((document.querySelector("#finish-setup") as HTMLButtonElement).disabled).toBe(true);
+    const consent = document.querySelector("#recording-consent") as HTMLInputElement;
+    consent.checked = true;
+    consent.dispatchEvent(new Event("change", { bubbles: true }));
+    (document.querySelector("#finish-setup") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "SAVE_SETTINGS",
+      settings: expect.objectContaining({ onboardingComplete: true, consentDisclosureAcknowledged: true }),
+    })));
+    expect(document.body.textContent).toContain("Ready to record");
+  });
+
+  it("ignores old desktop setup URLs", async () => {
     await loadWizard("/onboarding/onboarding.html?mode=desktop&source=desktop");
-
-    await vi.waitFor(() => expect(document.querySelector("#onboarding-form")).not.toBeNull());
     expect(document.querySelector("#download-helper")).toBeNull();
-    expect(document.querySelector("#use-desktop")).not.toBeNull();
-  });
-
-  it("honors the short-lived intent created by explicit desktop setup", async () => {
-    await loadWizard("/onboarding/onboarding.html?mode=desktop&source=desktop", () => {
-      return new Promise<void>((resolve) => chromeMock.storage.session.set({ "notetaker.desktopOnboardingIntentAt": Date.now() }, resolve));
-    });
-
-    await vi.waitFor(() => expect(document.querySelector("#download-helper")).not.toBeNull());
-    // Desktop detour starts at the helper step and hides the Meet mic section.
-    expect(document.querySelector("h1")?.textContent).toContain("desktop calls");
-    expect(document.querySelector("#allow-microphone")).toBeNull();
-    expect(document.querySelector("#use-meet")).not.toBeNull();
-    expect(chromeMock.storage.session._dump()).toEqual({});
-  });
-
-  it("keeps helper status stable, and preserves errors until the user can continue", async () => {
-    await loadWizard("/onboarding/onboarding.html?mode=desktop&source=desktop", () => {
-      chromeMock.runtime.sendMessage.mockResolvedValue({ ...helperState, helperStatus: "disconnected" });
-      return new Promise<void>((resolve) => chromeMock.storage.session.set({ "notetaker.desktopOnboardingIntentAt": Date.now() }, resolve));
-    });
-    await vi.waitFor(() => expect(document.querySelector("#check-helper")).not.toBeNull());
-
-    const checkButton = document.querySelector("#check-helper");
-    expect((document.querySelector("#next-button") as HTMLButtonElement).disabled).toBe(true);
-    document.querySelector<HTMLFormElement>("#onboarding-form")!.dispatchEvent(new Event("submit", { cancelable: true }));
-    await vi.waitFor(() => expect(document.querySelector("#step-error")?.textContent).toContain("not connected yet"));
-
-    const listener = chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)?.[0] as (message: unknown) => void;
-    listener({ type: "HELPER_STATUS", status: "connecting" });
-    expect(document.querySelector("#step-error")?.textContent).toContain("not connected yet");
-    expect(document.querySelector("#check-helper")).toBe(checkButton);
-    expect(document.querySelector("#helper-install-status")?.textContent).toContain("not responding");
-
-    listener({ type: "HELPER_STATUS", status: "connected" });
-    expect(document.querySelector("#step-error")?.textContent).toContain("not connected yet");
-    expect(document.querySelector("#helper-install-status")?.textContent).toContain("is connected");
-    expect((document.querySelector("#next-button") as HTMLButtonElement).disabled).toBe(false);
-    document.querySelector<HTMLButtonElement>("#next-button")!.click();
-    await vi.waitFor(() => expect(document.querySelector("h1")?.textContent).toContain("Check your audio"));
-    expect(document.querySelector("#step-error")?.textContent).toBe("");
-  });
-
-  it("lets the mic section be skipped only on the desktop detour", async () => {
-    await loadWizard("/onboarding/onboarding.html");
-
-    await vi.waitFor(() => expect(document.querySelector("#onboarding-form")).not.toBeNull());
-    expect(document.querySelector<HTMLButtonElement>("#use-desktop")?.textContent).toContain("Set up desktop calls");
-    expect(document.querySelector("#use-desktop")?.parentElement?.textContent).toContain("Using Zoom, Teams, or Slack");
-  });
-
-  it("does not approve keys changed while their previous test is pending", async () => {
-    const pending: Array<(result: { valid: boolean; message: string }) => void> = [];
-    await loadWizard("/onboarding/onboarding.html", () => {
-      chromeMock.runtime.sendMessage.mockImplementation(async (message: { type: string }) => {
-        if (message.type === "TEST_PROVIDER_KEY") {
-          return new Promise((resolve) => pending.push(resolve));
-        }
-        return helperState;
-      });
-    });
-    await vi.waitFor(() => expect(document.querySelector("#test-onboarding-keys")).not.toBeNull());
-    const transcriptKey = document.querySelector<HTMLInputElement>("#onboarding-deepgram-key")!;
-    const summaryKey = document.querySelector<HTMLInputElement>("#onboarding-claude-key")!;
-    transcriptKey.value = "original-key";
-    summaryKey.value = "summary-key";
-    document.querySelector<HTMLButtonElement>("#test-onboarding-keys")!.click();
-    await vi.waitFor(() => expect(pending).toHaveLength(2));
-    transcriptKey.value = "replacement-key";
-    transcriptKey.dispatchEvent(new Event("input"));
-    pending.splice(0).forEach((resolve) => resolve({ valid: true, message: "Valid" }));
-    await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>("#test-onboarding-keys")!.disabled).toBe(false));
-    expect(document.querySelector("#onboarding-key-result")?.textContent).not.toContain("Valid");
-    document.querySelector<HTMLFormElement>("#onboarding-form")!.dispatchEvent(new Event("submit", { cancelable: true }));
-    await vi.waitFor(() => expect(pending).toHaveLength(2));
-    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "TEST_PROVIDER_KEY", key: "replacement-key" }));
-    pending.splice(0).forEach((resolve) => resolve({ valid: false, message: "Invalid" }));
-    await vi.waitFor(() => expect(document.querySelector("#step-error")?.textContent).toContain("did not pass"));
-  });
-
-  it("saves a typed key immediately when the tab is closed inside the autosave delay", async () => {
-    await loadWizard("/onboarding/onboarding.html");
-    await vi.waitFor(() => expect(document.querySelector("#onboarding-deepgram-key")).not.toBeNull());
-    chromeMock.runtime.sendMessage.mockClear();
-    const key = document.querySelector<HTMLInputElement>("#onboarding-deepgram-key")!;
-    key.value = "typed-just-now";
-    key.dispatchEvent(new Event("input"));
-
-    window.dispatchEvent(new Event("pagehide"));
-
-    const saves = chromeMock.runtime.sendMessage.mock.calls.map((call) => call[0] as { type: string; settings?: { apiKeys?: { deepgram?: string } } }).filter((message) => message.type === "SAVE_SETTINGS");
-    expect(saves.at(-1)?.settings?.apiKeys?.deepgram).toBe("typed-just-now");
+    expect(document.querySelector("#allow-microphone")).not.toBeNull();
   });
 });

@@ -8,6 +8,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod desktop_library;
+mod desktop_migration;
+mod desktop_settings;
+mod desktop_sync;
 mod ipc;
 mod ipc_endpoint;
 mod logging;
@@ -18,11 +22,13 @@ mod tray;
 mod update_check;
 
 use async_trait::async_trait;
+use desktop_sync::{DesktopSync, DesktopSyncStatus};
 use notetaker_audio::{AudioCapture, AudioDiagnostics};
 use notetaker_core::native_messaging::{
-    decode_browser_audio_chunk, ActionItem, BrowserAudioChannel, CaptureCapabilitiesMessage,
-    CaptureSource, ErrorCode, ExtensionToHelper, HelperToExtension, ManagedServiceConfig,
-    MeetingMode, ProcessingMode,
+    decode_browser_audio_chunk, ActionItem, ApiKeys, BrowserAudioChannel,
+    CaptureCapabilitiesMessage, CaptureSource, ErrorCode, ExtensionToHelper, HelperToExtension,
+    ManagedServiceConfig, MeetingMode, ProcessingMode, ProviderKind, SummarizationProviderId,
+    TranscriptionProviderId,
 };
 use notetaker_core::pipeline::{Pipeline, RetryableChunk};
 use notetaker_core::providers::test_provider_key;
@@ -35,6 +41,7 @@ use notetaker_core::storage::MeetingStore;
 use notetaker_core::{
     build_summarization_provider, build_transcription_provider, native_messaging,
 };
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -42,6 +49,8 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -231,12 +240,113 @@ struct AppState {
     active: Mutex<HashMap<Uuid, ActiveRecording>>,
     pipelines: Mutex<HashMap<Uuid, Arc<Mutex<Pipeline>>>>,
     retry_tasks: Mutex<HashMap<Uuid, RetryWorker>>,
+    recovering: Mutex<HashSet<Uuid>>,
     managed_tasks: Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>,
     // std Mutex, not tokio: the IPC layer needs a synchronous disconnect
     // callback to prune a dead connection's entries before its writer task
     // is awaited, and every critical section here is short with no .await
     // inside — see subscribe_meeting/send_meeting_message/prune_subscribers.
     subscribers: std::sync::Mutex<HashMap<Uuid, Vec<ipc::OutSender>>>,
+}
+
+#[derive(Clone)]
+struct DesktopCommandContext {
+    app: Arc<AppState>,
+    tray: Arc<tray::TrayController<tauri::Wry>>,
+    output: ipc::OutSender,
+    preferences: Arc<std::sync::Mutex<desktop_settings::DesktopPreferences>>,
+    key_storage_error: Arc<std::sync::Mutex<Option<String>>>,
+    sync: Arc<DesktopSync>,
+    library: Arc<desktop_library::DesktopLibrary>,
+    ui_app: tauri::AppHandle<tauri::Wry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopAudioStatus {
+    platform: String,
+    driver: String,
+    microphone: Option<String>,
+    speaker: Option<String>,
+    ready: bool,
+    guidance: String,
+    native_loopback: bool,
+    virtual_device_fallback: bool,
+    permission_required: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopMeetingSummary {
+    id: String,
+    title: String,
+    started_at: String,
+    ended_at: Option<String>,
+    status: String,
+    summary: Option<String>,
+    action_items: Vec<ActionItem>,
+    active: bool,
+    text_only_import: bool,
+    extension_source_status: Option<String>,
+    reprocessed_from: Option<String>,
+    can_reprocess_extension_audio: bool,
+    folder_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopMeetingDetail {
+    meeting: DesktopMeetingSummary,
+    transcript: Vec<TranscriptSegment>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopSnapshot {
+    version: String,
+    settings: desktop_settings::DesktopSettingsView,
+    credential_store_error: Option<String>,
+    audio: DesktopAudioStatus,
+    active_meeting_id: Option<String>,
+    meetings: Vec<DesktopMeetingSummary>,
+    folders: Vec<desktop_library::Folder>,
+    library_error: Option<String>,
+    unreadable_recordings: usize,
+    notes_folder: String,
+    webapp_sync: DesktopSyncStatus,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopSettingsInput {
+    transcription_provider: TranscriptionProviderId,
+    summarization_provider: SummarizationProviderId,
+    default_meeting_mode: MeetingMode,
+    custom_vocabulary: Vec<String>,
+    custom_summary_instructions: String,
+    webapp_url: String,
+    /// `None` keeps the current credential; an empty string removes it.
+    deepgram_key: Option<String>,
+    groq_key: Option<String>,
+    claude_key: Option<String>,
+    gemini_key: Option<String>,
+    deepseek_key: Option<String>,
+    webapp_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderKeyCheck {
+    valid: bool,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebappConnectionCheck {
+    valid: bool,
+    message: String,
+    workspace_name: Option<String>,
 }
 
 struct RetryWorker {
@@ -719,7 +829,11 @@ async fn poll_managed_job(
                                 .get("owner")
                                 .and_then(serde_json::Value::as_str)
                                 .map(str::to_owned);
-                            Some(ActionItem { text, owner })
+                            Some(ActionItem {
+                                text,
+                                owner,
+                                ..ActionItem::default()
+                            })
                         })
                         .collect::<Vec<_>>()
                 });
@@ -995,6 +1109,31 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            desktop_snapshot,
+            desktop_test_provider_key,
+            desktop_test_webapp,
+            desktop_save_settings,
+            desktop_import_transfer,
+            desktop_import_audio_transfer,
+            desktop_sync_existing_notes,
+            desktop_retry_webapp_sync,
+            desktop_start_recording,
+            desktop_stop_recording,
+            desktop_recover_meeting,
+            desktop_reprocess_extension_audio,
+            desktop_get_meeting,
+            desktop_delete_meeting,
+            desktop_create_folder,
+            desktop_rename_folder,
+            desktop_move_folder,
+            desktop_delete_folder,
+            desktop_move_meeting,
+            desktop_test_audio,
+            desktop_open_screen_recording_settings,
+            desktop_open_notes_folder,
+            desktop_open_webapp,
+        ])
         .setup(move |app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
@@ -1003,8 +1142,8 @@ fn main() {
             ))?;
 
             let root = root.clone();
-            // Launch-at-login is the user's choice (tray toggle, off by default). The extension
-            // starts the helper through Native Messaging when it needs it, so nothing depends on it.
+            // Launch-at-login remains opt-in. The desktop window is now the
+            // primary surface; the Native Messaging socket stays for old installs.
             secure_data_dir(&root).map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
             let store = Arc::new(
                 MeetingStore::new(&root)
@@ -1021,16 +1160,98 @@ fn main() {
                 active: Mutex::new(HashMap::new()),
                 pipelines: Mutex::new(HashMap::new()),
                 retry_tasks: Mutex::new(HashMap::new()),
+                recovering: Mutex::new(HashSet::new()),
                 managed_tasks: Mutex::new(HashMap::new()),
                 subscribers: std::sync::Mutex::new(HashMap::new()),
             });
+            let preferences = desktop_settings::DesktopPreferences::load(&root).unwrap_or_else(|error| {
+                tracing::warn!(%error, "desktop preferences could not be loaded; using defaults");
+                desktop_settings::DesktopPreferences::default()
+            });
+            let (api_keys, key_storage_error) = match desktop_settings::load_api_keys() {
+                Ok(keys) => (keys, None),
+                Err(error) => {
+                    tracing::warn!(%error, "OS credential store is unavailable");
+                    (ApiKeys::default(), Some(error))
+                }
+            };
+            let preferences = Arc::new(std::sync::Mutex::new(preferences));
+            let key_storage_error = Arc::new(std::sync::Mutex::new(key_storage_error));
+            let sync = DesktopSync::load(&root);
+            let library = Arc::new(desktop_library::DesktopLibrary::new(root.clone()));
             let tray = tray::initialize(app.handle(), root.clone());
+            let (ui_output, mut ui_events) = tokio::sync::mpsc::unbounded_channel();
+            app.manage(DesktopCommandContext {
+                app: state.clone(),
+                tray: tray.clone(),
+                output: ui_output.clone(),
+                preferences: preferences.clone(),
+                key_storage_error: key_storage_error.clone(),
+                sync: sync.clone(),
+                library: library.clone(),
+                ui_app: app.handle().clone(),
+            });
+            let ui_app = app.handle().clone();
+            let sync_app = ui_app.clone();
+            let sync_state = state.clone();
+            let sync_preferences = preferences.clone();
+            let sync_queue = sync.clone();
+            tauri::async_runtime::spawn(async move {
+                while let Some(message) = ui_events.recv().await {
+                    if let HelperToExtension::SummaryReady { meeting_id, .. } = &message {
+                        if sync_queue.enqueue(*meeting_id).is_ok() {
+                            spawn_desktop_sync(
+                                sync_state.clone(),
+                                sync_preferences.clone(),
+                                sync_queue.clone(),
+                                sync_app.clone(),
+                            );
+                        }
+                    }
+                    if let Err(error) = ui_app.emit("helper-message", message) {
+                        tracing::debug!(%error, "desktop window is not ready for a helper event");
+                    }
+                }
+            });
+            let initial_settings = {
+                let preferences = preferences
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(%error, "saved web-app sync URL is invalid");
+                        None
+                    });
+                make_settings_message(&preferences, api_keys, webapp)
+            };
+            let initial_state = state.clone();
+            let initial_tray = tray.clone();
+            let initial_output = ui_output.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_message(initial_state, initial_tray, initial_settings, initial_output).await;
+            });
             let update_app = app.handle().clone();
             let update_data_dir = root.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     update_check::check_if_due(&update_app, &update_data_dir).await;
                     tokio::time::sleep(std::time::Duration::from_secs(6 * 60 * 60)).await;
+                }
+            });
+            let retry_state = state.clone();
+            let retry_preferences = preferences.clone();
+            let retry_queue = sync.clone();
+            let retry_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let _ = run_desktop_sync(
+                        retry_state.clone(),
+                        retry_preferences.clone(),
+                        retry_queue.clone(),
+                        retry_app.clone(),
+                    ).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 }
             });
             if let Ok(interrupted) = state
@@ -1069,6 +1290,960 @@ fn main() {
             tracing::error!(%error, "AI Notetaker helper stopped during startup");
             std::process::exit(1);
         });
+}
+
+#[tauri::command]
+async fn desktop_snapshot(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<DesktopSnapshot, String> {
+    let preferences = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let stored_keys = desktop_settings::load_api_keys();
+    let stored_token = desktop_settings::get_webapp_token();
+    let mut credential_error = context
+        .key_storage_error
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let keys = match stored_keys {
+        Ok(keys) => keys,
+        Err(error) => {
+            credential_error = Some(error);
+            ApiKeys::default()
+        }
+    };
+    let has_webapp_token = match stored_token {
+        Ok(token) => token.is_some_and(|token| !token.trim().is_empty()),
+        Err(error) => {
+            credential_error.get_or_insert(error);
+            false
+        }
+    };
+    let webapp_sync = context.sync.status(
+        has_webapp_token
+            && desktop_settings::normalize_webapp_url(&preferences.webapp_url)
+                .ok()
+                .flatten()
+                .is_some(),
+    );
+
+    let audio = context.app.audio.clone();
+    let diagnostics = tokio::task::spawn_blocking(move || audio.diagnostics())
+        .await
+        .map_err(|error| format!("Audio status could not be checked: {error}"))?;
+    let audio = DesktopAudioStatus {
+        platform: diagnostics.platform,
+        driver: diagnostics.driver,
+        microphone: diagnostics.microphone,
+        speaker: diagnostics.speaker,
+        ready: diagnostics.ready,
+        guidance: diagnostics.guidance,
+        native_loopback: diagnostics.native_loopback,
+        virtual_device_fallback: diagnostics.virtual_device_fallback,
+        permission_required: diagnostics.permission_required,
+    };
+
+    let active = context.app.active.lock().await;
+    let active_ids: HashSet<Uuid> = active.keys().copied().collect();
+    let active_meeting_id = active
+        .iter()
+        .find_map(|(id, recording)| recording.audio.is_some().then(|| id.to_string()));
+    drop(active);
+
+    let (library, library_error) = match context.library.snapshot() {
+        Ok(library) => (library, None),
+        Err(error) => (desktop_library::LibraryState::default(), Some(error)),
+    };
+    let placements = library.placements;
+    let store = context.app.store.clone();
+    let meetings = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let scan = store
+            .scan_meetings()
+            .map_err(|error| format!("Meeting history could not be read: {error}"))?;
+        let unreadable = scan.unreadable.len();
+        let reprocessed_sources = scan
+            .readable
+            .iter()
+            .filter_map(|meta| meta.reprocessed_from)
+            .collect::<HashSet<_>>();
+        let mut meetings = Vec::new();
+        for meta in scan.readable.into_iter().rev() {
+            let summary = store.load_summary(meta.id).ok().flatten();
+            let is_active = active_ids.contains(&meta.id);
+            let status = if is_active {
+                "recording"
+            } else if meta.state == notetaker_core::storage::MeetingState::Recording {
+                "recovered"
+            } else if summary.is_some() {
+                "complete"
+            } else if meta.summary_pending || meta.managed_pending {
+                "processing"
+            } else {
+                "saved"
+            };
+            let can_reprocess_extension_audio = !meta.text_only_import
+                && meta.extension_source_status.is_some()
+                && meta.reprocessed_from.is_none()
+                && (store.audio_len(meta.id, "mic.pcm").unwrap_or(0) > 0
+                    || store.audio_len(meta.id, "speaker.pcm").unwrap_or(0) > 0)
+                && !reprocessed_sources.contains(&meta.id);
+            meetings.push(DesktopMeetingSummary {
+                id: meta.id.to_string(),
+                title: meta.title.unwrap_or_else(|| {
+                    format!("Meeting on {}", meta.started_at.format("%b %-d, %Y"))
+                }),
+                started_at: meta.started_at.to_rfc3339(),
+                ended_at: meta.ended_at.map(|ended| ended.to_rfc3339()),
+                status: status.to_string(),
+                summary: summary.as_ref().map(|value| value.summary.clone()),
+                action_items: summary.map_or_else(Vec::new, |value| value.action_items),
+                active: is_active,
+                text_only_import: meta.text_only_import,
+                extension_source_status: meta.extension_source_status,
+                reprocessed_from: meta.reprocessed_from.map(|id| id.to_string()),
+                can_reprocess_extension_audio,
+                folder_id: placements.get(&meta.id).map(ToString::to_string),
+            });
+        }
+        Ok((meetings, unreadable))
+    })
+    .await
+    .map_err(|error| format!("Meeting history scan failed: {error}"))??;
+
+    Ok(DesktopSnapshot {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        settings: desktop_settings::settings_view(preferences, &keys, has_webapp_token),
+        credential_store_error: credential_error,
+        audio,
+        active_meeting_id,
+        meetings: meetings.0,
+        folders: library.folders,
+        library_error,
+        unreadable_recordings: meetings.1,
+        notes_folder: context.app.data_dir.join("meetings").display().to_string(),
+        webapp_sync,
+    })
+}
+
+#[tauri::command]
+async fn desktop_test_provider_key(
+    provider: ProviderKind,
+    key: String,
+) -> Result<ProviderKeyCheck, String> {
+    let key = validate_secret(Some(key))?.ok_or_else(|| "Enter an API key first.".to_string())?;
+    let (valid, message) = test_provider_key(provider, &key).await;
+    Ok(ProviderKeyCheck { valid, message })
+}
+
+#[tauri::command]
+async fn desktop_test_webapp(url: String, token: String) -> Result<WebappConnectionCheck, String> {
+    let url = desktop_settings::normalize_webapp_url(&url)?
+        .ok_or_else(|| "Enter your web-app URL first.".to_string())?;
+    let token = match validate_secret(Some(token))? {
+        Some(token) => token,
+        None => desktop_settings::get_webapp_token()?
+            .filter(|token| !token.trim().is_empty())
+            .ok_or_else(|| "Enter a desktop sync token first.".to_string())?,
+    };
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Web-app connection could not be configured.".to_string())?;
+    let response = client
+        .get(format!("{}/api/v1/desktop-sync", url.trim_end_matches('/')))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|_| {
+            "Could not reach the web app. Check the URL and network connection.".to_string()
+        })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let message = match status.as_u16() {
+            401 => "Token is invalid, expired, or revoked. Create a new desktop sync token.",
+            403 => "Token does not have desktop note sync access to a workspace.",
+            404 => "This web-app version does not support desktop note sync yet.",
+            _ => "The web app could not validate this token.",
+        };
+        return Ok(WebappConnectionCheck {
+            valid: false,
+            message: format!("{message} (HTTP {status})"),
+            workspace_name: None,
+        });
+    }
+    #[derive(Deserialize)]
+    struct Workspace {
+        name: String,
+    }
+    #[derive(Deserialize)]
+    struct Response {
+        workspace: Workspace,
+    }
+    let result = response
+        .json::<Response>()
+        .await
+        .map_err(|_| "Web app returned an invalid connection response.".to_string())?;
+    Ok(WebappConnectionCheck {
+        valid: true,
+        message: format!("Connected to {}.", result.workspace.name),
+        workspace_name: Some(result.workspace.name),
+    })
+}
+
+#[tauri::command]
+async fn desktop_save_settings(
+    context: tauri::State<'_, DesktopCommandContext>,
+    input: DesktopSettingsInput,
+) -> Result<desktop_settings::DesktopSettingsView, String> {
+    if input.custom_vocabulary.len() > 100
+        || input
+            .custom_vocabulary
+            .iter()
+            .any(|term| term.chars().count() > 100)
+    {
+        return Err("Use at most 100 vocabulary terms, each 100 characters or fewer.".into());
+    }
+    if input.custom_summary_instructions.chars().count() > 4_000 {
+        return Err("Custom summary instructions must be 4,000 characters or fewer.".into());
+    }
+    if input.webapp_url.chars().count() > 2_000 {
+        return Err("Web-app URL is too long.".into());
+    }
+    let normalized_url = desktop_settings::normalize_webapp_url(&input.webapp_url)?;
+    let mut keys = desktop_settings::load_api_keys()?;
+    let previous_keys = keys.clone();
+    apply_secret_update(&mut keys.deepgram, input.deepgram_key)?;
+    apply_secret_update(&mut keys.groq, input.groq_key)?;
+    apply_secret_update(&mut keys.claude, input.claude_key)?;
+    apply_secret_update(&mut keys.gemini, input.gemini_key)?;
+    apply_secret_update(&mut keys.deepseek, input.deepseek_key)?;
+
+    let previous_token = desktop_settings::get_webapp_token()?;
+    let new_token = match input.webapp_token {
+        Some(token) => validate_secret(Some(token))?,
+        None => previous_token.clone(),
+    };
+    let preferences = desktop_settings::DesktopPreferences {
+        transcription_provider: input.transcription_provider,
+        summarization_provider: input.summarization_provider,
+        default_meeting_mode: input.default_meeting_mode,
+        custom_vocabulary: input
+            .custom_vocabulary
+            .into_iter()
+            .map(|term| term.trim().to_string())
+            .filter(|term| !term.is_empty())
+            .collect(),
+        custom_summary_instructions: input.custom_summary_instructions.trim().to_string(),
+        webapp_url: normalized_url.unwrap_or_default(),
+    };
+
+    if let Err(error) = desktop_settings::save_api_keys(&keys) {
+        let _ = desktop_settings::save_api_keys(&previous_keys);
+        return Err(error);
+    }
+    if let Err(error) = desktop_settings::set_webapp_token(new_token.as_deref()) {
+        let _ = desktop_settings::save_api_keys(&previous_keys);
+        let _ = desktop_settings::set_webapp_token(previous_token.as_deref());
+        return Err(error);
+    }
+    if let Err(error) = preferences.save(&context.app.data_dir) {
+        let _ = desktop_settings::save_api_keys(&previous_keys);
+        let _ = desktop_settings::set_webapp_token(previous_token.as_deref());
+        return Err(error);
+    }
+
+    *context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = preferences.clone();
+    *context
+        .key_storage_error
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)?;
+    let settings = make_settings_message(&preferences, keys.clone(), webapp);
+    handle_message(
+        context.app.clone(),
+        context.tray.clone(),
+        settings,
+        context.output.clone(),
+    )
+    .await;
+
+    let has_webapp_token = new_token
+        .as_ref()
+        .is_some_and(|token| !token.trim().is_empty());
+    if has_webapp_token && !preferences.webapp_url.is_empty() {
+        spawn_desktop_sync(
+            context.app.clone(),
+            context.preferences.clone(),
+            context.sync.clone(),
+            context.ui_app.clone(),
+        );
+    }
+
+    Ok(desktop_settings::settings_view(
+        preferences,
+        &keys,
+        has_webapp_token,
+    ))
+}
+
+#[tauri::command]
+async fn desktop_import_transfer(
+    context: tauri::State<'_, DesktopCommandContext>,
+    contents: String,
+) -> Result<desktop_migration::MigrationImportReport, String> {
+    let archive = desktop_migration::parse_archive_json(&contents)?;
+    let imported_preferences = archive.settings.clone();
+    let store = context.app.store.clone();
+    let report =
+        tokio::task::spawn_blocking(move || desktop_migration::import_archive(archive, &store))
+            .await
+            .map_err(|_| "Desktop transfer import stopped unexpectedly.".to_string())??;
+
+    apply_imported_desktop_preferences(context.inner(), imported_preferences).await?;
+    Ok(report)
+}
+
+#[tauri::command]
+async fn desktop_import_audio_transfer(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<Option<desktop_migration::MigrationImportReport>, String> {
+    let (selected_tx, selected_rx) = tokio::sync::oneshot::channel();
+    context
+        .ui_app
+        .dialog()
+        .file()
+        .add_filter("AI Notetaker archive", &["ntarchive"])
+        .pick_file(move |path| {
+            let _ = selected_tx.send(path);
+        });
+    let Some(selected) = selected_rx
+        .await
+        .map_err(|_| "The archive picker could not open.".to_string())?
+    else {
+        return Ok(None);
+    };
+    let path = selected
+        .into_path()
+        .map_err(|_| "The selected archive path is invalid.".to_string())?;
+    let store = context.app.store.clone();
+    let (report, imported_preferences) = tokio::task::spawn_blocking(move || {
+        desktop_migration::import_audio_archive_file(&path, &store)
+    })
+    .await
+    .map_err(|_| "Audio archive import stopped unexpectedly.".to_string())??;
+    apply_imported_desktop_preferences(context.inner(), imported_preferences).await?;
+    Ok(Some(report))
+}
+
+async fn apply_imported_desktop_preferences(
+    context: &DesktopCommandContext,
+    imported_preferences: desktop_migration::MigrationSettings,
+) -> Result<(), String> {
+    let current = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let preferences = desktop_settings::DesktopPreferences {
+        transcription_provider: imported_preferences.transcription_provider,
+        summarization_provider: imported_preferences.summarization_provider,
+        default_meeting_mode: imported_preferences.default_meeting_mode,
+        custom_vocabulary: imported_preferences
+            .custom_vocabulary
+            .into_iter()
+            .map(|term| term.trim().to_string())
+            .filter(|term| !term.is_empty())
+            .collect(),
+        custom_summary_instructions: imported_preferences
+            .custom_summary_instructions
+            .trim()
+            .to_string(),
+        // The archive deliberately contains no web-app URL or token.
+        webapp_url: current.webapp_url,
+    };
+    preferences.save(&context.app.data_dir)?;
+    *context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = preferences.clone();
+    let keys = desktop_settings::load_api_keys()?;
+    let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)?;
+    handle_message(
+        context.app.clone(),
+        context.tray.clone(),
+        make_settings_message(&preferences, keys, webapp),
+        context.output.clone(),
+    )
+    .await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn desktop_start_recording(
+    context: tauri::State<'_, DesktopCommandContext>,
+    title: String,
+    consent_acknowledged: bool,
+) -> Result<String, String> {
+    if !consent_acknowledged {
+        return Err("Confirm that everyone has been told recording is starting.".into());
+    }
+    let title = title.trim();
+    if title.chars().count() > 200 || title.chars().any(char::is_control) {
+        return Err("Meeting title must be 200 characters or fewer.".into());
+    }
+    let preferences = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let keys = desktop_settings::load_api_keys()?;
+    resolve_keys(
+        preferences.transcription_provider,
+        preferences.summarization_provider,
+        &keys,
+    )?;
+
+    let meeting_id = Uuid::new_v4();
+    handle_message(
+        context.app.clone(),
+        context.tray.clone(),
+        ExtensionToHelper::StartRecording {
+            meeting_id,
+            title: (!title.is_empty()).then(|| title.to_string()),
+            meeting_mode: preferences.default_meeting_mode,
+            capture_source: CaptureSource::DesktopLoopback,
+            processing_mode: ProcessingMode::LocalByok,
+        },
+        context.output.clone(),
+    )
+    .await;
+    if !context.app.active.lock().await.contains_key(&meeting_id) {
+        return Err(
+            "Recording did not start. Check audio permissions and the audio setup message.".into(),
+        );
+    }
+    Ok(meeting_id.to_string())
+}
+
+#[tauri::command]
+async fn desktop_stop_recording(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let meeting_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    handle_message(
+        context.app.clone(),
+        context.tray.clone(),
+        ExtensionToHelper::StopRecording {
+            meeting_id,
+            flagged_moments: Vec::new(),
+        },
+        context.output.clone(),
+    )
+    .await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn desktop_recover_meeting(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let meeting_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    start_desktop_recovery(context.inner().clone(), meeting_id).await
+}
+
+#[tauri::command]
+async fn desktop_reprocess_extension_audio(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+) -> Result<String, String> {
+    let source_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    let preferences = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let keys = desktop_settings::load_api_keys()?;
+    resolve_keys(
+        preferences.transcription_provider,
+        preferences.summarization_provider,
+        &keys,
+    )?;
+    {
+        let mut recovering = context.app.recovering.lock().await;
+        if !recovering.insert(source_id) {
+            return Err("Audio is already being prepared for notes.".into());
+        }
+    }
+    let store = context.app.store.clone();
+    let copy_result =
+        tokio::task::spawn_blocking(move || store.create_extension_audio_reprocess_copy(source_id))
+            .await;
+    context.app.recovering.lock().await.remove(&source_id);
+    let copy_id = copy_result
+        .map_err(|_| "The desktop copy could not be created.".to_string())?
+        .map_err(|_| {
+            "The imported audio could not be copied. The original note is unchanged.".to_string()
+        })?;
+    let copy_meta = context
+        .app
+        .store
+        .load_meta(copy_id)
+        .map_err(|_| "The desktop copy could not be opened.".to_string())?;
+    if copy_meta.state == notetaker_core::storage::MeetingState::Recording {
+        start_desktop_recovery(context.inner().clone(), copy_id).await?;
+    }
+    Ok(copy_id.to_string())
+}
+
+async fn start_desktop_recovery(
+    context: DesktopCommandContext,
+    meeting_id: Uuid,
+) -> Result<(), String> {
+    if context.app.active.lock().await.contains_key(&meeting_id) {
+        return Err("This recording is already in progress.".into());
+    }
+    let meta = context
+        .app
+        .store
+        .load_meta(meeting_id)
+        .map_err(|_| "This saved recording could not be found.".to_string())?;
+    if meta.state != notetaker_core::storage::MeetingState::Recording || meta.text_only_import {
+        return Err("This meeting has no recoverable desktop recording.".into());
+    }
+    let has_audio = ["mic.pcm", "speaker.pcm"].iter().any(|channel| {
+        std::fs::metadata(context.app.store.audio_path(meeting_id, channel))
+            .is_ok_and(|file| file.len() > 0)
+    });
+    if !has_audio {
+        return Err("No saved audio was found for this recording.".into());
+    }
+    if context
+        .app
+        .retry_tasks
+        .lock()
+        .await
+        .get(&meeting_id)
+        .is_some_and(|worker| !worker._task.is_finished())
+    {
+        return Err("Recovery is already processing this recording.".into());
+    }
+    let preferences = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let keys = desktop_settings::load_api_keys()?;
+    resolve_keys(
+        preferences.transcription_provider,
+        preferences.summarization_provider,
+        &keys,
+    )?;
+    let mut recovering = context.app.recovering.lock().await;
+    if !recovering.insert(meeting_id) {
+        return Err("Recovery is already running for this recording.".into());
+    }
+    drop(recovering);
+
+    let app = context.app.clone();
+    let tray = context.tray.clone();
+    let output = context.output.clone();
+    let recovering = app.clone();
+    let settings = make_settings_message(&preferences, keys, None);
+    tokio::spawn(async move {
+        handle_message(app.clone(), tray.clone(), settings, output.clone()).await;
+        handle_message(
+            app.clone(),
+            tray,
+            ExtensionToHelper::ResumeRecording { meeting_id },
+            output,
+        )
+        .await;
+        recovering.recovering.lock().await.remove(&meeting_id);
+    });
+    Ok(())
+}
+
+#[tauri::command]
+async fn desktop_get_meeting(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+) -> Result<DesktopMeetingDetail, String> {
+    let meeting_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    let folder_id = context.library.snapshot().ok()
+        .and_then(|library| library.placements.get(&meeting_id).map(ToString::to_string));
+    let store = context.app.store.clone();
+    let active = context.app.active.lock().await.contains_key(&meeting_id);
+    tokio::task::spawn_blocking(move || {
+        let meta = store
+            .load_meta(meeting_id)
+            .map_err(|error| format!("Meeting could not be opened: {error}"))?;
+        let transcript = store
+            .load_transcript(meeting_id)
+            .map_err(|error| format!("Transcript could not be opened: {error}"))?;
+        let summary = store
+            .load_summary(meeting_id)
+            .map_err(|error| format!("Summary could not be opened: {error}"))?;
+        let reprocessed_sources = store
+            .scan_meetings()
+            .map_err(|error| format!("Meeting history could not be read: {error}"))?
+            .readable
+            .into_iter()
+            .filter_map(|candidate| candidate.reprocessed_from)
+            .collect::<HashSet<_>>();
+        let reprocessed_from = meta.reprocessed_from;
+        let can_reprocess_extension_audio = !meta.text_only_import
+            && meta.extension_source_status.is_some()
+            && reprocessed_from.is_none()
+            && !reprocessed_sources.contains(&meta.id)
+            && (store.audio_len(meta.id, "mic.pcm").unwrap_or(0) > 0
+                || store.audio_len(meta.id, "speaker.pcm").unwrap_or(0) > 0);
+        let status = if active {
+            "recording"
+        } else if meta.state == notetaker_core::storage::MeetingState::Recording {
+            "recovered"
+        } else if summary.is_some() {
+            "complete"
+        } else if meta.summary_pending || meta.managed_pending {
+            "processing"
+        } else {
+            "saved"
+        };
+        Ok(DesktopMeetingDetail {
+            meeting: DesktopMeetingSummary {
+                id: meta.id.to_string(),
+                title: meta.title.unwrap_or_else(|| {
+                    format!("Meeting on {}", meta.started_at.format("%b %-d, %Y"))
+                }),
+                started_at: meta.started_at.to_rfc3339(),
+                ended_at: meta.ended_at.map(|ended| ended.to_rfc3339()),
+                status: status.to_string(),
+                summary: summary.as_ref().map(|value| value.summary.clone()),
+                action_items: summary.map_or_else(Vec::new, |value| value.action_items),
+                active,
+                text_only_import: meta.text_only_import,
+                extension_source_status: meta.extension_source_status,
+                reprocessed_from: reprocessed_from.map(|id| id.to_string()),
+                can_reprocess_extension_audio,
+                folder_id,
+            },
+            transcript,
+        })
+    })
+    .await
+    .map_err(|error| format!("Meeting detail request failed: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_delete_meeting(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let meeting_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    delete_meeting_data(&context.app, &context.tray, meeting_id)
+        .await
+        .map_err(|error| format!("Recording could not be deleted: {error}"))?;
+    let _ = context.sync.remove(meeting_id);
+    if let Err(error) = context.library.forget_meeting(meeting_id) {
+        tracing::warn!(%error, %meeting_id, "deleted recording remains in local folder index");
+    }
+    Ok(())
+}
+
+fn optional_folder_id(value: Option<String>) -> Result<Option<Uuid>, String> {
+    value
+        .map(|id| Uuid::parse_str(&id).map_err(|_| "Invalid folder id.".to_string()))
+        .transpose()
+}
+
+#[tauri::command]
+async fn desktop_create_folder(
+    context: tauri::State<'_, DesktopCommandContext>,
+    name: String,
+    parent_id: Option<String>,
+) -> Result<desktop_library::Folder, String> {
+    let parent_id = optional_folder_id(parent_id)?;
+    let library = context.library.clone();
+    tokio::task::spawn_blocking(move || library.create(parent_id, &name))
+        .await
+        .map_err(|error| format!("Folder could not be created: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_rename_folder(
+    context: tauri::State<'_, DesktopCommandContext>,
+    folder_id: String,
+    name: String,
+) -> Result<(), String> {
+    let id = Uuid::parse_str(&folder_id).map_err(|_| "Invalid folder id.".to_string())?;
+    let library = context.library.clone();
+    tokio::task::spawn_blocking(move || library.rename(id, &name))
+        .await
+        .map_err(|error| format!("Folder could not be renamed: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_move_folder(
+    context: tauri::State<'_, DesktopCommandContext>,
+    folder_id: String,
+    parent_id: Option<String>,
+) -> Result<(), String> {
+    let id = Uuid::parse_str(&folder_id).map_err(|_| "Invalid folder id.".to_string())?;
+    let parent_id = optional_folder_id(parent_id)?;
+    let library = context.library.clone();
+    tokio::task::spawn_blocking(move || library.move_folder(id, parent_id))
+        .await
+        .map_err(|error| format!("Folder could not be moved: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_delete_folder(
+    context: tauri::State<'_, DesktopCommandContext>,
+    folder_id: String,
+) -> Result<(), String> {
+    let id = Uuid::parse_str(&folder_id).map_err(|_| "Invalid folder id.".to_string())?;
+    let library = context.library.clone();
+    tokio::task::spawn_blocking(move || library.delete_empty(id))
+        .await
+        .map_err(|error| format!("Folder could not be deleted: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_move_meeting(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+    folder_id: Option<String>,
+) -> Result<(), String> {
+    let id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    let folder_id = optional_folder_id(folder_id)?;
+    let store = context.app.store.clone();
+    let library = context.library.clone();
+    tokio::task::spawn_blocking(move || {
+        store
+            .load_meta(id)
+            .map_err(|_| "The recording no longer exists.".to_string())?;
+        library.move_meeting(id, folder_id)
+    })
+    .await
+    .map_err(|error| format!("Recording could not be moved: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_sync_existing_notes(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<usize, String> {
+    let store = context.app.store.clone();
+    let ids = tokio::task::spawn_blocking(move || {
+        let scan = store
+            .scan_meetings()
+            .map_err(|e| format!("Meeting history could not be read: {e}"))?;
+        let mut ids = Vec::new();
+        for meta in scan.readable {
+            if meta.state == notetaker_core::storage::MeetingState::Processed
+                && meta.managed_account_id.is_none()
+                && meta.managed_workspace_id.is_none()
+                && store.load_summary(meta.id).ok().flatten().is_some()
+            {
+                ids.push(meta.id);
+            }
+        }
+        Ok::<_, String>(ids)
+    })
+    .await
+    .map_err(|_| "Meeting history scan failed.".to_string())??;
+    let count = ids.len();
+    for id in ids {
+        context.sync.enqueue(id)?;
+    }
+    spawn_desktop_sync(
+        context.app.clone(),
+        context.preferences.clone(),
+        context.sync.clone(),
+        context.ui_app.clone(),
+    );
+    Ok(count)
+}
+
+#[tauri::command]
+async fn desktop_retry_webapp_sync(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<(), String> {
+    spawn_desktop_sync(
+        context.app.clone(),
+        context.preferences.clone(),
+        context.sync.clone(),
+        context.ui_app.clone(),
+    );
+    Ok(())
+}
+
+fn spawn_desktop_sync(
+    app: Arc<AppState>,
+    preferences: Arc<std::sync::Mutex<desktop_settings::DesktopPreferences>>,
+    sync: Arc<DesktopSync>,
+    ui_app: tauri::AppHandle<tauri::Wry>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let _ = run_desktop_sync(app, preferences, sync, ui_app).await;
+    });
+}
+
+#[tauri::command]
+async fn desktop_test_audio(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<(), String> {
+    handle_message(
+        context.app.clone(),
+        context.tray.clone(),
+        ExtensionToHelper::AudioProbe,
+        context.output.clone(),
+    )
+    .await;
+    Ok(())
+}
+
+#[tauri::command]
+fn desktop_open_screen_recording_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        open_external(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Open your operating system's privacy settings to grant audio access.".into())
+    }
+}
+
+async fn run_desktop_sync(
+    app: Arc<AppState>,
+    preferences: Arc<std::sync::Mutex<desktop_settings::DesktopPreferences>>,
+    sync: Arc<DesktopSync>,
+    ui_app: tauri::AppHandle<tauri::Wry>,
+) -> Result<(), String> {
+    let preferences = preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let url = desktop_settings::normalize_webapp_url(&preferences.webapp_url)?;
+    let token = desktop_settings::get_webapp_token()?;
+    if let (Some(url), Some(token)) = (url, token.filter(|token| !token.trim().is_empty())) {
+        if let Err(error) = sync.sync_pending(app.store.clone(), &url, &token).await {
+            tracing::warn!(%error, "desktop note sync attempt failed");
+        }
+    }
+    let configured = !preferences.webapp_url.is_empty()
+        && desktop_settings::get_webapp_token()?.is_some_and(|token| !token.trim().is_empty());
+    if let Err(error) = ui_app.emit("webapp-sync-updated", sync.status(configured)) {
+        tracing::debug!(%error, "desktop sync status event could not be emitted");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn desktop_open_notes_folder(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<(), String> {
+    let path = context.app.data_dir.join("meetings");
+    std::fs::create_dir_all(&path)
+        .map_err(|error| format!("Notes folder could not be opened: {error}"))?;
+    open_external(path.to_string_lossy().as_ref())
+}
+
+#[tauri::command]
+fn desktop_open_webapp(context: tauri::State<'_, DesktopCommandContext>) -> Result<(), String> {
+    let preferences = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let url = desktop_settings::normalize_webapp_url(&preferences.webapp_url)?
+        .ok_or_else(|| "Add your web-app URL in Settings first.".to_string())?;
+    open_external(&url)
+}
+
+fn open_external(target: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(target).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer").arg(target).spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(target).spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let result: Result<std::process::Child, std::io::Error> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "opening external locations is unsupported on this platform",
+    ));
+    result
+        .map(|_| ())
+        .map_err(|error| format!("Could not open this location: {error}"))
+}
+
+fn validate_secret(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.chars().count() > 10_000 || value.chars().any(char::is_control) {
+        return Err("Credential is too long or contains unsupported control characters.".into());
+    }
+    let value = value.trim().to_string();
+    Ok((!value.is_empty()).then_some(value))
+}
+
+fn apply_secret_update(target: &mut Option<String>, update: Option<String>) -> Result<(), String> {
+    if let Some(update) = update {
+        *target = validate_secret(Some(update))?;
+    }
+    Ok(())
+}
+
+fn make_settings_message(
+    preferences: &desktop_settings::DesktopPreferences,
+    api_keys: ApiKeys,
+    webapp: Option<native_messaging::WebappConfig>,
+) -> ExtensionToHelper {
+    ExtensionToHelper::Settings {
+        transcription_provider: preferences.transcription_provider,
+        summarization_provider: preferences.summarization_provider,
+        api_keys,
+        webapp,
+        default_meeting_mode: preferences.default_meeting_mode,
+        custom_vocabulary: preferences.custom_vocabulary.clone(),
+        custom_summary_instructions: (!preferences.custom_summary_instructions.is_empty())
+            .then(|| preferences.custom_summary_instructions.clone()),
+        processing_mode: ProcessingMode::LocalByok,
+        managed_service: None,
+    }
+}
+
+async fn delete_meeting_data(
+    state: &AppState,
+    tray: &tray::TrayController,
+    meeting_id: Uuid,
+) -> Result<(), notetaker_core::storage::StorageError> {
+    if let Some(active) = state.active.lock().await.remove(&meeting_id) {
+        if let Some(audio) = active.audio {
+            let _ = audio.stop_capture().await;
+        }
+        active.audio_processing.finish().await;
+        tray.set_recording(false);
+    }
+    if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
+        worker.abort();
+    }
+    state.pipelines.lock().await.remove(&meeting_id);
+    state.store.delete_meeting(meeting_id)?;
+    let _ = std::fs::remove_file(state.data_dir.join(format!("retry-{meeting_id}.json")));
+    Ok(())
 }
 
 async fn handle_message(
@@ -1815,25 +2990,13 @@ async fn handle_message(
         }
 
         ExtensionToHelper::DeleteMeeting { meeting_id } => {
-            if let Some(active) = state.active.lock().await.remove(&meeting_id) {
-                if let Some(audio) = active.audio {
-                    let _ = audio.stop_capture().await;
-                }
-                active.audio_processing.finish().await;
-                tray.set_recording(false);
-            }
-            if let Some(worker) = state.retry_tasks.lock().await.remove(&meeting_id) {
-                worker.abort();
-            }
-            state.pipelines.lock().await.remove(&meeting_id);
-            if let Err(error) = state.store.delete_meeting(meeting_id) {
+            if let Err(error) = delete_meeting_data(&state, &tray, meeting_id).await {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
                     code: ErrorCode::StorageError,
                     message: format!("could not delete meeting data: {error}"),
                 });
             }
-            let _ = std::fs::remove_file(state.data_dir.join(format!("retry-{meeting_id}.json")));
             true
         }
 

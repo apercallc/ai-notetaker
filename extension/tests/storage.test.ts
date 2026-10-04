@@ -3,6 +3,7 @@ import { chromeMock } from "./setup";
 import {
   getSettings,
   saveSettings,
+  migrateSavedProcessingModeToApiKeys,
   getPairingToken,
   savePairingToken,
   clearPairingToken,
@@ -100,6 +101,24 @@ describe("settings storage", () => {
 
     await saveSettings({ ...DEFAULT_SETTINGS, processingMode: { kind: "local_byok" }, managedService: null });
     await expect(getSettings()).resolves.toMatchObject({ processingMode: { kind: "local_byok" }, managedService: null });
+  });
+
+  it("migrates only new-processing mode while preserving saved service and provider data", async () => {
+    const managed = {
+      ...DEFAULT_SETTINGS,
+      processingMode: { kind: "managed" as const, accountId: "acct", workspaceId: "ws", plan: "pro" },
+      managedService: { baseUrl: "https://notes.example.com", accessToken: "session", accountId: "acct", workspaceId: "ws", plan: "pro" },
+      apiKeys: { ...DEFAULT_SETTINGS.apiKeys, deepgram: "provider-key" },
+    };
+    await saveSettings(managed);
+
+    await expect(migrateSavedProcessingModeToApiKeys()).resolves.toBe(true);
+    await expect(getSettings()).resolves.toMatchObject({
+      processingMode: { kind: "local_byok" },
+      managedService: managed.managedService,
+      apiKeys: managed.apiKeys,
+    });
+    await expect(migrateSavedProcessingModeToApiKeys()).resolves.toBe(false);
   });
 
   it("never writes settings (or API keys) to chrome.storage.sync", async () => {

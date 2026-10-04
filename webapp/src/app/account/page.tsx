@@ -110,16 +110,19 @@ export default async function AccountPage({
           {tab === "integrations" && (
             <>
               <section className="settings-card">
-                <h2>Extension &amp; API tokens</h2>
+                <h2>Desktop app and API tokens</h2>
                 <p className="muted-copy">
-                  Tokens sign the browser extension in without a password. They expire after 90 days of not being used
-                  and can be revoked here at any time.
+                  Create a workspace-scoped token for optional desktop note sync. Legacy extension and read-only API
+                  tokens remain separate. Tokens expire after 90 days without use and can be revoked here.
                 </p>
                 <ApiTokenPanel
+                  activeWorkspaceName={workspaces.find((item) => item.id === session.workspaceId)?.name ?? "this workspace"}
                   tokens={tokens.map((token) => ({
                     id: token.id,
                     label: token.label,
                     readOnly: token.scope === "notes_read",
+                    desktopSync: token.scope === "desktop_notes_sync",
+                    workspaceName: token.workspaceId ? workspaces.find((item) => item.id === token.workspaceId)?.name ?? "Unavailable workspace" : null,
                     device: token.userAgent ? describeUserAgent(token.userAgent) : null,
                     createdAt: formatDate(token.createdAt),
                     lastUsedAt: token.lastUsedAt ? formatDateTime(token.lastUsedAt) : null,

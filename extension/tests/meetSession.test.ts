@@ -73,7 +73,7 @@ describe("startMeetRecording", () => {
     capture.isActiveForTab.mockReturnValue(false);
     const [c, k] = asTypes();
     expect(await startMeetRecording(c, k, { tabId: 10 })).toBe("");
-    expect(controller.reportStartFailure).toHaveBeenCalledWith(expect.stringContaining("another Google Meet tab"));
+    expect(controller.reportStartFailure).toHaveBeenCalledWith(expect.stringContaining("Another Google Meet tab"));
     expect(controller.startRecording).not.toHaveBeenCalled();
     expect(capture.start).not.toHaveBeenCalled();
   });
@@ -122,7 +122,7 @@ describe("startMeetRecording", () => {
     const [c, k] = asTypes();
 
     expect(await startMeetRecording(c, k, { tabId: undefined })).toBe("");
-    expect(controller.reportStartFailure).toHaveBeenCalledWith("Open the Google Meet call in this tab first, then start notes.");
+    expect(controller.reportStartFailure).toHaveBeenCalledWith("Open the Google Meet call in this tab first, then start recording.");
     expect(controller.startRecording).not.toHaveBeenCalled();
     expect(controller.failRecording).not.toHaveBeenCalled();
     expect(capture.start).not.toHaveBeenCalled();

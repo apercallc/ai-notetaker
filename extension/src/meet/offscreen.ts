@@ -270,7 +270,7 @@ async function start(capturedStreamId: string | undefined, meetingId: string, ta
     directReceiver = new DirectAudioReceiver(() => {
       if (generation !== captureGeneration) return;
       void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_ERROR", meetingId,
-        message: "The connection to Meet audio stopped. Your saved audio is safe. Start notes again." }).catch(() => undefined);
+        message: "The connection to Meet audio stopped. Your saved audio is safe. Start recording again." }).catch(() => undefined);
       void stop();
     }, () => {
       if (generation !== captureGeneration) return;

@@ -215,8 +215,10 @@ impl AudioCapture for WindowsAudioCapture {
             platform: "windows".to_string(),
             driver: if native_loopback {
                 "WASAPI loopback"
-            } else {
+            } else if fallback_available {
                 "VB-CABLE"
+            } else {
+                "Unavailable"
             }
             .to_string(),
             driver_installed,

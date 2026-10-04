@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
-import { appendBrowserMeetChunk, clearBrowserMeetChunks, lastBrowserMeetSequence, listBrowserMeetChunks, streamBrowserMeetChunks } from "../src/meet/browserStorage";
+import { appendBrowserMeetChunk, browserMeetArchiveInventory, clearBrowserMeetChunks, lastBrowserMeetSequence, listBrowserMeetChunks, streamBrowserMeetChunks } from "../src/meet/browserStorage";
 
 const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
 
@@ -66,6 +66,16 @@ describe("browser Meet chunk storage", () => {
     // Exactly a multiple of the batch size must still terminate.
     expect(await collect("m1", 25)).toHaveLength(25);
     expect(await collect("nobody", 10)).toEqual([]);
+  });
+
+  it("exports a stable audio prefix when newer chunks arrive after inventory", async () => {
+    for (const sequence of [0, 1, 2]) await appendBrowserMeetChunk("m1", "mic", sequence, bytes(sequence, 0));
+    const [snapshot] = await browserMeetArchiveInventory();
+    expect(snapshot?.lastSequence).toBe(2);
+    await appendBrowserMeetChunk("m1", "mic", 3, bytes(3, 0));
+    const sequences: number[] = [];
+    for await (const chunk of streamBrowserMeetChunks("m1", 2, snapshot!.lastSequence)) sequences.push(chunk.sequence);
+    expect(sequences).toEqual([0, 1, 2]);
   });
 
   it("survives awaiting non-IndexedDB work between chunks (transactions would otherwise expire)", async () => {

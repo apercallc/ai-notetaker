@@ -65,11 +65,14 @@ try {
       const mix = context.createMediaStreamDestination(); tone.connect(mix); tone.start();
       const sender = new RTCPeerConnection({iceServers:[]}), receiver = new RTCPeerConnection({iceServers:[]});
       receiver.ontrack = ({track}) => { const audio = document.createElement('audio'); audio.srcObject = new MediaStream([track]); document.body.append(audio); audio.play(); };
-      sender.onicecandidate = e => { if(e.candidate) receiver.addIceCandidate(e.candidate); };
-      receiver.onicecandidate = e => { if(e.candidate) sender.addIceCandidate(e.candidate); };
+      const toReceiver = [], toSender = [];
+      sender.onicecandidate = e => { if (e.candidate) { if (receiver.remoteDescription) void receiver.addIceCandidate(e.candidate); else toReceiver.push(e.candidate); } };
+      receiver.onicecandidate = e => { if (e.candidate) { if (sender.remoteDescription) void sender.addIceCandidate(e.candidate); else toSender.push(e.candidate); } };
       sender.addTransceiver(mix.stream.getAudioTracks()[0], {direction:'sendonly'});
       await sender.setLocalDescription(await sender.createOffer()); await receiver.setRemoteDescription(sender.localDescription);
+      for (const candidate of toReceiver) await receiver.addIceCandidate(candidate);
       await receiver.setLocalDescription(await receiver.createAnswer()); await sender.setRemoteDescription(receiver.localDescription);
+      for (const candidate of toSender) await sender.addIceCandidate(candidate);
       window.call = {context,tone,mix,sender,receiver};
     };
   </script>` }));

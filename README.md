@@ -2,73 +2,55 @@
 
 Private, botless meeting notes: no bot joins your call.
 
-AI Notetaker records your microphone and the meeting audio, turns the
-conversation into a transcript, and produces a summary with action items. It
-is open source and local-first. Use it free with your own API keys and no
-account, or sign in to the paid hosted service and let it handle the AI
-providers and usage billing for you.
+AI Notetaker is moving to one cross-platform desktop app for setup, recording,
+and local notes. Add your own transcription and summary API keys; no
+AI Notetaker login or browser extension is needed for local use. Optional
+workspace sync copies finished note text to the web app. Audio and provider
+keys stay on this device.
 
-<p align="center">
-  <img src="docs/screenshots/recording-ready.png" alt="AI Notetaker popup with audio ready and a Start notes button" width="360" />
-</p>
+> **Status:** the desktop window and local recording flow are in development.
+> Installers and cross-platform acceptance are not ready yet. The Chrome
+> extension remains available during migration so current users can keep
+> access to existing data. See the
+> [desktop-first migration plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md).
 
-> **Status:** desktop installers are planned as direct GitHub Release
-> downloads for Apple silicon Mac, Windows 64-bit, and Debian/Ubuntu Linux
-> 64-bit. The first installers will be unsigned, with checksums and clear
-> first-open instructions. Chrome Web Store publication and hosted-mode
-> production acceptance are separate gates. See the
-> [native download trust policy](docs/code-signing-policy.md).
+## Quickstart
 
-## Quickstart: Google Meet in 60 seconds
-
-Google Meet needs only Chrome and the extension. No helper, no audio routing.
-
-1. Install the extension (Chrome Web Store when released; until then
-   [load it from source](#install-the-extension)). Installing opens setup
-   automatically.
-2. On the one setup screen, choose **Use my own API keys (free)** and paste a
-   transcription key and a summarization key, or choose **Hosted (paid)** and
-   sign in. Allow the microphone and tick the one-line consent box.
-3. Click **Finish**, then **Open Google Meet**.
-4. In a call, press **Alt+Shift+R** (or click the toolbar icon) to start
-   notes. Press it again, or just hang up, to stop and finalize them.
-5. Click the **Notes ready** notification to open your summary, action items,
-   and transcript.
-
-Full details are in [`docs/getting-started.md`](docs/getting-started.md).
+The intended setup is one desktop app: add and test provider API keys, grant
+audio permissions, then start and stop a meeting from the app. Installers are
+not published yet; see the [desktop-first migration plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md)
+for status. Existing extension users can follow the
+[Meet recorder guide](docs/getting-started.md#google-meet-recorder-extension).
 
 ## What you get
 
-- A transcript after Google Meet capture stops; desktop calls also support
-  live transcription through the helper.
 - A summary and action items when you stop.
 - Meeting history and notes pages stored locally by default, with search.
 - Notes styles (General, Standup, Sales call, 1:1, Interview, or your own),
   custom vocabulary, and summary instructions.
 - Crash recovery and a retry queue, so a provider outage never loses audio.
 - Optional Google Docs/Drive export and Markdown, text, or print/PDF export.
-- An optional self-hosted webapp for authenticated, cross-device history.
-- A hosted (paid) service foundation: workspace history, sharing, recording
-  downloads, and usage limits. Real deployment, provider, and billing
-  acceptance is still a separate release gate.
+- Optional workspace-scoped web-app sync for finished note text. Raw audio and
+  provider keys stay local.
 
 ## What you need
 
 | You want to record | You need |
 | --- | --- |
-| **Google Meet** in Chrome | Chrome, the extension, and either two provider API keys (free mode) or a hosted account. |
-| **Zoom, Teams, Slack huddles**, or other desktop calls | All of the above, plus the desktop helper and a system-audio source: ScreenCaptureKit on macOS 13+, WASAPI loopback on Windows, or a PipeWire/PulseAudio monitor on Linux. BlackHole (macOS), base VB-CABLE (Windows), and a null sink (Linux) are documented fallbacks only. |
+| **Any desktop or browser call** | The AI Notetaker desktop app, transcription and summary API keys, and operating-system audio permission. Native loopback is supported on macOS 13+, Windows, and Linux; see the [audio setup guide](docs/helper-packaging.md) for fallbacks. |
 
-In both cases, get permission from the people you record where local law
-requires it. AI Notetaker does not bundle a custom audio driver; see the
+Get permission from the people you record where local law requires it. AI
+Notetaker does not bundle a custom audio driver; see the
 [audio setup guide](docs/helper-packaging.md) for the fallbacks.
 
-## Install the extension
+## Google Meet recorder extension
 
-Install **AI Notetaker** from the Chrome Web Store when the listing is
-published. Chrome does not allow a native desktop installer to silently install
-an extension, so the extension is always installed from the store or loaded
-manually.
+The Chrome extension records Google Meet microphone and call audio separately
+in local browser storage. Export a full `.ntarchive` from extension Settings,
+import it in the desktop app, then create notes from the saved audio. The
+desktop app handles AI processing and other call sources. Older extension
+notes and settings remain accessible during migration. See the
+[recorder guide](docs/getting-started.md#google-meet-recorder-extension).
 
 To run from source today:
 
@@ -85,68 +67,54 @@ The extension ID is intentionally stable: `jidooookkdbbbhkkdmcajnnnhhphodok`.
 Do not replace the committed `key` in `extension/manifest.json`; the helper
 allowlists this ID.
 
-## Desktop calls: install the helper
+## Desktop app development build
 
-Only needed for Zoom, Teams, Slack, and other desktop apps. Download the
-installer for your platform from the [AI Notetaker install
-page](https://ai-notetaker.apercallc.com/download) or the [latest GitHub
-release](https://github.com/apercallc/ai-notetaker/releases/latest). See the
-[getting-started guide](docs/getting-started.md#1-install-the-helper) for
-unsigned-install prompts and Native Messaging setup.
-
-Launch **AI Notetaker** once so its tray process is running. The helper checks
-for a newer stable release daily and asks before opening its download page.
-You download and install the update yourself; **Check for Updates…** is also
-available in the tray menu.
-
-For source builds, follow the contributor
-[source-build path](docs/getting-started.md#build-from-source). Running
-`cargo build` alone does not make Chrome find the helper. Audio setup for each
-OS and app is in
-[`docs/getting-started.md`](docs/getting-started.md#desktop-calls-zoom-teams-slack).
+The Tauri application is intended as the single install for supported call
+apps. Installers are not ready; source builds are for development only. To
+launch the development app, follow the
+[desktop preview steps](docs/getting-started.md#quickstart-desktop-app-preview).
+Existing extension users can keep their legacy helper installation during
+migration.
 
 ## How the pieces fit together
 
 | Piece | What it does |
 | --- | --- |
-| Chrome extension | Owns botless Google Meet capture, local-first browser processing, setup, notes, settings, meetings, and action items. |
-| Desktop helper (desktop calls only) | A Rust/Tauri tray app for native microphone and system-audio capture, local storage, processing, retries, and recovery on Zoom, Teams, Slack, and other desktop calls. |
-| History service (optional) | Your own self-hosted webapp, or the hosted workspace, depending on the mode you choose. |
+| Desktop app | Owns setup, provider keys, microphone/system-audio capture, local notes, retries, and recovery. |
+| Web app (optional) | Stores synced finished note text in one authenticated workspace. |
+| Chrome extension | Records Google Meet audio locally and exports it to the desktop app; retains older data during migration. |
 
-The extension talks to the helper through Chrome Native Messaging and a local
-Unix socket or Windows named pipe. It does not open a TCP/localhost server.
-Your own API keys stay in `chrome.storage.local`; hosted provider keys stay on
-the server.
+The desktop window controls Rust through Tauri IPC; it does not open a
+TCP/localhost server. Provider API keys stay in the operating system credential
+store and go only to selected AI providers. Native Messaging remains for
+legacy extension compatibility during migration.
 
 ## Terms
 
-User-facing language is deliberately plain: **Start notes / Stop notes**,
-**Notes style**, **Use my own API keys (free)**, and **Hosted (paid)**.
+The Meet extension uses **Start recording / Stop recording**. After import, the
+desktop app offers **Create notes from saved audio**. Desktop settings include
+notes style and provider API key setup.
 "Managed" and "BYOK" are internal engineering terms. See the
 [glossary](docs/getting-started.md#terms-used-in-the-product).
 
 ## Provider costs and privacy
 
-With **Use my own API keys (free)**, you bring the keys and pay the providers
-directly. With **Hosted (paid)**, the service owns the provider credentials,
-applies usage limits, and bills your workspace through its payment provider.
-Provider and hosted-plan pricing can change, so check the current plan before
+You bring provider API keys and pay those providers directly. Costs depend on
+provider pricing and meeting length; check current provider pricing before
 relying on an estimate.
 
 Raw microphone and speaker audio is saved locally before any provider call so
-interrupted requests can be retried. With your own keys, the project does not
-receive your audio, transcripts, keys, or telemetry. With hosted, audio and the
-resulting notes leave your device only for the hosted service, after local
-saving; review its retention and deletion policy. See
+interrupted requests can be retried. The desktop app sends saved audio and text
+to the providers you selected, using your keys. Optional web-app sync sends
+finished note text only. See
 [`docs/data-handling.md`](docs/data-handling.md) for storage and deletion
 details.
 
 ## Optional: history on your own server
 
-The extension always keeps local meeting history. For authenticated,
-cross-device history, either deploy the optional self-hosted webapp and paste
-its URL plus access token into Settings, or sign in to the hosted service and
-use its workspace history and billing controls.
+The desktop app keeps local meeting history. For authenticated cross-device
+history, create a workspace-scoped desktop sync token in web-app Settings →
+Integrations, then save the web-app URL and token in desktop Settings.
 
 This is not required for recording, and the webapp never needs your AI
 provider keys. See [`webapp/README.md`](webapp/README.md) for local and
@@ -154,20 +122,17 @@ Railway deployment instructions.
 
 ## If something is not working
 
-- **Nothing happens on Alt+Shift+R:** Chrome only assigns the shortcut when
-  it is free. Check `chrome://extensions/shortcuts`, or use the toolbar icon.
-- **Chrome will not capture the Meet tab:** click the AI Notetaker toolbar
-  icon once on the Meet tab, then start notes again.
+- **Existing extension users cannot start notes:** check
+  `chrome://extensions/shortcuts`, or use the toolbar icon. New desktop
+  installs do not use the extension.
 - **Provider test fails:** verify that the key belongs to the selected
   provider tier and test it again in Settings. Do not put provider keys in
   the webapp.
-- **A recording was interrupted:** use the popup's **Resume** or **Discard**
-  banner. The raw audio is kept locally for recovery.
-- **Desktop calls only, "Helper not detected" or "Audio needs attention":**
-  launch the tray helper and reload the extension; if you built from source,
-  install the helper package or register its Native Messaging manifest (the two
-  binaries are `notetaker-helper` and `notetaker-nm-host`). Then re-run the
-  audio check. These do not apply to Google Meet.
+- **A recording was interrupted:** open the desktop app and use its recovery
+  prompt. Raw audio remains local.
+- **An existing extension says "Helper not detected":** launch the legacy
+  helper and reload the extension. New desktop users do not need Native
+  Messaging registration.
 
 The detailed troubleshooting flow is in [`docs/getting-started.md`](docs/getting-started.md#troubleshooting).
 

@@ -965,6 +965,7 @@ impl Pipeline {
                         .map(|i| ActionItem {
                             text: i.text,
                             owner: i.owner,
+                            ..ActionItem::default()
                         })
                         .collect(),
                 }]
@@ -1201,6 +1202,7 @@ impl Pipeline {
                         .map(|item| ActionItem {
                             text: item.text,
                             owner: item.owner,
+                            ..ActionItem::default()
                         })
                         .collect(),
                 })
@@ -1270,6 +1272,7 @@ mod tests {
                 speaker: speaker.into(),
                 text: "fake transcript".into(),
                 is_final: true,
+                timestamp: None,
             }])
         }
     }
@@ -1400,6 +1403,7 @@ mod tests {
                     speaker: "you".into(),
                     text: "hello".into(),
                     is_final: true,
+                    timestamp: None,
                 },
             )
             .unwrap();
@@ -1832,6 +1836,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recovery_tail_retry_survives_a_helper_restart() {
+        let (dir, mut pipeline) = build_pipeline(1);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2, 3, 4], 16_000)
+            .await;
+
+        let messages = pipeline.recover_recording(id).await.unwrap();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::Error { message, .. }
+                if message.contains("queued for retry")
+        )));
+        assert_eq!(pipeline.retry_queue_len(), 1);
+        assert_eq!(pipeline.store.load_transcript(id).unwrap().len(), 0);
+        assert!(pipeline.store.load_meta(id).unwrap().summary_pending);
+        drop(pipeline);
+
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let mut restarted = Pipeline::new(
+            store,
+            Box::new(FakeTranscriber {
+                fail_times: Arc::new(AtomicUsize::new(0)),
+                return_empty: false,
+            }),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let retry_messages = restarted.process_due_retries(Utc::now()).await;
+
+        assert!(retry_messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { meeting_id, .. } if *meeting_id == id
+        )));
+        assert_eq!(restarted.retry_queue_len(), 0);
+        assert_eq!(restarted.store.load_transcript(id).unwrap().len(), 1);
+        assert_eq!(
+            restarted.store.load_meta(id).unwrap().state,
+            MeetingState::Processed
+        );
+    }
+
+    #[tokio::test]
     async fn summary_failure_remains_pending_for_a_later_retry() {
         struct FailingSummarizer;
 
@@ -1872,6 +1921,7 @@ mod tests {
                     speaker: "you".into(),
                     text: "hello".into(),
                     is_final: true,
+                    timestamp: None,
                 },
             )
             .unwrap();
@@ -1954,6 +2004,7 @@ mod tests {
                     speaker: "you".into(),
                     text: "hi".into(),
                     is_final: true,
+                    timestamp: None,
                 },
                 0,
             ))),
@@ -2021,6 +2072,7 @@ mod tests {
                 speaker: "you".into(),
                 text: format!("backfilled {} bytes", chunk.pcm16.len()),
                 is_final: true,
+                timestamp: None,
             }])
         }
         async fn open_streaming_session(
@@ -2099,6 +2151,7 @@ mod tests {
                 .into(),
                 text: format!("recovered {} bytes", chunk.pcm16.len()),
                 is_final: true,
+                timestamp: None,
             }])
         }
         async fn open_streaming_session(

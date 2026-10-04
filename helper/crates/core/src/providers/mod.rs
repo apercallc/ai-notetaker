@@ -41,6 +41,9 @@ pub struct TranscriptSegment {
     pub speaker: String,
     pub text: String,
     pub is_final: bool,
+    /// Original browser transcript time, when available from the source client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -346,7 +349,11 @@ pub fn parse_summary_json(text: &str) -> Result<Summary, ProviderError> {
                         .get("owner")
                         .and_then(serde_json::Value::as_str)
                         .map(String::from);
-                    Some(ActionItem { text, owner })
+                    Some(ActionItem {
+                        text,
+                        owner,
+                        ..ActionItem::default()
+                    })
                 })
                 .collect()
         })
@@ -473,11 +480,13 @@ mod tests {
                 speaker: "you".into(),
                 text: "let's start".into(),
                 is_final: true,
+                timestamp: None,
             },
             TranscriptSegment {
                 speaker: "them".into(),
                 text: "sounds good".into(),
                 is_final: true,
+                timestamp: None,
             },
         ];
         assert_eq!(

@@ -65,7 +65,9 @@ export async function regenerateNotes(
   if (claimed.count !== 1) return fail(`Notes can be regenerated ${MAX_NOTES_REGENERATIONS} times per meeting. You've used them all.`);
 
   const utterances: ManagedUtterance[] = meeting.transcript.map((segment) => {
-    const offset = Math.max(0, segment.timestamp.getTime() - meeting.startedAt.getTime());
+    const offset = segment.timestamp
+      ? Math.max(0, segment.timestamp.getTime() - meeting.startedAt.getTime())
+      : 0;
     return { speaker: segment.speaker, text: segment.text, startMs: offset, endMs: offset };
   });
 

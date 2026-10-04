@@ -4,7 +4,7 @@
 export interface TranscriptLine {
   speaker: string;
   text: string;
-  timestamp: string; // ISO 8601
+  timestamp: string | null; // ISO 8601 when timing is available
 }
 
 export interface TranscriptTurn {
@@ -29,7 +29,7 @@ const END_SLACK_MS = 60_000;
 export function transcriptOffsets(startedAt: string, endedAt: string, lines: readonly TranscriptLine[]): (number | null)[] {
   const start = Date.parse(startedAt);
   const end = Date.parse(endedAt);
-  const times = lines.map((line) => Date.parse(line.timestamp));
+  const times = lines.map((line) => line.timestamp ? Date.parse(line.timestamp) : Number.NaN);
   if (!Number.isFinite(start) || !Number.isFinite(end) || times.some((time) => !Number.isFinite(time))) {
     return lines.map(() => null);
   }

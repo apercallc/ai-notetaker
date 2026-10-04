@@ -255,7 +255,9 @@ export interface MeetingRecord {
   summary: string | null;
   actionItems: ActionItem[];
   mode?: MeetingMode;
-  status: "recording" | "processing" | "complete" | "error";
+  status: "recording" | "saved" | "processing" | "complete" | "error";
+  /** New Meet captures retain audio for transfer to the desktop app. */
+  recorderOnly?: true;
   liveTranscriptStatus?: LiveTranscriptStatus;
   errorMessage?: string;
   /** Shown during the call if an AI provider failed its pre-recording connection check. */

@@ -1,28 +1,19 @@
-import { getSettings } from "../lib/storage";
+import { getSettings, listMeetings } from "../lib/storage";
+import { createDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../lib/desktopMigration";
 import { testWebappHealth } from "../lib/providerTest";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { escapeHtml } from "../lib/html";
 import { estimateMeetingCost } from "../lib/costEstimate";
+import { managedIntegrationsUrl } from "../lib/managedClient";
 import { readShortcuts, shortcutKeys } from "../lib/shortcuts";
 import { hasOptionalPermission, providerHostPermission, providerHostPermissions, providerPermissionName, requestOptionalPermission } from "../lib/optionalPermissions";
 import { DEFAULT_SETTINGS, type NotetakerSettings, type ProviderKind, type SummarizationProvider } from "../types";
-import { loginManaged, loginManagedWithGoogle, MANAGED_SERVICE_ORIGIN, managedBillingUrl, managedIntegrationsUrl, managedSignupUrl } from "../lib/managedClient";
-import { renderManagedSignInControls } from "../lib/managedAuthForm";
-import {
-  MODE_LABEL_HOSTED,
-  MODE_LABEL_OWN_KEYS,
-  applyModeChoice,
-  hasHostedSession,
-  isHostedActive,
-  signOutOfHosted,
-  validateWebappInputs,
-} from "./settingsModel";
+import { validateWebappInputs } from "./settingsModel";
 import { sendToBackground } from "../lib/sendToBackground";
 
 const app = document.getElementById("app")!;
 let settings: NotetakerSettings = structuredClone(DEFAULT_SETTINGS);
 /** Which mode the page is showing (not necessarily saved yet). Set from the loaded settings in init(). */
-let managedSetupVisible = isHostedActive(settings);
 
 /**
  * Text the user has typed but which is not part of `settings` yet (or, like
@@ -31,7 +22,6 @@ let managedSetupVisible = isHostedActive(settings);
  * into the new markup. Passwords are deliberately not kept.
  */
 interface Drafts {
-  managedEmail: string;
   webappUrl: string;
   webappToken: string;
   meetingMinutes: string;
@@ -40,7 +30,6 @@ let drafts: Drafts = emptyDrafts();
 
 function emptyDrafts(): Drafts {
   return {
-    managedEmail: "",
     webappUrl: "",
     webappToken: "",
     meetingMinutes: "45",
@@ -49,7 +38,6 @@ function emptyDrafts(): Drafts {
 
 // Disclosure state survives re-renders so toggling a provider never collapses what the user was editing.
 let integrationsOpen = false;
-let signedOutNotice = "";
 
 function isBudgetTier(s: NotetakerSettings): boolean {
   return s.transcriptionProvider === "groq";
@@ -73,14 +61,6 @@ function updateProviderKeyNotice(): void {
   notice.hidden = missing.length === 0;
 }
 
-function safeManagedBillingUrl(baseUrl: string): string {
-  try {
-    return managedBillingUrl(baseUrl);
-  } catch {
-    return "";
-  }
-}
-
 function inputValue(id: string): string | undefined {
   return (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null)?.value;
 }
@@ -88,7 +68,6 @@ function inputValue(id: string): string | undefined {
 function captureDrafts(): void {
   const pick = (id: string, current: string): string => inputValue(id) ?? current;
   drafts = {
-    managedEmail: pick("managed-email", drafts.managedEmail),
     webappUrl: pick("webapp-url", drafts.webappUrl),
     webappToken: pick("webapp-token", drafts.webappToken),
     meetingMinutes: pick("meeting-minutes", drafts.meetingMinutes),
@@ -255,9 +234,8 @@ function render(options: RenderOptions = {}): void {
 
     <details class="integrations" id="integrations" ${integrationsOpen ? "open" : ""}>
       <summary>Connections &amp; history (optional)</summary>
-      <p class="text-secondary field-hint">Use the hosted account or connect your own history webapp. Meetings are always saved on this device first.</p>
+      <p class="text-secondary field-hint">Connect your own history webapp for optional cross-device history. Meetings are always saved on this device first.</p>
 
-      ${managedSetupVisible ? "" : `
       <section class="integration" aria-labelledby="webapp-heading">
         <h2 id="webapp-heading">Your self-hosted history</h2>
         <p class="text-secondary field-hint">
@@ -277,10 +255,23 @@ function render(options: RenderOptions = {}): void {
           <p class="test-result invalid" id="webapp-token-error" role="alert"></p>
           <p class="test-result" id="webapp-test-result" role="status" aria-live="polite"></p>
         </div>
-      </section>`}
+      </section>
 
       ${renderGoogleServices()}
     </details>
+
+    <fieldset>
+      <legend>Move to the desktop app</legend>
+      <p class="field-hint text-secondary">
+        Export meeting notes, partial transcripts, portable preferences, and any raw Meet audio still saved in
+        this extension, then import the archive in desktop Settings. Completed-call audio is already removed
+        after notes are saved. API keys, web-app tokens, and Google connections are excluded. Export copies
+        data; it never removes or changes the extension's source records.
+      </p>
+      <button type="button" class="secondary" id="export-desktop-transfer">Export notes + saved audio</button>
+      <button type="button" class="secondary" id="export-desktop-notes-only">Export notes only</button>
+      <p class="test-result" id="desktop-transfer-status" role="status" aria-live="polite"></p>
+    </fieldset>
 
     <div class="save-bar">
       <button type="button" class="primary" id="save-settings">Save settings</button>
@@ -297,15 +288,10 @@ function render(options: RenderOptions = {}): void {
 }
 
 function renderModeSection(): string {
-  const hosted = managedSetupVisible;
   return `
     <fieldset>
-      <legend>How meetings are processed</legend>
-      <div class="tier-toggle" role="group" aria-label="Processing mode">
-        <button type="button" id="mode-local" class="${hosted ? "secondary" : "primary active"}" aria-pressed="${!hosted}">${MODE_LABEL_OWN_KEYS}</button>
-        <button type="button" id="mode-managed" class="${hosted ? "primary active" : "secondary"}" aria-pressed="${hosted}">${MODE_LABEL_HOSTED}</button>
-      </div>
-      ${hosted ? renderHostedSection() : renderOwnKeysSection()}
+      <legend>Provider API keys</legend>
+      ${renderOwnKeysSection()}
     </fieldset>
   `;
 }
@@ -314,9 +300,9 @@ function renderOwnKeysSection(): string {
   const budget = isBudgetTier(settings);
   return `
     <p class="text-secondary field-hint">
-      Free, and no account needed. You use one transcription key and one summary key from providers you choose.
+      No AI Notetaker account is needed. You use one transcription key and one summary key from providers you choose.
       They stay on this device; Google Meet uses the browser and desktop calls use the helper. Your providers may bill
-      you directly. Hosted AI plan allowance is not used in this mode.
+      you directly.
     </p>
     <div class="tier-toggle" role="group" aria-label="Provider set">
       <button type="button" id="tier-default" class="${!budget ? "primary active" : "secondary"}" aria-pressed="${!budget}">Deepgram + Claude</button>
@@ -329,39 +315,6 @@ function renderOwnKeysSection(): string {
       <input type="number" id="meeting-minutes" min="1" max="480" step="1" value="${escapeHtml(drafts.meetingMinutes)}" />
       <p class="field-hint text-secondary" id="cost-estimate" aria-live="polite"></p>
     </div>
-  `;
-}
-
-function renderHostedSection(): string {
-  if (hasHostedSession(settings) && settings.managedService) {
-    const service = settings.managedService;
-    const billingLink = safeManagedBillingUrl(service.baseUrl);
-    const active = isHostedActive(settings);
-    return `
-      <div class="callout ${active ? "" : "warning"}">
-        <p><strong>${active ? "Hosted AI is on for this device." : "You are signed in, but Hosted AI is not saved as your mode yet."}</strong></p>
-        <p class="text-secondary">
-          Account <strong>${escapeHtml(service.accountId || "unknown")}</strong> · plan <strong>${escapeHtml(service.plan || "unknown")}</strong>.
-          New recordings use this plan's allowance. Audio is saved on this device first, then uploaded only to your signed-in workspace. Provider credentials stay on the hosted service.
-        </p>
-        ${active ? "" : `<p class="text-secondary">Press <strong>Save settings</strong> to use Hosted AI. Until then, your own API keys are used and your providers may bill you directly.</p>`}
-      </div>
-      <div class="account-actions">
-        ${billingLink ? `<a class="button-link" href="${escapeHtml(billingLink)}" target="_blank" rel="noreferrer">Manage billing</a>` : ""}
-        <a class="button-link" href="${escapeHtml(managedIntegrationsUrl(service.baseUrl))}" target="_blank" rel="noreferrer">Google connections</a>
-        <button type="button" class="secondary" id="managed-sign-out">Sign out</button>
-      </div>
-      <p class="test-result" id="managed-sign-in-result" role="status" aria-live="polite"></p>
-    `;
-  }
-  return `
-    <p class="text-secondary field-hint">
-      Hosted AI uses your account's plan allowance, so you do not need provider keys. Sign in to use it. Until then,
-      recordings use your own API keys and your providers may bill you directly. Your account, billing, Calendar, and Drive
-      connections live at <strong>ai-notetaker.apercallc.com</strong>.
-      ${signedOutNotice ? `<br /><strong>${escapeHtml(signedOutNotice)}</strong>` : ""}
-    </p>
-    ${renderManagedSignInControls({ prefix: "managed", email: drafts.managedEmail })}
   `;
 }
 
@@ -400,9 +353,7 @@ function renderBudgetTierFields(): string {
 }
 
 function renderGoogleServices(): string {
-  const baseUrl = managedSetupVisible
-    ? settings.managedService?.baseUrl ?? MANAGED_SERVICE_ORIGIN
-    : settings.webapp?.url;
+  const baseUrl = settings.webapp?.url;
   const accountLink = baseUrl ? (() => {
     try {
       return managedIntegrationsUrl(baseUrl);
@@ -416,18 +367,17 @@ function renderGoogleServices(): string {
     <section class="integration" aria-labelledby="google-services-heading">
       <h2 id="google-services-heading">Google Calendar &amp; Drive</h2>
       <p class="text-secondary field-hint">
-        Connect once in your account. The service keeps its Google OAuth credentials and your authorization server-side;
-        this extension never asks for a client ID or client secret.
+        Connect Google Calendar or Drive from your history web app. This extension never asks for a client ID or client secret.
       </p>
       ${accountLink
         ? `<div class="connection-card">
-            <p><strong>Connect calendar and Drive from your account.</strong></p>
-            <p class="text-secondary field-hint">Calendar can name your meeting from the current event. Drive creates a copy of completed notes. You choose both permissions in one Google sign-in.</p>
+            <p><strong>Connect calendar and Drive from your history web app.</strong></p>
+            <p class="text-secondary field-hint">Calendar can name your meeting from the current event. Drive creates a copy of completed notes. Choose permissions in your history web app.</p>
             <a class="button-link" href="${escapeHtml(accountLink)}" target="_blank" rel="noreferrer">Manage Google connections</a>
           </div>`
         : `<div class="connection-card muted-card">
-            <p><strong>Connect a history web app first.</strong></p>
-            <p class="text-secondary field-hint">Hosted users sign in above. With your own API keys, connect your self-hosted history webapp to manage Google Calendar and Drive there.</p>
+            <p><strong>Connect your history web app first.</strong></p>
+            <p class="text-secondary field-hint">Add its URL and access token under Connections &amp; history, then manage Google Calendar and Drive there.</p>
           </div>`}
       ${legacyConnection ? `<p class="field-hint text-secondary">A previous device-only Google connection remains available for existing notes. Reconnect it in your account to move future access to the server.</p>` : ""}
     </section>
@@ -435,6 +385,14 @@ function renderGoogleServices(): string {
 }
 
 function renderKeyField(provider: keyof NotetakerSettings["apiKeys"], label: string, hint: string): string {
+  const keyPages: Partial<Record<keyof NotetakerSettings["apiKeys"], string>> = {
+    deepgram: "https://console.deepgram.com/",
+    claude: "https://console.anthropic.com/settings/keys",
+    groq: "https://console.groq.com/keys",
+    gemini: "https://aistudio.google.com/app/apikey",
+    deepseek: "https://platform.deepseek.com/api_keys",
+  };
+  const providerName = label.replace(/ API key$/, "");
   return `
     <div class="field">
       <label for="key-${provider}">${label}</label>
@@ -442,7 +400,7 @@ function renderKeyField(provider: keyof NotetakerSettings["apiKeys"], label: str
         <input type="password" id="key-${provider}" data-provider="${provider}" autocomplete="off" value="${escapeHtml(settings.apiKeys[provider] ?? "")}" aria-describedby="hint-${provider}" />
         <button type="button" class="secondary test-key" data-provider="${provider}">Test</button>
       </div>
-      <p class="field-hint text-secondary" id="hint-${provider}">${hint}</p>
+      <p class="field-hint text-secondary" id="hint-${provider}">${hint} <a href="${keyPages[provider]}" target="_blank" rel="noreferrer">Get a ${escapeHtml(providerName)} key</a></p>
       <p class="test-result" id="test-result-${provider}" role="status" aria-live="polite"></p>
     </div>
   `;
@@ -470,6 +428,43 @@ function showWebappErrors(urlError?: string, tokenError?: string): void {
 }
 
 function wireEvents(): void {
+  document.getElementById("export-desktop-transfer")?.addEventListener("click", async () => {
+    const button = document.getElementById("export-desktop-transfer") as HTMLButtonElement;
+    const status = document.getElementById("desktop-transfer-status");
+    readFormIntoSettings();
+    button.disabled = true;
+    setResult(status, "Choose where to save the archive…", "pending");
+    try {
+      const result = await saveDesktopAudioArchive(settings, listMeetings);
+      setResult(status, `Archive saved with ${result.meetingCount} meeting record${result.meetingCount === 1 ? "" : "s"} and ${(result.audioBytes / (1024 * 1024)).toFixed(1)} MB of saved audio. The extension source is unchanged.`, "valid");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setResult(status, "Archive export cancelled. Your extension data is unchanged.", "pending");
+      } else {
+        setResult(status, error instanceof Error ? error.message : "Could not create the transfer archive. Your extension data is unchanged.", "invalid");
+      }
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.getElementById("export-desktop-notes-only")?.addEventListener("click", async () => {
+    const button = document.getElementById("export-desktop-notes-only") as HTMLButtonElement;
+    const status = document.getElementById("desktop-transfer-status");
+    readFormIntoSettings();
+    button.disabled = true;
+    setResult(status, "Preparing notes-only transfer…", "pending");
+    try {
+      const archive = createDesktopMigrationArchive(settings, await listMeetings());
+      downloadDesktopMigrationArchive(archive);
+      setResult(status, `Notes-only file saved with ${archive.meetings.length} meeting records. Raw audio is not included.`, "valid");
+    } catch (error) {
+      setResult(status, error instanceof Error ? error.message : "Could not create the notes-only transfer file. Your extension data is unchanged.", "invalid");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   const minutesInput = document.getElementById("meeting-minutes") as HTMLInputElement | null;
   const costEstimate = document.getElementById("cost-estimate");
   const updateCostEstimate = () => {
@@ -482,78 +477,6 @@ function wireEvents(): void {
 
   document.getElementById("integrations")?.addEventListener("toggle", (event) => {
     integrationsOpen = (event.currentTarget as HTMLDetailsElement).open;
-  });
-
-  document.getElementById("mode-local")?.addEventListener("click", () => {
-    readFormIntoSettings();
-    settings = applyModeChoice(settings, false);
-    managedSetupVisible = false;
-    render({ focus: "mode-local" });
-  });
-  document.getElementById("mode-managed")?.addEventListener("click", () => {
-    readFormIntoSettings();
-    settings = applyModeChoice(settings, true);
-    managedSetupVisible = true;
-    render({ focus: "mode-managed" });
-  });
-  document.getElementById("managed-sign-out")?.addEventListener("click", async () => {
-    const resultEl = document.getElementById("managed-sign-in-result");
-    readFormIntoSettings();
-    settings = signOutOfHosted(settings);
-    signedOutNotice = "Signed out of Hosted AI.";
-    try {
-      await saveToBackground();
-    } catch {
-      setResult(resultEl, "Signed out here, but the change could not be saved. Press Save settings to finish.", "invalid");
-      return;
-    }
-    render({ focus: "managed-email" });
-  });
-  document.getElementById("managed-email-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const resultEl = document.getElementById("managed-result");
-    const button = document.getElementById("managed-sign-in") as HTMLButtonElement;
-    const emailInput = document.getElementById("managed-email") as HTMLInputElement | null;
-    const passwordInput = document.getElementById("managed-password") as HTMLInputElement | null;
-    if (!emailInput?.reportValidity() || !passwordInput?.reportValidity()) return;
-    readFormIntoSettings();
-    const email = emailInput.value.trim();
-    const password = passwordInput.value;
-    button.disabled = true;
-    setResult(resultEl, "Signing in…", "pending");
-    try {
-      const result = await loginManaged(MANAGED_SERVICE_ORIGIN, email, password);
-      settings.managedService = result.config;
-      settings = applyModeChoice(settings, true);
-      managedSetupVisible = true;
-      signedOutNotice = "";
-      await saveToBackground();
-      render({ focus: "managed-sign-out" });
-    } catch (error) {
-      setResult(resultEl, error instanceof Error ? error.message : "Sign-in failed.", "invalid");
-      button.disabled = false;
-    }
-  });
-  document.getElementById("managed-google-sign-in")?.addEventListener("click", async () => {
-    const resultEl = document.getElementById("managed-result");
-    const button = document.getElementById("managed-google-sign-in") as HTMLButtonElement;
-    button.disabled = true;
-    setResult(resultEl, "Opening Google sign-in…", "pending");
-    try {
-      const result = await loginManagedWithGoogle(MANAGED_SERVICE_ORIGIN);
-      settings.managedService = result.config;
-      settings = applyModeChoice(settings, true);
-      managedSetupVisible = true;
-      signedOutNotice = "";
-      await saveToBackground();
-      render({ focus: "managed-sign-out" });
-    } catch (error) {
-      setResult(resultEl, error instanceof Error ? error.message : "Google sign-in failed.", "invalid");
-      button.disabled = false;
-    }
-  });
-  document.getElementById("managed-signup")?.addEventListener("click", () => {
-    void chrome.tabs.create({ url: managedSignupUrl(MANAGED_SERVICE_ORIGIN) });
   });
 
   void readShortcuts().then((shortcuts) => {
@@ -648,22 +571,18 @@ function wireEvents(): void {
     const saveButton = document.getElementById("save-settings") as HTMLButtonElement;
     const statusEl = document.getElementById("save-status");
     readFormIntoSettings();
-    // The webapp fields only exist in your-own-keys mode; in Hosted mode the
-    // saved connection is left exactly as it was.
-    if (!managedSetupVisible) {
-      const check = validateWebappInputs(drafts.webappUrl, drafts.webappToken);
-      showWebappErrors(check.urlError, check.tokenError);
-      if (!check.ok) {
-        const integrations = document.getElementById("integrations") as HTMLDetailsElement | null;
-        if (integrations) integrations.open = true;
-        integrationsOpen = true;
-        setResult(statusEl, "Fix the highlighted webapp fields, then save again.", "invalid");
-        document.getElementById(check.urlError ? "webapp-url" : "webapp-token")?.focus();
-        return;
-      }
-      settings.webapp = check.webapp;
+    const check = validateWebappInputs(drafts.webappUrl, drafts.webappToken);
+    showWebappErrors(check.urlError, check.tokenError);
+    if (!check.ok) {
+      const integrations = document.getElementById("integrations") as HTMLDetailsElement | null;
+      if (integrations) integrations.open = true;
+      integrationsOpen = true;
+      setResult(statusEl, "Fix the highlighted webapp fields, then save again.", "invalid");
+      document.getElementById(check.urlError ? "webapp-url" : "webapp-token")?.focus();
+      return;
     }
-    settings = applyModeChoice(settings, managedSetupVisible);
+    settings.webapp = check.webapp;
+    settings.processingMode = { kind: "local_byok" };
     saveButton.disabled = true;
     setResult(statusEl, "Saving…", "pending");
     try {
@@ -724,7 +643,12 @@ async function init(): Promise<void> {
   // getSettings() can hand back the shared DEFAULT_SETTINGS object; this page
   // mutates `settings` as the user types, so it must work on its own copy.
   settings = structuredClone(await getSettings());
-  managedSetupVisible = isHostedActive(settings);
+  if (settings.processingMode.kind === "managed") {
+    // Existing hosted users move to API-key processing when they next open Settings.
+    // Keep their session for already-running historical jobs; new recordings use local mode.
+    settings.processingMode = { kind: "local_byok" };
+    await sendToBackground({ type: "SAVE_SETTINGS", settings });
+  }
   drafts = emptyDrafts();
   drafts.webappUrl = settings.webapp?.url ?? "";
   drafts.webappToken = settings.webapp?.token ?? "";

@@ -17,7 +17,8 @@
           },
           "artifacts": {
             "allOf": [
-              { "contains": { "properties": { "platform": { "const": "macos" }, "format": { "const": "dmg" } }, "required": ["platform", "format"] } },
+              { "contains": { "properties": { "platform": { "const": "macos" }, "architecture": { "const": "arm64" }, "format": { "const": "dmg" } }, "required": ["platform", "architecture", "format"] } },
+              { "contains": { "properties": { "platform": { "const": "macos" }, "architecture": { "const": "x86_64" }, "format": { "const": "dmg" } }, "required": ["platform", "architecture", "format"] } },
               { "contains": { "properties": { "platform": { "const": "windows" }, "format": { "const": "nsis" } }, "required": ["platform", "format"] } },
               { "contains": { "properties": { "platform": { "const": "linux" }, "format": { "const": "deb" } }, "required": ["platform", "format"] } }
             ]

@@ -270,11 +270,13 @@ export async function loginManagedWithGoogle(
   fetchImpl: typeof fetch = fetch,
 ): Promise<ManagedLoginResult> {
   const normalizedBaseUrl = serviceUrl(baseUrl);
+  // `identity` is optional. Chrome may not expose chrome.identity until
+  // the user grants it, so request it before checking the API surface.
+  await requestServiceOriginPermission(normalizedBaseUrl, { permissions: ["identity"] });
   const identity = chrome.identity;
   if (!identity?.getRedirectURL || !identity.launchWebAuthFlow) {
     throw new Error("Google sign-in is not available in this browser.");
   }
-  await requestServiceOriginPermission(normalizedBaseUrl, { permissions: ["identity"] });
 
   const redirectUri = identity.getRedirectURL("hosted-auth");
   const verifier = randomBase64Url(32);

@@ -113,6 +113,15 @@ export async function saveSettings(settings: NotetakerSettings): Promise<void> {
   await storageSet({ [KEYS.settings]: settings });
 }
 
+/** New recordings use provider keys; preserve the old session for in-flight hosted jobs. */
+export async function migrateSavedProcessingModeToApiKeys(): Promise<boolean> {
+  const settings = await getSettings();
+  if (settings.processingMode.kind !== "managed") return false;
+  settings.processingMode = { kind: "local_byok" };
+  await saveSettings(settings);
+  return true;
+}
+
 export async function getPairingToken(): Promise<string | null> {
   const token = await storageGet<string>(KEYS.pairingToken);
   return token ?? null;
@@ -132,7 +141,7 @@ export async function clearPairingToken(): Promise<void> {
   await storageRemove(KEYS.pairingToken);
 }
 
-const MEETING_STATUSES = new Set(["recording", "processing", "complete", "error"]);
+const MEETING_STATUSES = new Set(["recording", "saved", "processing", "complete", "error"]);
 
 /**
  * A stored meeting can be partial or corrupt (an interrupted write, an older

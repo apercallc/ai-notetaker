@@ -18,16 +18,15 @@ import {
   Briefcase,
 } from "lucide-react";
 import { ChannelDemo } from "./ChannelDemo";
-import { FALLBACK_PRICE_LABELS, LIMITS, SITE } from "./content";
+import { LIMITS, SITE } from "./content";
 import { Faq } from "./Faq";
 import { Icon } from "./Icon";
 import { Plans, type PlanDisplay } from "./Plans";
 import type { ShellContext } from "./Shell";
 
 export function Home({ context, prices }: { context: ShellContext; prices: PlanDisplay }) {
-  const start = context.signupOpen ? "/login?tab=signup" : "/download";
-  const startLabel = context.signupOpen ? "Try Hosted AI free" : "Get the extension";
-  const fromPrice = prices.hosted_pro ?? FALLBACK_PRICE_LABELS.hosted_pro;
+  const start = "/download";
+  const startLabel = "Get the desktop app";
   return (
     <>
       <section className="mk-hero" aria-labelledby="hero-title">
@@ -35,8 +34,8 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           <div>
             <h1 className="mk-h1" id="hero-title">{SITE.tagline}</h1>
             <p className="mk-lede">
-              AI Notetaker records Google Meet and desktop calls from your own device, then turns each one into a
-              transcript, decisions and action items. Nobody joins your call.
+              AI Notetaker is moving to one desktop app for setup, recording and local notes. Use your own AI keys;
+              no browser extension or AI Notetaker login is required. Nobody joins your call.
             </p>
             <div className="mk-cta-row">
               <Link className="mk-btn mk-btn--solid" href={start}>{startLabel}</Link>
@@ -55,30 +54,30 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
       <section className="mk-section mk-section--deep" id="setup" aria-labelledby="setup-title">
         <div className="mk-wrap">
           <div className="mk-section-head">
-            <h2 className="mk-h2" id="setup-title">Two ways to run the AI. Audio is saved on your device first, either way.</h2>
+            <h2 className="mk-h2" id="setup-title">Your own AI keys. Your recordings stay local.</h2>
             <p className="mk-lede">
-              Pick whichever suits you. You can switch at any time in the extension&apos;s Settings, and nothing about
-              how audio is captured changes.
+              Add transcription and summary provider keys in the desktop app. Connect a web workspace only if you
+              want finished notes available on more than one device.
             </p>
           </div>
           <div className="mk-choice">
             <article className="mk-panel mk-panel--lead" aria-labelledby="choice-hosted">
-              <h3 className="mk-h3" id="choice-hosted">Hosted AI</h3>
-              <p className="mk-panel-price"><strong>From {fromPrice}</strong>, after {LIMITS.trial} free meetings. Pro includes {LIMITS.pro.toLocaleString("en-US")} meetings or {LIMITS.proHours} meeting hours a month.</p>
+              <h3 className="mk-h3" id="choice-hosted">Desktop app</h3>
+              <p className="mk-panel-price"><strong>Free with your API keys</strong></p>
               <p className="mk-panel-copy">
-                We run the transcription and summaries. There is nothing to set up except an account, and your notes
-                are in a searchable library on any device. Pro and Team also include Ask your notes.
+                Choose transcription and summary providers, test your keys, and record from one app. Keys stay in the
+                operating-system credential store; audio is saved locally before provider calls.
               </p>
               <Link className="mk-btn mk-btn--light" href={start}>{startLabel}</Link>
             </article>
             <article className="mk-panel" aria-labelledby="choice-keys">
-              <h3 className="mk-h3" id="choice-keys">Your own keys</h3>
-              <p className="mk-panel-price"><strong>$0</strong> for the software</p>
+              <h3 className="mk-h3" id="choice-keys">Optional web-app sync</h3>
+              <p className="mk-panel-price"><strong>Connect one workspace</strong></p>
               <p className="mk-panel-copy">
-                You choose the AI providers and pay them directly. No AI Notetaker account is needed, and your keys
-                stay in protected storage on your device.
+                Create a revocable desktop sync token in the web app. Only finished transcripts, summaries, and
+                action items sync. Raw audio and provider keys stay on this device.
               </p>
-              <Link className="mk-btn mk-btn--ghost-on-deep" href="/how-it-works#own-keys">Set up with my keys</Link>
+              <Link className="mk-btn mk-btn--ghost-on-deep" href="/how-it-works#own-keys">How setup works</Link>
             </article>
           </div>
           <p className="mk-choice-foot">
@@ -95,24 +94,19 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           </div>
           <ol className="mk-steps">
             <li className="mk-step">
-              <h3 className="mk-h3">Install</h3>
-              <p>Add the Chrome extension and you can record Google Meet straight away.</p>
-              <ul>
-                <li>Zoom, Teams or Slack too? <Link href="/download?mode=desktop">Download and set up the desktop helper</Link> for macOS, Windows or Linux.</li>
-              </ul>
+              <h3 className="mk-h3">Install one app</h3>
+              <p>Download AI Notetaker and use one app for setup, recording, and local notes. The downloads page shows which installers are currently available.</p>
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Record</h3>
               <p>
-                Confirm the recording notice and start when you are ready. Your microphone and the meeting&apos;s audio
-                are saved on your device as two channels.
+                Add and test your transcription and summary API keys, then grant microphone and system-audio access.
               </p>
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Review</h3>
               <p>
-                When the call ends, open the transcript, summary, decisions and action items. Search across every
-                meeting when you need a detail back.
+                Start and stop in the desktop app. Your transcript, summary and action items are saved in local history.
               </p>
             </li>
           </ol>
@@ -200,7 +194,7 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
               <dt><Icon as={KeyRound} size={22} />With your own keys</dt>
               <dd>
                 Your keys stay in protected storage on your device and go only to the provider you chose. We never
-                receive them, your recordings or your notes.
+                receive your keys or recordings. Finished note text stays local unless you enable workspace sync.
               </dd>
             </div>
           </dl>
@@ -268,7 +262,7 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
             <h2 className="mk-h2" id="final-title">Be in the conversation. Get the notes.</h2>
             <div className="mk-cta-row">
               <Link className="mk-btn mk-btn--light" href={start}>{startLabel}</Link>
-              <Link className="mk-btn mk-btn--ghost-on-deep" href="/download">Download the extension</Link>
+              <Link className="mk-btn mk-btn--ghost-on-deep" href="/download#legacy-downloads">Existing extension downloads</Link>
             </div>
             <p className="mk-small mk-mt-m mk-on-deep">
               Free with your own keys. Open source under the {SITE.license} license. Delete your data any time.

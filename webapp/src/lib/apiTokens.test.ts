@@ -5,7 +5,7 @@ const { create, findUnique, deleteMany, updateMany, findMany } = vi.hoisted(() =
 }));
 vi.mock("./db", () => ({ prisma: { apiToken: { create, findUnique, deleteMany, updateMany, findMany } } }));
 
-import { API_TOKEN_LIFETIME_MS, API_TOKEN_PREFIX, createApiToken, hashToken, listApiTokens, looksLikeApiToken, resolveApiToken, revokeAllApiTokens, revokeApiToken, revokeApiTokenBySecret } from "./apiTokens";
+import { API_TOKEN_LIFETIME_MS, API_TOKEN_PREFIX, DESKTOP_NOTES_SCOPE, createApiToken, hashToken, listApiTokens, looksLikeApiToken, resolveApiToken, revokeAllApiTokens, revokeApiToken, revokeApiTokenBySecret } from "./apiTokens";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -29,6 +29,13 @@ describe("managed API token lifecycle", () => {
       tokenHash: hashToken(result.token), lastUsedAt: new Date(1_000), expiresAt: result.expiresAt,
     } });
     expect(create.mock.calls[0]?.[0].data).not.toHaveProperty("token");
+  });
+
+  it("binds desktop sync tokens to one workspace and rejects unbound creation", async () => {
+    await expect(createApiToken("user-1", { scope: DESKTOP_NOTES_SCOPE })).rejects.toThrow("bound to a workspace");
+    const created = await createApiToken("user-1", { scope: DESKTOP_NOTES_SCOPE, workspaceId: "workspace-7", now: 2_000 });
+    expect(created.token.startsWith(API_TOKEN_PREFIX)).toBe(true);
+    expect(create.mock.calls.at(-1)?.[0].data).toMatchObject({ scope: DESKTOP_NOTES_SCOPE, workspaceId: "workspace-7" });
   });
 
   it("keeps only the newest tokens per user and never fails a sign-in over housekeeping", async () => {
@@ -71,14 +78,14 @@ describe("managed API token lifecycle", () => {
 
   it("touches idle tokens to extend their sliding expiry but leaves recently used tokens read-only", async () => {
     const token = `${API_TOKEN_PREFIX}valid-secret`;
-    const row = { id: "row-2", revokedAt: null, scope: "managed", expiresAt: new Date(300_000), user: { id: "user-2", email: "b@example.com", mustChangePassword: false } };
+    const row = { id: "row-2", revokedAt: null, scope: "managed", workspaceId: null, expiresAt: new Date(300_000), user: { id: "user-2", email: "b@example.com", mustChangePassword: false } };
     findUnique.mockResolvedValueOnce({ ...row, lastUsedAt: null });
-    expect(await resolveApiToken(token, 200_000)).toEqual({ id: "user-2", email: "b@example.com", tokenId: "row-2" });
+    expect(await resolveApiToken(token, 200_000)).toEqual({ id: "user-2", email: "b@example.com", tokenId: "row-2", workspaceId: null });
     expect(updateMany).toHaveBeenCalledWith({ where: { id: "row-2", revokedAt: null }, data: { lastUsedAt: new Date(200_000), expiresAt: new Date(200_000 + API_TOKEN_LIFETIME_MS) } });
 
     updateMany.mockClear();
     findUnique.mockResolvedValueOnce({ ...row, lastUsedAt: new Date(200_000 - 60 * 60 * 1_000) });
-    expect(await resolveApiToken(token, 200_000)).toEqual({ id: "user-2", email: "b@example.com", tokenId: "row-2" });
+    expect(await resolveApiToken(token, 200_000)).toEqual({ id: "user-2", email: "b@example.com", tokenId: "row-2", workspaceId: null });
     expect(updateMany).not.toHaveBeenCalled();
 
     findUnique.mockResolvedValueOnce({ ...row, lastUsedAt: new Date(200_000 - 60 * 60 * 1_000 - 1) });

@@ -4,8 +4,8 @@
  * press arms the button and says so, a second press within a few seconds stops,
  * and doing nothing quietly puts the button back.
  */
-export const STOP_LABEL = "Stop notes";
-export const STOP_CONFIRM_LABEL = "Stop notes?";
+export const STOP_LABEL = "Stop recording";
+export const STOP_CONFIRM_LABEL = "Stop recording?";
 export const STOP_CONFIRM_WINDOW_MS = 3000;
 
 export interface StopConfirmOptions {

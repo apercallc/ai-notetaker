@@ -18,6 +18,14 @@ interface StoredChunk {
   capturedAt?: number;
 }
 
+export interface BrowserMeetArchiveStats {
+  meetingId: string;
+  chunkCount: number;
+  totalBytes: number;
+  firstCapturedAt: number | null;
+  lastSequence: number;
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     let abandoned = false;
@@ -107,7 +115,11 @@ export async function appendBrowserMeetChunk(
  * transaction because IndexedDB closes a transaction as soon as the caller
  * awaits anything that is not an IDB request, e.g. a provider upload.
  */
-export async function* streamBrowserMeetChunks(meetingId: string, batchSize: number = DEFAULT_BATCH_SIZE): AsyncGenerator<BrowserMeetChunk> {
+export async function* streamBrowserMeetChunks(
+  meetingId: string,
+  batchSize: number = DEFAULT_BATCH_SIZE,
+  throughSequence: number = Number.MAX_SAFE_INTEGER,
+): AsyncGenerator<BrowserMeetChunk> {
   const db = await openDatabase();
   try {
     let lastSequence = -1;
@@ -118,6 +130,8 @@ export async function* streamBrowserMeetChunks(meetingId: string, batchSize: num
         request.onsuccess = () => {
           const cursor = request.result;
           if (!cursor) return resolve(records);
+          const record = cursor.value as StoredChunk;
+          if (record.sequence > throughSequence) return resolve(records);
           records.push(cursor.value as StoredChunk);
           if (records.length >= batchSize) return resolve(records);
           cursor.continue();
@@ -176,6 +190,45 @@ export async function browserMeetChunkStats(meetingId: string): Promise<{ totalC
         cursor.continue();
       };
       request.onerror = () => reject(request.error ?? new Error("Meet audio could not be read"));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Index-only archive inventory. Audio bytes are inspected for length but never retained. */
+export async function browserMeetArchiveInventory(): Promise<BrowserMeetArchiveStats[]> {
+  const db = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const meetings = new Map<string, BrowserMeetArchiveStats>();
+      const request = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).index(MEETING_INDEX).openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve([...meetings.values()].sort((a, b) => a.meetingId.localeCompare(b.meetingId)));
+        const key = cursor.key;
+        const meetingId = Array.isArray(key) && typeof key[0] === "string" ? key[0] : null;
+        const record = cursor.value as StoredChunk;
+        if (meetingId && record.bytes && typeof record.bytes.byteLength === "number") {
+          let stats = meetings.get(meetingId);
+          if (!stats) {
+            stats = { meetingId, chunkCount: 0, totalBytes: 0, firstCapturedAt: null, lastSequence: -1 };
+            meetings.set(meetingId, stats);
+          }
+          stats.chunkCount += 1;
+          stats.totalBytes += record.bytes.byteLength;
+          if (Number.isSafeInteger(record.sequence) && record.sequence >= 0) {
+            stats.lastSequence = Math.max(stats.lastSequence, record.sequence);
+          }
+          if (typeof record.capturedAt === "number" && Number.isFinite(record.capturedAt)) {
+            stats.firstCapturedAt = stats.firstCapturedAt === null
+              ? record.capturedAt
+              : Math.min(stats.firstCapturedAt, record.capturedAt);
+          }
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error ?? new Error("Meet audio could not be inventoried"));
     });
   } finally {
     db.close();

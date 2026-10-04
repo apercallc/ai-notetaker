@@ -119,6 +119,11 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     if (pathname === "/api/mcp") {
       return NextResponse.next();
     }
+    // Native desktop requests use a workspace-bound notes-sync token and do
+    // not carry a browser Origin. Both routes authenticate in their handler.
+    if (pathname === "/api/v1/desktop-sync" || pathname.startsWith("/api/v1/desktop-sync/")) {
+      return NextResponse.next();
+    }
     if (pathname.startsWith("/api/v1/")) {
       const origin = request.headers.get("origin");
       const corsHeaders = managedCorsHeaders(origin, request.nextUrl.origin);

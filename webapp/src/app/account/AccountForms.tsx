@@ -109,26 +109,29 @@ export interface TokenRow {
   id: string;
   label: string | null;
   readOnly?: boolean;
+  desktopSync?: boolean;
+  workspaceName?: string | null;
   device: string | null;
   createdAt: string;
   lastUsedAt: string | null;
   expiresAt: string;
 }
 
-export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
+export function ApiTokenPanel({ tokens, activeWorkspaceName }: { tokens: TokenRow[]; activeWorkspaceName: string }) {
   const [result, formAction, pending] = useActionState<CreateApiTokenState | null, FormData>(callCreateToken, null);
   return (
     <div>
       <form action={formAction} className="login-form">
         <label htmlFor="token-label">Label</label>
-        <input id="token-label" name="label" type="text" className="text-input" placeholder="Chrome extension" maxLength={80} />
+        <input id="token-label" name="label" type="text" className="text-input" placeholder="AI Notetaker desktop" maxLength={80} />
         <label htmlFor="token-purpose">Use</label>
-        <select id="token-purpose" name="purpose" className="text-input" defaultValue="extension">
-          <option value="extension">Sign in the extension or helper</option>
+        <select id="token-purpose" name="purpose" className="text-input" defaultValue="desktop_sync">
+          <option value="desktop_sync">Sync notes from the desktop app to {activeWorkspaceName}</option>
+          <option value="extension">Sign in the legacy extension or helper</option>
           <option value="mcp">Read-only, for AI assistants (MCP)</option>
         </select>
         <button type="submit" className="button button-primary" disabled={pending} aria-busy={pending}>
-          {pending ? "Creating…" : "Create sign-in token"}
+          {pending ? "Creating…" : "Create API token"}
         </button>
       </form>
       {result?.ok === true && (
@@ -146,7 +149,7 @@ export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
         <ul className="meeting-list">
           {tokens.map((token) => (
             <li key={token.id} className="meeting-card static-row">
-              <div className="title">{token.label ?? "Sign-in token"}{token.readOnly && <span className="file-type">Read-only</span>}</div>
+            <div className="title">{token.label ?? "API token"}{token.readOnly && <span className="file-type">Read-only</span>}{token.desktopSync && <span className="file-type">Notes sync · {token.workspaceName ?? "workspace"}</span>}</div>
               <div className="meta">
                 {token.device ? `${token.device} · ` : ""}created {token.createdAt} · last used{" "}
                 {token.lastUsedAt ?? "never"} · expires {token.expiresAt}

@@ -11,6 +11,7 @@ export interface DownloadLinks {
   pageUrl: string;
   extension?: ReleaseAsset;
   mac?: ReleaseAsset;
+  macIntel?: ReleaseAsset;
   windows?: ReleaseAsset;
   linux?: ReleaseAsset;
 }
@@ -26,13 +27,16 @@ const toAsset = (asset: GithubAsset): ReleaseAsset | null =>
     ? { name: asset.name, url: asset.browser_download_url, bytes: typeof asset.size === "number" ? asset.size : 0 }
     : null;
 
-/** Sorts a release's files into the four installers the download page offers. */
+/** Sorts a release's native artifacts into platform download links. */
 export function pickAssets(assets: GithubAsset[]): Omit<DownloadLinks, "tag" | "pageUrl"> {
   const files = assets.map(toAsset).filter((asset): asset is ReleaseAsset => asset !== null);
   const find = (test: (name: string) => boolean) => files.find((file) => test(file.name.toLowerCase()));
+  const macArm = find((name) => name.endsWith(".dmg") && (name.includes("arm64") || name.includes("aarch64")));
+  const macIntel = find((name) => name.endsWith(".dmg") && (name.includes("x86_64") || name.includes("x64")));
   return {
     extension: find((name) => name.startsWith("ai-notetaker-extension") && name.endsWith(".zip")),
-    mac: find((name) => name.endsWith(".dmg")),
+    mac: macArm ?? find((name) => name.endsWith(".dmg") && !name.includes("x86_64") && !name.includes("x64")),
+    macIntel,
     windows: find((name) => name.endsWith(".exe") || name.endsWith(".msi")),
     linux: find((name) => name.endsWith(".deb")),
   };

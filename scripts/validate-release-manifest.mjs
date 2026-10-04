@@ -73,14 +73,15 @@ export function validateManifest(manifest) {
     add(artifacts.length > 0, "published manifests must contain artifacts");
     add(Boolean(storeUrl || fallbackUrl), "published manifests must contain a Chrome Web Store URL or extension fallback ZIP URL");
     const expected = [
-      ["macos", "dmg"],
-      ["windows", "nsis"],
-      ["linux", "deb"],
+      ["macos", "dmg", "arm64"],
+      ["macos", "dmg", "x86_64"],
+      ["windows", "nsis", null],
+      ["linux", "deb", null],
     ];
-    for (const [platform, format] of expected) {
+    for (const [platform, format, architecture] of expected) {
       add(
-        artifacts.some((artifact) => artifact?.platform === platform && artifact?.format === format),
-        `published manifests must contain a ${platform} ${format} artifact`,
+        artifacts.some((artifact) => artifact?.platform === platform && artifact?.format === format && (!architecture || artifact?.architecture === architecture)),
+        `published manifests must contain a ${architecture ? `${architecture} ` : ""}${platform} ${format} artifact`,
       );
     }
   }

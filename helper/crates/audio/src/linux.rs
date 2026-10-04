@@ -153,8 +153,10 @@ impl AudioCapture for LinuxAudioCapture {
             platform: "linux".to_string(),
             driver: if native_monitor.is_some() {
                 "PipeWire/PulseAudio monitor"
-            } else {
+            } else if pactl_available {
                 SINK_DESCRIPTION
+            } else {
+                "Unavailable"
             }
             .to_string(),
             driver_installed,

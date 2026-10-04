@@ -10,7 +10,7 @@ export const SITE = {
   name: "AI Notetaker",
   tagline: "Meeting notes without the meeting bot.",
   description:
-    "AI Notetaker records Google Meet in Chrome and desktop calls (Zoom, Teams, Slack) from your own device, so no bot joins the call. It turns each meeting into a transcript, summary, decisions and action items. Use it free with your own AI keys, or let us run the AI for a flat monthly price.",
+    "AI Notetaker is moving to one cross-platform desktop app for setup, recording, and local meeting notes. Use your own AI provider keys; optional workspace sync sends finished note text without uploading raw audio or provider keys.",
   repoUrl: "https://github.com/apercallc/ai-notetaker",
   releasesUrl: "https://github.com/apercallc/ai-notetaker/releases/latest",
   licenseUrl: "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE",
@@ -57,13 +57,13 @@ export const FAQS: Faq[] = [
   {
     question: "Does AI Notetaker join my meeting as a bot?",
     answer:
-      "No. Google Meet is captured by the Chrome extension from your own browser tab and microphone. Zoom, Microsoft Teams, Slack huddles and other desktop calls are captured by a small native helper that records your microphone and system audio. Nothing is added to the participant list. You are still responsible for telling participants and following the recording-consent rules that apply to you.",
+      "No. The desktop app captures your microphone and system audio locally. Nothing joins the participant list. You are still responsible for telling participants and following the recording-consent rules that apply to you.",
   },
   {
     question: "What is the difference between Hosted AI and using my own keys?",
     topics: ["setup", "pricing"],
     answer:
-      "With Hosted AI we run the transcription and summaries for you and you pay one flat monthly price. With your own keys the software is free: you create accounts with the AI providers you prefer, paste in their keys, and pay those providers directly. No AI Notetaker account is needed. Recordings are saved on your device first in both modes, and you can switch in the extension's Settings at any time.",
+      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. If you want a cross-device library, you can separately sign in to a web-app workspace and create a revocable desktop sync token. That optional sync sends finished note text only.",
   },
   {
     question: "How much does AI Notetaker cost?",
@@ -79,7 +79,7 @@ export const FAQS: Faq[] = [
     question: "Will I lose my notes if I clear my browser history?",
     topics: ["setup"],
     answer:
-      "No. Clearing history, cookies or cache does not delete notes. With Hosted AI your notes are stored in your workspace, so only a sign-in is needed again. In local mode they are stored in the extension on your device: they stay unless you uninstall the extension, delete the Chrome profile, or lose the device, and we hold no copy. Sync to Hosted AI or your own history server, or export the notes you want to keep.",
+      "No. Desktop recordings and notes are stored in the app's private data folder, not browser storage. They stay on the device unless you delete them, remove the app data, or lose the device. If you enable workspace sync, finished note text also appears in that web-app workspace.",
   },
   {
     question: "Can I import a recording I already have?",
@@ -134,12 +134,12 @@ export const FAQS: Faq[] = [
     question: "Does it work with Zoom, Microsoft Teams and Slack?",
     topics: ["setup"],
     answer:
-      "Through the desktop helper for macOS, Windows or Linux, which captures your microphone and the meeting's system audio as two separate channels so \"you\" and \"everyone else\" stay distinct. The helper's audio check confirms your setup before you record. We are still verifying every app on every operating system, so please tell us if something does not work. Google Meet does not need the helper.",
+      "The desktop app captures your microphone and system audio as separate channels on macOS, Windows, and Linux. Its audio check confirms the available sources before you record. We are still verifying every app on every operating system, so please tell us if something does not work.",
   },
   {
-    question: "Do I need the desktop helper for Google Meet?",
+    question: "Do I need a browser extension?",
     topics: ["setup"],
-    answer: "No. The Chrome extension records Google Meet by itself. Add the helper only if you also meet in other desktop apps.",
+    answer: "No. The desktop app is intended to handle meeting audio directly. Public installers are still in development; existing extension users can continue using their current setup during migration.",
   },
   {
     question: "Is AI Notetaker open source?",
@@ -148,7 +148,7 @@ export const FAQS: Faq[] = [
   {
     question: "What happens if my browser or computer crashes mid-meeting?",
     answer:
-      "Audio is written to your device as it is captured, so a crash does not lose what was already recorded. The helper checks for an unfinished recording on startup and offers to resume it, and the extension restores an active Google Meet recording after a browser restart.",
+      "Audio is written to your device as it is captured, so a crash does not lose what was already recorded. The desktop app checks for unfinished recordings on startup and offers recovery.",
   },
   {
     question: "Can I delete my meetings and data?",
@@ -158,7 +158,7 @@ export const FAQS: Faq[] = [
   {
     question: "Which browsers are supported?",
     topics: ["setup"],
-    answer: "Google Chrome for the extension today. The desktop helper works with any meeting app on macOS, Windows and Linux.",
+    answer: "AI Notetaker is moving to a desktop app for macOS, Windows, and Linux. The app captures system audio, so it can work alongside supported meeting apps in a browser or on the desktop. Cross-platform acceptance is still in progress.",
   },
 ];
 

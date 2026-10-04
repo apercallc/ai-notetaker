@@ -7,7 +7,18 @@
     "frontendDist": "ui"
   },
   "app": {
-    "windows": [],
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "AI Notetaker",
+        "width": 1080,
+        "height": 760,
+        "minWidth": 780,
+        "minHeight": 620,
+        "resizable": true
+      }
+    ],
     "security": {
       "csp": null
     }
@@ -27,6 +38,11 @@
     },
     "linux": {
       "deb": {
+        "depends": [
+          "libasound2",
+          "librsvg2-2",
+          "pulseaudio-utils"
+        ],
         "postInstallScript": "scripts/debian/postinst",
         "postRemoveScript": "scripts/debian/postrm"
       }

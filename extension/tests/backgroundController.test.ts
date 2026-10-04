@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { BackgroundController, type NativeClientLike } from "../src/lib/backgroundController";
-import { getMeeting, saveMeeting, saveSettings, saveWidgetPosition } from "../src/lib/storage";
+import { getMeeting, saveMeeting, saveSettings, saveWidgetPosition, updateMeeting } from "../src/lib/storage";
 import { DEFAULT_SETTINGS } from "../src/types";
 import * as browserStorage from "../src/meet/browserStorage";
 import * as browserProcessing from "../src/meet/browserProcessing";
@@ -69,37 +69,41 @@ beforeEach(async () => {
 });
 
 describe("BackgroundController", () => {
-  it("checks local Meet providers before starting and warns while preserving local audio capture", async () => {
-    const broadcast = vi.fn();
-    const controller = new BackgroundController(createFakeClient(), broadcast);
+  it("keeps the older helper audio checks available for migration", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    expect(await controller.getAudioPreflight()).toMatchObject({ ready: true });
+    expect(await controller.runAudioProbe()).toMatchObject({ passed: true });
+    expect(client.getAudioPreflight).toHaveBeenCalledOnce();
+    expect(client.runAudioProbe).toHaveBeenCalledOnce();
+  });
+
+  it("records Meet without provider keys or a provider request, then keeps audio for desktop transfer", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
     const fetch = vi.fn(async () => new Response("", { status: 503 }));
     controller.setFetchImpl(fetch);
+    const process = vi.spyOn(browserProcessing, "processBrowserMeetRecording");
+    await controller.init();
+    const meetingId = await controller.startRecording("general", "meet");
+    expect(await getMeeting(meetingId)).toMatchObject({ status: "recording", recorderOnly: true });
+    await controller.stopRecording(meetingId);
+    expect(await getMeeting(meetingId)).toMatchObject({ status: "saved", recorderOnly: true, endedAt: expect.any(String) });
+    expect(process).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not call an older calendar connection for a new Meet recording", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
     await controller.init();
     await controller.saveSettings({
       ...DEFAULT_SETTINGS,
       consentDisclosureAcknowledged: true,
-      transcriptionProvider: "groq",
-      summarizationProvider: "gemini",
-      apiKeys: { groq: "gsk-test", gemini: "gemini-test" },
+      calendar: { provider: "google", clientId: "x", accessToken: "a", refreshToken: "r", expiresAt: new Date(Date.now() + 60_000).toISOString() },
     });
-
-    expect(await controller.startRecording("general", "meet")).toBe("");
-    expect(controller.getState().activeMeeting).toBeNull();
-    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
-      type: "RECORDING_ERROR",
-      recovery: "provider_preflight",
-      message: expect.stringContaining("Recording has not started"),
-    }));
-
-    const meetingId = await controller.startRecording("general", "meet", undefined, true);
-    const meeting = await getMeeting(meetingId);
-
-    expect(fetch).toHaveBeenCalledTimes(4);
-    expect(meeting).toMatchObject({
-      status: "recording",
-      providerPreflightWarning: expect.stringContaining("Groq: Groq could not check the key (HTTP 503)"),
-    });
-    expect(meeting?.providerPreflightWarning).toContain("audio will be saved on this device");
+    vi.mocked(findCurrentEvent).mockClear();
+    const meetingId = await controller.startRecording("general", "meet", "Meet call");
+    expect(meetingId).toBeTruthy();
+    expect(findCurrentEvent).not.toHaveBeenCalled();
   });
 
   it("explains that a Meet timeout produced no notes and keeps audio available for retry", async () => {
@@ -112,6 +116,7 @@ describe("BackgroundController", () => {
     await controller.init();
     await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
     const meetingId = await controller.startRecording("general", "meet");
+    await updateMeeting(meetingId, (meeting) => ({ ...meeting, recorderOnly: undefined }));
     clearChunks.mockClear();
 
     await controller.stopRecording(meetingId);
@@ -134,6 +139,7 @@ describe("BackgroundController", () => {
     await controller.init();
     await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
     const id = await controller.startRecording("general", "meet");
+    await updateMeeting(id, (meeting) => ({ ...meeting, recorderOnly: undefined }));
     const original = await getMeeting(id);
     await controller.stopRecording(id);
     expect(client.startRecording).not.toHaveBeenCalled();
@@ -154,6 +160,7 @@ describe("BackgroundController", () => {
     await controller.init();
     await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
     const id = await controller.startRecording("general", "meet");
+    await updateMeeting(id, (meeting) => ({ ...meeting, recorderOnly: undefined }));
 
     await controller.saveSettings({
       ...DEFAULT_SETTINGS,
@@ -185,6 +192,7 @@ describe("BackgroundController", () => {
     await controller.saveSettings(managedSettings);
     controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "hosted_pro", status: "active", used: 0, limit: 1_000, remaining: 1_000, canProcess: true, inPaymentGrace: false }), { status: 200 })));
     const id = await controller.startRecording("general", "meet");
+    await updateMeeting(id, (meeting) => ({ ...meeting, recorderOnly: undefined, processingMode: managedSettings.processingMode }));
 
     await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" } });
     await controller.stopRecording(id);
@@ -523,7 +531,7 @@ describe("BackgroundController", () => {
     await vi.waitFor(async () => expect(await getMeeting("stranded-meet")).toMatchObject({ status: "complete", summary: "Resumed" }));
   });
 
-  it("blocks managed recording before creating a meeting when hosted quota is unavailable", async () => {
+  it("lets Meet capture start without a hosted quota check", async () => {
     const broadcast = vi.fn();
     const controller = new BackgroundController(createFakeClient(), broadcast);
     await controller.init();
@@ -535,8 +543,10 @@ describe("BackgroundController", () => {
     });
     controller.setFetchImpl(vi.fn(async () => new Response(JSON.stringify({ plan: "local", status: "inactive", used: 0, limit: 0, remaining: 0, canProcess: false, inPaymentGrace: false }), { status: 200 })));
 
-    expect(await controller.startRecording("general", "meet")).toBe("");
-    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", recovery: "check_billing" }));
+    const id = await controller.startRecording("general", "meet");
+    expect(id).toBeTruthy();
+    expect(await getMeeting(id)).toMatchObject({ recorderOnly: true, processingMode: { kind: "local_byok" } });
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ recovery: "check_billing" }));
   });
 
   it("two overlapping start requests produce one recording, not two", async () => {
@@ -879,6 +889,7 @@ describe("BackgroundController", () => {
     const drive = { clientId: "client", accessToken: "token", expiresAt: Date.now() + 60_000 };
     await controller.saveSettings({ ...DEFAULT_SETTINGS, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg", claude: "cl" }, drive });
     const id = await controller.startRecording("general", "meet");
+    await updateMeeting(id, (meeting) => ({ ...meeting, recorderOnly: undefined }));
     await controller.stopRecording(id);
 
     await vi.waitFor(async () => expect((await getMeeting(id))?.driveExport?.status).toBe("exported"));
@@ -1254,15 +1265,13 @@ describe("BackgroundController", () => {
 });
 
 describe("BackgroundController: recovery and in-call widget support", () => {
-  it("refuses to record a Meet call without provider keys instead of failing after the call", async () => {
-    const broadcast = vi.fn();
-    const controller = new BackgroundController(createFakeClient(), broadcast);
+  it("records a Meet call without provider keys", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
     await controller.init();
     await controller.saveSettings({ ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, apiKeys: { deepgram: "dg" } });
 
-    expect(await controller.startRecording("general", "meet")).toBe("");
-
-    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "RECORDING_ERROR", phase: "start", recovery: "check_provider_key", message: expect.stringContaining("claude") }));
+    const id = await controller.startRecording("general", "meet");
+    expect(await getMeeting(id)).toMatchObject({ recorderOnly: true, status: "recording" });
   });
 
   it("uses the tab-derived title hint when no calendar event names the call", async () => {

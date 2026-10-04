@@ -67,7 +67,9 @@ model TranscriptSegment {
   userId    String
   speaker   String
   text      String   @db.Text
-  timestamp DateTime
+  // Native desktop transcripts keep segment order but do not invent provider
+  // timestamps when a provider returns text without timing metadata.
+  timestamp DateTime?
   order     Int
 
   meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
@@ -171,6 +173,7 @@ model Workspace {
   createdAt DateTime @default(now())
 
   memberships WorkspaceMembership[]
+  apiTokens ApiToken[]
   googleExtensionAuthCodes GoogleExtensionAuthCode[]
   uploads ManagedUpload[]
   processingJobs ProcessingJob[]
@@ -444,6 +447,7 @@ model LoginThrottle {
 model ApiToken {
   id         String    @id @default(uuid())
   userId     String
+  workspaceId String?
   tokenHash  String    @unique
   scope      String    @default("managed")
   label      String?
@@ -454,8 +458,10 @@ model ApiToken {
   revokedAt  DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([workspaceId])
   @@index([expiresAt])
 }
 

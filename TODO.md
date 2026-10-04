@@ -1,5 +1,181 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Google Meet recorder extension — 2026-10-04
+
+- [x] Make new extension Meet sessions audio-only: save separate mic/call PCM,
+      stop in a saved state, and skip browser provider checks and processing.
+- [x] Limit new extension start controls to Google Meet; move provider controls
+      out of active setup/settings while preserving previous settings and notes.
+- [x] Expose full archive export for desktop import and accept the saved audio
+      state in desktop migration. Keep source browser data after export.
+- [ ] Verify the complete flow in an installed Chrome extension and live Google
+      Meet call: record, stop, export `.ntarchive`, import in the desktop app,
+      and create notes with real desktop provider keys. Unit tests and a build
+      do not prove browser capture or provider processing.
+- [ ] Decide whether to add automatic extension-to-desktop handoff after the
+      manual archive path passes end-to-end acceptance.
+
+Local gate: extension typecheck, 640 tests, 91.83% statement / 83.10% branch /
+90.34% function coverage, and build pass. Helper fmt, Clippy, and workspace
+tests pass, including saved-state desktop import parsing. The optional synthetic
+browser smoke now connects its fake peer call after an ICE fixture fix, but its
+direct capture attempt fell back to tab capture and Chrome rejected the missing
+toolbar invocation. The smoke therefore does not prove recording. No live Meet
+call or real archive import was completed.
+
+## Desktop-first app migration — 2026-10-03
+
+Approved direction: one Tauri desktop app owns setup, capture, and local notes;
+web-app sync is optional. The primary Tauri window and local
+recording/history controls run in a development build on this Mac, and
+optimized Apple silicon and Intel Mac app/DMG artifacts build locally. The
+release workflow now builds both Mac architectures; cross-platform installers
+are not published, and the extension remains supported. Local BYOK requires no
+browser extension or AI Notetaker login. The migration is tracked in
+[`docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md`](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md).
+The one-app workflow is not shipped.
+
+- [x] Add the primary Tauri window, setup controls, audio readiness, record/stop,
+      and local meeting history. Development UI inspected on this Mac.
+- [x] Keep a typed recording title and Notes search/focus through background
+      refreshes; show interrupted audio and processing on Record, and label
+      permission-related audio setup separately. Distinguish an empty library
+      from no search matches, reopen selected notes, and reject repeated Stop clicks.
+      Native transitions through all of these states remain to be checked.
+- [x] Keep Start disabled until provider keys, audio readiness, and the recording
+      consent checkbox are satisfied; preserve the checkbox through status
+      refreshes and clear it when leaving the Record page or starting a call.
+- [x] Verify the Settings screen and desktop archive picker on this Mac. Fix a
+      template-literal bug that left record content visible under the Settings
+      header; opening and canceling the archive picker changed no data.
+- [x] Add account-free BYOK provider selection, key checks, and OS credential
+      storage. No real provider key was entered or tested.
+- [x] Export/import portable provider preferences without exporting API keys.
+      Users re-enter provider keys in desktop Settings; web-app and Google
+      credentials remain separate and extension settings are not deleted.
+- [x] Reuse local capture, raw-audio persistence, transcript, and summary pipeline.
+- [x] Add a one-click macOS Screen Recording settings shortcut when native
+      system audio is unavailable. The user grants access; the app never does.
+- [x] Build the optimized macOS Tauri app and guided DMG locally. The DMG
+      checksum verifies, the ad-hoc signature and installer checks pass, and
+      macOS CI now disables release stripping that produced unloadable Rust
+      proc-macro libraries on this Mac's macOS 27 toolchain.
+- [x] Add Intel Mac release builds and architecture-specific download links.
+      The x86_64 app bundle and guided DMG build on this Apple silicon Mac;
+      the binary is x86_64 and the DMG checksum verifies. Intel hardware launch
+      and capture remain unverified.
+- [x] Add workspace-bound `desktop_notes_sync` API tokens and authenticated
+      `/api/v1/desktop-sync` endpoints. Tokens are revocable from web-app
+      Settings → Integrations and recheck workspace membership on each request.
+- [x] Store the sync token in the OS credential vault; sync finished text only,
+      with a durable ID-only outbox, restart retry, existing-note sync, and
+      visible status. Raw audio and provider keys never leave the device.
+- [x] Allow nullable transcript timestamps so sync preserves segment order
+      without inventing times. Existing exports and Google/Notion outputs handle
+      untimed segments.
+- [ ] Verify against a real web-app workspace/token and prove recovery after a
+      network failure and app restart. Automated route and outbox tests pass.
+- [x] Add local history detail/delete and open-notes-folder controls.
+- [x] Add a desktop Notes action to resume crash-interrupted recordings through
+      the existing BYOK retry pipeline, with duplicate recovery guarded.
+- [x] Add bounded (20 MB) note-text and preference transfer. It preserves
+      partial transcripts, source state, timestamps, and action-item state,
+      skips duplicate IDs, and leaves extension data untouched. Keys/tokens,
+      Google connections, and raw audio remain in the extension.
+- [x] Add a streamed `.ntarchive` export/import for notes, preferences, and raw
+      Meet PCM still retained by the extension. Each chunk has a CRC; import
+      stores mic/speaker PCM separately and never deletes extension data.
+      Completed Meet audio was already removed after note processing, so only
+      its text can transfer.
+- [x] Add a desktop action that copies imported mic/speaker audio into a new
+      note before recovery. Keep the original transcript, summary, and audio
+      unchanged; repeated requests reuse the same copy.
+- [ ] Verify a real imported archive through that action with BYOK keys and
+      usable system audio. The live Mac has neither configured yet.
+- [x] Keep desktop download links from auto-opening legacy extension setup;
+      make macOS install succeed when the optional legacy browser bridge is
+      missing or cannot register.
+- [x] Update privacy, data-handling, deployment, and installer docs so the
+      desktop app is the current local-data path and Native Messaging/extension
+      storage are clearly identified as legacy migration paths.
+- [ ] Inventory real extension IndexedDB audio and in-flight records. The
+      active Chrome extension ID has no IndexedDB directory in the checked
+      `Default` profile; its Local Extension Settings store is 457 bytes. The
+      profile has other unattributed, unmodified IndexedDB origins, so this is
+      not proof that historical recordings are absent from another ID/profile.
+      The streamed archive path and shared golden fixture pass, but a real
+      Chrome export/import and imported-audio reprocessing remain unverified.
+- [ ] Keep Native Messaging compatibility until desktop and migration
+      acceptance gates pass; only then retire extension setup and packaging.
+- [ ] Verify fresh install and real capture on macOS, Windows, and Linux.
+
+Verified in the latest pass: Apple silicon and x86_64 Mac release app/DMG builds;
+the x86_64 DMG checksum and seven installer regression tests pass. The webapp
+passes lint, strict typecheck, 801 PostgreSQL-backed tests, and production build;
+its measured coverage scope is 90.09% statements and 83.60% branches;
+release-manifest tests pass (7/7) and workflow YAML parses. Extension
+typecheck, 647 tests, 92.03% statement and 83.24% branch coverage, and build pass. Helper fmt,
+Clippy, and 248 workspace tests pass; the recovered-audio provider retry test
+survives a fresh pipeline restart. The desktop binary builds with a command-local
+MacOS 26.5 SDK and Swift-library path because this Mac's Command Line Tools do
+not install `XcodeDefault.xctoolchain`; system developer settings were not
+changed. The development app Settings screen
+opened on this Mac and its archive picker opened and canceled cleanly. No
+archive was imported through the live UI, and no real audio, provider key,
+web-app token, Windows, Linux audio-runtime, release, or deployment acceptance
+is claimed.
+The download page was also rendered at desktop and 390px widths against the
+currently published release. Its Intel card correctly stays unavailable until
+the new x86_64 artifact is published.
+The current `/Applications/AI Notetaker.app` is still the older tray-only bundle
+(`LSUIElement=true`). The rebuilt worktree debug bundle opens the desktop window
+and shows the expected first-run state. A fresh 0.17.0 arm64 DMG from current
+source verifies, has a valid ad-hoc signature and `LSUIElement=false`, and opens
+its desktop window directly from the mounted image. It was not installed over
+the user's app. No keys were entered or permissions granted.
+The Rust workspace also passes fmt, Clippy, and tests in a disposable Linux
+ARM64 container. That proves Linux compilation and unit behavior, not capture
+on Linux audio hardware. A Windows GNU workspace cross-check also passes,
+including WASAPI, Tauri, and the Windows keyring backend. A native MSVC build,
+Windows installer, and physical Windows runtime remain unverified; this Mac
+lacks the MSVC toolchain and Windows SDK headers.
+
+The initial Mac launch stall traced to CPAL probing supported input formats
+across all CoreAudio devices during diagnostics. Discovery now scans device
+names without probing streams; stream checks remain in explicit capture
+startup. The fresh debug app reaches its loaded UI. Its Settings screen and
+extension archive import entry were also checked. This Mac still reports
+system-audio capture unavailable until Screen Recording access is granted or
+BlackHole is installed, so no capture path was exercised. Audio status labels
+now say `Unavailable` when neither a native nor fallback route is detected.
+The rebuilt debug bundle was reopened and inspected after the copy change; its
+audio card now shows `macOS audio`, `Unavailable`, and only the Screen Recording
+or BlackHole steps relevant to this Mac.
+
+## macOS install and OAuth follow-up — 2026-10-03
+
+- [x] Install the 0.17.0 helper and register its Native Messaging host for
+      Chrome and Brave on this Mac.
+- [x] Request Chrome's optional `identity` permission before checking for
+      `chrome.identity`; a regression test reproduces the old unsupported-browser
+      error when the permission is missing.
+- Verified: extension typecheck, 638 tests, 91.76% statement coverage, build;
+      helper fmt, Clippy, and workspace tests. Chrome must reload the rebuilt
+      unpacked extension before live OAuth and helper checks.
+- [ ] Verify Chrome helper detection, Google Calendar/Drive connection, and
+      capture on this Mac.
+
+## API-key-only extension setup — 2026-10-03
+
+- [x] Remove Hosted AI/email and Google SSO from extension onboarding and
+      Settings; guide users to provider key pages and test both keys.
+- [x] Migrate saved processing mode at service-worker startup so the popup,
+      Meet widget, and desktop flow all use provider API keys for new recordings.
+      Preserve existing sessions and per-recording snapshots for in-flight jobs.
+- Verified: extension typecheck, 638 tests, 91.79% statement coverage, and
+      production build. No live Chrome interaction or provider-key purchase was
+      repeated after rebuilding; reload `extension/dist` before trying it.
+
 ## Meet start without toolbar invocation — 2026-10-02
 
 - [x] Trace the extra toolbar click to Chrome's tabCapture invocation gate and
@@ -1380,6 +1556,10 @@ Consciously deferred (why):
       accounts/devices and a published release.
 - [x] Fix Hosted AI account creation links to select the signup tab and keep
       managed request timeouts active through response-body parsing and retry.
+- [x] Make extension onboarding and Settings API-key-only: remove Hosted AI and
+      Google sign-in, link directly to provider key pages, test keys in setup,
+      and migrate saved processing mode for new recordings while preserving
+      historical recording snapshots.
 - [x] Bound pending and retained managed audio per workspace under a shared
       database lock; reject chunk retries that exceed declared upload bytes.
 - [x] Remove production inline-script CSP permission by using per-request

@@ -351,6 +351,7 @@ fn segments_from_alternative(
             speaker: "you".into(),
             text: transcript,
             is_final,
+            timestamp: None,
         }];
     }
 
@@ -365,6 +366,7 @@ fn segments_from_alternative(
             speaker: "them".into(),
             text: transcript,
             is_final,
+            timestamp: None,
         }],
     }
 }
@@ -388,6 +390,7 @@ fn group_by_speaker(words: &[Value], is_final: bool) -> Vec<TranscriptSegment> {
                     speaker: speaker_label(idx),
                     text: current_text.trim().to_string(),
                     is_final,
+                    timestamp: None,
                 });
             }
             current_speaker_idx = Some(speaker_idx);
@@ -401,6 +404,7 @@ fn group_by_speaker(words: &[Value], is_final: bool) -> Vec<TranscriptSegment> {
             speaker: speaker_label(idx),
             text: current_text.trim().to_string(),
             is_final,
+            timestamp: None,
         });
     }
     segments
@@ -476,7 +480,8 @@ mod tests {
             vec![TranscriptSegment {
                 speaker: "you".into(),
                 text: "hello wor".into(),
-                is_final: false
+                is_final: false,
+                timestamp: None,
             }]
         );
     }
@@ -493,7 +498,8 @@ mod tests {
             vec![TranscriptSegment {
                 speaker: "you".into(),
                 text: "hello world".into(),
-                is_final: true
+                is_final: true,
+                timestamp: None,
             }]
         );
     }
@@ -622,7 +628,8 @@ mod tests {
             vec![TranscriptSegment {
                 speaker: "you".into(),
                 text: "hello there".into(),
-                is_final: true
+                is_final: true,
+                timestamp: None,
             }]
         );
     }
@@ -668,7 +675,8 @@ mod tests {
             vec![TranscriptSegment {
                 speaker: "them".into(),
                 text: "just one voice".into(),
-                is_final: true
+                is_final: true,
+                timestamp: None,
             }]
         );
     }

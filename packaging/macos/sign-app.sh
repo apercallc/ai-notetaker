@@ -10,7 +10,7 @@ identifier=$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$app/Contents
   echo "Unexpected app identifier" >&2
   exit 1
 }
-[[ ! -L "$app" && -x "$app/Contents/MacOS/notetaker-nm-host" ]] || exit 1
+[[ ! -L "$app" && -x "$app/Contents/MacOS/notetaker-helper" ]] || exit 1
 
 # Sign nested Mach-O code before the outer bundle. Do not use --deep to sign:
 # it can hide missing or incorrectly placed nested components.

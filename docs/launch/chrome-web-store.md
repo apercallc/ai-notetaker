@@ -1,5 +1,10 @@
 # Chrome Web Store: step by step
 
+> **Legacy extension listing draft.** New users should install the standalone
+> Tauri desktop app when its installers are published. This checklist records
+> the old extension-led submission flow; re-audit every permission and remove
+> obsolete Hosted AI sign-in steps before any extension resubmission.
+
 Everything you paste is in this file. Budget about an hour for the dashboard,
 then wait for review (a first submission commonly takes a few days, sometimes
 longer; later updates are usually faster).

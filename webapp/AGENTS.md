@@ -3,6 +3,10 @@
 Read [`../CLAUDE.md`](../CLAUDE.md) and [`../AGENTS.md`](../AGENTS.md) before
 changing the optional self-hosted history app.
 
+The desktop app may sync finalized notes to the authenticated API. Preserve
+that optional, token-scoped client contract; local recording and provider
+processing must not depend on webapp availability or login.
+
 This app supports both a user-operated self-hosted history deployment and the
 project-operated managed AI service. Self-hosted BYOK deployments may remain
 storage/display-only; managed workers use server-side provider secrets and

@@ -41,6 +41,12 @@ pub enum MeetingState {
 pub struct MeetingMeta {
     pub id: Uuid,
     #[serde(default)]
+    pub text_only_import: bool,
+    #[serde(default)]
+    pub extension_source_status: Option<String>,
+    #[serde(default)]
+    pub reprocessed_from: Option<Uuid>,
+    #[serde(default)]
     pub title: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
@@ -105,6 +111,19 @@ pub struct UnreadableMeeting {
 pub struct MeetingScan {
     pub readable: Vec<MeetingMeta>,
     pub unreadable: Vec<UnreadableMeeting>,
+}
+
+/// Fully validated text-only meeting supplied by an explicit data import.
+#[derive(Debug, Clone)]
+pub struct ImportedMeetingNote {
+    pub id: Uuid,
+    pub title: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub extension_source_status: String,
+    pub mode: MeetingMode,
+    pub transcript: Vec<TranscriptSegment>,
+    pub summary: Option<Summary>,
 }
 
 /// `meta.json` is a read-modify-write document updated from several tasks
@@ -179,6 +198,9 @@ impl MeetingStore {
         fs::create_dir_all(&dir)?;
         let meta = MeetingMeta {
             id,
+            text_only_import: false,
+            extension_source_status: None,
+            reprocessed_from: None,
             title: None,
             started_at,
             ended_at: None,
@@ -199,6 +221,297 @@ impl MeetingStore {
         self.write_meta(&meta)
     }
 
+    /// Atomically adds a text-only note imported from another client.
+    /// Existing ids are never overwritten; the extension keeps its source copy.
+    pub fn import_text_only_note(&self, note: ImportedMeetingNote) -> Result<bool, StorageError> {
+        let target = self.meeting_dir(note.id);
+        if target.exists() {
+            return Ok(false);
+        }
+
+        let staging = self
+            .root
+            .join(format!(".desktop-import-{}-{}", note.id, Uuid::new_v4()));
+        fs::create_dir(&staging)?;
+        let meta = MeetingMeta {
+            id: note.id,
+            text_only_import: true,
+            extension_source_status: Some(note.extension_source_status),
+            reprocessed_from: None,
+            title: Some(note.title.trim().chars().take(200).collect()),
+            started_at: note.started_at,
+            ended_at: note.ended_at,
+            state: MeetingState::Processed,
+            summary_options: SummaryOptions {
+                mode: note.mode,
+                ..SummaryOptions::default()
+            },
+            transcribed_mic_bytes: 0,
+            transcribed_speaker_bytes: 0,
+            mic_sample_rate_hz: default_sample_rate(),
+            speaker_sample_rate_hz: default_sample_rate(),
+            summary_pending: false,
+            managed_pending: false,
+            managed_job_id: None,
+            managed_upload_id: None,
+            managed_next_chunk: 0,
+            managed_account_id: None,
+            managed_workspace_id: None,
+        };
+
+        let write_result = (|| -> Result<(), StorageError> {
+            atomic_write(
+                &staging.join("meta.json"),
+                &serde_json::to_vec_pretty(&meta)?,
+            )?;
+            atomic_write(
+                &staging.join("transcript.json"),
+                &serde_json::to_vec_pretty(&note.transcript)?,
+            )?;
+            if let Some(summary) = &note.summary {
+                atomic_write(
+                    &staging.join("summary.json"),
+                    &serde_json::to_vec_pretty(summary)?,
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+
+        match fs::rename(&staging, &target) {
+            Ok(()) => Ok(true),
+            Err(_error) if target.exists() => {
+                let _ = fs::remove_dir_all(&staging);
+                Ok(false)
+            }
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging);
+                Err(StorageError::Io(error))
+            }
+        }
+    }
+
+    /// Imports a portable note with its original browser-captured PCM tracks.
+    /// Source files are copied into a private staging directory and committed
+    /// with one rename; the transfer source is never modified.
+    pub fn import_note_with_audio(
+        &self,
+        note: ImportedMeetingNote,
+        mic_audio: Option<&Path>,
+        speaker_audio: Option<&Path>,
+        sample_rate_hz: u32,
+    ) -> Result<bool, StorageError> {
+        let target = self.meeting_dir(note.id);
+        if target.exists() {
+            return Ok(false);
+        }
+        if mic_audio.is_none() && speaker_audio.is_none() {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "audio archive meeting has no audio tracks",
+            )));
+        }
+        if !(8_000..=192_000).contains(&sample_rate_hz) {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "audio archive contains an unsupported sample rate",
+            )));
+        }
+
+        let staging = self
+            .root
+            .join(format!(".desktop-import-{}-{}", note.id, Uuid::new_v4()));
+        fs::create_dir(&staging)?;
+        let meta = MeetingMeta {
+            id: note.id,
+            text_only_import: false,
+            extension_source_status: Some(note.extension_source_status),
+            reprocessed_from: None,
+            title: Some(note.title.trim().chars().take(200).collect()),
+            started_at: note.started_at,
+            ended_at: note.ended_at,
+            state: MeetingState::Processed,
+            summary_options: SummaryOptions {
+                mode: note.mode,
+                ..SummaryOptions::default()
+            },
+            transcribed_mic_bytes: 0,
+            transcribed_speaker_bytes: 0,
+            mic_sample_rate_hz: sample_rate_hz,
+            speaker_sample_rate_hz: sample_rate_hz,
+            summary_pending: false,
+            managed_pending: false,
+            managed_job_id: None,
+            managed_upload_id: None,
+            managed_next_chunk: 0,
+            managed_account_id: None,
+            managed_workspace_id: None,
+        };
+
+        let write_result = (|| -> Result<(), StorageError> {
+            atomic_write(
+                &staging.join("meta.json"),
+                &serde_json::to_vec_pretty(&meta)?,
+            )?;
+            atomic_write(
+                &staging.join("transcript.json"),
+                &serde_json::to_vec_pretty(&note.transcript)?,
+            )?;
+            if let Some(summary) = &note.summary {
+                atomic_write(
+                    &staging.join("summary.json"),
+                    &serde_json::to_vec_pretty(summary)?,
+                )?;
+            }
+            for (source, name) in [(mic_audio, MIC_FILE), (speaker_audio, SPEAKER_FILE)] {
+                if let Some(source) = source {
+                    let metadata = fs::symlink_metadata(source)?;
+                    if !metadata.file_type().is_file()
+                        || metadata.len() == 0
+                        || metadata.len() % 2 != 0
+                    {
+                        return Err(StorageError::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "audio archive contains an invalid PCM track",
+                        )));
+                    }
+                    fs::copy(source, staging.join(name))?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+
+        match fs::rename(&staging, &target) {
+            Ok(()) => Ok(true),
+            Err(_error) if target.exists() => {
+                let _ = fs::remove_dir_all(&staging);
+                Ok(false)
+            }
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging);
+                Err(StorageError::Io(error))
+            }
+        }
+    }
+
+    /// Creates one independent desktop recording from an imported extension
+    /// capture. The original note, transcript, summary, and audio stay intact.
+    /// Repeated requests return the existing copy instead of duplicating it.
+    pub fn create_extension_audio_reprocess_copy(
+        &self,
+        source_id: Uuid,
+    ) -> Result<Uuid, StorageError> {
+        let source = self.load_meta(source_id)?;
+        if source.text_only_import
+            || source.extension_source_status.is_none()
+            || source.reprocessed_from.is_some()
+        {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "meeting is not an imported extension audio source",
+            )));
+        }
+        if let Some(existing) = self
+            .scan_meetings()?
+            .readable
+            .into_iter()
+            .find(|meta| meta.reprocessed_from == Some(source_id))
+        {
+            return Ok(existing.id);
+        }
+
+        let source_dir = self.meeting_dir(source_id);
+        let tracks = [(MIC_FILE, "mic.pcm"), (SPEAKER_FILE, "speaker.pcm")];
+        let mut available = Vec::new();
+        for (file, name) in tracks {
+            let path = source_dir.join(file);
+            match fs::symlink_metadata(&path) {
+                Ok(metadata)
+                    if metadata.file_type().is_file()
+                        && metadata.len() > 0
+                        && metadata.len() % 2 == 0 =>
+                {
+                    available.push((path, name));
+                }
+                Ok(_) => {
+                    return Err(StorageError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "imported audio track is invalid",
+                    )));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(StorageError::Io(error)),
+            }
+        }
+        if available.is_empty() {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "imported audio was not found",
+            )));
+        }
+
+        let id = Uuid::new_v4();
+        let staging = self.root.join(format!(".desktop-reprocess-{id}"));
+        fs::create_dir(&staging)?;
+        let mut title = source
+            .title
+            .clone()
+            .unwrap_or_else(|| "Imported meeting".into());
+        title.push_str(" (desktop notes)");
+        title = title.chars().take(200).collect();
+        let meta = MeetingMeta {
+            id,
+            text_only_import: false,
+            extension_source_status: source.extension_source_status.clone(),
+            reprocessed_from: Some(source_id),
+            title: Some(title),
+            started_at: source.started_at,
+            ended_at: None,
+            state: MeetingState::Recording,
+            summary_options: source.summary_options,
+            transcribed_mic_bytes: 0,
+            transcribed_speaker_bytes: 0,
+            mic_sample_rate_hz: source.mic_sample_rate_hz,
+            speaker_sample_rate_hz: source.speaker_sample_rate_hz,
+            summary_pending: false,
+            managed_pending: false,
+            managed_job_id: None,
+            managed_upload_id: None,
+            managed_next_chunk: 0,
+            managed_account_id: None,
+            managed_workspace_id: None,
+        };
+        let write_result = (|| -> Result<(), StorageError> {
+            atomic_write(
+                &staging.join("meta.json"),
+                &serde_json::to_vec_pretty(&meta)?,
+            )?;
+            atomic_write(&staging.join("transcript.json"), b"[]")?;
+            for (source, name) in available {
+                fs::copy(source, staging.join(name))?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+        match fs::rename(&staging, self.meeting_dir(id)) {
+            Ok(()) => Ok(id),
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging);
+                Err(StorageError::Io(error))
+            }
+        }
+    }
+
     pub fn create_meeting_with_options(
         &self,
         id: Uuid,
@@ -211,6 +524,9 @@ impl MeetingStore {
         fs::create_dir_all(&dir)?;
         let meta = MeetingMeta {
             id,
+            text_only_import: false,
+            extension_source_status: None,
+            reprocessed_from: None,
             title: None,
             started_at,
             ended_at: None,
@@ -1170,6 +1486,120 @@ mod tests {
     }
 
     #[test]
+    fn imported_extension_audio_keeps_channels_and_never_overwrites_existing_notes() {
+        let (dir, store) = temp_store();
+        let mic_path = dir.path().join("source-mic.pcm");
+        let speaker_path = dir.path().join("source-speaker.pcm");
+        fs::write(&mic_path, [1, 2, 3, 4]).unwrap();
+        fs::write(&speaker_path, [5, 6]).unwrap();
+        let id = Uuid::new_v4();
+        let note = ImportedMeetingNote {
+            id,
+            title: "Imported meeting".into(),
+            started_at: Utc::now(),
+            ended_at: None,
+            extension_source_status: "error".into(),
+            mode: MeetingMode::General,
+            transcript: vec![],
+            summary: None,
+        };
+
+        assert!(store
+            .import_note_with_audio(note.clone(), Some(&mic_path), Some(&speaker_path), 48_000)
+            .unwrap());
+        assert!(!store
+            .import_note_with_audio(note, Some(&speaker_path), Some(&mic_path), 48_000)
+            .unwrap());
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meta.state, MeetingState::Processed);
+        assert!(!meta.text_only_import);
+        assert_eq!(meta.extension_source_status.as_deref(), Some("error"));
+        assert_eq!(meta.mic_sample_rate_hz, 48_000);
+        assert_eq!(meta.speaker_sample_rate_hz, 48_000);
+        assert_eq!(
+            fs::read(store.audio_path(id, MIC_FILE)).unwrap(),
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            fs::read(store.audio_path(id, SPEAKER_FILE)).unwrap(),
+            [5, 6]
+        );
+    }
+
+    #[test]
+    fn reprocessing_imported_audio_creates_an_idempotent_copy_and_preserves_source_notes() {
+        let (dir, store) = temp_store();
+        let mic_path = dir.path().join("source-mic.pcm");
+        let speaker_path = dir.path().join("source-speaker.pcm");
+        fs::write(&mic_path, [1, 2, 3, 4]).unwrap();
+        fs::write(&speaker_path, [5, 6]).unwrap();
+        let source_id = Uuid::new_v4();
+        let source_transcript = vec![TranscriptSegment {
+            speaker: "you".into(),
+            text: "Original extension transcript".into(),
+            is_final: true,
+            timestamp: Some(Utc::now().to_rfc3339()),
+        }];
+        let source_summary = Summary {
+            summary: "Original extension summary".into(),
+            action_items: vec![],
+        };
+        store
+            .import_note_with_audio(
+                ImportedMeetingNote {
+                    id: source_id,
+                    title: "Imported meeting".into(),
+                    started_at: Utc::now(),
+                    ended_at: None,
+                    extension_source_status: "processing".into(),
+                    mode: MeetingMode::General,
+                    transcript: source_transcript.clone(),
+                    summary: Some(source_summary.clone()),
+                },
+                Some(&mic_path),
+                Some(&speaker_path),
+                48_000,
+            )
+            .unwrap();
+
+        let copy_id = store
+            .create_extension_audio_reprocess_copy(source_id)
+            .unwrap();
+        assert_ne!(copy_id, source_id);
+        assert_eq!(
+            store
+                .create_extension_audio_reprocess_copy(source_id)
+                .unwrap(),
+            copy_id
+        );
+        assert_eq!(store.load_transcript(source_id).unwrap(), source_transcript);
+        assert_eq!(store.load_summary(source_id).unwrap(), Some(source_summary));
+        assert!(store.load_transcript(copy_id).unwrap().is_empty());
+        assert!(store.load_summary(copy_id).unwrap().is_none());
+        let copy = store.load_meta(copy_id).unwrap();
+        assert_eq!(copy.state, MeetingState::Recording);
+        assert_eq!(copy.reprocessed_from, Some(source_id));
+        assert_eq!(copy.transcribed_mic_bytes, 0);
+        assert_eq!(copy.transcribed_speaker_bytes, 0);
+        assert_eq!(
+            fs::read(store.audio_path(copy_id, MIC_FILE)).unwrap(),
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            fs::read(store.audio_path(copy_id, SPEAKER_FILE)).unwrap(),
+            [5, 6]
+        );
+        assert_eq!(
+            fs::read(store.audio_path(source_id, MIC_FILE)).unwrap(),
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            fs::read(store.audio_path(source_id, SPEAKER_FILE)).unwrap(),
+            [5, 6]
+        );
+    }
+
+    #[test]
     fn audio_len_reads_metadata_without_loading_the_channel() {
         let (_dir, store) = temp_store();
         let id = Uuid::new_v4();
@@ -1359,6 +1789,7 @@ mod tests {
                     speaker: "you".into(),
                     text: "first".into(),
                     is_final: true,
+                    timestamp: None,
                 },
             )
             .unwrap();
@@ -1369,6 +1800,7 @@ mod tests {
                     speaker: "them".into(),
                     text: "second".into(),
                     is_final: true,
+                    timestamp: None,
                 },
             )
             .unwrap();
@@ -1647,11 +2079,13 @@ mod tests {
                         speaker: "You".into(),
                         text: " Ship it. ".into(),
                         is_final: true,
+                        timestamp: None,
                     },
                     TranscriptSegment {
                         speaker: "Them".into(),
                         text: "partial".into(),
                         is_final: false,
+                        timestamp: None,
                     },
                 ],
             )
@@ -1665,10 +2099,12 @@ mod tests {
                         crate::native_messaging::ActionItem {
                             text: "Send notes".into(),
                             owner: Some("Sam".into()),
+                            ..crate::native_messaging::ActionItem::default()
                         },
                         crate::native_messaging::ActionItem {
                             text: "Book venue".into(),
                             owner: None,
+                            ..crate::native_messaging::ActionItem::default()
                         },
                     ],
                 },

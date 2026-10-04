@@ -38,7 +38,7 @@ describe("auto-record attempts survive a service-worker restart", () => {
 describe("maybeAutoStartMeetRecording", () => {
   it("explains that one toolbar click completes Chrome's first-use gate", () => {
     expect(MEET_AUTO_RECORD_GUIDANCE).toContain("click the AI Notetaker toolbar icon once");
-    expect(MEET_AUTO_RECORD_GUIDANCE).toContain("no extra Start notes step");
+    expect(MEET_AUTO_RECORD_GUIDANCE).toContain("no extra Start recording step");
   });
 
   it("defaults auto-record on while keeping disclosure and share off and opening notes on", () => {

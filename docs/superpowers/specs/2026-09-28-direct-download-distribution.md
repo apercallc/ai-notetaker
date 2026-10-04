@@ -1,7 +1,8 @@
 # Direct-download distribution and marketing site
 
 Date: 2026-09-28  
-Status: Current product direction
+Status: Distribution reference; extension-led product decisions are superseded
+by the desktop-first product design in `2026-10-03-desktop-first-product-design.md`.
 
 ## Product decision
 
@@ -10,15 +11,16 @@ explains what the product does, presents real product value without invented
 testimonials, and links each visitor to the platform artifact published in the
 latest GitHub Release.
 
-The Chrome extension is the short path for Google Meet. Desktop-call capture
-uses the native Tauri helper for Zoom, Teams, Slack, and other desktop apps.
-The optional webapp stores history; it is not part of desktop capture.
+The Tauri desktop app is the primary install for setup, capture, and local
+notes. The Chrome extension remains a migration path for existing users. The
+optional web app stores synced note history; it is not required for capture.
 
 ## Primary download targets
 
 | Visitor device | Artifact | First release guidance |
 | --- | --- | --- |
-| Mac with Apple silicon (M1 or later) | Apple-silicon DMG | Drag to Applications, then Control-click → Open on first launch. |
+| Mac with Apple silicon (M1 or later) | Apple-silicon DMG | Guided DMG installer; unsigned-install guidance applies. |
+| Intel Mac | Intel DMG | Guided DMG installer; unsigned-install guidance applies. |
 | Windows 64-bit | x86_64 NSIS installer | If SmartScreen appears, check the official release and SHA-256, then More info → Run anyway for that installer. |
 | Debian/Ubuntu Linux 64-bit | x86_64 `.deb` | Open in Software Install or install the downloaded file with `sudo apt install ./<file>.deb`. |
 
@@ -46,7 +48,8 @@ publication must not depend on extension-store publication.
 
 ## Release contract
 
-- Build an Apple-silicon Tauri DMG with target `aarch64-apple-darwin`.
+- Build Apple-silicon and Intel Tauri DMGs with targets `aarch64-apple-darwin`
+  and `x86_64-apple-darwin`.
 - Build the Windows 64-bit NSIS installer for the primary download.
 - Build and promote the Linux 64-bit `.deb` because it registers a stable
   Native Messaging relay. Do not publish AppImage until a stable

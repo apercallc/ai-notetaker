@@ -1,5 +1,4 @@
 import type { BrowserAudioChannel } from "../types";
-import { getSettings } from "../lib/storage";
 import { MIC_PERMISSION_HINT } from "./hints";
 import { meetingCodeFromPath } from "./meetContext";
 import { bounded, validSdp, validSession, type DirectReply, type DirectRequest } from "./directProtocol";
@@ -169,21 +168,6 @@ export class MeetCaptureController {
     await this.prepare(tabId);
   }
 
-  /**
-   * The offscreen document only gets chrome.runtime, not chrome.storage, so the
-   * worker hands it the one credential live captions need (only in local BYOK
-   * mode with Deepgram selected). Any failure just means no live captions.
-   */
-  private async liveDeepgramKey(): Promise<string | null> {
-    try {
-      const settings = await getSettings();
-      const key = settings.apiKeys.deepgram?.trim() ?? "";
-      return settings.processingMode.kind === "local_byok" && settings.transcriptionProvider === "deepgram" && key ? key : null;
-    } catch {
-      return null;
-    }
-  }
-
   async start(tabId: number, meetingId: string): Promise<void> {
     if (this.starting) {
       if (this.starting.meetingId !== meetingId) throw new Error("Another Meet recording is starting.");
@@ -200,8 +184,6 @@ export class MeetCaptureController {
     const assertCurrent = () => { if (start.cancelled) throw new Error("Meet recording start was cancelled."); };
     const { url, streamId, documentKey } = await this.prepare(tabId, preferDirect);
     assertCurrent();
-    const liveDeepgramKey = await this.liveDeepgramKey();
-    assertCurrent();
     // The offscreen page may emit a worklet chunk before its START reply gets
     // back to this worker. Mark the meeting active first so that the initial
     // audio is durably forwarded instead of silently dropped.
@@ -214,7 +196,7 @@ export class MeetCaptureController {
         await chrome.offscreen.createDocument({
           url: "meet/offscreen.html",
           reasons: documentKey ? [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.WEB_RTC] : [chrome.offscreen.Reason.USER_MEDIA],
-          justification: "Capture the Google Meet microphone and remote audio as two local note-taking channels.",
+          justification: "Save the Google Meet microphone and remote audio as separate local recording channels.",
         });
       }
       assertCurrent();
@@ -226,7 +208,7 @@ export class MeetCaptureController {
       }
       assertCurrent();
       const response = await sendMessage<{ ok?: boolean; error?: string }>({ type: "MEET_CAPTURE_START", tabId, meetingId,
-        ...(directOffer ? { directOffer } : { streamId }), ...(liveDeepgramKey ? { liveDeepgramKey } : {}) });
+        ...(directOffer ? { directOffer } : { streamId }) });
       if (response?.ok !== true) throw new Error(response?.error ?? "Google Meet capture could not start.");
       assertCurrent();
       await this.persistCaptures();

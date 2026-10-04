@@ -1,16 +1,16 @@
-# AI Notetaker helper packaging
+# AI Notetaker desktop app packaging
 
-The helper is a tray-only Tauri v2 application. `notetaker-helper` owns the
-persistent capture/pipeline process; `notetaker-nm-host` remains a separate,
-Tauri-free Native Messaging relay that Chrome starts per connection. Extension
-and desktop icons use the shared AI Notetaker note-and-waveform mark. Rebuild
-the platform icon files with `python3 scripts/generate-brand-icons.py`.
+AI Notetaker is a Tauri v2 desktop app with a primary setup, recording, and
+notes window plus a tray for status and quick actions. `notetaker-helper` owns
+the persistent capture/pipeline process. `notetaker-nm-host` remains a separate,
+Tauri-free Native Messaging relay only for existing extension users during
+migration. New desktop use does not require Chrome or Native Messaging.
+Rebuild the platform icon files with `python3 scripts/generate-brand-icons.py`.
 
 For the user path, start with [`docs/getting-started.md`](getting-started.md).
 This document is the packaging and uninstall reference. A raw `cargo build`
-does not register the Native Messaging manifest, so a source build is not
-complete until the package is installed or the manifest is registered
-manually.
+can run the desktop app directly. Register Native Messaging only when an
+existing extension installation still needs the legacy browser bridge.
 
 ## Build artifacts
 
@@ -34,17 +34,20 @@ cargo deb --manifest-path helper/crates/app/Cargo.toml
 Users download the matching installer from the [AI Notetaker install
 page](https://ai-notetaker.apercallc.com/download) or the [latest GitHub
 release](https://github.com/apercallc/ai-notetaker/releases/latest). The
-current target set is Apple silicon Mac (arm64), Windows 64-bit (x86_64), and
-Debian/Ubuntu Linux 64-bit (x86_64). The Mac DMG and Windows installer are
+The desktop-first target set is Apple silicon and Intel Mac, Windows 64-bit
+(x86_64), and Debian/Ubuntu Linux 64-bit (x86_64). Mac builds use separate
+arm64 and x86_64 guided DMGs. The guided Mac DMGs and Windows installer are
 unsigned; Linux uses a `.deb`. The release manifest and `SHA256SUMS` describe
-the exact published files.
+the exact files in a published desktop-first release.
+Older helper-only releases still require the browser extension and are not the
+new-user install path.
 
-AppImage is not offered as a primary Linux download because a portable mount
-cannot safely provide Chrome a stable path to the Native Messaging relay. The
-Debian package depends on `pulseaudio-utils`, which supplies `pactl` for audio
-setup/probing and `parec` for monitor capture.
+The Debian package depends on `pulseaudio-utils`, which supplies `pactl` for
+audio setup/probing and `parec` for monitor capture. AppImage remains a CI
+bundle, but is not currently a published primary download; the desktop app
+does not require a stable Chrome Native Messaging path.
 
-The helper checks for a newer stable GitHub release daily and asks before
+The desktop app checks for a newer stable GitHub release daily and asks before
 opening the official release page. It never downloads or installs an update
 automatically. Users can also choose **Check for Updates…** from the tray
 menu. This keeps updates available without requiring a Tauri updater signing
@@ -65,7 +68,11 @@ device is enumerated. Attribution to [VB-Audio](https://vb-audio.com/Cable/)
 and the donation option must remain visible. A+B/C+D packages are never
 included.
 
-## Native Messaging installer registration
+## Legacy Native Messaging installer registration
+
+This compatibility bridge is only for existing browser extension installs.
+New users configure, capture, and manage local notes in the desktop app and do
+not need browser registration.
 
 The checked-in template remains useful for manual installs, but release
 packages now register the real installed relay instead of shipping the token
@@ -104,10 +111,10 @@ unchanged:
   with a permanent gecko ID, not `allowed_origins` with a
   `chrome-extension://` URL) instead of just another directory.
 
-AppImages are portable artifacts and cannot safely point Chrome at a relay
-inside a transient AppImage mount; use the Debian package for automatic Linux
-registration, or perform an explicit manual install with a stable extracted
-relay path.
+The Debian package is the primary Linux download because it installs the
+required `pulseaudio-utils` tools and can register the legacy browser bridge.
+The desktop app itself does not depend on that registration. AppImage remains
+available as a CI bundle, but is not currently a published primary download.
 
 ## Update behavior
 
@@ -121,10 +128,11 @@ an immediate check.
 
 ## Uninstall
 
-Before uninstalling, stop a recording and quit the helper. Remove the Chrome
-Native Messaging manifest and the helper's local data if you want a clean
-reset. Local data includes raw mic/speaker PCM, transcripts, summaries,
-pairing state, and retry queues; copy it first if it must be kept.
+Before uninstalling, stop notes and quit AI Notetaker. Remove the desktop
+app's local data if you want a clean reset. For users who still use the legacy
+extension, also remove its Native Messaging manifest. Local data includes raw
+mic/speaker PCM, transcripts, summaries, and retry queues; copy it first if it
+must be kept.
 
 ### Linux
 
@@ -182,5 +190,5 @@ native signatures have been checked.
 
 The generated Linux build and cross-platform CI do not prove Mac/Windows
 installer behavior or physical-device audio capture. Verify installer launch,
-Native Messaging registration, uninstall, permissions, and audio preflight on
-each target OS before treating desktop downloads as accepted.
+permissions, capture, and uninstall on each target OS. Verify Native Messaging
+registration separately only for the legacy extension path.

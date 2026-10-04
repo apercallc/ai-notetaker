@@ -8,6 +8,7 @@ export type WidgetView =
   | "starting"
   | "recording"
   | "processing"
+  | "saved"
   | "done"
   | "error";
 
@@ -39,14 +40,14 @@ export function deriveView(state: WidgetState | null, ui: WidgetUi, now: number 
     const endedAt = latest.endedAt ? Date.parse(latest.endedAt) : Date.parse(latest.startedAt);
     const recent = Number.isFinite(endedAt) && now - endedAt < DONE_CARD_WINDOW_MS;
     if (recent && latest.status === "complete") return "done";
+    if (recent && latest.status === "saved") return "saved";
     if (recent && latest.status === "error") return "error";
   }
   return "ready";
 }
 
 export function canStart(state: WidgetState | null): boolean {
-  // The Meet widget is browser-owned capture. Desktop calls use the popup's
-  // desktop-helper path, so a missing helper must not block Meet recording.
+  // The Meet widget records in Chrome, so helper status does not block it.
   return !!state?.onboardingComplete && !!state?.consentAcknowledged;
 }
 

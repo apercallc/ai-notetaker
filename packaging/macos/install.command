@@ -41,9 +41,6 @@ fail() {
 identifier=$(plutil -extract CFBundleIdentifier raw -o - "$source_app/Contents/Info.plist")
 [[ "$identifier" == com.ainotetaker.helper ]] || fail "This is not the AI Notetaker app."
 codesign --verify --deep --strict "$source_app" || fail "The app failed its integrity check. Download a fresh installer from the official release."
-[[ -x "$source_app/Contents/MacOS/notetaker-nm-host" ]] || fail "Browser connection component is missing."
-[[ -f "$source_app/Contents/Resources/scripts/install-native-messaging.sh" ]] || fail "Browser setup script is missing."
-
 target="$destination/AI Notetaker.app"
 [[ ! -L "$destination" && ! -L "$target" ]] || fail "The installation folder and app must not be symbolic links."
 if [[ -e "$target" ]]; then
@@ -51,10 +48,10 @@ if [[ -e "$target" ]]; then
   [[ "$existing_id" == com.ainotetaker.helper ]] || fail "Another app already uses this name. Nothing was replaced."
 fi
 if pgrep -x notetaker-helper >/dev/null; then
-  fail "Quit AI Notetaker from its menu bar icon after any recording finishes, then run the installer again."
+  fail "Quit AI Notetaker after any recording finishes, then run the installer again."
 fi
 if [[ "$approved" == 0 ]]; then
-  osascript -e 'display dialog "Install AI Notetaker? This release is not notarized by Apple. Continue only if you downloaded it from the official AI Notetaker release. Installation approves this app only, connects it to your browser, and opens it. Your other Mac security settings stay unchanged." with title "Install AI Notetaker" buttons {"Cancel", "Install"} default button "Install" cancel button "Cancel"' >/dev/null
+  osascript -e 'display dialog "Install AI Notetaker? This release is not notarized by Apple. Continue only if you downloaded it from the official AI Notetaker release. Installation approves this app only and opens it. Your other Mac security settings stay unchanged." with title "Install AI Notetaker" buttons {"Cancel", "Install"} default button "Install" cancel button "Cancel"' >/dev/null
 fi
 mkdir -p "$destination"
 [[ -w "$destination" ]] || fail "This folder is not writable. Ask your Mac administrator to install AI Notetaker."
@@ -83,11 +80,15 @@ if [[ -e "$target" ]]; then mv "$target" "$stage/previous.app"; fi
 mv "$stage/AI Notetaker.app" "$target"
 committed=1
 
-# Keep a successfully installed app if registration or launch fails. Retrying
-# installation can repair registration; deleting the app would leave dangling
-# manifests and turn a recoverable setup problem into a broken installation.
-sh "$target/Contents/Resources/scripts/install-native-messaging.sh" "$target" || fail "The app is installed, but browser setup failed. Run this installer again to reconnect it."
+# Native Messaging only serves users who still use the legacy extension. A
+# missing or failing browser hook must never block the standalone desktop app.
+legacy_hook="$target/Contents/Resources/scripts/install-native-messaging.sh"
+if [[ -x "$target/Contents/MacOS/notetaker-nm-host" && -f "$legacy_hook" ]]; then
+  if ! sh "$legacy_hook" "$target"; then
+    echo "The desktop app is installed. Legacy extension connection was not registered; desktop recording works without it." >&2
+  fi
+fi
 if [[ "$launch" == 1 ]]; then
   open "$target" || fail "Installed. Open AI Notetaker from Applications to finish setup."
 fi
-echo "AI Notetaker is installed. Look for its menu bar icon, then return to Chrome and choose Check desktop helper."
+echo "AI Notetaker desktop app is installed. Add your provider API keys in Settings, then use Start notes from Record."

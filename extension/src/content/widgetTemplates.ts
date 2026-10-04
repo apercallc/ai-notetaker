@@ -15,16 +15,6 @@ export interface TemplateContext {
   selectedMode: MeetingMode | null;
 }
 
-const MODES: Array<[MeetingMode, string]> = [
-  ["general", "General"],
-  ["standup", "Standup"],
-  ["sales", "Sales call"],
-  ["one_on_one", "1:1"],
-  ["interview", "Interview"],
-  ["lecture", "Lecture"],
-  ["custom", "Custom template"],
-];
-
 export const ICONS = {
   chevron: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`,
   bookmark: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4Z"/></svg>`,
@@ -45,6 +35,7 @@ export const PILL_LABELS: Partial<Record<WidgetView, string>> = {
   recording: "Recording",
   starting: "Starting…",
   processing: "Writing notes…",
+  saved: "Audio saved",
   done: "Notes ready",
   error: "Needs attention",
   disconnected: "Reload to reconnect",
@@ -70,7 +61,7 @@ export function renderPill(view: WidgetView, ctx: TemplateContext): string {
           <span>${escapeHtml(label)}</span>
           ${recording ? `<span class="elapsed" id="elapsed" role="timer">${elapsed}</span>` : ""}
         </button>
-        ${quickStart ? `<button type="button" class="pill-start" id="pill-start" title="${hint("Start notes", state?.shortcuts.toggle)}">Start notes</button>` : ""}
+        ${quickStart ? `<button type="button" class="pill-start" id="pill-start" title="${hint("Start recording", state?.shortcuts.toggle)}">Start recording</button>` : ""}
         ${
           recording
             ? `<button type="button" class="icon-btn" id="pill-bookmark" aria-label="Flag this moment" title="${hint("Flag this moment", state?.shortcuts.bookmark)}">${ICONS.bookmark}</button>
@@ -93,7 +84,7 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
     case "setup":
       return `
           <div class="stack">
-            <div><h2>Finish setup to take notes</h2><p class="sub">Choose how notes are written (your own API keys or Hosted AI), allow the microphone, and you're ready. It takes about a minute.</p></div>
+            <div><h2>Finish recording setup</h2><p class="sub">Allow the microphone and confirm you will tell everyone before recording.</p></div>
             <button type="button" class="btn primary block" id="open-setup">Open setup</button>
           </div>`;
     case "starting":
@@ -118,6 +109,13 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
             <button type="button" class="btn primary block" id="open-notes">Open notes</button>
             <button type="button" class="btn secondary block" id="dismiss">Dismiss</button>
           </div>`;
+    case "saved":
+      return `
+          <div class="stack">
+            <div><h2>Meet audio saved</h2><p class="sub">Your microphone and the call audio are stored on this device. Export them from extension Settings and import the archive in the desktop app to make notes.</p></div>
+            <button type="button" class="btn primary block" id="open-ai-settings">Export recordings</button>
+            <button type="button" class="btn secondary block" id="dismiss">Dismiss</button>
+          </div>`;
     case "error":
       return renderError(ctx);
     case "recording":
@@ -127,18 +125,18 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
             ${
               ctx.state?.disclosureNoticeEnabled
                 ? `<div class="disclosure" id="disclosure-card">
-              <p class="note" id="disclosure-text">Notify the call: this meeting is being transcribed.</p>
+              <p class="note" id="disclosure-text">Notify the call: this meeting is being recorded.</p>
               <button type="button" class="btn secondary block" id="copy-disclosure">Copy notice for chat</button>
             </div>`
                 : ""
             }
               ${
-              ctx.state?.helperStatus === "connected" || ctx.state?.active?.captureSource === "meet" || ctx.state?.active?.captureSource === "meet_tab"
+              !ctx.state?.active?.recorderOnly && (ctx.state?.helperStatus === "connected" || ctx.state?.active?.captureSource === "meet" || ctx.state?.active?.captureSource === "meet_tab")
                 ? `<div class="transcript-wrap">
               <div class="transcript" id="transcript" role="log" aria-live="off" aria-label="Live transcript" tabindex="0"></div>
               <button type="button" class="jump" id="jump" hidden>Jump to latest</button>
             </div>`
-                : `<p class="sub" id="written-on-stop">Recording. Your notes are written when you stop. Live captions need the desktop helper.</p>`
+                : `<p class="sub" id="written-on-stop">Recording. Your microphone and Meet audio are being saved separately on this device.</p>`
             }
             <form class="row" id="moment-form" autocomplete="off">
               <input type="text" id="moment-note" maxlength="280" placeholder="Add a note to this moment" aria-label="Note for this moment (optional)" />
@@ -174,7 +172,7 @@ function renderError(ctx: TemplateContext): string {
             : "";
   return `
           <div class="stack">
-            <div><h2>${needsCaptureInvocation ? "One Chrome step" : needsProviderConfirmation ? "Provider check needs attention" : "Couldn't take notes"}</h2></div>
+            <div><h2>${needsCaptureInvocation ? "One Chrome step" : needsProviderConfirmation ? "Provider check needs attention" : "Recording needs attention"}</h2></div>
             <p class="note ${needsCaptureInvocation ? "warning" : "error"}">${escapeHtml(message)}${shortcutHint}${recoveryHint ? ` ${escapeHtml(recoveryHint)}` : ""}</p>
             <div class="row">
               ${needsProviderConfirmation ? `<button type="button" class="btn secondary" id="open-ai-settings">Open AI settings</button><button type="button" class="btn primary" id="continue-anyway">Record anyway</button>` : ""}
@@ -186,30 +184,25 @@ function renderError(ctx: TemplateContext): string {
 }
 
 function startingCopy(state: WidgetState | null): string {
-  return state?.processingKind === "managed"
-    ? "Audio is saved on this device first, then uploaded to Hosted AI. The service deletes its temporary copy when your notes are ready."
-    : "Checking your selected AI providers. Audio is saved on this device first. If a provider is unavailable, we’ll warn you and keep the audio for retry.";
+  void state;
+  return "Connecting to this Meet tab and microphone. Audio will be saved on this device.";
 }
 
 function renderReady(ctx: TemplateContext): string {
   const { state } = ctx;
-  const mode = ctx.selectedMode ?? state?.defaultMeetingMode ?? "general";
+  void ctx.selectedMode;
   const intro = state?.callTitle
-    ? `Notes for <strong>${escapeHtml(state.callTitle)}</strong> appear right after the call.`
-    : "Notes, decisions, and action items appear right after the call.";
+    ? `Record <strong>${escapeHtml(state.callTitle)}</strong> and export it to the desktop app after the call.`
+    : "Save this Meet call locally and export it to the desktop app after the call.";
   const startHint = state?.shortcuts.toggle
-    ? `Start notes here, or press ${keysHtml(state.shortcuts.toggle)}.`
-    : `Start notes here when everyone is ready. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
+    ? `Start recording here, or press ${keysHtml(state.shortcuts.toggle)}.`
+    : `Start recording here when everyone is ready. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
   return `
       <div class="stack">
         <div><h2>Ready when you are</h2><p class="sub">${intro}</p></div>
         <p class="note" id="start-hint">${startHint}</p>
-        <p class="sub">When you press Start, we check that your selected provider keys and browser access respond. This can’t predict a full-call timeout; your audio stays saved on this device for retry.</p>
-        <div class="field">
-          <label for="mode">Notes style</label>
-          <select id="mode">${MODES.map(([value, label]) => `<option value="${value}"${value === mode ? " selected" : ""}>${label}</option>`).join("")}</select>
-        </div>
+        <p class="sub">Audio is saved in Chrome until you export it. No provider key is needed to record.</p>
         <p class="consent"><strong>Nobody else is notified.</strong> Tell everyone you're recording; some places require everyone's consent.</p>
-        <button type="button" class="btn secondary block" id="start"${canStart(state) ? "" : " disabled"}>Start notes</button>
+        <button type="button" class="btn secondary block" id="start"${canStart(state) ? "" : " disabled"}>Start recording</button>
       </div>`;
 }

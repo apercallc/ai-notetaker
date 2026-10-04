@@ -122,6 +122,7 @@ async function render(focusActionId?: string): Promise<void> {
     <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><a href="../popup/popup.html">AI Notetaker</a></div>
     <div class="title-row" id="title-row">${titleRowHtml(title)}</div>
     <p class="meeting-meta text-secondary">${new Date(meeting.startedAt).toLocaleString()}</p>
+    ${meeting.status === "saved" ? '<p class="drive-export-status" role="status">Meet audio is saved in Chrome. Export the recording from extension Settings, then import it in the desktop app to make notes. <button type="button" class="secondary" id="export-saved-audio">Open export</button></p>' : ""}
     ${meeting.attendeeShare
       ? `<p class="drive-export-status" role="status">Attendee share link (expires ${escapeHtml(new Date(meeting.attendeeShare.expiresAt).toLocaleDateString())}): <a href="${escapeHtml(safeShareLink(meeting.attendeeShare.shareUrl))}" target="_blank" rel="noreferrer">${escapeHtml(meeting.attendeeShare.shareUrl)}</a></p>`
       : ""}
@@ -215,6 +216,8 @@ async function render(focusActionId?: string): Promise<void> {
   }
 
   wireRename(id, title);
+
+  document.getElementById("export-saved-audio")?.addEventListener("click", () => void chrome.runtime.openOptionsPage());
 
   document.getElementById("copy-notes")?.addEventListener("click", () => void copyToClipboard(formatNotesForCopy(meeting), "Notes"));
   document.getElementById("copy-actions")?.addEventListener("click", () => void copyToClipboard(formatActionItemsForCopy(meeting), "Action items"));

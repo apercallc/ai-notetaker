@@ -81,6 +81,42 @@ describe("managedClient", () => {
     }));
   });
 
+  it("requests the optional identity permission before reading the Google identity API", async () => {
+    const originalIdentity = Object.getOwnPropertyDescriptor(chrome, "identity");
+    const originalRequest = Object.getOwnPropertyDescriptor(chrome.permissions, "request");
+    let identityGranted = false;
+    const identity = chromeMock.identity;
+    const request = vi.fn(async () => {
+      identityGranted = true;
+      return true;
+    });
+    Object.defineProperty(chrome, "identity", {
+      configurable: true,
+      get: () => identityGranted ? identity : undefined,
+    });
+    Object.defineProperty(chrome.permissions, "request", { configurable: true, value: request });
+    const fetchImpl = vi.fn().mockResolvedValue(response({ accessToken: "session", accountId: "acct", workspaceId: "ws" }));
+    const launchFlow = identity.launchWebAuthFlow as unknown as { mockImplementation: (implementation: (details: { url: string }, callback: (url?: string) => void) => void) => void };
+    launchFlow.mockImplementation(({ url }, callback) => {
+      const start = new URL(url);
+      callback(`${chrome.identity.getRedirectURL("hosted-auth")}#state=${start.searchParams.get("client_state")}&code=one-use-code`);
+    });
+
+    try {
+      await expect(loginManagedWithGoogle("https://notes.example.com", fetchImpl)).resolves.toMatchObject({
+        config: { accessToken: "session", accountId: "acct", workspaceId: "ws" },
+      });
+      expect(request).toHaveBeenCalledWith({
+        permissions: ["identity"],
+        origins: ["https://notes.example.com/*"],
+      });
+      expect(identity.launchWebAuthFlow).toHaveBeenCalledOnce();
+    } finally {
+      if (originalIdentity) Object.defineProperty(chrome, "identity", originalIdentity);
+      if (originalRequest) Object.defineProperty(chrome.permissions, "request", originalRequest);
+    }
+  });
+
   it("rejects a mismatched Google OAuth state without exchanging a code", async () => {
     const fetchImpl = vi.fn();
     const launchFlow = chrome.identity.launchWebAuthFlow as unknown as { mockImplementation: (implementation: (details: { url: string }, callback: (url?: string) => void) => void) => void };

@@ -34,7 +34,7 @@ chrome.runtime.onMessage.addListener((request: DirectRequest, sender, reply) => 
   })) return false;
   if (!["probe", "start", "answer", "stop"].includes(request.operation)) return false;
   if (request.operation !== "probe" && (request.documentKey !== documentKey || !validSession(request.session))) {
-    reply({ ok: false, error: "The Meet page changed. Start notes again." });
+    reply({ ok: false, error: "The Meet page changed. Start recording again." });
     return false;
   }
   if (request.operation === "answer" && !validSdp(request.sdp)) return false;

@@ -1,21 +1,21 @@
-# AI Notetaker — Desktop Helper
+# AI Notetaker — Desktop App
 
-Tauri/Rust desktop capture helper. See the architecture spec at
-`../docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md` and
+Tauri/Rust desktop app for setup, recording controls, local notes, recovery,
+and optional authenticated web-app sync. It works locally with provider API
+keys; no browser extension or AI Notetaker account is required. See the
+architecture spec at
+`../docs/superpowers/specs/2026-10-03-desktop-first-product-design.md` and
 `CLAUDE.md` in this directory for the design this implements.
 
 For a first-time user, use the [complete getting-started guide](../docs/getting-started.md).
-This file explains the helper workspace and contributor verification. In
-particular, `cargo build` creates binaries but does not register Chrome's
-Native Messaging host; use the packaged installer flow in
-[`../docs/helper-packaging.md`](../docs/helper-packaging.md) when you need a
-working extension-to-helper install.
+This file explains the desktop workspace and contributor verification. The
+Native Messaging host remains only for existing extension users during
+migration; the desktop app communicates with its own UI through Tauri IPC.
 
-End users download the native installer for their operating system from the
-[AI Notetaker install page](https://ai-notetaker.apercallc.com/download) or the
-[latest GitHub release](https://github.com/apercallc/ai-notetaker/releases/latest).
-The GitHub release publishes unsigned installers with checksums and clear
-first-open guidance; npm/npx is not a supported native-helper installer.
+Desktop-first installers are not published yet. The [install page](https://ai-notetaker.apercallc.com/download)
+has status and migration guidance. Do not use an older helper-only release as
+the new-user setup path. Native installers remain the supported distribution
+channel; npm/npx is not an end-user install method.
 
 ## Workspace layout
 
@@ -27,9 +27,9 @@ crates/
                                backends (macOS/ScreenCaptureKit + BlackHole,
                                Windows/WASAPI + VB-CABLE,
                                Linux/PulseAudio)
-  app/     notetaker-app    — two binaries: notetaker-helper (the
-                               persistent tray app) and notetaker-nm-host
-                               (the Native Messaging host Chrome spawns)
+  app/     notetaker-app    — primary Tauri desktop window and persistent
+                               background/tray runtime; also builds
+                               notetaker-nm-host as a legacy extension relay
 native-messaging-host-manifest/  — the Chrome host manifest template
 ```
 
@@ -41,15 +41,17 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-As of this implementation pass: **152 Rust tests passing (124 in `core`, 15
-in `audio` including the capability matrix, 11 in `app`, and 1 fixture
-integration test), zero compiler warnings, zero clippy warnings**. Linux is
-verified locally. The repository's three-OS CI matrix runs the same Rust gates
-and an unsigned Tauri bundle smoke build for each native target. CI pins the
-Tauri CLI 2.11.5, alongside the lockfile's Rust Tauri 2.11.6 release. This
-Linux host does not have the Apple or MinGW toolchains needed for local
-cross-target checks; OS trust prompts, device permissions, and installer
-execution still require native runners.
+Verified on 2026-10-03: **248 workspace tests pass**, `cargo fmt` and Clippy
+pass, all 7 macOS installer regression tests pass, and the rebuilt debug Tauri
+app opens on this Mac. This Mac's Command Line
+Tools do not provide the default `XcodeDefault.xctoolchain` Swift library path.
+The build succeeds with command-local `SDKROOT=.../MacOSX26.5.sdk`,
+`MACOSX_DEPLOYMENT_TARGET=13.0`, and `RUSTFLAGS='-L .../usr/lib/swift/macosx'`;
+no system developer-directory setting was changed. The previously built DMG
+has now been rebuilt from the current source, checksum-verified, and opened
+directly from its mounted image. Its app is ad-hoc signed, not Developer ID
+signed or notarized. Real-call recording and Windows/Linux runtime acceptance
+still need native device checks.
 
 ## What's genuinely verified vs. what isn't (read this before trusting a "done" claim)
 
@@ -73,7 +75,9 @@ filesystem I/O via `tempfile`, no live credentials or hardware needed):
   logic for finding BlackHole/VB-CABLE/the Linux null-sink among enumerated
   device names.
 
-**Linux runtime verified on a real PipeWire desktop** — the module uses
+**Legacy Linux audio runtime verified on a real PipeWire desktop** — this
+exercises the shared capture backend through the old helper path, not the full
+desktop-first window journey. The module uses
 `pactl` for virtual-source setup/probing, `parec` for the speaker monitor, and
 cpal's default input device for the microphone. A live Native Messaging audio
 probe and a short raw-audio recording have both been exercised.
@@ -118,16 +122,16 @@ meeting app. The GitHub Actions matrix is the native compile gate:
   virtual fallback captures it still needs real-device validation. Native
   ScreenCaptureKit/WASAPI paths do not require those routing changes. Linux's
   `pactl module-loopback` equivalent *is* implemented.
-- **Tray icon UI** — wired through Tauri v2 with idle/recording status, recent
-  note/folder opening, opt-in launch-at-login, and quit. The helper has no
-  main window; Tauri owns the process main thread and the IPC server starts
-  from `.setup()`.
-- **Re-transcribing the raw-audio tail after crash recovery** — pending retry
-  queue files are reloaded after the next authenticated settings handshake,
-  but `resume_recording` still finalizes whatever transcript existed before
-  the crash rather than reconstructing a final chunk that was captured but
-  never reached the transcription provider. The raw audio itself is never
-  lost (that's the resilience guarantee, and it holds).
+- **Tray icon UI** — secondary to the primary Tauri app window. The tray offers
+  idle/recording status, recent note/folder opening, opt-in launch-at-login,
+  and quit; recording controls use Tauri IPC. The persistent runtime starts
+  from `.setup()` and does not depend on a browser connection.
+- **Crash-recovery transcription tail** — implemented. Recovery resumes each
+  channel from its persisted transcribed-byte cursor, reads the remaining raw
+  PCM in bounded batches, queues provider failures durably, and summarizes only
+  after pending transcription retries finish. If reading saved audio fails,
+  the meeting remains recoverable. Core tests cover tail transcription and
+  completion; provider access and audio capture still need live-device proof.
 - **Daily release checks** — the helper asks before opening the official
   GitHub download page and never installs silently. See
   `../docs/getting-started.md`.

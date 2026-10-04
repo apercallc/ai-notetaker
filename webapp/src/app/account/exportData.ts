@@ -13,7 +13,7 @@ import { prisma } from "@/lib/db";
 export interface ExportedTranscriptSegment {
   speaker: string;
   text: string;
-  timestamp: string;
+  timestamp: string | null;
 }
 
 export interface ExportedActionItem {
@@ -51,7 +51,7 @@ function meetingToMarkdown(row: {
   startedAt: Date;
   endedAt: Date;
   summary: string | null;
-  transcript: Array<{ speaker: string; text: string; timestamp: Date }>;
+  transcript: Array<{ speaker: string; text: string; timestamp: Date | null }>;
   actionItems: Array<{ text: string; owner: string | null; status: string; dueAt: Date | null }>;
 }): string {
   const lines: string[] = [
@@ -76,7 +76,7 @@ function meetingToMarkdown(row: {
   if (row.transcript.length > 0) {
     lines.push("## Transcript", "");
     for (const segment of row.transcript) {
-      lines.push(`**[${formatTime(segment.timestamp, row.startedAt)}] ${segment.speaker}:** ${segment.text}`);
+      lines.push(`**${segment.timestamp ? `[${formatTime(segment.timestamp, row.startedAt)}] ` : ""}${segment.speaker}:** ${segment.text}`);
     }
     lines.push("");
   }
@@ -90,7 +90,7 @@ function toExportedMeeting(row: {
   startedAt: Date;
   endedAt: Date;
   summary: string | null;
-  transcript: Array<{ speaker: string; text: string; timestamp: Date }>;
+  transcript: Array<{ speaker: string; text: string; timestamp: Date | null }>;
   actionItems: Array<{ text: string; owner: string | null; status: string; dueAt: Date | null }>;
 }): ExportedMeeting {
   return {
@@ -104,7 +104,7 @@ function toExportedMeeting(row: {
     transcript: row.transcript.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,
-      timestamp: segment.timestamp.toISOString(),
+      timestamp: segment.timestamp?.toISOString() ?? null,
     })),
     actionItems: row.actionItems.map((item) => ({
       text: item.text,

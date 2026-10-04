@@ -174,6 +174,7 @@ mod tests {
             speaker: "you".into(),
             text: "hi".into(),
             is_final: true,
+            timestamp: None,
         }];
         let summary = provider
             .summarize(&transcript, &SummaryOptions::default())
@@ -195,6 +196,7 @@ mod tests {
             speaker: "you".into(),
             text: "hi".into(),
             is_final: true,
+            timestamp: None,
         }];
         assert!(matches!(
             provider

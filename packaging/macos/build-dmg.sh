@@ -14,13 +14,17 @@ AI Notetaker for Mac
 
 1. Double-click Install AI Notetaker.command. A Terminal window opens.
    Choose Install in the confirmation dialog.
-2. The installer copies the app, connects it to Chrome, and opens it.
-3. Return to the extension and choose Check desktop helper.
+2. The installer copies the desktop app to Applications and opens it.
+3. In Settings, add and test your provider API keys. Then open Record and
+   choose Start notes. No browser extension or AI Notetaker account is needed.
 
 This free release is not notarized by Apple. The installer verifies the app's
 bundle integrity and asks before approving this app only. It does not change
 Gatekeeper settings or install an audio driver. Only run it from our official
 release: https://github.com/apercallc/ai-notetaker/releases/latest
+
+Existing extension users may keep using their browser connection during
+migration. New desktop users do not need Chrome or Native Messaging.
 
 If macOS blocks the installer itself, choose System Settings > Privacy & Security
 > Open Anyway, if offered. Managed Macs may require administrator approval.

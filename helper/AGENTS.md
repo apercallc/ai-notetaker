@@ -3,13 +3,17 @@
 Read [`../CLAUDE.md`](CLAUDE.md) and [`../AGENTS.md`](../AGENTS.md) before
 changing helper code. This package is Tauri/Rust, not Electron.
 
-- Keep the persistent `notetaker-helper` Tauri app separate from the
-  per-connection `notetaker-nm-host` relay. The relay stays Tauri-free and
-  must not own pipeline state.
-- Keep IPC on Native Messaging plus the local Unix socket/named pipe. Never
-  introduce a TCP or loopback listener.
+- The `notetaker-helper` Tauri app is the primary product and owns its UI,
+  capture, and pipeline. Keep `notetaker-nm-host` only as a compatibility
+  relay for legacy extensions until the migration plan's acceptance gates
+  pass; the relay must not own pipeline state.
+- Use Tauri IPC for desktop UI. Never introduce a TCP or loopback listener.
+  Native Messaging plus the Unix socket/named pipe remains only for extension
+  compatibility during migration.
 - Capture mic and speaker as separate streams, and write raw PCM to disk
   before any transcription request. Preserve retry and startup recovery.
+- Store provider keys in the platform OS credential vault. Never store them
+  in ordinary settings JSON or send them to the web app.
 - Wrap existing BlackHole, base VB-CABLE, or PulseAudio/PipeWire devices;
   never add a custom virtual audio driver. Do not bundle BlackHole's official
   binary. Any base VB-CABLE installer must retain vb-cable.com attribution and

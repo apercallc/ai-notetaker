@@ -9,11 +9,11 @@ for the full rationale.
 
 ## Conventions
 
-- **This package owns long-running capture and local durability.** In local
-  BYOK mode it also owns audio chunking, transcription, and summarization API
-  calls. In managed mode it owns authenticated, resumable upload and job
-  state; hosted workers perform provider calls without exposing their keys to
-  the extension.
+- **This package is the primary desktop app.** Its Tauri window owns setup,
+  long-running capture, local durability, local BYOK provider calls, local
+  notes, recovery, and optional authenticated web-app sync. The tray is a
+  secondary status and quick-action surface; Native Messaging stays only for
+  installed legacy extensions during migration.
 - **Prefer native loopback capture — don't build a driver.** Use
   ScreenCaptureKit/native audio on macOS, WASAPI loopback on Windows, and
   PipeWire/PulseAudio monitor sources on Linux. BlackHole, VB-CABLE, and a
@@ -39,8 +39,11 @@ for the full rationale.
   `notetaker-add-provider` skill before adding a transcription or LLM
   provider — it walks through preserving the resilience guarantee, honest
   streaming-vs-batch labeling, and cost documentation.
-- **Native Messaging host, not an open port**, for talking to the
-  extension.
+- **Tauri IPC, not an open port**, for desktop UI-to-Rust control. Keep Native
+  Messaging only for backward compatibility with already-installed
+  extensions; do not require it for a new desktop installation.
+- **Store provider keys in OS credential storage.** Never place provider keys
+  in ordinary settings JSON or send them to the web app.
 - **Detect and offer to resume an in-progress recording on startup.**
   Because raw audio is written incrementally during capture, an unclean
   shutdown (crash, forced quit, OS restart) leaves recoverable audio behind

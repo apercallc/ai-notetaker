@@ -65,19 +65,20 @@ export function softwareNode(origin: string): Node {
     description: SITE.description,
     applicationCategory: "BusinessApplication",
     applicationSubCategory: "Meeting notes",
-    operatingSystem: "Chrome, macOS, Windows, Linux",
+    operatingSystem: "macOS, Windows, Linux",
     isAccessibleForFree: true,
     license: SITE.licenseUrl,
     codeRepository: SITE.repoUrl,
     downloadUrl: url(origin, "/download"),
     publisher: { "@id": url(origin, "/#organization") },
     featureList: [
-      "Records Google Meet from Chrome with no meeting bot",
-      "Records Zoom, Microsoft Teams and Slack calls through a native desktop helper",
+      "One desktop app for setup, recording, and local meeting notes",
+      "Captures browser and desktop meetings from microphone and system audio",
       "Saves audio on your device before any AI provider is called",
       "Keeps your microphone and the meeting's audio as separate channels",
       "Transcript, summary, decisions and action items for every meeting",
-      "Free with your own AI provider keys, or Hosted AI for a flat monthly price",
+      "Local use with your own AI provider keys and no required account",
+      "Optional workspace sync for finished note text",
       "Open source under the MIT license",
     ],
     offers: [
@@ -130,7 +131,7 @@ export function howToNode(origin: string): Node {
       {
         "@type": "HowToStep",
         name: "Install",
-        text: "Add the Chrome extension for Google Meet. For Zoom, Teams and Slack, also install the desktop helper for macOS, Windows or Linux.",
+        text: "Download one desktop app for setup, recording, and local notes. The download page shows currently available installers.",
       },
       {
         "@type": "HowToStep",

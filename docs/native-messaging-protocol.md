@@ -168,7 +168,14 @@ file on Unix-like systems.
   "type": "summary_ready",
   "meetingId": "<uuid>",
   "summary": "...",
-  "actionItems": [{ "text": "...", "owner": "..." }]
+  "actionItems": [{
+    "text": "...",
+    "owner": "...",
+    "id": "optional stable id",
+    "status": "open | done",
+    "dueAt": "optional ISO 8601 or null",
+    "completedAt": "optional ISO 8601 or null"
+  }]
 }
 
 // On any pipeline failure (network, rate limit, bad key). The raw audio is

@@ -67,6 +67,11 @@ header.app-header button.icon-button:hover {
   border: 1px solid var(--color-warning);
 }
 
+.recorder-list { display: grid; gap: 10px; margin: 12px 0; padding: 0; list-style: none; }
+.recorder-list li { display: grid; gap: 3px; padding: 9px 0; border-top: 1px solid var(--color-border); }
+.recorder-list span { color: var(--color-text-secondary); font-size: .75rem; }
+.history-section > p { font-size: .8125rem; line-height: 1.45; }
+
 .record-controls {
   display: flex;
   flex-direction: column;

@@ -44,7 +44,13 @@ impl MacosAudioCapture {
     fn installed_device_name(&self) -> Option<String> {
         let host = cpal::default_host();
         let names: Vec<String> = host
-            .input_devices()
+            // `HostTrait::input_devices` filters by querying supported input
+            // formats for every CoreAudio device. On some Macs that CoreAudio
+            // call never returns (including passive diagnostics), freezing the
+            // desktop window before it can show recovery or settings. Device
+            // names are enough to detect BlackHole; validate stream support
+            // only after the user explicitly starts fallback capture.
+            .devices()
             .map(|it| it.filter_map(|d| d.name().ok()).collect())
             .unwrap_or_default();
         find_matching_device(&names, MACOS_DEVICE_HINT).map(String::from)
@@ -107,30 +113,39 @@ impl AudioCapture for MacosAudioCapture {
             true,
             permission_required,
         );
+        let guidance = if !native_loopback && !fallback_available {
+            let microphone_hint = if microphone.is_none() {
+                " Connect or enable a microphone as well."
+            } else {
+                ""
+            };
+            format!(
+                "System-audio capture is unavailable. In System Settings > Privacy & Security > Screen & System Audio Recording, enable AI Notetaker. If it is not listed, click Add and select the app from Applications. Reopen AI Notetaker after changing access, or install BlackHole from {BLACKHOLE_DOWNLOAD_URL}.{microphone_hint}"
+            )
+        } else if microphone.is_none() {
+            "System audio is available, but no microphone was found. Connect or enable a microphone, then check again.".to_string()
+        } else if native_loopback {
+            "Native ScreenCaptureKit system-audio capture is available. Keep your meeting app on its normal microphone and speaker; macOS may ask for Screen Recording access the first time.".to_string()
+        } else {
+            format!(
+                "BlackHole fallback is available. Create a Multi-Output Device with BlackHole and your normal speakers or headphones so the meeting remains audible. {BLACKHOLE_DOWNLOAD_URL}"
+            )
+        };
         AudioDiagnostics {
             platform: "macos".to_string(),
             driver: if native_loopback {
                 "ScreenCaptureKit"
-            } else {
+            } else if fallback_available {
                 "BlackHole"
+            } else {
+                "Unavailable"
             }
             .to_string(),
             driver_installed,
             microphone,
             speaker,
             ready,
-            guidance: if ready && native_loopback {
-                "Native ScreenCaptureKit system-audio capture is available. Keep your meeting app on its normal microphone and speaker; macOS will ask for Screen Recording permission the first time.".to_string()
-            } else if ready {
-                format!(
-                    "BlackHole fallback is available. Create a Multi-Output Device with BlackHole and your normal speakers or headphones so the meeting remains audible. {}",
-                    BLACKHOLE_DOWNLOAD_URL
-                )
-            } else {
-                format!(
-                    "macOS system-audio capture is not ready. Grant Screen Recording permission or install BlackHole from {BLACKHOLE_DOWNLOAD_URL}, then make sure a microphone is available."
-                )
-            },
+            guidance,
             native_loopback,
             virtual_device_fallback: !native_loopback && fallback_available,
             permission_required,
@@ -196,7 +211,7 @@ impl AudioCapture for MacosAudioCapture {
                 }
             } else {
                 let Some(speaker_device) = fallback_device_name.as_ref().and_then(|name| {
-                    host.input_devices().ok().and_then(|mut it| {
+                    host.devices().ok().and_then(|mut it| {
                         it.find(|d| d.name().ok().as_deref() == Some(name.as_str()))
                     })
                 }) else {

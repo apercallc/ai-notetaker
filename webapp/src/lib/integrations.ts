@@ -221,7 +221,7 @@ export interface NotePayload {
   url: string | null;
   summaryMarkdown: string;
   actionItems: Array<{ text: string; owner: string | null; dueAt: string | null; status: string }>;
-  transcript?: Array<{ speaker: string; text: string; timestamp: string }>;
+  transcript?: Array<{ speaker: string; text: string; timestamp: string | null }>;
 }
 
 function appUrl(): string | null {
@@ -243,7 +243,7 @@ export async function buildNotePayload(workspaceId: string, meetingId: string, i
   const names = Object.fromEntries(meeting.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName]));
   const base = appUrl();
   const folders = meeting.folderId ? await prisma.folder.findMany({ where: { workspaceId, deletedAt: null }, select: { id: true, parentId: true, name: true } }) : [];
-  const transcript = (meeting as { transcript?: Array<{ speaker: string; text: string; timestamp: Date }> }).transcript;
+  const transcript = (meeting as { transcript?: Array<{ speaker: string; text: string; timestamp: Date | null }> }).transcript;
   return {
     id: meeting.id,
     title: meeting.title,
@@ -255,7 +255,7 @@ export async function buildNotePayload(workspaceId: string, meetingId: string, i
     summaryMarkdown: meeting.summary,
     actionItems: meeting.actionItems.map((item) => ({ text: item.text, owner: item.owner, dueAt: item.dueAt?.toISOString() ?? null, status: item.status })),
     ...(includeTranscript && transcript
-      ? { transcript: transcript.map((line) => ({ speaker: speakerLabel(line.speaker, names), text: line.text, timestamp: line.timestamp.toISOString() })) }
+      ? { transcript: transcript.map((line) => ({ speaker: speakerLabel(line.speaker, names), text: line.text, timestamp: line.timestamp?.toISOString() ?? null })) }
       : {}),
   };
 }

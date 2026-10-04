@@ -81,8 +81,10 @@ pub fn macos_readiness(observed: MacosObservations) -> MacosReadiness {
     MacosReadiness {
         driver: if native_loopback {
             "ScreenCaptureKit"
-        } else {
+        } else if virtual_device_fallback {
             "BlackHole"
+        } else {
+            "Unavailable"
         },
         native_loopback,
         virtual_device_fallback,
@@ -145,6 +147,7 @@ mod tests {
     fn screen_denied_without_blackhole_asks_for_screen_access_or_blackhole() {
         let r = observe(PermissionState::Granted, false, false, true);
         assert!(!r.ready && r.permission_required && !r.driver_installed);
+        assert_eq!(r.driver, "Unavailable");
         assert!(r.guidance.contains("Screen Recording"));
         assert!(r.guidance.contains(BLACKHOLE_DOWNLOAD_URL));
         assert!(!r.guidance.contains("Microphone access is denied"));

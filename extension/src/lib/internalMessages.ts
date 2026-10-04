@@ -50,6 +50,7 @@ export interface WidgetMeeting {
   title: string;
   startedAt: string;
   status: MeetingRecord["status"];
+  recorderOnly?: true;
   captureStarting?: boolean;
   captureSource?: CaptureSource;
   liveTranscriptStatus?: LiveTranscriptStatus;

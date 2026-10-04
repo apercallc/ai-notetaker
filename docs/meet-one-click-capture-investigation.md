@@ -3,6 +3,13 @@
 Date: 2026-10-02
 Status: Implemented locally; 637 extension tests and synthetic Chromium media smoke pass. Live Google Meet acceptance remains outstanding.
 
+This document describes the legacy extension-owned Meet capture path. The
+desktop-first architecture in
+[`superpowers/specs/2026-10-03-desktop-first-product-design.md`](superpowers/specs/2026-10-03-desktop-first-product-design.md)
+supersedes it for new product work: the desktop app captures microphone and
+system audio without Chrome. Keep this investigation as implementation history
+and reference only while supporting existing extension users.
+
 ## Delivered implementation
 
 The extension now prefers direct remote-track capture when the Meet adapter

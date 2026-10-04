@@ -432,7 +432,7 @@ function driveSpeakerLabel(speaker: string, names: Readonly<Record<string, strin
   return names[speaker] ?? (/^(you|them|them-\d+|speaker|speaker-\d+)$/.test(speaker) ? speakerLabel(speaker) : speaker);
 }
 
-function formatMeetingForGoogleDoc(meeting: { title: string; startedAt: Date; endedAt: Date; summary: string; speakers?: Array<{ speakerKey: string; displayName: string }>; transcript: Array<{ speaker: string; text: string; timestamp: Date }>; actionItems: Array<{ text: string; owner: string | null; status: string; dueAt: Date | null }> }): string {
+function formatMeetingForGoogleDoc(meeting: { title: string; startedAt: Date; endedAt: Date; summary: string; speakers?: Array<{ speakerKey: string; displayName: string }>; transcript: Array<{ speaker: string; text: string; timestamp: Date | null }>; actionItems: Array<{ text: string; owner: string | null; status: string; dueAt: Date | null }> }): string {
   const speakerNames = Object.fromEntries((meeting.speakers ?? []).map((speaker) => [speaker.speakerKey, speaker.displayName]));
   const lines = [
     meeting.title,
@@ -447,7 +447,7 @@ function formatMeetingForGoogleDoc(meeting: { title: string; startedAt: Date; en
     ...(meeting.actionItems.length ? meeting.actionItems.map((item) => `- [${item.status}] ${item.text}${item.owner ? ` (${item.owner})` : ""}${item.dueAt ? ` — due ${item.dueAt.toISOString().slice(0, 10)}` : ""}`) : ["None"]),
     "",
     "Transcript",
-    ...(meeting.transcript.length ? meeting.transcript.map((segment) => `[${segment.timestamp.toISOString()}] ${driveSpeakerLabel(segment.speaker, speakerNames)}: ${segment.text}`) : ["No transcript recorded."]),
+    ...(meeting.transcript.length ? meeting.transcript.map((segment) => `${segment.timestamp ? `[${segment.timestamp.toISOString()}] ` : ""}${driveSpeakerLabel(segment.speaker, speakerNames)}: ${segment.text}`) : ["No transcript recorded."]),
   ];
   return lines.join("\n");
 }

@@ -1,15 +1,12 @@
 # extension/ — Chrome Extension
 
-Manifest V3. This package owns the Google Meet browser path: its offscreen
-document receives remote Meet audio from a minimal MAIN-world receiver-track
-adapter (with tab capture as a fallback), captures the microphone separately,
-and IndexedDB persists chunks before
-local BYOK processing or Hosted AI upload. For desktop-call sources it is a
-**thin UI** that forwards start/stop and settings to the native helper. See the root `CLAUDE.md` and
-`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`
-for why: service workers die after ~30s idle and cannot own the long-running
-desktop pipeline; the offscreen Meet path is explicitly durable and rehydrates
-from IndexedDB after service-worker suspension.
+Manifest V3. This package is an optional Google Meet recorder during the
+desktop-first migration. New calls capture separate mic and meeting tracks in
+IndexedDB; the Tauri desktop app owns provider keys, notes, and desktop calls.
+Keep older recordings, notes, settings, and the explicit archive export
+available until acceptance passes. Do not remove storage or alter the stable
+manifest key during the transition. See the root `CLAUDE.md` and
+`docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`.
 
 ## Conventions
 
@@ -24,17 +21,11 @@ from IndexedDB after service-worker suspension.
   WebSocket to `127.0.0.1` for extension↔helper control — any webpage's JS
   can connect to an open local port. Native Messaging is OS-enforced and
   allowlisted to this extension's ID.
-- **Local BYOK keys and tokens live in `chrome.storage.local`, never `.sync`.**
-  Managed provider keys remain server-side and never reach the extension.
-- **Meet BYOK provider calls are direct from the extension only for the
-  browser-owned Meet path.** Raw mic/speaker chunks must already be in
-  IndexedDB before a call. Desktop-call BYOK remains helper-routed, and
-  managed mode uses the authenticated hosted service; never send local keys
-  to that service.
-- **Local mode requires no account.** Managed mode may authenticate to the
-  project-operated hosted service, but requests must be explicit,
-  authenticated, workspace-scoped, and visible in settings. Never send local
-  BYOK keys to the hosted service.
+- **Existing local BYOK keys and tokens stay in `chrome.storage.local`, never
+  `.sync`, while the extension remains supported.** The desktop migration
+  moves keys into OS credential storage without writing them to exports.
+- Keep all legacy processing requests authenticated and workspace-scoped.
+  Never send local BYOK keys to any web service.
 - Keep it a standard WebExtension where the API allows, even though Chrome
   is the primary target — an Edge/Brave/Firefox port later shouldn't
   require a rewrite (see spec §7).

@@ -8,35 +8,70 @@ afterEach(() => {
   else process.env.CHROME_WEB_STORE_URL = storeUrl;
 });
 
-it("keeps a real download destination when the GitHub lookup fails", () => {
+it("keeps a real release destination when GitHub links cannot be loaded", () => {
   delete process.env.CHROME_WEB_STORE_URL;
   const html = renderToStaticMarkup(<DownloadView release={null} />);
   expect(html).toContain('href="https://github.com/apercallc/ai-notetaker/releases/latest"');
-  expect(html).toContain("All desktop downloads on GitHub");
+  expect(html).toContain("One desktop app for meeting notes.");
+  expect(html).toContain("Release links could not be loaded.");
+  expect(html).toContain("View all releases");
+  expect(html).toContain("Already use the Chrome extension? See legacy downloads and setup.");
   expect(html).not.toContain("Not published yet");
   expect(html).not.toContain("Add to Chrome");
 });
 
-it("links the published installer and opens the matching installation instructions", () => {
+it("shows direct desktop downloads and one-app setup when installers are published", () => {
   const html = renderToStaticMarkup(<DownloadView platform="macos" release={{
     tag: "v1.0.0",
     pageUrl: "https://github.com/apercallc/ai-notetaker/releases/tag/v1.0.0",
     mac: { name: "app.dmg", url: "https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app.dmg", bytes: 100 },
+    macIntel: { name: "app-x86_64.dmg", url: "https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app-x86_64.dmg", bytes: 100 },
   }} />);
   expect(html).toContain('href="https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app.dmg"');
-  expect(html).toMatch(/<details open=""><summary>macOS/);
-  expect(html).toContain("install-native-messaging.sh");
-  expect(html).toContain("Check desktop helper");
+  const desktopSection = html.split('<details id="legacy-downloads"')[0];
+  expect(desktopSection).toContain("Download AI Notetaker");
+  expect(desktopSection).toContain("Installer not published yet.");
+  expect(desktopSection).toContain("Install on macOS · Apple silicon");
+  expect(desktopSection).toContain("macOS · Intel");
+  expect(desktopSection).toContain('href="https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app-x86_64.dmg"');
+  expect(desktopSection).toContain("No browser extension or AI Notetaker account is needed.");
+  expect(desktopSection).not.toContain("install-native-messaging.sh");
+  expect(desktopSection).not.toContain("Check desktop helper");
+  expect(desktopSection).toMatch(/class="mk-btn mk-btn--solid"[^>]*href="https:\/\/github.com\/apercallc\/ai-notetaker\/releases\/download\/v1\.0\.0\/app\.dmg"/);
 });
 
-it("shows the guided steps only for a guided Mac installer asset", () => {
+it("links to the release page when a release has no desktop installer", () => {
   const html = renderToStaticMarkup(<DownloadView platform="macos" release={{
     tag: "v1.0.0",
     pageUrl: "https://github.com/apercallc/ai-notetaker/releases/tag/v1.0.0",
-    mac: { name: "AI.Notetaker_1.0.0_aarch64-installer.dmg", url: "https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app-installer.dmg", bytes: 100 },
+    extension: { name: "ai-notetaker-extension-v1.0.0.zip", url: "https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/extension.zip", bytes: 100 },
   }} />);
-  expect(html).toContain("Install AI Notetaker.command");
-  expect(html).toContain("A Terminal window opens");
-  expect(html).toContain("not notarized by Apple");
-  expect(html).not.toContain("install-native-messaging.sh");
+  expect(html).toContain("Public desktop installers are still in development.");
+  expect(html).toContain('href="https://github.com/apercallc/ai-notetaker/releases/tag/v1.0.0"');
+  expect(html).not.toContain("Download for macOS · Apple silicon");
+});
+
+it("offers Windows and Linux installers with matching setup guidance", () => {
+  const html = renderToStaticMarkup(<DownloadView platform="windows" release={{
+    tag: "v1.0.0",
+    pageUrl: "https://github.com/apercallc/ai-notetaker/releases/tag/v1.0.0",
+    windows: { name: "AI.Notetaker_1.0.0_x64-setup.exe", url: "https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app.exe", bytes: 100 },
+    linux: { name: "ai-notetaker_1.0.0_amd64.deb", url: "https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app.deb", bytes: 100 },
+  }} />);
+  const desktopSection = html.split('<details id="legacy-downloads"')[0];
+  expect(desktopSection).toContain('href="https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app.exe"');
+  expect(desktopSection).toContain('href="https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app.deb"');
+  expect(desktopSection).toContain("Install on Windows · 64-bit");
+  expect(desktopSection).toContain("Install on Linux · Debian or Ubuntu");
+  expect(desktopSection).toMatch(/<details open=""><summary>Install on Windows · 64-bit/);
+});
+
+it("keeps legacy extension downloads collapsed, including desktop query links", () => {
+  const defaultHtml = renderToStaticMarkup(<DownloadView release={null} />);
+  expect(defaultHtml).toMatch(/<details id="legacy-downloads" class="mk-wrap mk-legacy-downloads">/);
+  expect(defaultHtml).toContain("New desktop setups do not need the extension.");
+  expect(defaultHtml).toContain("New setups use the desktop app above");
+  expect(defaultHtml).toContain("Use my own API keys");
+  expect(defaultHtml).toContain("does not require an AI Notetaker account or Hosted AI sign-in");
+  expect(defaultHtml).not.toContain("choose <strong>Hosted AI</strong> and sign in");
 });

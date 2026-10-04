@@ -53,6 +53,7 @@ impl TranscriptionProvider for FixtureTranscriber {
             .into(),
             text: format!("{} fixture transcript", self.tier),
             is_final: true,
+            timestamp: None,
         }])
     }
 }

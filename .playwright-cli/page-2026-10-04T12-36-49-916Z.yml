@@ -1,0 +1,26 @@
+- generic [ref=e2]:
+  - complementary "Main navigation" [ref=e3]:
+    - generic [ref=e9]:
+      - strong [ref=e10]: AI Notetaker
+      - generic [ref=e11]: Local-first meeting notes
+    - navigation "Sections" [ref=e12]:
+      - button "Record" [ref=e13] [cursor=pointer]:
+        - generic [aria-hidden] [ref=e14]: ●
+      - button "Notes" [ref=e16] [cursor=pointer]:
+        - generic [aria-hidden] [ref=e17]: ▤
+      - button "Settings" [ref=e19] [cursor=pointer]:
+        - generic [aria-hidden] [ref=e20]: ⚙
+    - generic [ref=e22]:
+      - generic [ref=e23]: Saved on this device
+      - button "Open notes folder" [ref=e25] [cursor=pointer]
+      - generic [ref=e26]: Starting…
+  - main [ref=e27]:
+    - generic [ref=e28]:
+      - generic [ref=e29]:
+        - paragraph [ref=e30]: YOUR DESKTOP NOTETAKER
+        - heading "Record a meeting" [level=1] [ref=e31]
+      - status [ref=e32]:
+        - generic [ref=e34]: Checking audio
+    - generic [ref=e36]:
+      - strong [ref=e37]: Desktop bridge unavailable
+      - text: Open AI Notetaker from its installed desktop app.
