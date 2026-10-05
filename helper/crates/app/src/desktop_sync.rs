@@ -8,6 +8,7 @@ use notetaker_core::storage::{
     ImportedMeetingNote, MeetingState, MeetingStore, WorkspaceImportOutcome,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,19 @@ const MAX_ACTION_ITEMS: usize = 1_000;
 const MAX_ACTION_TEXT_LENGTH: usize = 2_000;
 const MAX_OWNER_LENGTH: usize = 200;
 const MAX_ACTION_ID_LENGTH: usize = 128;
+const MAX_SYNC_CONFLICTS: usize = 100;
+
+fn remote_version_key(meeting_id: Uuid, source_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(meeting_id.as_bytes());
+    digest.update([0]);
+    digest.update(source_id.as_bytes());
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +55,41 @@ struct PersistedSyncState {
     workspace_import_ids: HashSet<Uuid>,
     #[serde(default)]
     remote_versions: HashMap<Uuid, DateTime<Utc>>,
+    #[serde(default)]
+    scoped_remote_versions: HashMap<String, DateTime<Utc>>,
+    #[serde(default)]
+    conflicts: Vec<SyncConflict>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncConflict {
+    meeting_id: Uuid,
+    webapp_url: String,
+    workspace_id: String,
+}
+
+impl SyncConflict {
+    fn key(&self) -> String {
+        let mut digest = Sha256::new();
+        digest.update(self.meeting_id.as_bytes());
+        digest.update([0]);
+        digest.update(self.webapp_url.as_bytes());
+        digest.update([0]);
+        digest.update(self.workspace_id.as_bytes());
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopSyncConflictStatus {
+    pub meeting_id: String,
+    pub key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +97,12 @@ struct PersistedSyncState {
 struct RemoteCursor {
     updated_at: DateTime<Utc>,
     id: String,
+}
+
+struct WorkspacePageImport {
+    imported: usize,
+    versions: Vec<(Uuid, DateTime<Utc>)>,
+    conflicts: Vec<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -63,6 +118,17 @@ struct RemotePage {
 #[serde(rename_all = "camelCase")]
 struct UploadReceipt {
     updated_at: DateTime<Utc>,
+    workspace_id: String,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceIdentityResponse {
+    workspace: WorkspaceIdentity,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceIdentity {
+    id: String,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +160,7 @@ pub struct DesktopSyncStatus {
     pub pending: usize,
     pub last_error: Option<String>,
     pub last_success_at: Option<String>,
+    pub conflicts: Vec<DesktopSyncConflictStatus>,
 }
 
 pub struct DesktopSync {
@@ -166,7 +233,23 @@ impl DesktopSync {
             pending: state.pending.len(),
             last_error: self.load_error.clone().or_else(|| state.last_error.clone()),
             last_success_at: state.last_success_at.map(|at| at.to_rfc3339()),
+            conflicts: state
+                .conflicts
+                .iter()
+                .map(|conflict| DesktopSyncConflictStatus {
+                    meeting_id: conflict.meeting_id.to_string(),
+                    key: conflict.key(),
+                })
+                .collect(),
         }
+    }
+
+    pub fn conflict_webapp_url(&self, conflict_key: &str) -> Option<(Uuid, String)> {
+        self.lock_state()
+            .conflicts
+            .iter()
+            .find(|conflict| conflict.key() == conflict_key)
+            .map(|conflict| (conflict.meeting_id, conflict.webapp_url.clone()))
     }
 
     pub fn enqueue(&self, meeting_id: Uuid) -> Result<(), String> {
@@ -220,6 +303,41 @@ impl DesktopSync {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| "Web-app connection could not be configured.".to_string())?;
+        let identity_url = format!("{}/api/v1/desktop-sync", base_url.trim_end_matches('/'));
+        let identity_response = client
+            .get(identity_url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|_| {
+                "Could not reach the web app. The note stays on this device.".to_string()
+            })?;
+        if !identity_response.status().is_success() {
+            let status = identity_response.status();
+            let message = match status.as_u16() {
+                401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
+                403 => "The desktop sync token no longer has access to its workspace.",
+                404 => "This web-app version does not support desktop note sync yet.",
+                429 => "The web app is receiving too many requests. Sync will retry later.",
+                _ => "The web app could not confirm the selected workspace.",
+            };
+            return Err(format!("{message} (HTTP {status})"));
+        }
+        let workspace_id = identity_response
+            .json::<WorkspaceIdentityResponse>()
+            .await
+            .map_err(|_| "The web app returned an unsupported workspace identity.".to_string())?
+            .workspace
+            .id;
+        if workspace_id.trim().is_empty() || workspace_id.len() > 128 {
+            return Err("The web app returned an invalid workspace identity.".into());
+        }
+        let source_base = reqwest::Url::parse(base_url)
+            .map_err(|_| "Web-app URL is invalid.".to_string())?
+            .to_string()
+            .trim_end_matches('/')
+            .to_owned();
+        let source_id = format!("{source_base}/workspace/{workspace_id}");
         for meeting_id in pending {
             let store = store.clone();
             let payload = tokio::task::spawn_blocking(move || build_payload(&store, meeting_id))
@@ -238,8 +356,8 @@ impl DesktopSync {
 
             let expected_version = {
                 self.lock_state()
-                    .remote_versions
-                    .get(&meeting_id)
+                    .scoped_remote_versions
+                    .get(&remote_version_key(meeting_id, &source_id))
                     .map(DateTime::to_rfc3339)
                     .unwrap_or_else(|| "new".to_string())
             };
@@ -261,10 +379,24 @@ impl DesktopSync {
                             return Err(error);
                         }
                     };
-                    self.record_success(meeting_id, receipt.updated_at)?
+                    if receipt.workspace_id != workspace_id {
+                        let error = "The web app changed workspaces during sync. The local note is safe; retry sync to confirm its destination.".to_string();
+                        self.record_error(error.clone());
+                        return Err(error);
+                    }
+                    self.record_success(meeting_id, receipt.updated_at, base_url, &workspace_id)?
                 }
                 Ok(response) => {
                     let status = response.status();
+                    if status == reqwest::StatusCode::CONFLICT {
+                        let conflict_workspace_id = response
+                            .json::<serde_json::Value>()
+                            .await
+                            .ok()
+                            .and_then(|body| body.get("workspaceId")?.as_str().map(str::to_owned))
+                            .unwrap_or_else(|| workspace_id.clone());
+                        self.record_conflict(meeting_id, base_url, &conflict_workspace_id)?;
+                    }
                     let message = match status.as_u16() {
                         409 => "This note changed in the web app after its last sync. Review the web version before retrying.",
                         400 | 413 | 422 => "The web app rejected a saved note. Update the web app, then retry sync.",
@@ -388,6 +520,7 @@ impl DesktopSync {
                 return Err("The web app returned an invalid workspace identity.".into());
             }
             let source_id = format!("{source_base}/workspace/{}", page.workspace_id);
+            let page_workspace_id = page.workspace_id.clone();
             let next_cursor = page.next_cursor;
             let has_more = page.has_more;
             if has_more && next_cursor.is_none() {
@@ -396,10 +529,15 @@ impl DesktopSync {
                 );
             }
             let store_for_import = store.clone();
-            let page_imported = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+            let page_source_id = source_id.clone();
+            let known_versions = self.lock_state().scoped_remote_versions.clone();
+            let page_import = tokio::task::spawn_blocking(move || -> Result<WorkspacePageImport, String> {
                 let mut count = 0;
+                let mut versions = Vec::new();
+                let mut conflicts = Vec::new();
                 for meeting in page.meetings {
                     validate_remote_meeting(&meeting)?;
+                    let remote_updated_at = meeting.updated_at;
                     let source_updated_at = meeting.updated_at;
                     let action_items = meeting.action_items;
                     let summary = (!meeting.summary.trim().is_empty() || !action_items.is_empty()).then_some(Summary {
@@ -410,7 +548,7 @@ impl DesktopSync {
                         id: meeting.id,
                         workspace_import: true,
                         workspace_source_updated_at: Some(source_updated_at),
-                        workspace_source_id: Some(source_id.clone()),
+                        workspace_source_id: Some(page_source_id.clone()),
                         title: meeting.title,
                         started_at: meeting.started_at,
                         ended_at: Some(meeting.ended_at),
@@ -424,15 +562,41 @@ impl DesktopSync {
                         }).collect(),
                         summary,
                     };
+                    let meeting_id = note.id;
                     let outcome = store_for_import.refresh_workspace_import(note)
                         .map_err(|_| "A workspace note could not be saved locally. Retry sync; existing notes are safe.".to_string())?;
                     if matches!(outcome, WorkspaceImportOutcome::Created | WorkspaceImportOutcome::Updated) {
                         count += 1;
+                    } else if outcome == WorkspaceImportOutcome::PreservedLocalNote
+                        && known_versions
+                            .get(&remote_version_key(meeting_id, &page_source_id))
+                            .is_none_or(|known| remote_updated_at > *known)
+                    {
+                        conflicts.push(meeting_id);
+                    }
+                    if matches!(outcome, WorkspaceImportOutcome::Created | WorkspaceImportOutcome::Updated | WorkspaceImportOutcome::Unchanged) {
+                        versions.push((meeting_id, remote_updated_at));
                     }
                 }
-                Ok(count)
+                Ok(WorkspacePageImport {
+                    imported: count,
+                    versions,
+                    conflicts,
+                })
             }).await.map_err(|_| "Workspace notes could not be imported.".to_string())??;
-            imported += page_imported;
+            imported += page_import.imported;
+            if !page_import.versions.is_empty() {
+                let mut state = self.lock_state();
+                for (meeting_id, updated_at) in page_import.versions {
+                    state
+                        .scoped_remote_versions
+                        .insert(remote_version_key(meeting_id, &source_id), updated_at);
+                }
+                self.persist(&state)?;
+            }
+            for meeting_id in page_import.conflicts {
+                self.record_conflict(meeting_id, base_url, &page_workspace_id)?;
+            }
             if let Some(next) = next_cursor {
                 if cursor.as_ref().is_some_and(|old| {
                     next.updated_at < old.updated_at
@@ -461,12 +625,62 @@ impl DesktopSync {
         }
     }
 
-    fn record_success(&self, meeting_id: Uuid, updated_at: DateTime<Utc>) -> Result<(), String> {
+    fn record_success(
+        &self,
+        meeting_id: Uuid,
+        updated_at: DateTime<Utc>,
+        webapp_url: &str,
+        workspace_id: &str,
+    ) -> Result<(), String> {
+        let normalized_url = reqwest::Url::parse(webapp_url)
+            .map_err(|_| "Web-app URL is invalid.".to_string())?
+            .to_string()
+            .trim_end_matches('/')
+            .to_owned();
+        let source_id = format!("{normalized_url}/workspace/{workspace_id}");
         let mut state = self.lock_state();
         state.pending.retain(|id| *id != meeting_id);
         state.remote_versions.insert(meeting_id, updated_at);
+        state
+            .scoped_remote_versions
+            .insert(remote_version_key(meeting_id, &source_id), updated_at);
+        state.conflicts.retain(|conflict| {
+            conflict.meeting_id != meeting_id
+                || conflict.webapp_url != normalized_url
+                || conflict.workspace_id != workspace_id
+        });
         state.last_error = None;
         state.last_success_at = Some(Utc::now());
+        self.persist(&state)
+    }
+
+    fn record_conflict(
+        &self,
+        meeting_id: Uuid,
+        webapp_url: &str,
+        workspace_id: &str,
+    ) -> Result<(), String> {
+        let normalized_url = reqwest::Url::parse(webapp_url)
+            .map_err(|_| "Web-app URL is invalid.".to_string())?
+            .to_string()
+            .trim_end_matches('/')
+            .to_owned();
+        let mut state = self.lock_state();
+        state.conflicts.retain(|conflict| {
+            conflict.meeting_id != meeting_id
+                || conflict.webapp_url != normalized_url
+                || conflict.workspace_id != workspace_id
+        });
+        if state.conflicts.len() >= MAX_SYNC_CONFLICTS {
+            return Err(
+                "There are too many unresolved sync conflicts. Review and clear some before syncing more notes.".into(),
+            );
+        }
+        state.conflicts.push(SyncConflict {
+            meeting_id,
+            webapp_url: normalized_url,
+            workspace_id: workspace_id.to_owned(),
+        });
         self.persist(&state)
     }
 
@@ -665,6 +879,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sync_conflicts_survive_restart_and_clear_after_an_upload_succeeds() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let sync = DesktopSync::load(directory.path());
+        sync.record_conflict(id, "https://notes.example.test", "workspace-a")
+            .unwrap();
+        sync.record_conflict(id, "https://notes.example.test", "workspace-b")
+            .unwrap();
+        let workspace_a_key = sync.status(true).conflicts[0].key.clone();
+        let workspace_b_key = sync.status(true).conflicts[1].key.clone();
+        assert_ne!(workspace_a_key, workspace_b_key);
+
+        let reopened = DesktopSync::load(directory.path());
+        assert_eq!(
+            reopened.conflict_webapp_url(&workspace_a_key),
+            Some((id, "https://notes.example.test".to_string()))
+        );
+        assert_eq!(
+            reopened.conflict_webapp_url(&workspace_b_key),
+            Some((id, "https://notes.example.test".to_string()))
+        );
+        assert_eq!(reopened.status(true).conflicts.len(), 2);
+
+        reopened
+            .record_success(id, Utc::now(), "https://notes.example.test", "workspace-b")
+            .unwrap();
+        let remaining = reopened.status(true).conflicts;
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].key, workspace_a_key);
+    }
+
     #[tokio::test]
     async fn upload_sends_first_write_version_and_saves_server_receipt() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -694,22 +940,39 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let mut stream = BufReader::new(stream);
-            let mut headers = String::new();
-            loop {
-                let mut line = String::new();
-                let count = stream.read_line(&mut line).await.unwrap();
-                if count == 0 || line == "\r\n" {
-                    break;
+            async fn read_headers(
+                stream: tokio::net::TcpStream,
+            ) -> (String, tokio::net::TcpStream) {
+                let mut reader = BufReader::new(stream);
+                let mut headers = String::new();
+                loop {
+                    let mut line = String::new();
+                    let count = reader.read_line(&mut line).await.unwrap();
+                    if count == 0 || line == "\r\n" {
+                        break;
+                    }
+                    headers.push_str(&line);
                 }
-                headers.push_str(&line);
+                (headers, reader.into_inner())
             }
+
+            let (stream, _) = listener.accept().await.unwrap();
+            let (headers, mut stream) = read_headers(stream).await;
+            assert!(headers.starts_with("GET /api/v1/desktop-sync "));
+            let body = r#"{"workspace":{"id":"workspace-1","name":"Product"}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+
+            let (stream, _) = listener.accept().await.unwrap();
+            let (headers, mut stream) = read_headers(stream).await;
             assert!(headers
                 .to_ascii_lowercase()
                 .contains("x-desktop-sync-version: new"));
-            let mut stream = stream.into_inner();
-            let body = serde_json::json!({ "updatedAt": updated_at }).to_string();
+            let body = serde_json::json!({ "updatedAt": updated_at, "workspaceId": "workspace-1" })
+                .to_string();
             let response = format!(
                 "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(), body
@@ -723,6 +986,13 @@ mod tests {
         server.await.unwrap();
         let state = sync.lock_state();
         assert_eq!(state.remote_versions.get(&id), Some(&updated_at));
+        let source_id = format!("http://{address}/workspace/workspace-1");
+        assert_eq!(
+            state
+                .scoped_remote_versions
+                .get(&remote_version_key(id, &source_id)),
+            Some(&updated_at)
+        );
         assert!(!state.pending.contains(&id));
     }
 
@@ -920,10 +1190,24 @@ mod tests {
             "Updated online."
         );
         assert_eq!(store.load_transcript(id).unwrap()[0].text, "Edited online.");
+        let source_id = format!("http://{update_address}/workspace/workspace-1");
+        assert_eq!(
+            sync.lock_state()
+                .scoped_remote_versions
+                .get(&remote_version_key(id, &source_id)),
+            Some(&newer_at)
+        );
         let reopened = DesktopSync::load(directory.path());
         assert_eq!(
             reopened.lock_state().remote_cursor.as_ref().unwrap().id,
             id.to_string()
+        );
+        assert_eq!(
+            reopened
+                .lock_state()
+                .scoped_remote_versions
+                .get(&remote_version_key(id, &source_id)),
+            Some(&newer_at)
         );
     }
 }

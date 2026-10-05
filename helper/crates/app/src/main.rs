@@ -1134,6 +1134,7 @@ fn main() {
             desktop_open_screen_recording_settings,
             desktop_open_notes_folder,
             desktop_open_webapp,
+            desktop_open_webapp_conflict,
         ])
         .setup(move |app| {
             #[cfg(desktop)]
@@ -2181,6 +2182,23 @@ fn desktop_open_webapp(context: tauri::State<'_, DesktopCommandContext>) -> Resu
     let url = desktop_settings::normalize_webapp_url(&preferences.webapp_url)?
         .ok_or_else(|| "Add your web-app URL in Settings first.".to_string())?;
     open_external(&url)
+}
+
+#[tauri::command]
+fn desktop_open_webapp_conflict(
+    context: tauri::State<'_, DesktopCommandContext>,
+    conflict_key: String,
+) -> Result<(), String> {
+    let (conflict_meeting_id, source_url) = context
+        .sync
+        .conflict_webapp_url(&conflict_key)
+        .ok_or_else(|| "This sync conflict is no longer available.".to_string())?;
+    let base_url = desktop_settings::normalize_webapp_url(&source_url)?
+        .ok_or_else(|| "The web-app address for this conflict is unavailable.".to_string())?;
+    let target = reqwest::Url::parse(&base_url)
+        .and_then(|url| url.join(&format!("/meetings/{conflict_meeting_id}")))
+        .map_err(|_| "The web version could not be opened.".to_string())?;
+    open_external(target.as_str())
 }
 
 fn open_external(target: &str) -> Result<(), String> {

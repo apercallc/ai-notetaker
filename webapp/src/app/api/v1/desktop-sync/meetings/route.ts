@@ -197,11 +197,18 @@ export async function POST(request: Request) {
       meeting = await upsertMeeting(body, auth.auth.workspaceId, auth.auth.userId, { expectedUpdatedAt });
     } catch (error) {
       if (error instanceof DesktopSyncConflictError) {
-        return jsonError(error.message, 409, requestId);
+        return NextResponse.json({
+          error: error.message,
+          requestId,
+          workspaceId: auth.auth.workspaceId,
+        }, {
+          status: 409,
+          headers: { "x-request-id": requestId, "cache-control": "no-store" },
+        });
       }
       throw error;
     }
-    return NextResponse.json(meeting, {
+    return NextResponse.json({ ...meeting, workspaceId: auth.auth.workspaceId }, {
       status: 201,
       headers: { "x-request-id": requestId, "cache-control": "no-store" },
     });

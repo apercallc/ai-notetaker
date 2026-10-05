@@ -167,6 +167,7 @@ describe("POST /api/v1/desktop-sync/meetings", () => {
       body: JSON.stringify(payload),
     }));
     expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ workspaceId: "workspace-1" });
     expect(upsertMeeting).toHaveBeenCalledWith(payload, "workspace-1", "user-1", {
       expectedUpdatedAt: new Date("2026-10-04T11:00:00.000Z"),
     });
@@ -178,7 +179,11 @@ describe("POST /api/v1/desktop-sync/meetings", () => {
       body: JSON.stringify(payload),
     }));
     expect(conflict.status).toBe(409);
-    expect(await conflict.json()).toMatchObject({ error: "This workspace note changed online.", requestId: "desktop-sync-test" });
+    expect(await conflict.json()).toMatchObject({
+      error: "This workspace note changed online.",
+      requestId: "desktop-sync-test",
+      workspaceId: "workspace-1",
+    });
   });
 
   it("rejects notes labeled for another capture or processing path", async () => {
