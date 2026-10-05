@@ -30,6 +30,11 @@
       Provider keys, macOS audio permissions, recording, and Chrome connection
       were not configured or exercised. Remaining platform acceptance is in
       [`release-candidate-checklist.md`](docs/launch/release-candidate-checklist.md).
+- [x] Publish v0.18.9. Workflow
+      [37290690554](https://github.com/apercallc/ai-notetaker/actions/runs/37290690554)
+      passed all four native builds, extension/webapp builds, asset verification,
+      and release publication. Verified the public arm64 DMG checksum and
+      mounted app signature/version. No recording or provider flow was tested.
 
 ## Extension offline sync queue — 2026-10-05
 

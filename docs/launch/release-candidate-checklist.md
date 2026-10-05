@@ -2,8 +2,8 @@
 
 Updated 2026-10-05. Keep repository/CI evidence separate from install,
 provider, account, and physical-device acceptance. The current public release
-is v0.18.8. It is now installed on the reviewed Mac; this does not inherit the
-older app's device acceptance or prove real audio capture.
+is v0.18.9. This does not inherit older app acceptance or prove real audio
+capture.
 
 ## Verified release evidence
 
@@ -26,6 +26,12 @@ older app's device acceptance or prove real audio capture.
       [37284514728](https://github.com/apercallc/ai-notetaker/actions/runs/37284514728)
       passed metadata validation, webapp image and extension builds, all four
       native builds, asset/checksum verification, and publication. Docker Hub
+      mirroring and Chrome Web Store upload were skipped.
+- [x] GitHub Release [`v0.18.9`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.9)
+      was published on 2026-10-05. Release workflow
+      [37290690554](https://github.com/apercallc/ai-notetaker/actions/runs/37290690554)
+      passed metadata validation, webapp and extension builds, all four native
+      builds, asset/checksum verification, and publication. Docker Hub
       mirroring and Chrome Web Store upload were skipped.
 - [x] Release workflow [37254643304](https://github.com/apercallc/ai-notetaker/actions/runs/37254643304)
       passed release metadata validation, package builds, cross-platform helper
@@ -71,6 +77,12 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       manifests point to the installed app and allow the published extension
       ID. This is install/update proof only; no recording or browser connection
       was exercised.
+- [x] On 2026-10-05, verified the public v0.18.9 arm64 DMG against its
+      official `SHA256SUMS`; its mounted app bundle passed strict code-signature
+      verification and reported version 0.18.9. The installed v0.18.9 copy
+      built from that tag's workflow artifact opened to its first-run UI.
+      Provider keys, audio permission, recording, and browser connection were
+      not exercised.
 - [ ] Finish macOS arm64 uninstall checks; install and verify macOS x86_64,
       Windows x64, and Debian/Ubuntu x64 builds. Native Messaging manifest
       inspection does not prove a browser-to-host connection.
