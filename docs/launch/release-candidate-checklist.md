@@ -15,6 +15,11 @@ and physical-device acceptance.
 - [x] Production `/api/health` returned HTTP 200 with `managedReady: true` on
       2026-10-04 after the `v0.18.2` release. This confirms service readiness
       checks, not an end-to-end customer journey.
+- [x] Railway production deployed web and managed-worker from release commit
+      `2922289`; both are online with one running replica, Postgres is online,
+      and the environment has no pending changes, active warnings, or recent
+      failed/crashed deployments. The later docs-only commit was skipped as
+      expected.
 - [x] Stripe checkout, webhook, and portal cancellation were exercised on
       2026-09-30 with a 100%-off test promotion; recheck paid billing before
       changing pricing or billing configuration.
@@ -57,7 +62,9 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
 - [ ] Publish the Chrome Web Store listing and verify store installation,
       permissions, screenshots, extension ID, and Native Messaging origin. The
       `v0.18.2` store upload job was skipped; manual ZIP installation remains
-      available.
+      available. The published extension ID is absent from this Mac's Chrome
+      Default profile, so the registered host has not been exercised through
+      Chrome.
 
 ### Managed service and operations
 

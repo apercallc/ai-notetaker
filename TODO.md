@@ -89,7 +89,11 @@ call or real archive import was completed.
   CodeQL. The auto-release workflow published `v0.18.2`; its four native
   desktop jobs, extension package, webapp image, checksum/manifest validation,
   and GitHub asset publication passed. Docker Hub mirroring and Chrome Web
-  Store upload were skipped because their credentials are unset. On an Apple
+  Store upload were skipped because their credentials are unset. Railway
+  production deployed commit `2922289`: web and managed worker are online at
+  one replica each, Postgres is online, and the environment reports no pending
+  changes, active warnings, or recent failures. The subsequent docs-only push
+  was correctly skipped. On an Apple
   M4 Mac running macOS 27.0.1, the v0.18.2 arm64 DMG checksum verified, the
   guided installer completed, the installed ad-hoc signature verifies, and
   the app launched to its first-run screen and Settings. Chrome and Edge
