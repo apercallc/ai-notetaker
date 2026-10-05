@@ -1,25 +1,35 @@
 # Release and production acceptance
 
-Updated 2026-10-04 against the published `v0.18.2` release and its release
-workflow. Keep repository/CI evidence separate from install, provider, account,
-and physical-device acceptance.
+Updated 2026-10-05. Keep repository/CI evidence separate from install,
+provider, account, and physical-device acceptance. The installed Mac app was
+still v0.18.2 during this review; the newer v0.18.6 release has build and
+publication proof but does not inherit the older app's device acceptance.
 
 ## Verified release evidence
 
 - [x] GitHub Release [`v0.18.2`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.2)
       is published with macOS arm64 and x86_64 DMGs, Windows x64 installer,
       Debian package, extension ZIPs, generated release manifest, and checksums.
+- [x] GitHub Release [`v0.18.6`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.6)
+      was published on 2026-10-05. Its release workflow passed metadata
+      validation, webapp image and extension builds, native builds for all four
+      targets, package verification, and GitHub Release publication. Docker Hub
+      mirroring and Chrome Web Store upload were skipped.
 - [x] Release workflow [37254643304](https://github.com/apercallc/ai-notetaker/actions/runs/37254643304)
       passed release metadata validation, package builds, cross-platform helper
       jobs, asset verification, and GitHub Release publication.
 - [x] Production `/api/health` returned HTTP 200 with `managedReady: true` on
       2026-10-04 after the `v0.18.2` release. This confirms service readiness
       checks, not an end-to-end customer journey.
-- [x] Railway production deployed web and managed-worker from release commit
-      `2922289`; both are online with one running replica, Postgres is online,
-      and the environment has no pending changes, active warnings, or recent
-      failed/crashed deployments. The later docs-only commit was skipped as
-      expected.
+- [x] Live `/api/health` check on 2026-10-05 returned `ok: true`,
+      `managedReady: true`, and `objectStorage: "s3"`. This still does not prove
+      signup, provider processing, billing, or cleanup end to end.
+- [x] Railway production was verified on 2026-09-30 with web and
+      managed-worker deployed from release commit `2922289`; both had one
+      running replica, Postgres was online, and the environment had no pending
+      changes, active warnings, or recent failed/crashed deployments. This is a
+      dated snapshot; the 2026-10-05 health check above does not inspect Railway
+      deployment status.
 - [x] Stripe checkout, webhook, and portal cancellation were exercised on
       2026-09-30 with a 100%-off test promotion; recheck paid billing before
       changing pricing or billing configuration.
@@ -64,10 +74,10 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       records remain intact and imported audio stays on separate tracks.
 - [ ] Publish the Chrome Web Store listing and verify store installation,
       permissions, screenshots, extension ID, and Native Messaging origin. The
-      `v0.18.2` store upload job was skipped; manual ZIP installation remains
-      available. The published extension ID is absent from this Mac's Chrome
-      Default profile, so the registered host has not been exercised through
-      Chrome.
+      `v0.18.2` and `v0.18.6` store upload jobs were skipped; manual ZIP
+      installation remains available. The published extension ID is absent
+      from this Mac's Chrome Default profile, so the registered host has not
+      been exercised through Chrome.
 
 ### Managed service and operations
 
