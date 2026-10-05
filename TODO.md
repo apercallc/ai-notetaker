@@ -1,5 +1,15 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Dependency audit — 2026-10-05
+
+- [ ] Recheck `braces` after upstream publishes a patched release. The webapp
+      development-only chain `eslint-config-next → @next/eslint-plugin-next →
+      fast-glob → micromatch → braces@3.0.3` is affected by GHSA-vfj7-8cjw-p6xm.
+      GitHub's advisory lists no patched version. `npm audit --omit=dev` reports
+      zero webapp production dependency vulnerabilities; full webapp audit finds
+      five high-severity paths to this same advisory. Do not force-downgrade
+      Next or pin another affected `braces` release as a workaround.
+
 ## v0.18.8 release and Mac update — 2026-10-05
 
 - [x] Publish the v0.18.8 desktop and extension release. Workflow
