@@ -793,7 +793,9 @@ Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowe
 - [x] Deploy the new query, worker, expiry, trash, and search indexes through the
       normal migration/release flow. On 2026-10-05, the production `web` service
       deployed commit `3a77a0c`; startup found all 38 migrations and reported no
-      pending migrations. The health endpoint returned `managedReady: true`.
+      pending migrations. A read-only Postgres check confirmed `pg_trgm` is
+      installed and all 11 expected worker, expiry, trash, and trigram indexes
+      are ready and valid. The health endpoint returned `managedReady: true`.
       Large-table index-build impact was not benchmarked, and no 100M-user load
       certification is claimed.
 
