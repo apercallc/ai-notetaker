@@ -400,10 +400,14 @@ or BlackHole steps relevant to this Mac.
       processing failures explicit with saved-audio retry and settings actions.
 - [x] Report desktop recording only after audio capture starts, and move
       synchronous audio preflight diagnostics off the helper IPC executor.
+- [x] Load only the five newest browser recordings for the extension popup.
+      Source-filtered history scans the meeting index in 25-record batches and
+      stops as soon as it has enough results, avoiding a full-archive read on
+      every popup open.
 - Follow-up: add an incremental transcript search index and reduce repeated
-  full-meeting storage rewrites for finalized segments in large extension
-  archives. Preserve a migration path for existing local records and durable
-  final transcript data.
+  full-meeting storage rewrites for each finalized segment in large extension
+  archives. Archive-wide search and final-segment persistence still load full
+  records; preserve existing records and durable transcript data when addressed.
 - [x] Defer helper retries while capture is active or Stop is draining the
       persisted audio queue, so provider latency cannot block live transcript
       updates.

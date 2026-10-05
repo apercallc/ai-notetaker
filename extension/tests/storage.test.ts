@@ -218,6 +218,32 @@ describe("meeting storage", () => {
     expect((await listMeetings(2)).map((item) => item.id)).toEqual(["m3", "m2"]);
   });
 
+  it("lists recent source-matching meetings in bounded batches", async () => {
+    await saveMeeting({ ...meeting, id: "meet-0", captureSource: "meet" });
+    await saveMeeting({ ...meeting, id: "meet-1", captureSource: "meet", startedAt: "2026-09-21T11:00:00.000Z" });
+    for (let index = 0; index < 38; index += 1) {
+      await saveMeeting({
+        ...meeting,
+        id: `desktop-${index}`,
+        captureSource: "desktop",
+        startedAt: `2026-09-22T${String(index % 24).padStart(2, "0")}:00:00.000Z`,
+      });
+    }
+    chromeMock.storage.local.get.mockClear();
+
+    expect((await listMeetings(2, undefined, "meet")).map((item) => item.id)).toEqual(["meet-1", "meet-0"]);
+    // One index read, then two 25-record batches; the remaining archive is untouched.
+    expect(chromeMock.storage.local.get).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns no meetings for a zero limit without reading records", async () => {
+    await saveMeeting(meeting);
+    chromeMock.storage.local.get.mockClear();
+
+    expect(await listMeetings(0)).toEqual([]);
+    expect(chromeMock.storage.local.get).not.toHaveBeenCalled();
+  });
+
   it("searches the complete archive across titles, summaries, transcripts, and actions", async () => {
     await saveMeeting({ ...meeting, id: "m1", summary: "Roadmap review" });
     await saveMeeting({

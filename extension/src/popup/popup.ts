@@ -25,12 +25,12 @@ async function render(): Promise<void> {
     const [state, settings, meetings, tab] = await Promise.all([
       sendToBackground<BackgroundState>({ type: "GET_STATE" }),
       getSettings(),
-      listMeetings(),
+      listMeetings(5, undefined, "meet"),
       activeBrowserTab(),
     ]);
     const active = state.activeMeeting ? await getMeeting(state.activeMeeting.id) : null;
     const activeMeet = active?.captureSource === "meet" ? active : null;
-    const recent = meetings.filter((meeting) => meeting.captureSource === "meet").slice(0, 5);
+    const recent = meetings;
     const ready = settings.onboardingComplete && settings.consentDisclosureAcknowledged;
     app.innerHTML = `
       <header class="app-header"><div class="brand-lockup"><img src="../icons/icon48.png" alt="" /><h1>AI Notetaker</h1></div><button class="icon-button" id="open-settings" aria-label="Open recording settings">Settings</button></header>

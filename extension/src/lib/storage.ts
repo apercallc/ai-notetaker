@@ -5,7 +5,9 @@
  * and the root CLAUDE.md non-negotiable constraints list). Do not add a
  * `.sync` call anywhere in this file.
  */
-import { DEFAULT_SETTINGS, type MeetingRecord, type NotetakerSettings, type ProcessingMode } from "../types";
+import { DEFAULT_SETTINGS, type CaptureSource, type MeetingRecord, type NotetakerSettings, type ProcessingMode } from "../types";
+
+const MEETING_SCAN_BATCH_SIZE = 25;
 
 const KEYS = {
   settings: "notetaker.settings",
@@ -172,12 +174,37 @@ export function normalizeMeeting(raw: unknown): MeetingRecord | null {
  * Reading only its tail keeps the popup cheap even after a year of notes.
  * Callers that need the complete archive can omit the limit.
  */
-export async function listMeetings(limit?: number, query?: string): Promise<MeetingRecord[]> {
+export async function listMeetings(
+  limit?: number,
+  query?: string,
+  captureSource?: CaptureSource,
+): Promise<MeetingRecord[]> {
+  const requestedLimit = limit === undefined ? undefined : Math.max(0, Math.floor(limit));
+  if (requestedLimit === 0) return [];
+
   const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
-  const normalizedQuery = query?.trim().slice(0, 200).toLocaleLowerCase();
+  const normalizedQuery = query?.trim().slice(0, 200).toLocaleLowerCase() || undefined;
+  if (captureSource && !normalizedQuery && requestedLimit !== undefined) {
+    const recentMatches: MeetingRecord[] = [];
+    for (let end = index.length; end > 0 && recentMatches.length < requestedLimit;) {
+      const start = Math.max(0, end - MEETING_SCAN_BATCH_SIZE);
+      const batchIds = index.slice(start, end);
+      end = start;
+      const records = (await storageGet<Record<string, unknown>>(
+        batchIds.map((id) => KEYS.meetingPrefix + id),
+      )) ?? {};
+      for (const id of batchIds.reverse()) {
+        const meeting = normalizeMeeting(records[KEYS.meetingPrefix + id]);
+        if (meeting?.captureSource === captureSource) recentMatches.push(meeting);
+        if (recentMatches.length === requestedLimit) break;
+      }
+    }
+    return recentMatches.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
   // A search must inspect the whole archive before applying a display limit;
   // the normal popup path still reads only its newest five records.
-  const ids = normalizedQuery ? index : limit === undefined ? index : index.slice(-Math.max(0, limit));
+  const ids = normalizedQuery ? index : requestedLimit === undefined ? index : index.slice(-requestedLimit);
   // Fetch the selected records in one storage operation. Searching is an
   // archive-wide operation, so issuing one request per meeting makes older
   // profiles increasingly slow and can exhaust the browser's callback queue.
@@ -187,6 +214,7 @@ export async function listMeetings(limit?: number, query?: string): Promise<Meet
   const meetings = ids.map((id) => normalizeMeeting(records[KEYS.meetingPrefix + id]));
   const matchingMeetings = meetings.filter((meeting): meeting is MeetingRecord => {
     if (!meeting) return false;
+    if (captureSource && meeting.captureSource !== captureSource) return false;
     if (!normalizedQuery) return true;
     return [
       meeting.title,
@@ -197,7 +225,8 @@ export async function listMeetings(limit?: number, query?: string): Promise<Meet
   });
   return matchingMeetings
     .filter((m): m is MeetingRecord => m !== null)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .slice(0, requestedLimit);
 }
 
 export async function getMeeting(id: string): Promise<MeetingRecord | null> {
