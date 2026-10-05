@@ -23,8 +23,10 @@
       release tag, so a docs-only follow-up cannot strand an earlier product
       change. The release job now exits cleanly when its SHA is superseded
       before treating cancelled checks as failures.
-- Verified with `actionlint` and all 10 release version/manifest tests. Remote
-      check completion and the next published release remain to be confirmed.
+- Verified with `actionlint`, all 10 release version/manifest tests, and
+      workflow [37294290434](https://github.com/apercallc/ai-notetaker/actions/runs/37294290434)
+      passing on `3d971c1`. It reconciled the follow-up code fix into the
+      published v0.18.10 release.
 
 ## v0.18.8 release and Mac update — 2026-10-05
 
@@ -44,6 +46,11 @@
       passed all four native builds, extension/webapp builds, asset verification,
       and release publication. Verified the public arm64 DMG checksum and
       mounted app signature/version. No recording or provider flow was tested.
+- [x] Publish v0.18.10. Release workflow
+      [37294935146](https://github.com/apercallc/ai-notetaker/actions/runs/37294935146)
+      passed all native, extension, and webapp build jobs and published all
+      assets. Verified the public arm64 DMG checksum and embedded app version/
+      signature integrity; no install or recording was attempted.
 
 ## Extension offline sync queue — 2026-10-05
 
