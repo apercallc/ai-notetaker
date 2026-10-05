@@ -1,5 +1,12 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Desktop UI CI guard — 2026-10-05
+
+- [x] Parse-check the Tauri desktop UI JavaScript in the cross-platform helper
+      and release build workflows, so syntax errors fail before packaging.
+- Verified locally with `node --check` and `actionlint` on both workflows.
+      This does not verify native UI behavior or audio capture.
+
 ## Download page and test reliability — 2026-10-04
 
 - [x] Mark published installers as unsigned previews before download choices,

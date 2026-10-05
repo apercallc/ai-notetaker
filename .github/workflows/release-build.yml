@@ -127,6 +127,9 @@ jobs:
         with:
           components: rustfmt, clippy
           targets: ${{ matrix.target || '' }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
       - name: Install Linux Tauri and audio dev headers
         if: runner.os == 'Linux'
         run: |
@@ -136,6 +139,8 @@ jobs:
         with:
           workspaces: helper
       - run: cargo fmt --all -- --check
+      - name: Check desktop UI JavaScript syntax
+        run: node --check crates/app/ui/app.js
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Prepare Swift runtime for macOS tests
         if: runner.os == 'macOS'
