@@ -2745,7 +2745,7 @@ dependencies = [
 
 [[package]]
 name = "notetaker-app"
-version = "0.18.5"
+version = "0.18.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2779,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "notetaker-audio"
-version = "0.18.5"
+version = "0.18.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2795,7 +2795,7 @@ dependencies = [
 
 [[package]]
 name = "notetaker-core"
-version = "0.18.5"
+version = "0.18.6"
 dependencies = [
  "anyhow",
  "async-trait",
