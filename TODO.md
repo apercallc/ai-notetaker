@@ -10,6 +10,19 @@
       five high-severity paths to this same advisory. Do not force-downgrade
       Next or pin another affected `braces` release as a workaround.
 
+## macOS installer concurrency — 2026-10-05
+
+- [x] Serialize installer launches across the unnotarized-release confirmation
+      dialog. Recheck that the exact target app is stopped after confirmation
+      and before replacing it; ignore a separate installation at another path.
+- [x] Add regression coverage for concurrent installer launches and replacing
+      a running target while preserving installs to unrelated folders.
+- Verified with all 9 macOS installer tests, 272 helper workspace tests,
+  `cargo fmt`, and strict Clippy. The local workspace tests require command-local
+  Xcode Swift runtime paths because this Mac's selected Command Line Tools
+  environment cannot link Swift-dependent audio tests. No global developer
+  directory or signing policy was changed.
+
 ## Desktop setup copy — 2026-10-05
 
 - [x] Keep the disabled Start hint concise when provider setup is incomplete;

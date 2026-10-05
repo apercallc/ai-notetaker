@@ -53,9 +53,9 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-Verified on 2026-10-03: **248 workspace tests pass**, `cargo fmt` and Clippy
-pass, all 7 macOS installer regression tests pass, and the rebuilt debug Tauri
-app opens on this Mac. This Mac's Command Line
+Verified on 2026-10-05: **272 workspace tests pass**, `cargo fmt` and Clippy
+pass, and all 9 macOS installer regression tests pass. The rebuilt debug Tauri
+development app was opened on this Mac on 2026-10-03. This Mac's Command Line
 Tools do not provide the default `XcodeDefault.xctoolchain` Swift library path.
 The build succeeds with command-local `SDKROOT=.../MacOSX26.5.sdk`,
 `MACOSX_DEPLOYMENT_TARGET=13.0`, and `RUSTFLAGS='-L .../usr/lib/swift/macosx'`;

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,8 +23,9 @@ class InstallerTests(unittest.TestCase):
         self.target = self.destination / "AI Notetaker.app"
         binary_dir = self.source / "Contents" / "MacOS"
         binary_dir.mkdir(parents=True)
+        shutil.copyfile("/bin/sleep", binary_dir / "notetaker-helper")
+        shutil.copyfile("/usr/bin/true", binary_dir / "notetaker-nm-host")
         for name in ("notetaker-helper", "notetaker-nm-host"):
-            shutil.copyfile("/usr/bin/true", binary_dir / name)
             (binary_dir / name).chmod(0o755)
         self.plist = self.source / "Contents" / "Info.plist"
         self.plist.write_bytes(plistlib.dumps({
@@ -57,6 +59,9 @@ class InstallerTests(unittest.TestCase):
         self.run_command("xattr", "-w", "com.ainotetaker.test", "keep", str(self.source))
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Copying and verifying AI Notetaker", result.stdout)
+        self.assertIn("Installing AI Notetaker", result.stdout)
+        self.assertIn("Setting up optional support for existing extension users", result.stdout)
         self.run_command("codesign", "--verify", "--deep", "--strict", str(self.target))
         self.assertEqual((self.destination / "registered-path").read_text(), str(self.target))
         attrs = self.run_command("xattr", str(self.target)).stdout
@@ -72,6 +77,45 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(audio.read_bytes(), b"saved-audio")
         self.assertEqual(list(self.destination.glob(".ai-notetaker-install.*")), [])
+
+    def test_concurrent_installer_is_rejected_while_first_install_runs(self):
+        started = self.destination / "installer-hook-started"
+        self.hook.write_text(
+            '#!/bin/sh\ntouch "$1/../installer-hook-started"\nsleep 3\n'
+        )
+        self.sign()
+        command = [
+            "bash", str(self.root / "image/install.command"),
+            "--destination", str(self.destination), "--allow-unnotarized", "--no-open",
+        ]
+        first = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 10
+            while not started.exists() and first.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(started.exists(), "first installer did not reach its hook")
+
+            second = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("Another AI Notetaker installation is already running", second.stderr)
+
+            _, first_stderr = first.communicate(timeout=10)
+            self.assertEqual(first.returncode, 0, first_stderr)
+        finally:
+            if first.poll() is None:
+                first.kill()
+                first.wait(timeout=5)
+
+    def test_refuses_to_replace_running_target_but_ignores_other_installations(self):
+        self.assertEqual(self.install().returncode, 0)
+        app_process = subprocess.Popen([str(self.target / "Contents/MacOS/notetaker-helper"), "30"])
+        try:
+            result = self.install()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Quit AI Notetaker", result.stderr)
+        finally:
+            app_process.terminate()
+            app_process.wait(timeout=5)
 
     def test_tampered_resource_is_rejected_before_replacing_previous_app(self):
         self.assertEqual(self.install().returncode, 0)
@@ -101,6 +145,7 @@ class InstallerTests(unittest.TestCase):
         self.sign()
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Setting up optional support for existing extension users", result.stdout)
         self.assertIn("desktop app is installed", result.stderr)
         self.assertIn("desktop recording works without it", result.stderr)
         self.run_command("codesign", "--verify", "--deep", "--strict", str(self.target))
