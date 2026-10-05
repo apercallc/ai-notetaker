@@ -10,6 +10,13 @@
       five high-severity paths to this same advisory. Do not force-downgrade
       Next or pin another affected `braces` release as a workaround.
 
+## Desktop setup copy — 2026-10-05
+
+- [x] Keep the disabled Start hint concise when provider setup is incomplete;
+      the setup panel already identifies the required provider keys.
+- Verified the changed helper UI script with `node --check` and
+      `git diff --check`.
+
 ## v0.18.8 release and Mac update — 2026-10-05
 
 - [x] Publish the v0.18.8 desktop and extension release. Workflow

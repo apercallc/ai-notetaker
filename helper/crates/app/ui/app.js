@@ -240,7 +240,7 @@
     if (busy) return "Starting recording…";
     const nextSteps = [];
     if (credentialStoreError) nextSteps.push("Follow the secure storage instructions above, then retry saving your keys in Settings.");
-    else if (!keyReady) nextSteps.push("Add provider keys in Settings.");
+    else if (!keyReady) nextSteps.push("Complete provider setup.");
     if (!audio.ready) {
       nextSteps.push(audioChecking
         ? audioTimedOut ? "The audio check is taking longer; follow the Audio setup guidance."
