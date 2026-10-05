@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   test:
+    name: Extension checks
     runs-on: ubuntu-latest
     defaults:
       run:

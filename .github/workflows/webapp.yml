@@ -24,6 +24,7 @@ concurrency:
 
 jobs:
   test:
+    name: Webapp checks
     runs-on: ubuntu-latest
     defaults:
       run:
