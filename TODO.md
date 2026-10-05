@@ -1,5 +1,14 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Extension transcript write efficiency — 2026-10-05
+
+- [x] Broadcast interim transcript revisions immediately without persisting
+      each full meeting rewrite; persist provider-finalized segments. Raw audio
+      remains the recovery source if a final transcript update is interrupted.
+- Verified with controller tests and the extension package gates. Final segment
+      updates still rewrite the meeting record, and archive search still scans
+      stored transcripts; indexing and large-archive migration remain follow-up.
+
 ## Desktop UI CI guard — 2026-10-05
 
 - [x] Parse-check the Tauri desktop UI JavaScript in the cross-platform helper
@@ -392,8 +401,9 @@ or BlackHole steps relevant to this Mac.
 - [x] Report desktop recording only after audio capture starts, and move
       synchronous audio preflight diagnostics off the helper IPC executor.
 - Follow-up: add an incremental transcript search index and reduce repeated
-  full-meeting storage rewrites for large extension archives. Preserve a
-  migration path for existing local records and durable final transcript data.
+  full-meeting storage rewrites for finalized segments in large extension
+  archives. Preserve a migration path for existing local records and durable
+  final transcript data.
 - [x] Defer helper retries while capture is active or Stop is draining the
       persisted audio queue, so provider latency cannot block live transcript
       updates.

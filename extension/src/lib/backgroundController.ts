@@ -983,6 +983,11 @@ export class BackgroundController {
       isFinal: update.isFinal,
       utteranceId: update.utteranceId,
     });
+    // Interim captions are delivered to the live widget above. Rewriting the
+    // full MeetingRecord for every revision is quadratic in transcript size;
+    // raw Meet audio is already durable and a final utterance is persisted as
+    // soon as the provider confirms it.
+    if (!update.isFinal) return;
     const meeting = await updateMeeting(update.meetingId, (current) => {
       if (current.status !== "recording") return current;
       const existingIndex = current.transcript.findIndex(
@@ -1016,6 +1021,10 @@ export class BackgroundController {
       isFinal: msg.isFinal,
       utteranceId: msg.utteranceId,
     });
+    // Interim provider text is a live UI event, not durable transcript data.
+    // The audio queue has already persisted its source before transcription,
+    // and the provider's final event is saved below.
+    if (!msg.isFinal) return;
     const meeting = await updateMeeting(msg.meetingId, (current) => {
       const existingIndex = current.transcript.findIndex(
         (segment) => segment.speaker === msg.speaker && segment.utteranceId === msg.utteranceId && !segment.isFinal,

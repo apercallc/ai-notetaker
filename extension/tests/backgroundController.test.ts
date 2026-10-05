@@ -734,18 +734,27 @@ describe("BackgroundController", () => {
     ]);
   });
 
-  it("replaces an in-progress line in place instead of appending", async () => {
+  it("keeps interim transcript updates live and persists the finalized revision", async () => {
     const client = createFakeClient();
-    const controller = new BackgroundController(client, vi.fn());
+    const broadcast = vi.fn();
+    const controller = new BackgroundController(client, broadcast);
     await controller.init();
     const meetingId = await controller.startRecording();
+    const storageSet = vi.spyOn(chromeMock.storage.local, "set");
+    storageSet.mockClear();
 
     client.emit("transcript_partial", { meetingId, speaker: "you", text: "hello wor", isFinal: false, utteranceId: 1 });
-    await vi.waitFor(async () => {
-      expect((await getMeeting(meetingId))?.transcript).toHaveLength(1);
-    });
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
+      type: "TRANSCRIPT_UPDATE",
+      meetingId,
+      text: "hello wor",
+      isFinal: false,
+    })));
+    expect(storageSet).not.toHaveBeenCalled();
+    expect((await getMeeting(meetingId))?.transcript).toEqual([]);
 
     client.emit("transcript_partial", { meetingId, speaker: "you", text: "hello world", isFinal: true, utteranceId: 1 });
+    await vi.waitFor(() => expect(storageSet).toHaveBeenCalled());
     await vi.waitFor(async () => {
       const meeting = await getMeeting(meetingId);
       expect(meeting?.transcript).toHaveLength(1);
@@ -811,6 +820,23 @@ describe("BackgroundController", () => {
         completedAt: null,
       }),
     ]);
+  });
+
+  it("replaces an older persisted interim line when its final arrives", async () => {
+    const client = createFakeClient();
+    const controller = new BackgroundController(client, vi.fn());
+    await controller.init();
+    const meetingId = await controller.startRecording();
+    await updateMeeting(meetingId, (meeting) => ({
+      ...meeting,
+      transcript: [{ speaker: "you", text: "hello wor", isFinal: false, timestamp: new Date().toISOString(), utteranceId: 1 }],
+    }));
+
+    client.emit("transcript_partial", { meetingId, speaker: "you", text: "hello world", isFinal: true, utteranceId: 1 });
+
+    await vi.waitFor(async () => expect((await getMeeting(meetingId))?.transcript).toEqual([
+      expect.objectContaining({ speaker: "you", text: "hello world", isFinal: true, utteranceId: 1 }),
+    ]));
   });
 
   it("clears extension-owned Meet chunks when the helper completes managed processing", async () => {
@@ -1440,7 +1466,7 @@ describe("BackgroundController: recovery and in-call widget support", () => {
     expect(findCurrentEvent).toHaveBeenCalledTimes(1);
   });
 
-  it("persists live transcript updates and exposes live status to the widget", async () => {
+  it("broadcasts interim Meet captions and persists finalized text", async () => {
     const broadcast = vi.fn();
     const controller = new BackgroundController(createFakeClient(), broadcast);
     await controller.init();
@@ -1460,10 +1486,23 @@ describe("BackgroundController: recovery and in-call widget support", () => {
 
     expect(await getMeeting(meetingId)).toMatchObject({
       liveTranscriptStatus: "available",
-      transcript: [expect.objectContaining({ speaker: "you", text: "Planning the launch", isFinal: false, utteranceId: 1, offsetMs: 2400 })],
+      transcript: [],
     });
     expect((await controller.getWidgetState()).active).toMatchObject({ liveTranscriptStatus: "available" });
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "TRANSCRIPT_UPDATE", meetingId, text: "Planning the launch", isFinal: false, utteranceId: 1 }));
+
+    await controller.addMeetLiveTranscript({
+      meetingId,
+      channel: "mic",
+      speaker: "you",
+      text: "Planning the launch.",
+      isFinal: true,
+      utteranceId: 1,
+      offsetMs: 2400,
+    });
+    await vi.waitFor(async () => expect(await getMeeting(meetingId)).toMatchObject({
+      transcript: [expect.objectContaining({ speaker: "you", text: "Planning the launch.", isFinal: true, utteranceId: 1, offsetMs: 2400 })],
+    }));
   });
 
   it("fails a Meet recording durably without asking a disconnected helper to stop it", async () => {
