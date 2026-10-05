@@ -64,6 +64,14 @@
       passed all native, extension, and webapp build jobs and published all
       assets. Verified the public arm64 DMG checksum and embedded app version/
       signature integrity; no install or recording was attempted.
+- [x] Publish v0.18.11. Release workflow
+      [37304453318](https://github.com/apercallc/ai-notetaker/actions/runs/37304453318)
+      passed metadata validation, extension and webapp image builds, all four
+      native targets, and GitHub Release publication. Docker Hub mirroring and
+      Chrome Web Store upload were skipped. No install or recording was attempted.
+- [x] Verify the v0.18.11 Apple silicon DMG SHA-256 against both the release
+      `SHA256SUMS` file and GitHub's published asset digest. No install or launch
+      was attempted.
 
 ## Extension offline sync queue — 2026-10-05
 

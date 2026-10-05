@@ -2,7 +2,7 @@
 
 Updated 2026-10-05. Keep repository/CI evidence separate from install,
 provider, account, and physical-device acceptance. The current public release
-is v0.18.10. This does not inherit older app acceptance or prove real audio
+is v0.18.11. This does not inherit older app acceptance or prove real audio
 capture.
 
 ## Verified release evidence
@@ -39,6 +39,12 @@ capture.
       passed metadata validation, webapp and extension builds, all four native
       builds, asset/checksum verification, and publication. Docker Hub
       mirroring and Chrome Web Store upload were skipped.
+- [x] GitHub Release [`v0.18.11`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.11)
+      was published on 2026-10-05. Release workflow
+      [37304453318](https://github.com/apercallc/ai-notetaker/actions/runs/37304453318)
+      passed metadata validation, webapp and extension builds, all four native
+      builds, and publication. Docker Hub mirroring and Chrome Web Store upload
+      were skipped. This does not prove install or recording acceptance.
 - [x] Release workflow [37254643304](https://github.com/apercallc/ai-notetaker/actions/runs/37254643304)
       passed release metadata validation, package builds, cross-platform helper
       jobs, asset verification, and GitHub Release publication.
@@ -109,7 +115,11 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       integrity verification and reported version 0.18.10. This is not
       Developer ID/notarization or install proof. No provider keys, audio
       permission, recording, or browser connection were exercised.
-- [ ] Finish macOS arm64 uninstall checks; install and verify macOS x86_64,
+- [x] On 2026-10-05, verified the public v0.18.11 arm64 DMG SHA-256 against
+      both the release `SHA256SUMS` file and GitHub's published asset digest.
+      This does not prove install, signature, or launch behavior.
+- [ ] Open the v0.18.11 first-run UI and finish macOS arm64 uninstall checks;
+      install and verify macOS x86_64,
       Windows x64, and Debian/Ubuntu x64 builds. Native Messaging manifest
       inspection does not prove a browser-to-host connection.
 - [ ] On each OS, make a real meeting call and verify separate microphone and
@@ -131,7 +141,7 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       records remain intact and imported audio stays on separate tracks.
 - [ ] Publish the Chrome Web Store listing and verify store installation,
       permissions, screenshots, extension ID, and Native Messaging origin.
-      Store upload jobs through `v0.18.10` were skipped; manual ZIP
+      Store upload jobs through `v0.18.11` were skipped; manual ZIP
       installation remains available. The published extension ID is absent
       from this Mac's Chrome Default profile, so the registered host has not
       been exercised through Chrome.
