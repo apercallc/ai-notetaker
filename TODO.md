@@ -151,8 +151,9 @@ Approved direction: one Tauri desktop app owns setup, capture, and local notes;
 web-app sync is optional. The primary Tauri window and local
 recording/history controls run in a development build on this Mac, and
 optimized Apple silicon and Intel Mac app/DMG artifacts build locally. The
-release workflow now builds both Mac architectures; cross-platform installers
-are not published, and the extension remains supported. Local BYOK requires no
+release workflow builds both Mac architectures, and the public `v0.18.2`
+release includes Mac, Windows, and Debian/Ubuntu installers. They remain
+unsigned previews, and the extension remains supported. Local BYOK requires no
 browser extension or AI Notetaker login. The migration is tracked in
 [`docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md`](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md).
 The one-app workflow is not shipped.
@@ -478,9 +479,9 @@ you are listed under "Engineering backlog" and are not started.
   per import, per regeneration and per chat question.
 - Real devices: Zoom/Teams/Slack on macOS and Windows, native installers, iOS Safari and
   Android Chrome layout checks.
-- Store listing and release: Chrome Web Store listing and real screenshots, replace the
-  development extension ID in Native Messaging origins, publish the tagged release, and
-  `ai-notetaker-mcp` on npm.
+- Store listing and npm: publish the Chrome Web Store listing, verify its assigned
+  ID matches the pinned extension ID, capture real screenshots, and publish
+  `ai-notetaker-mcp` on npm. The tagged `v0.18.2` native release is published.
 - Signing: Apple Developer ID and notarization secrets; Windows code-signing certificate.
 - Decisions: plan pricing/allowances and chat pricing, Deepgram diarization for imports as a
   paid perk, Hosted as the primary onboarding path, helper launch-at-login default.
@@ -833,10 +834,9 @@ decided yet.
       optional permissions requested when the feature is first used, so the
       install prompt for a Meet-only user is minimal. Denials have recovery
       guidance; calendar reminder retries fall back to an in-session timer.
-- [ ] **You:** (d) Replace the committed development extension ID in the Native
-      Messaging `allowed_origins` with the real Chrome Web Store extension ID
-      once the listing exists, and verify the committed manifest `key`
-      derives the published ID (or add both origins deliberately).
+- [ ] **You:** (d) Publish the Chrome Web Store listing and verify it receives
+      the ID pinned by the committed manifest key and existing Native Messaging
+      origins (`jidooookkdbbbhkkdmcajnnnhhphodok`). Do not replace the stable ID.
 - [x] (e) Replace the signed Tauri installer updater plan with a daily
       GitHub-release check and explicit opt-in to the release page. The helper
       never downloads or installs updates; a tray action also supports manual
@@ -944,12 +944,16 @@ remains native; Docker is for the optional history webapp only.
 - [x] Add a daily stable-release check to the desktop helper. It asks before
       opening the official GitHub release page and never downloads or installs
       an update; users can also check from the tray menu.
-- [ ] **You:** Publish a tagged release and confirm the real Apple-silicon, Windows,
-      and Linux artifacts install/register Native Messaging on their target OS.
+- [x] Publish the tagged `v0.18.2` release with Apple-silicon and Intel Mac,
+      Windows x64, and Debian/Ubuntu x64 installers plus extension ZIPs and
+      `SHA256SUMS` (published 2026-10-05). The native installers remain unsigned.
+- [ ] **You:** Confirm the real Apple-silicon, Windows, and Linux installers work
+      on their target OS, including setup, permissions, audio routing, and
+      Native Messaging compatibility where used.
 - [ ] **You:** Publish the Chrome Web Store listing and capture real customer stories
       with written permission before presenting testimonials as social proof.
 
-## Live release gates (audit, 2026-09-27; rechecked 2026-09-29)
+## Live release gates (historical snapshot: audit 2026-09-27; rechecked 2026-09-29)
 
 - [x] Restore and verify the production API hostname (2026-09-29): Hostinger
       CNAME and Railway ownership TXT records propagated, TLS became valid,
@@ -980,11 +984,13 @@ remains native; Docker is for the optional history webapp only.
       Drive, providers, managed upload/worker/storage, Stripe billing, and
       health checks after configuration; local tests/builds do not prove those
       account- and deployment-backed flows.
-- [ ] **You:** Publish the first unsigned native release and Chrome Web Store listing,
-      replace the development extension ID in Native Messaging origins, and
-      capture real store screenshots. Rechecked: GitHub has no published
-      release and `release/manifest.json` remains unpublished with no artifacts
-      or store URL.
+- [x] Publish the first unsigned native release as `v0.18.2` (2026-10-05).
+- [ ] **You:** Publish the Chrome Web Store listing and capture real store
+      screenshots. Keep the extension ID pinned by `extension/manifest.json`
+      (`jidooookkdbbbhkkdmcajnnnhhphodok`) and matching Native Messaging origins;
+      do not replace the stable ID. Configure `CHROME_WEB_STORE_URL` after the
+      listing is live. The checked-in `release/manifest.json` is an unpublished
+      template; each tagged release generates its published artifact manifest.
 - [x] Add `webapp/Dockerfile` and Docker Compose for the optional webapp and
       Postgres, with persistent storage, migrations, health checks, and
       authenticated token setup.
