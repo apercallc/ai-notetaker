@@ -117,7 +117,9 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       permission, recording, or browser connection were exercised.
 - [x] On 2026-10-05, verified the public v0.18.11 arm64 DMG SHA-256 against
       both the release `SHA256SUMS` file and GitHub's published asset digest.
-      This does not prove install, signature, or launch behavior.
+      The mounted app reports version 0.18.11 and passes strict bundle signature
+      integrity verification. The signature is ad hoc with no Team ID; this is
+      not Developer ID signing or notarization. No install or launch was tried.
 - [ ] Open the v0.18.11 first-run UI and finish macOS arm64 uninstall checks;
       install and verify macOS x86_64,
       Windows x64, and Debian/Ubuntu x64 builds. Native Messaging manifest

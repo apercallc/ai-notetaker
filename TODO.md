@@ -70,8 +70,10 @@
       native targets, and GitHub Release publication. Docker Hub mirroring and
       Chrome Web Store upload were skipped. No install or recording was attempted.
 - [x] Verify the v0.18.11 Apple silicon DMG SHA-256 against both the release
-      `SHA256SUMS` file and GitHub's published asset digest. No install or launch
-      was attempted.
+      `SHA256SUMS` file and GitHub's published asset digest. The mounted app
+      reports version 0.18.11 and passes strict bundle signature integrity
+      verification; its signature is ad hoc with no Team ID. No install or
+      launch was attempted.
 
 ## Extension offline sync queue — 2026-10-05
 
