@@ -1,29 +1,12 @@
 name: Auto release
 
-# Every push to main that changes shipped code cuts a release: it waits for the
-# other CI workflows on the same commit, bumps every version in lockstep, tags,
-# and dispatches the existing Release build (which builds all OSes, publishes
-# the GitHub release, and uploads to the Chrome Web Store when configured).
-#
-# Docs, site, marketing pages and housekeeping-only history release nothing.
+# Main pushes reconcile all unreleased conventional commits against the latest
+# tag. Housekeeping-only history releases nothing. This lets a docs-only push
+# safely supersede a product commit without stranding its pending release.
 
 on:
   push:
     branches: [main]
-    paths:
-      - extension/**
-      - helper/**
-      - packaging/**
-      - webapp/**
-      - "!webapp/src/marketing/**"
-      - "!webapp/src/app/(marketing)/**"
-      - "!webapp/public/marketing/**"
-      # Test-only changes still run their CI workflow, but do not need a new
-      # customer-facing desktop/extension release.
-      - "!**/*.test.*"
-      - "!**/*.spec.*"
-      - "!**/__tests__/**"
-      - "!**/tests/**"
   workflow_dispatch:
     inputs:
       bump:
@@ -63,10 +46,23 @@ jobs:
         run: |
           # Poll every check run on the commit except this workflow's own job.
           # A red or cancelled check blocks the release; no checks at all also blocks.
+          # If main moved, this run is obsolete. The newer push has its own
+          # reconciliation run; do not treat its cancellation of older CI as
+          # a failed release.
+          latest=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          if [ "$latest" != "$SHA" ]; then
+            echo "::notice::${SHA} is superseded by ${latest}; leaving release reconciliation to the newer main run."
+            exit 0
+          fi
           # Give the other workflows a minute to register so a single fast
           # check cannot look like "everything finished".
           sleep 60
           for _ in $(seq 1 120); do
+            latest=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+            if [ "$latest" != "$SHA" ]; then
+              echo "::notice::${SHA} is superseded by ${latest}; leaving release reconciliation to the newer main run."
+              exit 0
+            fi
             runs=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100" \
               --jq '[.check_runs[] | select(.name != "Tag and dispatch release")]')
             total=$(jq 'length' <<<"$runs")

@@ -17,6 +17,15 @@
 - Verified the changed helper UI script with `node --check` and
       `git diff --check`.
 
+## Auto-release supersession — 2026-10-05
+
+- [x] Reconcile every `main` push against conventional commits since the last
+      release tag, so a docs-only follow-up cannot strand an earlier product
+      change. The release job now exits cleanly when its SHA is superseded
+      before treating cancelled checks as failures.
+- Verified with `actionlint` and all 10 release version/manifest tests. Remote
+      check completion and the next published release remain to be confirmed.
+
 ## v0.18.8 release and Mac update — 2026-10-05
 
 - [x] Publish the v0.18.8 desktop and extension release. Workflow
