@@ -7,6 +7,9 @@ name: Auto release
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+    types: [closed]
   workflow_dispatch:
     inputs:
       bump:
@@ -15,9 +18,7 @@ on:
         default: auto
 
 permissions:
-  contents: write
-  actions: write
-  checks: read
+  contents: read
 
 concurrency:
   group: auto-release
@@ -25,10 +26,16 @@ concurrency:
 
 jobs:
   release:
-    name: Tag and dispatch release
+    name: Prepare release pull request
     runs-on: ubuntu-latest
-    # Never react to our own version-bump commit.
-    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    permissions:
+      contents: write
+      actions: write
+      checks: read
+      pull-requests: write
+    # A merged release PR is published by the separate job below. Do not
+    # reconcile on pull_request events or react to an old direct release commit.
+    if: "github.event_name != 'pull_request' && !startsWith(github.event.head_commit.message || '', 'chore(release):')"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,7 +45,21 @@ jobs:
         with:
           node-version: 22
 
+      - name: Check for an unpublished release version
+        id: release-state
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          current="v$(node -p 'JSON.parse(require("fs").readFileSync("release/manifest.json", "utf8")).version')"
+          latest=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -n "$latest" ] && [ "$current" != "$latest" ]; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${current} is merged but not published yet; waiting for its release PR publisher."
+          else
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Wait for CI on this commit
+        if: steps.release-state.outputs.pending != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
@@ -64,7 +85,7 @@ jobs:
               exit 0
             fi
             runs=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100" \
-              --jq '[.check_runs[] | select(.name != "Tag and dispatch release")]')
+              --jq '[.check_runs[] | select(.name != "Prepare release pull request")]')
             total=$(jq 'length' <<<"$runs")
             pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
             failed=$(jq '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length' <<<"$runs")
@@ -85,6 +106,7 @@ jobs:
 
       - name: Bump versions in lockstep
         id: bump
+        if: steps.release-state.outputs.pending != 'true'
         env:
           BUMP: ${{ inputs.bump || 'auto' }}
         run: |
@@ -101,13 +123,13 @@ jobs:
           if [ "$version" = "none" ]; then echo "Nothing releasable since the last tag."; fi
 
       - name: Verify metadata before tagging
-        if: steps.bump.outputs.version != 'none'
+        if: steps.bump.outputs.version != 'none' && steps.release-state.outputs.pending != 'true'
         run: |
           node scripts/validate-release-manifest.mjs release/manifest.json
           node --test scripts/bump-version.test.mjs scripts/release-manifest.test.mjs
 
-      - name: Commit, tag, and dispatch the release build
-        if: steps.bump.outputs.version != 'none'
+      - name: Open or update the release pull request
+        if: steps.bump.outputs.version != 'none' && steps.release-state.outputs.pending != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.bump.outputs.version }}
@@ -115,11 +137,62 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
+          git diff --cached --check
           git commit -m "chore(release): v${VERSION}"
-          git tag -a "v${VERSION}" -m "AI Notetaker v${VERSION}"
-          git push --atomic origin HEAD:main "v${VERSION}"
-          # Pushes made with GITHUB_TOKEN do not start other workflows, so
-          # dispatch the build on the new tag explicitly (github.ref becomes the
-          # tag, which is what the publish job keys on).
-          gh workflow run release-build.yml --ref "v${VERSION}" -f ref="v${VERSION}"
-          echo "Released v${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          branch="automation/release-v${VERSION}"
+          remote_revision=$(git ls-remote origin "refs/heads/${branch}" | cut -f1)
+          if [ -n "$remote_revision" ]; then
+            git push --force-with-lease="refs/heads/${branch}:${remote_revision}" origin "HEAD:refs/heads/${branch}"
+          else
+            git push --force-with-lease="refs/heads/${branch}:" origin "HEAD:refs/heads/${branch}"
+          fi
+          pr=$(gh pr list --base main --head "$branch" --json number --jq '.[0].number // empty')
+          body="Automated lockstep version bump. Merge only after all required checks pass and a maintainer reviews the release metadata."
+          if [ -z "$pr" ]; then
+            gh pr create --base main --head "$branch" --title "chore(release): v${VERSION}" --body "$body"
+          else
+            gh pr edit "$pr" --title "chore(release): v${VERSION}" --body "$body"
+          fi
+          # GITHUB_TOKEN-created PR checks require manual approval. Dispatch the
+          # normal CI workflows directly on this exact release branch instead.
+          gh workflow run helper.yml --ref "$branch"
+          gh workflow run webapp.yml --ref "$branch"
+          gh workflow run extension.yml --ref "$branch"
+          echo "Prepared release PR for v${VERSION}." >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish merged release
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'automation/release-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Tag the reviewed merge and dispatch its release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          node scripts/validate-release-manifest.mjs release/manifest.json
+          version=$(node -p 'JSON.parse(require("fs").readFileSync("release/manifest.json", "utf8")).version')
+          tag="v${version}"
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "AI Notetaker ${tag}" "$MERGE_SHA"
+            git push origin "$tag"
+          fi
+          # GITHUB_TOKEN tag pushes do not trigger tag workflows automatically.
+          gh workflow run release-build.yml --ref "$tag" -f ref="$tag"
+          echo "Published reviewed release tag ${tag}." >> "$GITHUB_STEP_SUMMARY"
