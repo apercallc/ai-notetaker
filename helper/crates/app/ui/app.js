@@ -30,6 +30,7 @@
   }
 
   async function refresh() {
+    if (document.visibilityState === "hidden") return;
     try {
       state.snapshot = await invoke("desktop_snapshot");
       if (state.page === "settings" && state.settingsDirty) return;
