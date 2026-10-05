@@ -718,6 +718,28 @@
     updateSyncFeedback();
     void refresh();
   }).catch(() => {});
+
+  const REFRESH_INTERVAL_MS = 15000;
+  let refreshInterval = null;
+  function stopRefreshPolling() {
+    if (refreshInterval === null) return;
+    window.clearInterval(refreshInterval);
+    refreshInterval = null;
+  }
+  function startRefreshPolling() {
+    if (refreshInterval !== null || document.visibilityState !== "visible") return;
+    refreshInterval = window.setInterval(() => {
+      if (!state.busy && state.page !== "settings") void refresh();
+    }, REFRESH_INTERVAL_MS);
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void refresh();
+      startRefreshPolling();
+    } else {
+      stopRefreshPolling();
+    }
+  });
   refresh();
-  setInterval(() => { if (!state.busy && state.page !== "settings") refresh(); }, 15000);
+  startRefreshPolling();
 })();

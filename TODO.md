@@ -36,6 +36,9 @@
       Xcode dylibs beside test binaries. This avoids duplicate Swift class
       warnings; the full 267-test helper workspace passes with the local Xcode
       27 toolchain and `DYLD_LIBRARY_PATH=/usr/lib/swift`.
+- [x] Pause desktop UI status polling while its window is hidden, and refresh
+      immediately when it becomes visible again. Capture and recovery remain
+      owned by the Rust helper while the window is hidden.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
 - [ ] Show workspace notes in the extension through its authenticated desktop
