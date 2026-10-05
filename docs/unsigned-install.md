@@ -1,6 +1,6 @@
 # Installing an unsigned desktop preview
 
-The published v0.18.2 desktop installers and local Tauri builds are unsigned.
+Published desktop preview installers and local Tauri builds are unsigned.
 This page explains the operating-system warnings and checksum limits; a
 checksum detects file corruption but does not verify the publisher. Install
 only if you trust the release source or built the app yourself. See

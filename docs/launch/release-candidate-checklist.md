@@ -1,9 +1,9 @@
 # Release and production acceptance
 
 Updated 2026-10-05. Keep repository/CI evidence separate from install,
-provider, account, and physical-device acceptance. The installed Mac app was
-still v0.18.2 during this review; the newer v0.18.7 release has build and
-publication proof but does not inherit the older app's device acceptance.
+provider, account, and physical-device acceptance. The current public release
+is v0.18.8. It is now installed on the reviewed Mac; this does not inherit the
+older app's device acceptance or prove real audio capture.
 
 ## Verified release evidence
 
@@ -18,6 +18,12 @@ publication proof but does not inherit the older app's device acceptance.
 - [x] GitHub Release [`v0.18.7`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.7)
       was published on 2026-10-05. Release workflow
       [37281422274](https://github.com/apercallc/ai-notetaker/actions/runs/37281422274)
+      passed metadata validation, webapp image and extension builds, all four
+      native builds, asset/checksum verification, and publication. Docker Hub
+      mirroring and Chrome Web Store upload were skipped.
+- [x] GitHub Release [`v0.18.8`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.8)
+      was published on 2026-10-05. Release workflow
+      [37284514728](https://github.com/apercallc/ai-notetaker/actions/runs/37284514728)
       passed metadata validation, webapp image and extension builds, all four
       native builds, asset/checksum verification, and publication. Docker Hub
       mirroring and Chrome Web Store upload were skipped.
@@ -58,9 +64,16 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       audio access.
       Chrome and Edge Native Messaging manifests point to the installed host
       and allow the published extension ID.
-- [ ] Finish macOS arm64 update/uninstall checks; install and verify macOS
-      x86_64, Windows x64, and Debian/Ubuntu x64 builds. Native Messaging
-      manifest inspection does not prove a browser-to-host connection.
+- [x] On 2026-10-05, verified the v0.18.8 arm64 installer DMG against the
+      release `SHA256SUMS`, replaced the installed v0.18.2 app, verified the
+      installed bundle with `codesign --verify --deep --strict`, launched it,
+      and confirmed the v0.18.8 first-run UI rendered. Chrome and Edge host
+      manifests point to the installed app and allow the published extension
+      ID. This is install/update proof only; no recording or browser connection
+      was exercised.
+- [ ] Finish macOS arm64 uninstall checks; install and verify macOS x86_64,
+      Windows x64, and Debian/Ubuntu x64 builds. Native Messaging manifest
+      inspection does not prove a browser-to-host connection.
 - [ ] On each OS, make a real meeting call and verify separate microphone and
       speaker tracks, visible recording state, stop/finalize, provider failure
       recovery, and restart recovery of an interrupted recording.
@@ -80,10 +93,10 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       records remain intact and imported audio stays on separate tracks.
 - [ ] Publish the Chrome Web Store listing and verify store installation,
       permissions, screenshots, extension ID, and Native Messaging origin. The
-      `v0.18.2`, `v0.18.6`, and `v0.18.7` store upload jobs were skipped; manual
-      ZIP installation remains available. The published extension ID is absent
-      from this Mac's Chrome Default profile, so the registered host has not
-      been exercised through Chrome.
+      `v0.18.2`, `v0.18.6`, `v0.18.7`, and `v0.18.8` store upload jobs were
+      skipped; manual ZIP installation remains available. The published
+      extension ID is absent from this Mac's Chrome Default profile, so the
+      registered host has not been exercised through Chrome.
 
 ### Managed service and operations
 

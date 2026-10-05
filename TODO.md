@@ -1,5 +1,19 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## v0.18.8 release and Mac update — 2026-10-05
+
+- [x] Publish the v0.18.8 desktop and extension release. Workflow
+      [37284514728](https://github.com/apercallc/ai-notetaker/actions/runs/37284514728)
+      passed metadata validation, extension and webapp builds, native builds
+      for macOS arm64/x86_64, Windows x64, and Debian/Ubuntu x64, artifact
+      verification, and GitHub Release publication. Chrome Web Store upload and
+      Docker Hub mirroring were skipped.
+- [x] Replace the reviewed Mac's v0.18.2 app with v0.18.8 after verifying the
+      official arm64 DMG checksum; verify bundle integrity and first-run UI.
+      Provider keys, macOS audio permissions, recording, and Chrome connection
+      were not configured or exercised. Remaining platform acceptance is in
+      [`release-candidate-checklist.md`](docs/launch/release-candidate-checklist.md).
+
 ## Extension offline sync queue — 2026-10-05
 
 - [x] Store newly queued web-app sync work as local meeting IDs instead of
