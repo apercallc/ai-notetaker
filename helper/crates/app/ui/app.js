@@ -129,6 +129,15 @@
       && providerKeySaved(s.settings, s.settings.preferences.summarizationProvider);
     const setup = s.credentialStoreError || !keyReady;
     const setupMessage = s.credentialStoreError || `Add your ${providerName(s.settings.preferences.transcriptionProvider)} and ${providerName(s.settings.preferences.summarizationProvider)} API keys in Settings to start.`;
+    const startHint = recordingStartHint({
+      credentialStoreError: s.credentialStoreError,
+      keyReady,
+      transcriptionProvider: s.settings.preferences.transcriptionProvider,
+      summarizationProvider: s.settings.preferences.summarizationProvider,
+      audio,
+      consentAcknowledged: state.recordConsentAcknowledged,
+      busy: state.busy,
+    });
     const openAudioSettings = audio.platform === "macos" && audio.driver === "Unavailable"
       ? '<button class="small-button" id="open-screen-recording-settings">Open macOS audio permissions</button>'
       : "";
@@ -136,7 +145,7 @@
     const recoverable = s.meetings.find((meeting) => meeting.status === "recovered" && !meeting.textOnlyImport);
     const processing = s.meetings.filter((meeting) => meeting.status === "processing").length;
     $("#content").innerHTML = `
-      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)} Your provider key stays in this device’s credential store.</span></div></div>` : ""}
+      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError ? "" : " Your provider keys stay in this device’s credential store."}</span></div></div>` : ""}
       ${recoverable ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Saved audio needs recovery</strong><span>${esc(recoverable.title)} was interrupted. Its audio is still on this device.</span><button class="small-button" id="open-recoverable">Open recording</button></div></div>` : ""}
       ${processing ? `<p class="process-status" role="status">Preparing notes from ${processing} saved recording${processing === 1 ? "" : "s"}. You can keep using the app.</p>` : ""}
       <div class="record-grid">
@@ -147,7 +156,7 @@
           <label class="consent-row"><input id="record-consent" type="checkbox" ${state.recordConsentAcknowledged ? "checked" : ""} ${active ? "disabled" : ""} /><span>I’ve told everyone on the call that recording is starting.</span></label>
           <div class="record-actions">${active
             ? `<button class="danger-button" id="stop-recording"><span class="record-icon"></span>Stop recording</button><span class="fine-print">Recording ID ${esc(active.slice(0, 8))}</span>`
-            : `<button class="primary-button" id="start-recording" ${!state.recordConsentAcknowledged || !audio.ready || !keyReady || s.credentialStoreError || state.busy ? "disabled" : ""}><span class="record-icon"></span>Start recording</button><span class="fine-print">${audio.ready ? "Microphone and system audio are kept on separate tracks." : audio.permissionRequired ? "Grant the audio permission shown under Audio setup." : "Check audio setup before recording."}</span>`}
+            : `<button class="primary-button" id="start-recording" ${!state.recordConsentAcknowledged || !audio.ready || !keyReady || s.credentialStoreError || state.busy ? "disabled" : ""}><span class="record-icon"></span>Start recording</button><span class="fine-print" id="start-recording-hint">${esc(startHint)}</span>`}
           </div>
         </section>
         <section class="card audio-card" aria-labelledby="audio-heading">
@@ -167,6 +176,16 @@
       state.recordConsentAcknowledged = $("#record-consent").checked;
       const startButton = $("#start-recording");
       if (startButton) startButton.disabled = !state.recordConsentAcknowledged || !audio.ready || !keyReady || s.credentialStoreError || state.busy;
+      const hint = $("#start-recording-hint");
+      if (hint) hint.textContent = recordingStartHint({
+        credentialStoreError: s.credentialStoreError,
+        keyReady,
+        transcriptionProvider: s.settings.preferences.transcriptionProvider,
+        summarizationProvider: s.settings.preferences.summarizationProvider,
+        audio,
+        consentAcknowledged: state.recordConsentAcknowledged,
+        busy: state.busy,
+      });
     });
     $("#meeting-title")?.addEventListener("input", (event) => { state.recordTitle = event.currentTarget.value; });
     $("#open-recoverable")?.addEventListener("click", () => openMeeting(recoverable.id));
@@ -183,20 +202,35 @@
     return `<button class="meeting-card" data-meeting-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><time>${esc(prettyDate(meeting.startedAt))}</time><span class="preview">${esc(preview)}</span></button>`;
   }
 
+  function recordingStartHint({ credentialStoreError, keyReady, audio, consentAcknowledged, busy }) {
+    if (busy) return "Starting recording…";
+    const blockers = [];
+    if (credentialStoreError) blockers.push("Resolve the secure storage issue above to enable recording.");
+    else if (!keyReady) blockers.push("Finish provider setup above to enable recording.");
+    if (!audio.ready) blockers.push("Resolve the audio issue below to enable recording.");
+    if (!consentAcknowledged) blockers.push("Confirm recording consent above to enable recording.");
+    return blockers.length ? blockers.join(" ") : "Microphone and system audio are kept on separate tracks.";
+  }
+
   function statusLabel(status) { return ({ recording: "Recording", processing: "Preparing your notes", recovered: "Recovered recording", complete: "Notes ready", saved: "Audio saved" })[status] || status; }
 
   async function startRecording() {
     if (!state.recordConsentAcknowledged || state.busy) return;
+    const title = $("#meeting-title").value;
     const consent = state.recordConsentAcknowledged;
     state.busy = true;
+    const button = $("#start-recording");
+    if (button) { button.disabled = true; button.textContent = "Starting recording…"; }
+    const hint = $("#start-recording-hint");
+    if (hint) hint.textContent = "Starting recording…";
+    notify("Starting recording…");
     try {
-      await invoke("desktop_start_recording", { title: $("#meeting-title").value, consentAcknowledged: consent });
+      await invoke("desktop_start_recording", { title, consentAcknowledged: consent });
       state.recordConsentAcknowledged = false;
       state.recordTitle = "";
       notify("Recording started. Audio is being saved on this device.");
-      await refresh();
     } catch (error) { notify(String(error), "error"); }
-    finally { state.busy = false; }
+    finally { state.busy = false; await refresh(); }
   }
 
   async function stopRecording() {

@@ -7,6 +7,16 @@
 - Verified locally with `node --check` and `actionlint` on both workflows.
       This does not verify native UI behavior or audio capture.
 
+## Desktop Start readiness feedback — 2026-10-05
+
+- [x] Explain disabled Start with concise references to provider setup, audio
+      setup, and recording consent; use the existing live notice for the
+      starting transition so periodic refreshes do not repeatedly announce it.
+- [x] Do not claim provider keys are stored when the OS credential store has
+      reported an error.
+- Source-reviewed. Rendered accessibility and real recording still need
+      installed-app verification.
+
 ## Download page and test reliability — 2026-10-04
 
 - [x] Mark published installers as unsigned previews before download choices,
