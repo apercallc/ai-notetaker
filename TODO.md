@@ -49,7 +49,22 @@
 - [x] Do not claim provider keys are stored when the OS credential store has
       reported an error.
 - Source-reviewed. Rendered accessibility and real recording still need
-      installed-app verification.
+  installed-app verification.
+
+## Desktop first-run clarity and accessibility — 2026-10-05
+
+- [x] Replace repeated disabled-Start explanations with concise ordered steps;
+      keep readiness changes in a persistent live region and associate the
+      visible explanation with the Start button.
+- [x] Keep the Start label intact at narrow widths, allow its hint to wrap
+      below, and remove the forced minimum page width at compact sizes.
+- [x] Lead macOS users to Screen & System Audio Recording permissions, with
+      BlackHole setup behind an optional disclosure and a button to the
+      developer's official download.
+- Verified with UI JavaScript syntax check, helper format and Clippy gates, and
+  all 272 helper tests. Guardrails and design reviews found no remaining source
+  findings. Updated-package visual verification at 200% zoom and actual
+  screen-reader behavior remain open.
 
 ## Desktop stop responsiveness — 2026-10-05
 

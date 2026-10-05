@@ -158,9 +158,14 @@
       audioChecking: audio.checking,
       audioTimedOut: audio.timedOut,
     });
+    if (!active) announceRecordingReadiness(startHint);
     const openAudioSettings = audio.platform === "macos" && audio.driver === "Unavailable"
       ? '<button class="small-button" id="open-screen-recording-settings">Open macOS audio permissions</button>'
       : "";
+    const macAudioUnavailable = audio.platform === "macos" && audio.driver === "Unavailable";
+    const audioGuidance = macAudioUnavailable
+      ? `<div class="guidance"><p>Allow AI Notetaker under System Settings &gt; Privacy &amp; Security &gt; Screen &amp; System Audio Recording, then reopen the app. If it is not listed, add it from Applications.</p><details class="audio-fallback"><summary>Use BlackHole instead</summary><p>BlackHole is an optional fallback and is not included with AI Notetaker. After installing it, create a Multi-Output Device with BlackHole and your speakers or headphones, then select it as the meeting app’s speaker. <button class="small-button" id="open-blackhole-download">Download BlackHole from Existential Audio</button></p></details></div>`
+      : `<p class="guidance">${esc(audio.guidance || "Audio will be captured from your current microphone and system output.")}</p>`;
     const recent = s.meetings.slice(0, 3);
     const recoverable = s.meetings.find((meeting) => meeting.status === "recovered" && !meeting.textOnlyImport);
     const processing = s.meetings.filter((meeting) => meeting.status === "processing").length;
@@ -178,7 +183,7 @@
           <label class="consent-row"><input id="record-consent" type="checkbox" ${state.recordConsentAcknowledged ? "checked" : ""} ${active ? "disabled" : ""} /><span>I’ve told everyone on the call that recording is starting.</span></label>
           <div class="record-actions">${active
             ? `<button class="danger-button" id="stop-recording"><span class="record-icon"></span>Stop recording</button><span class="fine-print">Recording ID ${esc(active.slice(0, 8))}</span>`
-            : `<button class="primary-button" id="start-recording" ${!state.recordConsentAcknowledged || !audio.ready || !keyReady || s.credentialStoreError || state.busy ? "disabled" : ""}><span class="record-icon"></span>Start recording</button><span class="fine-print" id="start-recording-hint">${esc(startHint)}</span>`}
+            : `<button class="primary-button" id="start-recording" aria-describedby="start-recording-hint" ${!state.recordConsentAcknowledged || !audio.ready || !keyReady || s.credentialStoreError || state.busy ? "disabled" : ""}><span class="record-icon"></span>Start recording</button><span class="fine-print" id="start-recording-hint">${esc(startHint)}</span>`}
           </div>
         </section>
         <section class="card audio-card" aria-labelledby="audio-heading">
@@ -188,7 +193,7 @@
             <div class="device-row"><span class="device-icon" aria-hidden="true">◉</span><div><strong>System audio</strong><span>${esc(audio.speaker || "Default output")}</span></div></div>
             <div class="device-row"><span class="device-icon" aria-hidden="true">⌘</span><div><strong>${esc(platformName(audio.platform))} audio</strong><span>${esc(audio.driver)}</span></div></div>
           </div>
-          <p class="guidance">${esc(audio.guidance || "Audio will be captured from your current microphone and system output.")}</p>
+          ${audioGuidance}
           <div class="audio-actions">${openAudioSettings}<button class="small-button" id="check-audio">Check audio again</button></div>
         </section>
       </div>
@@ -210,6 +215,7 @@
         audioChecking: audio.checking,
         audioTimedOut: audio.timedOut,
       });
+      if (hint) announceRecordingReadiness(hint.textContent);
     });
     $("#meeting-title")?.addEventListener("input", (event) => { state.recordTitle = event.currentTarget.value; });
     $("#open-recoverable")?.addEventListener("click", () => openMeeting(recoverable.id));
@@ -217,6 +223,10 @@
     $("#stop-recording")?.addEventListener("click", stopRecording);
     $("#check-audio")?.addEventListener("click", checkAudio);
     $("#open-screen-recording-settings")?.addEventListener("click", openScreenRecordingSettings);
+    $("#open-blackhole-download")?.addEventListener("click", async () => {
+      try { await invoke("desktop_open_blackhole_download"); }
+      catch (error) { notify(String(error), "error"); }
+    });
     $("#all-notes")?.addEventListener("click", () => setPage("notes"));
     for (const button of document.querySelectorAll("[data-meeting-id]")) button.addEventListener("click", () => openMeeting(button.dataset.meetingId));
   }
@@ -228,14 +238,24 @@
 
   function recordingStartHint({ credentialStoreError, keyReady, audio, consentAcknowledged, busy, audioChecking, audioTimedOut }) {
     if (busy) return "Starting recording…";
-    const blockers = [];
-    if (credentialStoreError) blockers.push("Resolve the secure storage issue above to enable recording.");
-    else if (!keyReady) blockers.push("Finish provider setup above to enable recording.");
-    if (!audio.ready) blockers.push(audioChecking
-      ? audioTimedOut ? "The audio check is taking longer than expected. Follow the guidance below before recording." : "Wait for the audio device check to finish."
-      : "Resolve the audio issue below to enable recording.");
-    if (!consentAcknowledged) blockers.push("Confirm recording consent above to enable recording.");
-    return blockers.length ? blockers.join(" ") : "Microphone and system audio are kept on separate tracks.";
+    const nextSteps = [];
+    if (credentialStoreError) nextSteps.push("Follow the secure storage instructions above, then retry saving your keys in Settings.");
+    else if (!keyReady) nextSteps.push("Add provider keys in Settings.");
+    if (!audio.ready) {
+      nextSteps.push(audioChecking
+        ? audioTimedOut ? "The audio check is taking longer; follow the Audio setup guidance."
+          : "Wait for the audio check to finish."
+        : "Complete Audio setup.");
+    }
+    if (!consentAcknowledged) nextSteps.push("Confirm you’ve told everyone recording is starting.");
+    return nextSteps.length
+      ? `To record: ${nextSteps.join(" ")}`
+      : "Audio is ready. Microphone and system audio are saved separately.";
+  }
+
+  function announceRecordingReadiness(message) {
+    const status = $("#recording-readiness-status");
+    if (status && status.textContent !== message) status.textContent = message;
   }
 
   function statusLabel(status) { return ({ recording: "Recording", processing: "Preparing your notes", recovered: "Recovered recording", complete: "Notes ready", saved: "Audio saved" })[status] || status; }

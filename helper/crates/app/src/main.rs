@@ -1141,6 +1141,7 @@ fn main() {
             desktop_move_meeting,
             desktop_test_audio,
             desktop_open_screen_recording_settings,
+            desktop_open_blackhole_download,
             desktop_open_notes_folder,
             desktop_open_webapp,
             desktop_open_webapp_conflict,
@@ -2145,6 +2146,11 @@ fn desktop_open_screen_recording_settings() -> Result<(), String> {
     {
         Err("Open your operating system's privacy settings to grant audio access.".into())
     }
+}
+
+#[tauri::command]
+fn desktop_open_blackhole_download() -> Result<(), String> {
+    open_external("https://existential.audio/blackhole/")
 }
 
 async fn run_desktop_sync(
