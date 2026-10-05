@@ -790,9 +790,12 @@ Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowe
 - [ ] **You (decision):** new-plan pricing/allowances from measured full-use cost; existing
       commitments remain honored. Direct private uploads and audio transport compression
       still need evaluation with quality and tenant-isolation acceptance.
-- [ ] **You:** deploy the new indexes through the normal migration/release flow. Large
-      production tables need an online index rollout; no deployment or 100M-user load
-      certification is claimed by this local audit.
+- [x] Deploy the new query, worker, expiry, trash, and search indexes through the
+      normal migration/release flow. On 2026-10-05, the production `web` service
+      deployed commit `3a77a0c`; startup found all 38 migrations and reported no
+      pending migrations. The health endpoint returned `managedReady: true`.
+      Large-table index-build impact was not benchmarked, and no 100M-user load
+      certification is claimed.
 
 This tracks the current implementation baseline, the approved dual-mode
 product migration, and the remaining production gates. The current target
