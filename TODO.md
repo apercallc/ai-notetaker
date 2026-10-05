@@ -571,11 +571,11 @@ Moved out of the checklist so that every unchecked box in this file needs you.
       `scripts/docker-entrypoint.mjs` runs `npx prisma migrate deploy` at
       container start, so the CLI must ship. Revisit only if entrypoint
       switches to a build-time migration step or a standalone engine.
-- Helper `stop_capture_only` (pipeline.rs) drops mic/speaker streaming
-      sessions without `close()` — audit lead from the delegation sweep,
-      not re-verified against the current code after the pipeline rework;
-      sessions drop when the process exits, but an explicit close would
-      flush provider buffers cleanly. Verify on the next pipeline pass.
+- [x] Verify Helper `stop_capture_only` session handling: its only callers are
+  managed-capture paths, whose `ManagedCaptureTranscription` is non-streaming.
+  Local BYOK uses `stop_recording`, which closes streaming sessions and flushes
+  trailing finals; `stop_recording_closes_streaming_sessions_and_flushes_trailing_final`
+  covers this path.
 - Track six RustSec unmaintained-dependency warnings in the transitive
       Tauri/GTK dependency graph (`proc-macro-error` and the `unic-*` crates).
       The 2026-09-29 `cargo audit` run found zero vulnerable or yanked crates;
