@@ -11,8 +11,8 @@ notes to the web app and copies workspace notes into the desktop library.
 Web edits, deletions, and settings do not sync back yet; extension recordings
 still need archive export and import. Audio and provider keys stay on this device.
 
-> **Status:** v0.18.2 preview installers are published for macOS, Windows, and
-> Debian/Ubuntu Linux. The release is unsigned, and real-call capture and
+> **Status:** Preview installers are published for macOS, Windows, and
+> Debian/Ubuntu Linux. They are unsigned, and real-call capture and
 > fresh-install acceptance are still in progress across platforms. The Chrome
 > extension captures browser meeting audio while new recordings are processed
 > in desktop. See the
