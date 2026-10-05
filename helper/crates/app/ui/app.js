@@ -215,9 +215,14 @@
     setHeader("Library", "LOCAL RECORDING LIBRARY");
     const meetings = state.snapshot.meetings;
     const folders = state.snapshot.folders || [];
+    const noteCounts = new Map();
+    for (const meeting of meetings) {
+      const folderId = meeting.folderId || null;
+      noteCounts.set(folderId, (noteCounts.get(folderId) || 0) + 1);
+    }
     if (state.currentFolderId && !folders.some((folder) => folder.id === state.currentFolderId)) state.currentFolderId = null;
     const current = folders.find((folder) => folder.id === state.currentFolderId);
-    const directNoteCount = meetings.filter((meeting) => meeting.folderId === state.currentFolderId).length;
+    const directNoteCount = noteCounts.get(state.currentFolderId) || 0;
     const path = folderPath(state.currentFolderId);
     const listScroll = $("#meeting-list")?.scrollTop || 0;
     $("#content").innerHTML = `<div class="notes-layout">
@@ -233,8 +238,8 @@
       <section class="card note-detail" id="note-detail">${state.detailError ? `<div class="empty-state"><strong>Note could not open</strong>${esc(state.detailError)}</div>` : state.selectedId ? '<div class="loading-state"><span class="spinner"></span><span>Opening note…</span></div>' : '<div class="empty-state"><strong>Select a recording</strong>Your transcript, summary, and action items will appear here.</div>'}</section>
     </div>`;
     const search = $("#notes-search");
-    search.addEventListener("input", () => { state.notesQuery = search.value; renderMeetingList(state.notesQuery); });
-    renderMeetingList(state.notesQuery);
+    search.addEventListener("input", () => { state.notesQuery = search.value; renderMeetingList(state.notesQuery, noteCounts); });
+    renderMeetingList(state.notesQuery, noteCounts);
     $("#meeting-list").scrollTop = listScroll;
     for (const button of document.querySelectorAll("[data-folder-path]")) button.addEventListener("click", () => openFolder(button.dataset.folderPath || null));
     $("#new-folder")?.addEventListener("click", () => { $("#new-folder-form").hidden = false; $("#folder-name").focus(); });
@@ -296,7 +301,7 @@
     renderNotes();
   }
 
-  function renderMeetingList(query = "") {
+  function renderMeetingList(query = "", noteCounts) {
     const list = $("#meeting-list");
     if (!list) return;
     const needle = query.trim().toLocaleLowerCase();
@@ -308,7 +313,7 @@
       && `${meeting.title} ${meeting.summary || ""}`.toLocaleLowerCase().includes(needle));
     const childFolders = needle ? [] : folders.filter((folder) => folder.parentId === state.currentFolderId)
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-    const folderRows = childFolders.map((folder) => { const count = state.snapshot.meetings.filter((meeting) => meeting.folderId === folder.id).length; return `<button class="folder-list-item" data-open-folder="${esc(folder.id)}"><span aria-hidden="true">▤</span><strong>${esc(folder.name)}</strong><span>${count} ${count === 1 ? "note" : "notes"}</span></button>`; }).join("");
+    const folderRows = childFolders.map((folder) => { const count = noteCounts.get(folder.id) || 0; return `<button class="folder-list-item" data-open-folder="${esc(folder.id)}"><span aria-hidden="true">▤</span><strong>${esc(folder.name)}</strong><span>${count} ${count === 1 ? "note" : "notes"}</span></button>`; }).join("");
     list.innerHTML = folderRows + (filtered.length ? filtered.map((meeting) => `<button class="meeting-list-item ${meeting.id === state.selectedId ? "selected" : ""}" data-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><span>${esc(prettyDate(meeting.startedAt))} · ${esc(statusLabel(meeting.status))}</span></button>`).join("") : !folderRows ? `<div class="empty-state">${state.snapshot.meetings.length ? needle ? "No matching notes." : "This folder is empty." : "No recordings yet."}</div>` : "");
     for (const button of list.querySelectorAll("[data-open-folder]")) button.addEventListener("click", () => openFolder(button.dataset.openFolder));
     for (const button of list.querySelectorAll("[data-id]")) button.addEventListener("click", () => openMeeting(button.dataset.id));

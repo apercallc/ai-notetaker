@@ -39,6 +39,8 @@
 - [x] Pause desktop UI status polling and skip event-triggered snapshots while
       its window is hidden; refresh immediately when it becomes visible again.
       Capture and recovery remain owned by the Rust helper while hidden.
+- [x] Count desktop library notes by folder in one pass instead of rescanning
+      the full meeting list once for every visible folder row.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
 - [ ] Show workspace notes in the extension through its authenticated desktop
