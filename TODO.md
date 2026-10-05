@@ -27,10 +27,11 @@
       overwrite desktop-origin notes. Each imported copy is bound to its server
       URL and workspace ID; web deletions/settings remain per app. Extension
       recordings still require archive export/import.
-- [ ] Define and implement safe conflict handling for web-edited desktop-origin
-      notes and deletions. Desktop uploads use an optimistic version check and
-      preserve an identical retry after a lost response; matching local notes
-      remain protected and remote deletions do not propagate.
+- [x] Resolve web-edited desktop-origin conflicts with explicit, workspace-
+      scoped choices: replace the web version using its current compare-and-swap
+      version, recreate a physically removed web note, or keep copies separate.
+      Trashed notes must be restored before replacement. Conflicted uploads stay
+      paused until a choice; neither recording nor local audio is overwritten.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
 - [ ] Show workspace notes in the extension through its authenticated desktop
@@ -74,19 +75,21 @@ call or real archive import was completed.
       local note and link to the matching web version.
 - [x] Read the extension protocol version from its exported constant in the
       release metadata gate so tagged builds validate the live contract.
-- [ ] Add a deliberate conflict resolution path after product rules define
-      whether users keep the desktop copy, keep the web copy, or merge text.
+- [x] Add deliberate conflict resolution after product rules define whether
+      users replace the web copy, recreate a removed copy, or keep separate
+      copies. Automatic text merging remains out of scope.
 - [x] Fix import duration rounding at the hour boundary and show correct byte
       labels for empty and sub-kilobyte files.
-- Verified for this sync slice: helper fmt, Clippy, and all 258 workspace tests;
-  extension typecheck, all 645 tests, and production build; webapp Prisma
-  generation, lint, typecheck, all 822 PostgreSQL-backed tests, and production
-  build. Desktop settings copy passed design and guardrails review; release CI
-  passed across OSes and v0.18.1 assets published. Docker Hub mirroring and
-  Chrome Web Store upload were skipped because listing variables are unset.
-  JS syntax and diff checks pass. Rendered native UI, live cross-platform
-  audio, real workspace-token recovery, Chrome capture, and installed archive
-  migration were not verified here.
+- Verified after conflict resolution: helper formatting, strict Clippy, and
+  workspace tests; extension typecheck, all 645 tests, and production build;
+  webapp Prisma generation, lint, typecheck, all 822 PostgreSQL-backed tests,
+  and production build. The changed UI script passes Node syntax validation.
+  The design review and guardrails review found no remaining source-level
+  findings. Release CI passed across OSes and v0.18.1 assets are published.
+  Docker Hub mirroring and Chrome Web Store upload were skipped because their
+  listing variables are unset. Rendered native UI, live cross-platform audio,
+  real workspace-token recovery, Chrome capture, and installed archive
+  migration remain unverified.
 
 ## Desktop-first app migration — 2026-10-03
 

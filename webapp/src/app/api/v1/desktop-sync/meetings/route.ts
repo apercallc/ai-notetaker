@@ -201,6 +201,7 @@ export async function POST(request: Request) {
           error: error.message,
           requestId,
           workspaceId: auth.auth.workspaceId,
+          conflict: error.conflict ?? null,
         }, {
           status: 409,
           headers: { "x-request-id": requestId, "cache-control": "no-store" },

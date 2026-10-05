@@ -22,7 +22,7 @@ mod tray;
 mod update_check;
 
 use async_trait::async_trait;
-use desktop_sync::{DesktopSync, DesktopSyncStatus};
+use desktop_sync::{DesktopSync, DesktopSyncStatus, SyncConflictReason};
 use notetaker_audio::{AudioCapture, AudioDiagnostics};
 use notetaker_core::native_messaging::{
     decode_browser_audio_chunk, ActionItem, ApiKeys, BrowserAudioChannel,
@@ -1135,6 +1135,7 @@ fn main() {
             desktop_open_notes_folder,
             desktop_open_webapp,
             desktop_open_webapp_conflict,
+            desktop_resolve_webapp_conflict,
         ])
         .setup(move |app| {
             #[cfg(desktop)]
@@ -2189,16 +2190,44 @@ fn desktop_open_webapp_conflict(
     context: tauri::State<'_, DesktopCommandContext>,
     conflict_key: String,
 ) -> Result<(), String> {
-    let (conflict_meeting_id, source_url) = context
+    let (conflict_meeting_id, source_url, reason) = context
         .sync
-        .conflict_webapp_url(&conflict_key)
+        .conflict_webapp_target(&conflict_key)
         .ok_or_else(|| "This sync conflict is no longer available.".to_string())?;
     let base_url = desktop_settings::normalize_webapp_url(&source_url)?
         .ok_or_else(|| "The web-app address for this conflict is unavailable.".to_string())?;
+    let path = match reason {
+        SyncConflictReason::Updated => format!("/meetings/{conflict_meeting_id}"),
+        SyncConflictReason::Trashed => "/trash".to_string(),
+        SyncConflictReason::Removed => {
+            return Err("This web note was removed. Choose whether to recreate it or keep the desktop copy here.".into());
+        }
+    };
     let target = reqwest::Url::parse(&base_url)
-        .and_then(|url| url.join(&format!("/meetings/{conflict_meeting_id}")))
+        .and_then(|url| url.join(&path))
         .map_err(|_| "The web version could not be opened.".to_string())?;
     open_external(target.as_str())
+}
+
+#[tauri::command]
+fn desktop_resolve_webapp_conflict(
+    context: tauri::State<'_, DesktopCommandContext>,
+    conflict_key: String,
+    resolution: String,
+) -> Result<(), String> {
+    let keep_desktop = match resolution.as_str() {
+        "use_desktop" => true,
+        "keep_separate" => false,
+        _ => return Err("Choose a valid sync conflict resolution.".into()),
+    };
+    context.sync.resolve_conflict(&conflict_key, keep_desktop)?;
+    spawn_desktop_sync(
+        context.app.clone(),
+        context.preferences.clone(),
+        context.sync.clone(),
+        context.ui_app.clone(),
+    );
+    Ok(())
 }
 
 fn open_external(target: &str) -> Result<(), String> {

@@ -459,10 +459,25 @@
       providerKeyMarkup += `<div class="form-field"><label class="field-label" for="key-${key.id}">${key.label} <span class="fine-print">· ${key.description}</span></label><div class="key-row"><input class="text-input" id="key-${key.id}" type="password" autocomplete="new-password" placeholder="${s[key.saved] ? "Saved securely · blank keeps current key" : "Paste API key"}" /><button type="button" class="secondary-button test-key" data-provider="${key.id}">Check</button></div><label class="key-status" id="key-status-${key.id}">${s[key.saved] ? "A key is saved securely on this device." : "No key saved."}</label><label class="fine-print"><input type="checkbox" id="clear-${key.id}" /> Remove saved key</label></div>`;
     });
     const conflicts = state.snapshot.webappSync.conflicts || [];
+    const conflictSummary = "Choose an action for each note: replace edited web versions, recreate removed web notes, or keep copies separate. Restore trashed notes before replacing them.";
     const conflictMarkup = conflicts.length
-      ? `<details class="sync-conflicts"><summary>Review ${conflicts.length} note version conflict${conflicts.length === 1 ? "" : "s"}</summary><p>The desktop app cannot resolve conflicts yet. Open a web version to compare; both copies stay saved as they are.</p><div class="inline-actions">${conflicts.map((conflict) => {
+      ? `<details class="sync-conflicts"><summary>Review ${conflicts.length} note version conflict${conflicts.length === 1 ? "" : "s"}</summary><p>${conflictSummary}</p><div class="inline-actions">${conflicts.map((conflict) => {
         const meeting = state.snapshot.meetings.find((item) => item.id === conflict.meetingId);
-        return `<button type="button" class="secondary-button" data-sync-conflict="${esc(conflict.key)}">Review web version${meeting?.title ? `: ${esc(meeting.title)}` : ""}</button>`;
+        const title = meeting?.title ? esc(meeting.title) : "Meeting note";
+        const desktopLabel = conflict.reason === "removed" ? "Recreate web version" : "Replace web version";
+        const separateLabel = conflict.reason === "removed" ? "Keep desktop copy here" : "Keep both copies";
+        const replaceUnavailable = conflict.reason === "trashed" || (conflict.reason === "updated" && !conflict.remoteUpdatedAt);
+        const resolutionHint = conflict.reason === "trashed"
+          ? "Restore this note in the web app before replacing it. You can still keep the desktop copy here."
+          : conflict.reason === "updated" && !conflict.remoteUpdatedAt
+            ? "The web app did not return its current note version. Update the web app and sync again before replacing it."
+            : "";
+        const hintMarkup = resolutionHint ? `<p class="fine-print">${resolutionHint}</p>` : "";
+        const reviewAction = conflict.reason === "removed"
+          ? `<span class="fine-print">Web copy removed</span>`
+          : `<button type="button" class="secondary-button" data-sync-open="${esc(conflict.key)}" aria-label="${conflict.reason === "trashed" ? "Open Trash" : "Review web version"}: ${title}" ${state.syncInProgress ? "disabled" : ""}>${conflict.reason === "trashed" ? "Open Trash" : "Review web version"}</button>`;
+        const desktopClass = conflict.reason === "removed" ? "primary-button" : "danger-button";
+        return `<div class="sync-conflict-item"><strong>${title}</strong><div class="inline-actions">${reviewAction}<button type="button" class="${desktopClass}" data-sync-resolution="use_desktop" data-sync-reason="${esc(conflict.reason)}" data-sync-replace-unavailable="${replaceUnavailable}" data-sync-conflict="${esc(conflict.key)}" aria-label="${desktopLabel}: ${title}" ${replaceUnavailable || state.syncInProgress ? "disabled" : ""}>${desktopLabel}</button><button type="button" class="secondary-button" data-sync-resolution="keep_separate" data-sync-reason="${esc(conflict.reason)}" data-sync-conflict="${esc(conflict.key)}" aria-label="${separateLabel}: ${title}" ${state.syncInProgress ? "disabled" : ""}>${separateLabel}</button></div>${hintMarkup}</div>`;
       }).join("")}</div></details>`
       : "";
     $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="providers" aria-current="true">AI providers</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button></nav><form id="settings-form" class="settings-stack">
@@ -481,7 +496,8 @@
         <div class="form-field wide"><label class="field-label" for="webapp-token">Desktop sync token</label><div class="key-row"><input class="text-input" id="webapp-token" type="password" autocomplete="new-password" placeholder="${s.hasWebappToken ? "Saved securely · blank keeps current token" : "Paste desktop sync token"}" /><button type="button" class="secondary-button" id="test-webapp">Test connection</button></div><label class="key-status" id="webapp-status">${s.hasWebappToken ? (state.snapshot.webappSync.configured ? `Sync enabled · ${state.snapshot.webappSync.pending} note(s) pending` : "Token saved. Check the URL and connection.") : "No sync token saved."}</label><label class="fine-print"><input type="checkbox" id="clear-webapp-token" /> Remove saved token</label></div></div>
         <div class="privacy-note"><p>To connect, sign in to the web app, create a “Desktop note sync” token in Settings → Integrations, and paste it here.</p><p>Finished desktop notes upload to the selected workspace. Notes created in the web app are copied here and updated on the next sync. Web edits do not change recordings made on this desktop. Note deletions and settings do not sync between the desktop and web app.</p><p>This workspace sync sends notes only; it does not send raw audio or provider keys. Import extension recordings from an archive.</p></div>
         ${conflictMarkup}
-        ${state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} upload(s) pending` : ""}</button></div><p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p><p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : ""}
+        ${state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : ""}
+        ${state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : ""}
       </section>
       <section class="card settings-card" id="settings-import"><h2 tabindex="-1">Import from the extension</h2><p>Import a full archive to bring over new browser meeting recordings, older notes, partial transcripts, and any raw audio still saved by the extension. Older completed-call audio may already have been removed after notes were saved. API keys, web-app credentials, and Google connections stay separate. Import copies data; it never removes the extension source.</p>
         <button type="button" class="secondary-button" id="import-desktop-audio-transfer">Choose full archive</button>
@@ -500,9 +516,27 @@
     $("#test-webapp")?.addEventListener("click", testWebapp);
     $("#sync-existing")?.addEventListener("click", syncExisting);
     $("#retry-sync")?.addEventListener("click", retrySync);
-    for (const button of document.querySelectorAll("[data-sync-conflict]")) button.addEventListener("click", async () => {
-      try { await invoke("desktop_open_webapp_conflict", { conflictKey: button.dataset.syncConflict }); }
+    for (const button of document.querySelectorAll("[data-sync-open]")) button.addEventListener("click", async () => {
+      try { await invoke("desktop_open_webapp_conflict", { conflictKey: button.dataset.syncOpen }); }
       catch (error) { notify(String(error), "error"); }
+    });
+    for (const button of document.querySelectorAll("[data-sync-resolution]")) button.addEventListener("click", async () => {
+      const resolution = button.dataset.syncResolution;
+      if (resolution === "use_desktop" && button.dataset.syncReason !== "removed" && !window.confirm("Replace the current web note and its online edits with the saved desktop note? Your desktop copy stays saved locally.")) return;
+      state.syncInProgress = true;
+      state.syncAnnouncement = "";
+      updateSyncFeedback();
+      try {
+        await invoke("desktop_resolve_webapp_conflict", {
+          conflictKey: button.dataset.syncConflict,
+          resolution,
+        });
+      } catch (error) {
+        state.syncInProgress = false;
+        state.syncAnnouncement = `Conflict could not be resolved: ${String(error)}`;
+        updateSyncFeedback();
+        notify(String(error), "error");
+      }
     });
     $("#choose-desktop-transfer")?.addEventListener("click", () => $("#desktop-transfer-file").click());
     $("#desktop-transfer-file")?.addEventListener("change", importDesktopTransfer);
@@ -629,6 +663,10 @@
     }
     const existing = $("#sync-existing");
     if (existing) existing.disabled = state.syncInProgress;
+    for (const action of document.querySelectorAll("[data-sync-resolution], [data-sync-open]")) {
+      action.disabled = state.syncInProgress
+        || action.dataset.syncResolution === "use_desktop" && action.dataset.syncReplaceUnavailable === "true";
+    }
   }
 
   async function saveSettings(event) {

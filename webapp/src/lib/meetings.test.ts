@@ -199,9 +199,16 @@ describe("upsertMeeting", () => {
     expect(retry.updatedAt).toEqual(created.updatedAt);
 
     await renameMeeting(WORKSPACE_ID, input.id, "Edited online");
-    await expect(
-      upsertMeeting({ ...input, summary: "Stale desktop edit" }, WORKSPACE_ID, undefined, { expectedUpdatedAt: created.updatedAt }),
-    ).rejects.toBeInstanceOf(DesktopSyncConflictError);
+    const staleWrite = await upsertMeeting(
+      { ...input, summary: "Stale desktop edit" },
+      WORKSPACE_ID,
+      undefined,
+      { expectedUpdatedAt: created.updatedAt },
+    ).catch((error: unknown) => error);
+    expect(staleWrite).toBeInstanceOf(DesktopSyncConflictError);
+    expect(staleWrite).toMatchObject({
+      conflict: { reason: "updated", remoteUpdatedAt: expect.any(String) },
+    });
     expect((await getMeeting(WORKSPACE_ID, input.id))?.title).toBe("Edited online");
   });
 

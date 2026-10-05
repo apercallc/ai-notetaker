@@ -10,7 +10,17 @@ import { notifyNoteReady } from "./integrations";
 import { nextMeetingVersion } from "./meetingVersion";
 
 export class ValidationError extends Error {}
-export class DesktopSyncConflictError extends Error {}
+export type DesktopSyncConflictDetails = {
+  reason: "updated" | "removed" | "trashed";
+  remoteUpdatedAt: string | null;
+};
+
+export class DesktopSyncConflictError extends Error {
+  constructor(message: string, readonly conflict?: DesktopSyncConflictDetails) {
+    super(message);
+    this.name = "DesktopSyncConflictError";
+  }
+}
 
 /** Lightweight ID scan lets desktop sync choose a bounded detail batch. */
 export async function listDesktopSyncMeetingCandidates(
@@ -242,10 +252,16 @@ export async function upsertMeeting(
     }
     if (options.expectedUpdatedAt !== undefined) {
       if (existing?.deletedAt) {
-        throw new DesktopSyncConflictError("This workspace note is in trash. Restore it in the web app before syncing.");
+        throw new DesktopSyncConflictError(
+          "This workspace note is in trash. Restore it in the web app before syncing.",
+          { reason: "trashed", remoteUpdatedAt: existing.updatedAt.toISOString() },
+        );
       }
       if (!existing && options.expectedUpdatedAt !== null) {
-        throw new DesktopSyncConflictError("This workspace note was removed. Review it in the web app before syncing.");
+        throw new DesktopSyncConflictError(
+          "This workspace note was removed. Review it in the web app before syncing.",
+          { reason: "removed", remoteUpdatedAt: null },
+        );
       }
       if (existing) {
         const currentActionContent = existing.actionItems.map((item) => JSON.stringify([
@@ -276,7 +292,10 @@ export async function upsertMeeting(
           return { updatedAt: existing.updatedAt, unchanged: true };
         }
         if (options.expectedUpdatedAt === null || existing.updatedAt.getTime() !== options.expectedUpdatedAt.getTime()) {
-          throw new DesktopSyncConflictError("This workspace note changed online after its last desktop sync. Review the web version before retrying.");
+          throw new DesktopSyncConflictError(
+            "This workspace note changed online after its last desktop sync. Review the web version before retrying.",
+            { reason: "updated", remoteUpdatedAt: existing.updatedAt.toISOString() },
+          );
         }
       }
     }

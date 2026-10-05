@@ -59,6 +59,16 @@ struct PersistedSyncState {
     scoped_remote_versions: HashMap<String, DateTime<Utc>>,
     #[serde(default)]
     conflicts: Vec<SyncConflict>,
+    #[serde(default)]
+    separate_copies: HashSet<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncConflictReason {
+    Updated,
+    Removed,
+    Trashed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,22 +77,34 @@ struct SyncConflict {
     meeting_id: Uuid,
     webapp_url: String,
     workspace_id: String,
+    #[serde(default = "default_conflict_reason")]
+    reason: SyncConflictReason,
+    #[serde(default)]
+    remote_updated_at: Option<DateTime<Utc>>,
+}
+
+fn default_conflict_reason() -> SyncConflictReason {
+    SyncConflictReason::Updated
 }
 
 impl SyncConflict {
     fn key(&self) -> String {
-        let mut digest = Sha256::new();
-        digest.update(self.meeting_id.as_bytes());
-        digest.update([0]);
-        digest.update(self.webapp_url.as_bytes());
-        digest.update([0]);
-        digest.update(self.workspace_id.as_bytes());
-        digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        sync_conflict_key(self.meeting_id, &self.webapp_url, &self.workspace_id)
     }
+}
+
+fn sync_conflict_key(meeting_id: Uuid, webapp_url: &str, workspace_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(meeting_id.as_bytes());
+    digest.update([0]);
+    digest.update(webapp_url.as_bytes());
+    digest.update([0]);
+    digest.update(workspace_id.as_bytes());
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +112,8 @@ impl SyncConflict {
 pub struct DesktopSyncConflictStatus {
     pub meeting_id: String,
     pub key: String,
+    pub reason: SyncConflictReason,
+    pub remote_updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,7 +126,7 @@ struct RemoteCursor {
 struct WorkspacePageImport {
     imported: usize,
     versions: Vec<(Uuid, DateTime<Utc>)>,
-    conflicts: Vec<Uuid>,
+    conflicts: Vec<(Uuid, DateTime<Utc>)>,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +185,7 @@ pub struct DesktopSyncStatus {
     pub last_error: Option<String>,
     pub last_success_at: Option<String>,
     pub conflicts: Vec<DesktopSyncConflictStatus>,
+    pub separate_copies: usize,
 }
 
 pub struct DesktopSync {
@@ -239,17 +264,92 @@ impl DesktopSync {
                 .map(|conflict| DesktopSyncConflictStatus {
                     meeting_id: conflict.meeting_id.to_string(),
                     key: conflict.key(),
+                    reason: conflict.reason,
+                    remote_updated_at: conflict.remote_updated_at.map(|at| at.to_rfc3339()),
                 })
                 .collect(),
+            separate_copies: state.separate_copies.len(),
         }
     }
 
-    pub fn conflict_webapp_url(&self, conflict_key: &str) -> Option<(Uuid, String)> {
+    pub fn conflict_webapp_target(
+        &self,
+        conflict_key: &str,
+    ) -> Option<(Uuid, String, SyncConflictReason)> {
         self.lock_state()
             .conflicts
             .iter()
             .find(|conflict| conflict.key() == conflict_key)
-            .map(|conflict| (conflict.meeting_id, conflict.webapp_url.clone()))
+            .map(|conflict| {
+                (
+                    conflict.meeting_id,
+                    conflict.webapp_url.clone(),
+                    conflict.reason,
+                )
+            })
+    }
+
+    pub fn resolve_conflict(&self, conflict_key: &str, keep_desktop: bool) -> Result<(), String> {
+        let mut state = self.lock_state();
+        let index = state
+            .conflicts
+            .iter()
+            .position(|conflict| conflict.key() == conflict_key)
+            .ok_or_else(|| "This sync conflict is no longer available.".to_string())?;
+        let conflict = state.conflicts[index].clone();
+        let source_id = format!(
+            "{}/workspace/{}",
+            conflict.webapp_url, conflict.workspace_id
+        );
+        let version_key = remote_version_key(conflict.meeting_id, &source_id);
+
+        if keep_desktop {
+            if conflict.reason == SyncConflictReason::Trashed {
+                return Err(
+                    "Restore this note in the web app before replacing its version.".into(),
+                );
+            }
+            if conflict.reason == SyncConflictReason::Updated
+                && conflict.remote_updated_at.is_none()
+            {
+                return Err(
+                    "Sync again to retrieve the current web version before replacing it.".into(),
+                );
+            }
+            if let Some(updated_at) = conflict.remote_updated_at {
+                state.scoped_remote_versions.insert(version_key, updated_at);
+            } else {
+                // A removed remote note has no version. Sending `new` lets the
+                // server recreate it, still under its normal workspace checks.
+                state.scoped_remote_versions.remove(&version_key);
+            }
+            if !state.pending.contains(&conflict.meeting_id) {
+                state.pending.push(conflict.meeting_id);
+            }
+            state.separate_copies.remove(conflict_key);
+        } else {
+            if let Some(updated_at) = conflict.remote_updated_at {
+                state.scoped_remote_versions.insert(version_key, updated_at);
+            }
+            state.separate_copies.insert(conflict_key.to_owned());
+        }
+
+        state.conflicts.remove(index);
+        state.last_error = None;
+        self.persist(&state)
+    }
+
+    fn should_skip_upload(&self, meeting_id: Uuid, webapp_url: &str, workspace_id: &str) -> bool {
+        let state = self.lock_state();
+        state.conflicts.iter().any(|conflict| {
+            conflict.meeting_id == meeting_id
+                && conflict.webapp_url == webapp_url
+                && conflict.workspace_id == workspace_id
+        }) || state.separate_copies.contains(&sync_conflict_key(
+            meeting_id,
+            webapp_url,
+            workspace_id,
+        ))
     }
 
     pub fn enqueue(&self, meeting_id: Uuid) -> Result<(), String> {
@@ -339,6 +439,9 @@ impl DesktopSync {
             .to_owned();
         let source_id = format!("{source_base}/workspace/{workspace_id}");
         for meeting_id in pending {
+            if self.should_skip_upload(meeting_id, &source_base, &workspace_id) {
+                continue;
+            }
             let store = store.clone();
             let payload = tokio::task::spawn_blocking(move || build_payload(&store, meeting_id))
                 .await
@@ -389,16 +492,39 @@ impl DesktopSync {
                 Ok(response) => {
                     let status = response.status();
                     if status == reqwest::StatusCode::CONFLICT {
-                        let conflict_workspace_id = response
+                        let conflict = response
                             .json::<serde_json::Value>()
                             .await
-                            .ok()
-                            .and_then(|body| body.get("workspaceId")?.as_str().map(str::to_owned))
-                            .unwrap_or_else(|| workspace_id.clone());
-                        self.record_conflict(meeting_id, base_url, &conflict_workspace_id)?;
+                            .unwrap_or_default();
+                        let conflict_workspace_id = conflict
+                            .get("workspaceId")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(&workspace_id)
+                            .to_owned();
+                        let conflict_details = conflict.get("conflict");
+                        let reason = match conflict_details
+                            .and_then(|details| details.get("reason"))
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            Some("removed") => SyncConflictReason::Removed,
+                            Some("trashed") => SyncConflictReason::Trashed,
+                            _ => SyncConflictReason::Updated,
+                        };
+                        let remote_updated_at = conflict_details
+                            .and_then(|details| details.get("remoteUpdatedAt"))
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                            .map(|value| value.with_timezone(&Utc));
+                        self.record_conflict(
+                            meeting_id,
+                            base_url,
+                            &conflict_workspace_id,
+                            reason,
+                            remote_updated_at,
+                        )?;
                     }
                     let message = match status.as_u16() {
-                        409 => "This note changed in the web app after its last sync. Review the web version before retrying.",
+                        409 => "A web-app note conflicts with this desktop copy. Review the conflict in Settings → Web app sync.",
                         400 | 413 | 422 => "The web app rejected a saved note. Update the web app, then retry sync.",
                         401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
                         403 => "The desktop sync token no longer has access to its workspace. Create a token for the correct workspace.",
@@ -572,7 +698,7 @@ impl DesktopSync {
                             .get(&remote_version_key(meeting_id, &page_source_id))
                             .is_none_or(|known| remote_updated_at > *known)
                     {
-                        conflicts.push(meeting_id);
+                        conflicts.push((meeting_id, remote_updated_at));
                     }
                     if matches!(outcome, WorkspaceImportOutcome::Created | WorkspaceImportOutcome::Updated | WorkspaceImportOutcome::Unchanged) {
                         versions.push((meeting_id, remote_updated_at));
@@ -594,8 +720,14 @@ impl DesktopSync {
                 }
                 self.persist(&state)?;
             }
-            for meeting_id in page_import.conflicts {
-                self.record_conflict(meeting_id, base_url, &page_workspace_id)?;
+            for (meeting_id, remote_updated_at) in page_import.conflicts {
+                self.record_conflict(
+                    meeting_id,
+                    base_url,
+                    &page_workspace_id,
+                    SyncConflictReason::Updated,
+                    Some(remote_updated_at),
+                )?;
             }
             if let Some(next) = next_cursor {
                 if cursor.as_ref().is_some_and(|old| {
@@ -659,6 +791,8 @@ impl DesktopSync {
         meeting_id: Uuid,
         webapp_url: &str,
         workspace_id: &str,
+        reason: SyncConflictReason,
+        remote_updated_at: Option<DateTime<Utc>>,
     ) -> Result<(), String> {
         let normalized_url = reqwest::Url::parse(webapp_url)
             .map_err(|_| "Web-app URL is invalid.".to_string())?
@@ -678,9 +812,16 @@ impl DesktopSync {
         }
         state.conflicts.push(SyncConflict {
             meeting_id,
-            webapp_url: normalized_url,
+            webapp_url: normalized_url.clone(),
             workspace_id: workspace_id.to_owned(),
+            reason,
+            remote_updated_at,
         });
+        state.separate_copies.remove(&sync_conflict_key(
+            meeting_id,
+            &normalized_url,
+            workspace_id,
+        ));
         self.persist(&state)
     }
 
@@ -861,6 +1002,33 @@ mod tests {
     }
 
     #[test]
+    fn older_conflict_records_load_with_safe_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        std::fs::write(
+            directory.path().join(OUTBOX_FILE),
+            serde_json::json!({
+                "pending": [],
+                "conflicts": [{
+                    "meetingId": id,
+                    "webappUrl": "https://notes.example.test",
+                    "workspaceId": "workspace-a"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let sync = DesktopSync::load(directory.path());
+
+        assert_eq!(
+            sync.status(true).conflicts[0].reason,
+            SyncConflictReason::Updated
+        );
+        assert_eq!(sync.status(true).conflicts[0].remote_updated_at, None);
+    }
+
+    #[test]
     fn remote_upload_versions_survive_restart() {
         let directory = tempfile::tempdir().unwrap();
         let id = Uuid::new_v4();
@@ -884,22 +1052,44 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let id = Uuid::new_v4();
         let sync = DesktopSync::load(directory.path());
-        sync.record_conflict(id, "https://notes.example.test", "workspace-a")
-            .unwrap();
-        sync.record_conflict(id, "https://notes.example.test", "workspace-b")
-            .unwrap();
+        sync.record_conflict(
+            id,
+            "https://notes.example.test",
+            "workspace-a",
+            SyncConflictReason::Updated,
+            Some(Utc::now()),
+        )
+        .unwrap();
+        sync.record_conflict(
+            id,
+            "https://notes.example.test",
+            "workspace-b",
+            SyncConflictReason::Updated,
+            Some(Utc::now()),
+        )
+        .unwrap();
         let workspace_a_key = sync.status(true).conflicts[0].key.clone();
         let workspace_b_key = sync.status(true).conflicts[1].key.clone();
         assert_ne!(workspace_a_key, workspace_b_key);
+        assert!(sync.should_skip_upload(id, "https://notes.example.test", "workspace-a"));
+        assert!(sync.should_skip_upload(id, "https://notes.example.test", "workspace-b"));
 
         let reopened = DesktopSync::load(directory.path());
         assert_eq!(
-            reopened.conflict_webapp_url(&workspace_a_key),
-            Some((id, "https://notes.example.test".to_string()))
+            reopened.conflict_webapp_target(&workspace_a_key),
+            Some((
+                id,
+                "https://notes.example.test".to_string(),
+                SyncConflictReason::Updated,
+            ))
         );
         assert_eq!(
-            reopened.conflict_webapp_url(&workspace_b_key),
-            Some((id, "https://notes.example.test".to_string()))
+            reopened.conflict_webapp_target(&workspace_b_key),
+            Some((
+                id,
+                "https://notes.example.test".to_string(),
+                SyncConflictReason::Updated,
+            ))
         );
         assert_eq!(reopened.status(true).conflicts.len(), 2);
 
@@ -909,6 +1099,151 @@ mod tests {
         let remaining = reopened.status(true).conflicts;
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].key, workspace_a_key);
+    }
+
+    #[test]
+    fn choosing_desktop_version_retries_against_the_conflicted_web_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let version = Utc::now();
+        let sync = DesktopSync::load(directory.path());
+        sync.record_conflict(
+            id,
+            "https://notes.example.test",
+            "workspace-a",
+            SyncConflictReason::Updated,
+            Some(version),
+        )
+        .unwrap();
+        let key = sync.status(true).conflicts[0].key.clone();
+
+        sync.resolve_conflict(&key, true).unwrap();
+
+        let state = sync.lock_state();
+        let source_id = "https://notes.example.test/workspace/workspace-a";
+        assert_eq!(state.pending, vec![id]);
+        assert_eq!(state.conflicts.len(), 0);
+        assert_eq!(
+            state
+                .scoped_remote_versions
+                .get(&remote_version_key(id, source_id)),
+            Some(&version)
+        );
+        assert!(state.separate_copies.is_empty());
+    }
+
+    #[test]
+    fn observing_a_conflict_never_advances_the_upload_version_before_a_choice() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let old_version = Utc::now() - chrono::Duration::minutes(1);
+        let new_version = Utc::now();
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(id).unwrap();
+        let source_id = "https://notes.example.test/workspace/workspace-a";
+        sync.lock_state()
+            .scoped_remote_versions
+            .insert(remote_version_key(id, source_id), old_version);
+
+        sync.record_conflict(
+            id,
+            "https://notes.example.test",
+            "workspace-a",
+            SyncConflictReason::Updated,
+            Some(new_version),
+        )
+        .unwrap();
+
+        assert!(sync.should_skip_upload(id, "https://notes.example.test", "workspace-a"));
+        assert_eq!(
+            sync.lock_state()
+                .scoped_remote_versions
+                .get(&remote_version_key(id, source_id)),
+            Some(&old_version)
+        );
+    }
+
+    #[test]
+    fn keeping_both_copies_suppresses_only_that_workspace_upload() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let version = Utc::now();
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(id).unwrap();
+        sync.record_conflict(
+            id,
+            "https://notes.example.test",
+            "workspace-a",
+            SyncConflictReason::Updated,
+            Some(version),
+        )
+        .unwrap();
+        let key = sync.status(true).conflicts[0].key.clone();
+
+        sync.resolve_conflict(&key, false).unwrap();
+
+        assert!(sync.should_skip_upload(id, "https://notes.example.test", "workspace-a"));
+        assert!(!sync.should_skip_upload(id, "https://notes.example.test", "workspace-b"));
+        let state = sync.lock_state();
+        let source_id = "https://notes.example.test/workspace/workspace-a";
+        assert_eq!(state.pending, vec![id]);
+        assert_eq!(state.conflicts.len(), 0);
+        assert_eq!(state.separate_copies.len(), 1);
+        assert_eq!(
+            state
+                .scoped_remote_versions
+                .get(&remote_version_key(id, source_id)),
+            Some(&version)
+        );
+        drop(state);
+        let reopened = DesktopSync::load(directory.path());
+        assert!(reopened.should_skip_upload(id, "https://notes.example.test", "workspace-a"));
+    }
+
+    #[test]
+    fn removed_remote_note_can_be_explicitly_recreated() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let sync = DesktopSync::load(directory.path());
+        sync.record_conflict(
+            id,
+            "https://notes.example.test",
+            "workspace-a",
+            SyncConflictReason::Removed,
+            None,
+        )
+        .unwrap();
+        let key = sync.status(true).conflicts[0].key.clone();
+
+        sync.resolve_conflict(&key, true).unwrap();
+
+        let state = sync.lock_state();
+        let source_id = "https://notes.example.test/workspace/workspace-a";
+        assert_eq!(state.pending, vec![id]);
+        assert!(!state
+            .scoped_remote_versions
+            .contains_key(&remote_version_key(id, source_id)));
+    }
+
+    #[test]
+    fn trashed_remote_note_cannot_be_replaced_until_restored() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let sync = DesktopSync::load(directory.path());
+        sync.record_conflict(
+            id,
+            "https://notes.example.test",
+            "workspace-a",
+            SyncConflictReason::Trashed,
+            Some(Utc::now()),
+        )
+        .unwrap();
+        let key = sync.status(true).conflicts[0].key.clone();
+
+        let error = sync.resolve_conflict(&key, true).unwrap_err();
+
+        assert!(error.contains("Restore this note"));
+        assert_eq!(sync.status(true).conflicts.len(), 1);
     }
 
     #[tokio::test]

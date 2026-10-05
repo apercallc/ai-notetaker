@@ -13,7 +13,11 @@ const {
   listDesktopSyncMeetingCandidates: vi.fn(),
   listDesktopSyncMeetingDetails: vi.fn(),
   apiErrorResponse: vi.fn(() => Response.json({ error: "internal error" }, { status: 500 })),
-  DesktopSyncConflictError: class DesktopSyncConflictError extends Error {},
+  DesktopSyncConflictError: class DesktopSyncConflictError extends Error {
+    constructor(message: string, readonly conflict?: { reason: "updated" | "removed" | "trashed"; remoteUpdatedAt: string | null }) {
+      super(message);
+    }
+  },
 }));
 
 vi.mock("@/lib/desktopSyncAuth", () => ({ authenticateDesktopSync }));
@@ -172,7 +176,10 @@ describe("POST /api/v1/desktop-sync/meetings", () => {
       expectedUpdatedAt: new Date("2026-10-04T11:00:00.000Z"),
     });
 
-    upsertMeeting.mockRejectedValueOnce(new DesktopSyncConflictError("This workspace note changed online."));
+    upsertMeeting.mockRejectedValueOnce(new DesktopSyncConflictError(
+      "This workspace note changed online.",
+      { reason: "updated", remoteUpdatedAt: "2026-10-04T12:00:00.000Z" },
+    ));
     const conflict = await POST(new Request(endpoint, {
       method: "POST",
       headers: { "x-desktop-sync-version": "new" },
@@ -183,6 +190,7 @@ describe("POST /api/v1/desktop-sync/meetings", () => {
       error: "This workspace note changed online.",
       requestId: "desktop-sync-test",
       workspaceId: "workspace-1",
+      conflict: { reason: "updated", remoteUpdatedAt: "2026-10-04T12:00:00.000Z" },
     });
   });
 

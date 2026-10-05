@@ -1,93 +1,79 @@
-# Release-candidate checklist
+# Release and production acceptance
 
-Everything the code cannot do for itself. Code, local tests and builds are
-done; each item below needs an account, a device, or a publish action. Tick
-items here and mirror the result into `TODO.md` ("Live release gates").
+Updated 2026-10-04 against the published `v0.18.1` release and its release
+workflow. Keep repository/CI evidence separate from install, provider, account,
+and physical-device acceptance.
 
-**Paid Hosted is "released" after Gate A. Public release needs Gate B.**
+## Verified release evidence
 
-## Critical path (updated 2026-09-30)
+- [x] GitHub Release [`v0.18.1`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.1)
+      is published with macOS arm64 and x86_64 DMGs, Windows x64 installer,
+      Debian package, extension ZIPs, generated release manifest, and checksums.
+- [x] Release workflow [37250885566](https://github.com/apercallc/ai-notetaker/actions/runs/37250885566)
+      passed release metadata validation, package builds, cross-platform helper
+      jobs, asset verification, and GitHub Release publication.
+- [x] Production `/api/health` returned HTTP 200 with `managedReady: true` on
+      2026-10-04. This confirms service readiness checks, not an end-to-end
+      customer journey.
+- [x] Stripe checkout, webhook, and portal cancellation were exercised on
+      2026-09-30 with a 100%-off test promotion; recheck paid billing before
+      changing pricing or billing configuration.
 
-Longest lead time first. Items in the same step can run in parallel.
+The checked-in [`release/manifest.json`](../../release/manifest.json) is an
+input template and intentionally stays `unpublished` with no artifact list.
+The tagged build generates the published manifest from the actual files and
+checksums. Release binaries are unsigned; SHA-256 checks detect corruption but
+do not authenticate the publisher. See the [unsigned install guide](../unsigned-install.md).
 
-1. **Start today, then wait:** Chrome Web Store draft and review
-   (`chrome-web-store.md` steps 1 to 4, then `rotate-extension-id.mjs`), and
-   tag the release so the helper CI matrix runs on that exact tag.
-2. **Your devices (about half a day):** managed upload end to end (upload,
-   audio deleted, expiry sweep), Chrome + Meet with real participants, helper
-   Native Messaging, Groq/OpenAI calls, macOS and Windows audio checks.
-3. **15 minutes each:** Resend inbox test (plus-address signup, check
-   SPF/DKIM/DMARC), Google sign-in click-through, Sentry test event and an
-   "any new issue" alert.
-4. **Then publish:** GitHub Release with artifacts, installer acceptance,
-   real screenshots, store URL into `release/manifest.json`, launch-at-login
-   default.
+## Still required before broad public promotion
 
-Done: Stripe end to end (2026-09-30), hosted readiness open, Sentry wired to
-`ai-notetaker-web`. Cloudflare R2 is not required (see `hosting-costs.md`).
+### Native desktop install and capture
 
-## Gate A: Hosted mode (blockers 1 to 4)
+- [ ] Install the published build on supported macOS arm64, macOS x86_64,
+      Windows x64, and Debian/Ubuntu x64 machines. Verify first launch,
+      permissions, update check, uninstall, and Native Messaging registration
+      where the extension compatibility path is used.
+- [ ] On each OS, make a real meeting call and verify separate microphone and
+      speaker tracks, visible recording state, stop/finalize, provider failure
+      recovery, and restart recovery of an interrupted recording.
+- [ ] Verify a fresh user can configure a local provider key in the OS vault,
+      test it, record, and open the local note without an AI Notetaker account.
+      Do not use a test key to claim provider quality or paid-path acceptance.
 
-### 1. Stripe (verified live 2026-09-30)
-- [x] `STRIPE_SECRET_KEY`, webhook secret and price IDs set on Railway `web`;
-      `/api/health` reports `managedReady: true`.
-- [x] Checkout, webhook and portal cancel tested end to end with a 100%-off
-      one-time promotion code (invoice $0.00, workspace `hosted_pro`/`active`,
-      `cancel_at` set).
-- [ ] Confirm the key is the restricted one (Checkout Sessions + portal write,
-      Prices read); Railway redacts the value, so check in the Stripe dashboard.
-- [x] Portal return URL and privacy/terms URLs set; billing page shows
-      "ends on <date>" for a pending cancellation.
+### Browser extension and migration
 
-### 2. Managed upload end to end
-- [ ] Upload one real recording; job completes; staged audio object is gone.
-- [ ] Force an expiry (short TTL on a test upload); worker sweep deletes it.
-- [ ] Add a bucket lifecycle rule as a backstop (sweep is the only expiry
-      today).
+- [ ] In installed Chrome, verify Meet capture with real participants and
+      Teams/Zoom browser-tab capture, including navigation, tab close, export,
+      and import into desktop.
+- [ ] Complete a real `.ntarchive` export/import and confirm extension source
+      records remain intact and imported audio stays on separate tracks.
+- [ ] Publish the Chrome Web Store listing and verify store installation,
+      permissions, screenshots, extension ID, and Native Messaging origin. The
+      `v0.18.1` store upload job was skipped; manual ZIP installation remains
+      available.
 
-### 3. Live acceptance (capture evidence: screenshot or log per line)
-- [ ] Chrome + Google Meet with real participants: widget, mic/speaker
-      channels, notes produced.
-- [ ] Helper Native Messaging on a real device: handshake, start/stop.
-- [ ] Provider calls: Groq and OpenAI with real keys.
-- [ ] Signed-in managed flow: signup email, login, upload, notes.
+### Managed service and operations
 
-### 4. Physical audio checks
-- [x] Linux (2026-09-24)
-- [ ] macOS
-- [ ] Windows
+- [ ] Run one real managed upload through job completion; verify temporary
+      audio deletion after success and expiration cleanup after an abandoned
+      upload.
+- [ ] Complete production signup, password reset, login, Google sign-in/Drive,
+      provider processing, and billing with owner-controlled accounts.
+- [ ] Confirm signup and password-reset messages arrive in Gmail and Outlook,
+      including spam placement and SPF/DKIM/DMARC alignment.
+- [ ] Configure Sentry alerts that notify an operator, then send a test event
+      and verify receipt. The uptime monitor alone is not alert-routing proof.
+- [ ] Confirm the production Stripe key has the intended restricted
+      permissions in the Stripe dashboard.
 
-## Gate B: Public release (items 5 to 9)
+## Optional and deferred
 
-- [ ] Bump/confirm version; `git tag vX.Y.Z`; push tag.
-- [ ] Helper CI matrix green on that exact tag (Linux, macOS, Windows).
-- [ ] GitHub Release published with artifacts; `release/manifest.json`
-      `status`, `artifacts`, `chromeWebStoreUrl` filled.
-- [ ] Installers acceptance-tested per OS, including the macOS DMG manual
-      post-copy step and Native Messaging manifest auto-registration.
-- [ ] Daily update check sees the new release.
-- [ ] Decide launch-at-login default: ______
-- [ ] Chrome Web Store: follow `chrome-web-store.md` steps 1 to 4 first
-      (`node scripts/rotate-extension-id.mjs "<key>"`), then replace the dev
-      ID in `allowed_origins`; verify the manifest `key` derives the
-      published ID.
-- [ ] Real screenshots from macOS, Windows, Linux for store listing, install
-      page, README.
-
-## Ops gaps
-
-- [ ] Sentry alert rules (uptime monitor exists).
-- [ ] Resend: send real signup and password-reset mail to Gmail and Outlook;
-      confirm inbox, not spam (check SPF/DKIM/DMARC alignment).
-- [ ] Google Cloud project + client per `google-oauth.md`; live sign-in test.
-      Only non-sensitive scopes, so no verification queue.
-
-## Decisions (not blockers)
-
-- [ ] Hosted as primary onboarding CTA: needs an affordable trial policy
-      (design spec section 6).
-- [ ] Hosted live transcription stays off until server-side metering and a
-      Deepgram token flow exist.
-- [ ] Six RustSec unmaintained warnings (upstream Tauri/GTK): accept, no
-      vulnerabilities.
-- [ ] Code signing: unsigned first release with `docs/unsigned-install.md`.
+- Docker Hub mirroring is optional; the release job skips it when mirror
+  credentials are absent. The GitHub Container Registry image is the primary
+  published container path.
+- Automatic extension-to-desktop audio handoff, synchronized settings, and
+  extension access to workspace notes remain future migration work. The manual
+  archive path stays supported until automatic handoff passes acceptance.
+- Hosted live transcription remains off until server-side metering and the
+  managed token flow are ready. Local BYOK and desktop capture do not depend on
+  it.
