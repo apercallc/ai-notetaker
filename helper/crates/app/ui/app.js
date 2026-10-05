@@ -29,8 +29,26 @@
     if (message) state.noticeTimer = setTimeout(() => { box.hidden = true; }, 6500);
   }
 
-  async function refresh() {
-    if (document.visibilityState === "hidden") return;
+  let refreshTask = null;
+  let refreshQueued = false;
+  function refresh() {
+    if (document.visibilityState === "hidden") return Promise.resolve();
+    refreshQueued = true;
+    if (refreshTask) return refreshTask;
+    refreshTask = (async () => {
+      try {
+        while (refreshQueued && document.visibilityState !== "hidden") {
+          refreshQueued = false;
+          await refreshSnapshot();
+        }
+      } finally {
+        refreshTask = null;
+      }
+    })();
+    return refreshTask;
+  }
+
+  async function refreshSnapshot() {
     try {
       state.snapshot = await invoke("desktop_snapshot");
       if (state.page === "settings" && state.settingsDirty) return;
@@ -735,7 +753,7 @@
   function startRefreshPolling() {
     if (refreshInterval !== null || document.visibilityState !== "visible") return;
     refreshInterval = window.setInterval(() => {
-      if (!state.busy && state.page !== "settings") void refresh();
+      if (refreshTask === null && !state.busy && state.page !== "settings") void refresh();
     }, REFRESH_INTERVAL_MS);
   }
   document.addEventListener("visibilitychange", () => {

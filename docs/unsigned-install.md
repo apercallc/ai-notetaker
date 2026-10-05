@@ -1,9 +1,11 @@
-# Installing an unsigned development build
+# Installing an unsigned desktop preview
 
-This page covers local source builds of the Tauri desktop app. New users run
-setup, recording, and local notes in that app; no browser extension is needed.
-See [`code-signing-policy.md`](code-signing-policy.md) for release first-open
-steps and checksum limits.
+The published v0.18.2 desktop installers and local Tauri builds are unsigned.
+This page explains the operating-system warnings and checksum limits; a
+checksum detects file corruption but does not verify the publisher. Install
+only if you trust the release source or built the app yourself. See
+[`code-signing-policy.md`](code-signing-policy.md) for release first-open
+steps.
 
 ## Linux
 
@@ -22,9 +24,10 @@ legacy extension path, load `extension/dist` separately.
 
 ## macOS
 
-Open the locally built `.app` from Finder. macOS may show an unidentified
-developer warning for an unsigned build. Only bypass that warning for a build
-whose source and checksum you have inspected: Control-click the app, choose
+Open the downloaded preview or locally built `.app` from Finder. macOS may show
+an unidentified developer warning. Only bypass that warning for an artifact
+from the official release page or a build whose source and checksum you have
+inspected: Control-click the app, choose
 **Open**, and confirm the warning. Desktop recording works without Native
 Messaging. Existing extension users who need to reconnect the browser bridge
 can run the bundled installer after copying the app to `/Applications`:
@@ -33,14 +36,16 @@ can run the bundled installer after copying the app to `/Applications`:
 sh "/Applications/AI Notetaker.app/Contents/Resources/scripts/install-native-messaging.sh"
 ```
 
-Unsigned builds do not provide an Apple Developer ID or notarization claim.
+These unsigned installers do not provide an Apple Developer ID or notarization
+claim.
 
 ## Windows
 
-Run the locally built MSI/NSIS installer only if you trust the checkout and
+Run the preview MSI/NSIS installer only if you trust the official release and
 have verified its checksum. Windows SmartScreen warnings are expected for an
-unsigned build. Do not disable SmartScreen globally; use the installer’s
-per-file **More info → Run anyway** path only for this test build.
+unsigned installer. Do not disable SmartScreen globally; use the installer’s
+per-file **More info → Run anyway** path only for this preview.
 
-Do not treat a checksum as proof of publisher identity. Only install source
-builds you created or whose source you have independently reviewed.
+Do not treat a checksum as proof of publisher identity. Only install preview
+artifacts from the official release page or source builds you created or whose
+source you have independently reviewed.

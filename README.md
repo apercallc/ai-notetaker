@@ -11,8 +11,9 @@ notes to the web app and copies workspace notes into the desktop library.
 Web edits, deletions, and settings do not sync back yet; extension recordings
 still need archive export and import. Audio and provider keys stay on this device.
 
-> **Status:** the desktop window and local recording flow are in development.
-> Installers and cross-platform acceptance are not ready yet. The Chrome
+> **Status:** v0.18.2 preview installers are published for macOS, Windows, and
+> Debian/Ubuntu Linux. The release is unsigned, and real-call capture and
+> fresh-install acceptance are still in progress across platforms. The Chrome
 > extension captures browser meeting audio while new recordings are processed
 > in desktop. See the
 > [desktop-first migration plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md).
@@ -21,9 +22,13 @@ still need archive export and import. Audio and provider keys stay on this devic
 
 For browser-tab capture, start the extension from the Chrome meeting tab, then
 export and import the archive in the desktop app to create notes. For direct
-browser or desktop system-audio capture, use the desktop app. Installers are
-not published yet; see the [desktop-first migration plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md)
-for status and the [recorder guide](docs/getting-started.md#browser-meeting-recorder-extension).
+browser or desktop system-audio capture, use the desktop app. Preview installers
+are available from the [release page](https://github.com/apercallc/ai-notetaker/releases/latest);
+review the [release and production acceptance checklist](docs/launch/release-candidate-checklist.md)
+before relying on cross-platform capture. See the [desktop-first migration
+plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md)
+and [recorder guide](docs/getting-started.md#browser-meeting-recorder-extension)
+for status.
 
 ## What you get
 
@@ -76,9 +81,9 @@ allowlists this ID.
 ## Desktop app development build
 
 The Tauri application is intended as the single install for supported call
-apps. Installers are not ready; source builds are for development only. To
-launch the development app, follow the
-[desktop preview steps](docs/getting-started.md#quickstart-desktop-app-preview).
+apps. Preview installers are published, but remain unsigned and platform
+capture acceptance is incomplete. To launch a development build, follow the
+[developer source-build steps](docs/getting-started.md#developer-quickstart-run-from-source).
 Existing extension users can keep their legacy helper installation during
 migration.
 

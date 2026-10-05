@@ -41,6 +41,8 @@
       Capture and recovery remain owned by the Rust helper while hidden.
 - [x] Count desktop library notes by folder in one pass instead of rescanning
       the full meeting list once for every visible folder row.
+- [x] Serialize desktop library snapshots and coalesce overlapping refresh
+      requests so slow local scans cannot overlap or render out of order.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
 - [ ] Show workspace notes in the extension through its authenticated desktop

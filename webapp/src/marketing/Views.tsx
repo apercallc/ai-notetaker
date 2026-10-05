@@ -102,7 +102,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
           <ol className="mk-steps">
             <li className="mk-step">
               <h3 className="mk-h3">Install the desktop app</h3>
-              <p>Public installers are in development. Local recording will not require an AI Notetaker account.</p>
+              <p>Preview installers are available on Downloads. They are unsigned, and platform capture checks are still in progress. Local recording does not require an AI Notetaker account.</p>
               <ul>
                 <li><Link href="/download">Go to downloads</Link></li>
               </ul>
@@ -341,7 +341,7 @@ export function DownloadView({
             </>
           ) : release ? (
             <div className="mk-prose">
-              <p>Public desktop installers are still in development. We will publish them after cross-platform audio and recovery checks are complete.</p>
+              <p>This release has no desktop installer attached. Check its release page for available assets.</p>
               <p><a className="mk-btn mk-btn--quiet" href={release.pageUrl}>View release details</a></p>
             </div>
           ) : (

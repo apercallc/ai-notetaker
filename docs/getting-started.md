@@ -12,10 +12,13 @@ For the release and installation model, including direct platform downloads,
 first-open warnings, checksums, and the Docker-only webapp option, see the
 [current distribution decision](superpowers/specs/2026-09-28-direct-download-distribution.md).
 
-> **Release status.** Desktop installers and cross-platform acceptance are
-> not ready. The desktop window is available as a development build. Browser
+> **Release status.** v0.18.2 preview installers are published for macOS,
+> Windows, and Debian/Ubuntu Linux. They are unsigned, and fresh-install and
+> real-call capture acceptance is still in progress across platforms. Browser
 > tab capture is available in the Chrome extension; the desktop app processes
-> those recordings and handles direct system-audio capture.
+> those recordings and handles direct system-audio capture. See the
+> [release acceptance checklist](launch/release-candidate-checklist.md) before
+> relying on a platform capture path.
 
 ## Terms used in the product
 
@@ -36,7 +39,17 @@ user-facing copy.
 The recording state uses one red across the desktop app and legacy extension,
 so "this is being recorded" always looks the same.
 
-## Quickstart: desktop app preview
+## Quickstart: install the desktop preview
+
+Download the v0.18.2 [desktop installer for your platform](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.2).
+The installers are unsigned, and fresh-install and real-call capture checks
+are incomplete outside the tested macOS Apple silicon first-run flow. Review
+the [release checklist](launch/release-candidate-checklist.md) before relying
+on a platform capture path.
+
+## Developer quickstart: run from source
+
+Building from source is optional; it is not the end-user install path.
 
 1. Install the Rust and Tauri prerequisites for your OS (see
    [`helper/README.md`](../helper/README.md)).
@@ -52,9 +65,6 @@ so "this is being recorded" always looks the same.
 4. Allow microphone and system-audio access when the OS asks.
 5. In **Record**, enter an optional title, confirm recording consent, then
    start and stop the meeting. Find the finished notes under **Notes**.
-
-The single-app installers are not published yet. This preview is for
-development and does not establish Windows/Linux or real-call acceptance.
 
 ## Browser meeting recorder extension
 

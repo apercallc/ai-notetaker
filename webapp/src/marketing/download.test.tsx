@@ -48,7 +48,7 @@ it("links to the release page when a release has no desktop installer", () => {
     pageUrl: "https://github.com/apercallc/ai-notetaker/releases/tag/v1.0.0",
     extension: { name: "ai-notetaker-extension-v1.0.0.zip", url: "https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/extension.zip", bytes: 100 },
   }} />);
-  expect(html).toContain("Public desktop installers are still in development.");
+  expect(html).toContain("This release has no desktop installer attached. Check its release page for available assets.");
   expect(html).toContain('href="https://github.com/apercallc/ai-notetaker/releases/tag/v1.0.0"');
   expect(html).not.toContain("Download for macOS · Apple silicon");
 });

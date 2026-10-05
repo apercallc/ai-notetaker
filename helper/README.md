@@ -15,10 +15,12 @@ This file explains the desktop workspace and contributor verification. The
 Native Messaging host remains only for existing extension users during
 migration; the desktop app communicates with its own UI through Tauri IPC.
 
-Desktop-first installers are not published yet. The [install page](https://ai-notetaker.apercallc.com/download)
-has status and migration guidance. Do not use an older helper-only release as
-the new-user setup path. Native installers remain the supported distribution
-channel; npm/npx is not an end-user install method.
+The v0.18.2 [preview installers](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.2)
+are published for macOS, Windows, and Debian/Ubuntu Linux. They are unsigned,
+and fresh-install and real-call capture acceptance remains incomplete across
+platforms. Check the [release acceptance checklist](../docs/launch/release-candidate-checklist.md)
+before relying on a platform capture path. Native installers are the supported
+distribution channel; npm/npx is not an end-user install method.
 
 ## Workspace layout
 
