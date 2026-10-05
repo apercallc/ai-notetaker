@@ -3,7 +3,7 @@
 
   const invoke = window.__TAURI__?.core?.invoke;
   const listen = window.__TAURI__?.event?.listen;
-  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0 };
+  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const prettyDate = (value) => {
@@ -29,6 +29,15 @@
     if (message) state.noticeTimer = setTimeout(() => { box.hidden = true; }, 6500);
   }
 
+  function setTopbarStatus(label, dotClass = "") {
+    const status = $("#topbar-status");
+    const nextDotClass = `status-dot ${dotClass}`.trim();
+    if (status.dataset.label === label && status.dataset.dotClass === nextDotClass) return;
+    status.dataset.label = label;
+    status.dataset.dotClass = nextDotClass;
+    status.innerHTML = `<span class="${nextDotClass}"></span><span>${esc(label)}</span>`;
+  }
+
   let refreshTask = null;
   let refreshQueued = false;
   function refresh() {
@@ -51,6 +60,10 @@
   async function refreshSnapshot() {
     try {
       state.snapshot = await invoke("desktop_snapshot");
+      for (const meetingId of state.finalizingMeetingIds) {
+        const meeting = state.snapshot.meetings.find((item) => item.id === meetingId);
+        if (!meeting || meeting.status !== "recording") state.finalizingMeetingIds.delete(meetingId);
+      }
       if (state.page === "settings" && state.settingsDirty) return;
       if (state.page === "notes" && ($("#new-folder-form:not([hidden])") || $("#folder-manage:not([hidden])")
         || document.activeElement?.id === "note-folder")) return;
@@ -67,7 +80,7 @@
     } catch (error) {
       $("#content").innerHTML = `<div class="empty-state"><strong>Workspace could not open</strong>${esc(error)}<p><button class="secondary-button" id="retry-load">Try again</button></p></div>`;
       $("#retry-load")?.addEventListener("click", refresh);
-      $("#topbar-status").innerHTML = '<span class="status-dot needs-attention"></span><span>Workspace unavailable</span>';
+      setTopbarStatus("Workspace unavailable", "needs-attention");
     }
   }
 
@@ -105,8 +118,12 @@
       && providerKeySaved(snapshot.settings, preferences.summarizationProvider);
     const appReady = !snapshot.credentialStoreError && providersReady;
     const processing = snapshot.meetings.some((meeting) => meeting.status === "processing");
-    const needsAttention = !recording && !processing && (!appReady || !snapshot.audio.ready);
-    $("#topbar-status").innerHTML = `<span class="status-dot ${recording ? "recording" : needsAttention ? "needs-attention" : ""}"></span><span>${recording ? "Recording on this device" : processing ? "Preparing saved notes" : !appReady ? "Setup needed" : snapshot.audio.ready ? "Ready to record" : snapshot.audio.permissionRequired ? "Audio permission needed" : "Audio setup needed"}</span>`;
+    const finalizing = snapshot.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
+    const needsAttention = !recording && !processing && !finalizing && (!appReady || !snapshot.audio.ready);
+    setTopbarStatus(
+      recording ? "Recording on this device" : finalizing ? "Finishing saved audio" : processing ? "Preparing saved notes" : !appReady ? "Setup needed" : snapshot.audio.ready ? "Ready to record" : snapshot.audio.permissionRequired ? "Audio permission needed" : "Audio setup needed",
+      recording ? "recording" : needsAttention ? "needs-attention" : "",
+    );
     $("#open-webapp").hidden = !snapshot.settings.preferences.webappUrl;
     if (snapshot.credentialStoreError) notify(snapshot.credentialStoreError, "error");
     else if (snapshot.unreadableRecordings) notify(`${snapshot.unreadableRecordings} recording${snapshot.unreadableRecordings === 1 ? "" : "s"} could not be read. Other notes remain available.`, "warn");
@@ -144,10 +161,12 @@
     const recent = s.meetings.slice(0, 3);
     const recoverable = s.meetings.find((meeting) => meeting.status === "recovered" && !meeting.textOnlyImport);
     const processing = s.meetings.filter((meeting) => meeting.status === "processing").length;
+    const finalizing = s.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
     $("#content").innerHTML = `
       ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError ? "" : " Your provider keys stay in this device’s credential store."}</span></div></div>` : ""}
       ${recoverable ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Saved audio needs recovery</strong><span>${esc(recoverable.title)} was interrupted. Its audio is still on this device.</span><button class="small-button" id="open-recoverable">Open recording</button></div></div>` : ""}
       ${processing ? `<p class="process-status" role="status">Preparing notes from ${processing} saved recording${processing === 1 ? "" : "s"}. You can keep using the app.</p>` : ""}
+      ${finalizing ? '<p class="process-status">Finishing saved audio. It stays on this device while notes are prepared.</p>' : ""}
       <div class="record-grid">
         <section class="card record-card" aria-labelledby="record-heading">
           <div class="record-intro"><h2 id="record-heading">${active ? "Recording is in progress" : "Start a recording"}</h2><p>${active ? "Audio is being saved on this device while your notes are prepared." : "Record a browser or desktop call and keep the audio and notes on this device."}</p></div>
@@ -198,7 +217,7 @@
   }
 
   function meetingCard(meeting) {
-    const preview = meeting.summary || (meeting.actionItems.length ? meeting.actionItems.map((item) => item.text).join(" · ") : statusLabel(meeting.status));
+    const preview = state.finalizingMeetingIds.has(meeting.id) ? "Finishing saved audio" : meeting.summary || (meeting.actionItems.length ? meeting.actionItems.map((item) => item.text).join(" · ") : statusLabel(meeting.status));
     return `<button class="meeting-card" data-meeting-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><time>${esc(prettyDate(meeting.startedAt))}</time><span class="preview">${esc(preview)}</span></button>`;
   }
 
@@ -238,13 +257,19 @@
     const id = state.snapshot.activeMeetingId;
     if (!id) return;
     state.busy = true;
+    state.finalizingMeetingIds.add(id);
     const button = $("#stop-recording");
-    if (button) button.disabled = true;
+    if (button) { button.disabled = true; button.textContent = "Stopping…"; }
+    notify("Stopping recording… Audio is saved locally while notes are prepared.");
     try {
       await invoke("desktop_stop_recording", { meetingId: id });
-      notify("Recording stopped. Your notes will appear when processing finishes.");
+      notify("Recording stopped. Your notes are being prepared from the saved audio.");
       await refresh();
-    } catch (error) { notify(String(error), "error"); }
+    } catch (error) {
+      state.finalizingMeetingIds.delete(id);
+      notify(String(error), "error");
+      await refresh();
+    }
     finally {
       state.busy = false;
       if (button?.isConnected) button.disabled = false;

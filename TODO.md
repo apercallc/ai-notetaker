@@ -17,6 +17,16 @@
 - Source-reviewed. Rendered accessibility and real recording still need
       installed-app verification.
 
+## Desktop stop responsiveness — 2026-10-05
+
+- [x] Return from Stop after capture ends and the persisted-audio queue is
+      sealed; drain provider work and finalize notes in the background. Tell
+      extension clients capture has stopped immediately, while retaining the
+      raw-audio recovery path and showing the desktop finalization state.
+- Verified with an audio-queue detach regression test and the helper gates.
+      Real capture latency and provider failure recovery still need device
+      acceptance.
+
 ## Download page and test reliability — 2026-10-04
 
 - [x] Mark published installers as unsigned previews before download choices,
@@ -378,8 +388,6 @@ or BlackHole steps relevant to this Mac.
       updates.
 - [x] Run audio preflight outside the IPC executor and bound Linux `pactl`
       discovery commands to two seconds each.
-- Follow-up: let Stop acknowledge promptly while a durable audio backlog
-  drains. Keep retries recoverable from raw audio and verify across devices.
 - Follow-up: bound platform audio discovery subprocess timeouts and verify
   Windows and macOS diagnostics against slow device APIs; Linux `pactl` calls
   now have a two-second per-command timeout.

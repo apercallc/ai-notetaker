@@ -222,10 +222,14 @@ impl AudioProcessingQueue {
             .is_some_and(|sender| sender.send(chunk).is_ok())
     }
 
-    async fn finish(&self) {
+    async fn close(&self) -> Option<tokio::task::JoinHandle<()>> {
         let sender = self.sender.lock().ok().and_then(|mut sender| sender.take());
         drop(sender);
-        if let Some(task) = self.task.lock().await.take() {
+        self.task.lock().await.take()
+    }
+
+    async fn finish(&self) {
+        if let Some(task) = self.close().await {
             let _ = task.await;
         }
     }
@@ -2798,103 +2802,91 @@ async fn handle_message(
                 });
                 return true;
             }
-            if let Some(active) = &active_recording {
+            let audio_processing_task = if let Some(active) = &active_recording {
                 if let Some(audio) = &active.audio {
                     let _ = audio.stop_capture().await;
                 }
-                active.audio_processing.finish().await;
-            }
-            let has_pipeline = state.pipelines.lock().await.contains_key(&meeting_id);
-            if has_pipeline {
-                // The stop pipeline (transcription flush, summary, and for
-                // managed mode an upload with 3x60s retry timeouts) can run
-                // for minutes. Awaiting it here blocked this connection's
-                // IPC loop — the one ipc.rs documents must never block — so
-                // Meet AudioChunk frames for other (or this) meeting queued
-                // up behind it. Spawn it: replies flow through the meeting
-                // subscriber registry, exactly like transcript partials.
-                let state = state.clone();
-                let tray = tray.clone();
-                let out_tx_for_stop = out_tx.clone();
-                tokio::spawn(async move {
-                    let _stop_guard = stop_guard;
-                    if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
-                        if !flagged_moments.is_empty() {
-                            let moments: Vec<FlaggedMoment> = flagged_moments
-                                .into_iter()
-                                .map(|moment| FlaggedMoment {
-                                    offset_ms: moment.offset_ms,
-                                    note: moment.note,
-                                    position_percent: moment.position_percent,
-                                })
-                                .collect();
-                            // A summary without flags is still a good summary, so a
-                            // failure to store them must never block stopping.
-                            if let Err(error) = pipeline
-                                .lock()
-                                .await
-                                .record_flagged_moments(meeting_id, &moments)
-                            {
-                                tracing::warn!(%meeting_id, %error, "could not store flagged moments");
-                            }
+                send_meeting_message(
+                    &state,
+                    meeting_id,
+                    HelperToExtension::RecordingStopped { meeting_id },
+                );
+                active.audio_processing.close().await
+            } else {
+                None
+            };
+            // Audio frames have already been persisted before they enter this
+            // queue. Detach its provider work from the IPC loop, then finalize
+            // in the background after it drains so Stop returns promptly
+            // without losing the transcript tail or the recovery path.
+            tray.set_recording(false);
+            let state = state.clone();
+            let out_tx_for_stop = out_tx.clone();
+            tokio::spawn(async move {
+                let _stop_guard = stop_guard;
+                if let Some(task) = audio_processing_task {
+                    let _ = task.await;
+                }
+                if let Some(pipeline) = state.pipelines.lock().await.get(&meeting_id).cloned() {
+                    if !flagged_moments.is_empty() {
+                        let moments: Vec<FlaggedMoment> = flagged_moments
+                            .into_iter()
+                            .map(|moment| FlaggedMoment {
+                                offset_ms: moment.offset_ms,
+                                note: moment.note,
+                                position_percent: moment.position_percent,
+                            })
+                            .collect();
+                        // A summary without flags is still a good summary, so a
+                        // failure to store them must never block stopping.
+                        if let Err(error) = pipeline
+                            .lock()
+                            .await
+                            .record_flagged_moments(meeting_id, &moments)
+                        {
+                            tracing::warn!(%meeting_id, %error, "could not store flagged moments");
                         }
-                        let managed = active_recording.as_ref().is_some_and(|active| {
-                            matches!(active.processing_mode, ProcessingMode::Managed { .. })
-                        });
-                        let messages = if managed {
-                            pipeline
-                                .lock()
-                                .await
-                                .stop_capture_only(meeting_id)
-                                .map(|message| vec![message])
-                        } else {
-                            pipeline.lock().await.stop_recording(meeting_id).await
-                        };
-                        tray.set_recording(false);
-                        match messages {
-                            Ok(messages) => {
-                                for m in messages {
+                    }
+                    let managed = active_recording.as_ref().is_some_and(|active| {
+                        matches!(active.processing_mode, ProcessingMode::Managed { .. })
+                    });
+                    let messages = if managed {
+                        pipeline
+                            .lock()
+                            .await
+                            .stop_capture_only(meeting_id)
+                            .map(|message| vec![message])
+                    } else {
+                        pipeline.lock().await.stop_recording(meeting_id).await
+                    };
+                    match messages {
+                        Ok(messages) => {
+                            for m in messages {
+                                if !matches!(&m, HelperToExtension::RecordingStopped { .. }) {
                                     send_meeting_message(&state, meeting_id, m);
                                 }
-                                if managed {
-                                    match managed_service_from_state(&state).await {
-                                        Ok(service) => match retry_managed_upload(|| {
-                                            upload_managed_recording(
-                                                &state.store,
-                                                meeting_id,
-                                                &service,
-                                            )
-                                        })
-                                        .await
-                                        {
-                                            Ok(job_id) => {
-                                                if let Err(error) = state
-                                                    .store
-                                                    .set_managed_job_id(meeting_id, &job_id)
-                                                {
-                                                    tracing::error!(%meeting_id, %error, "could not persist managed job id");
-                                                }
-                                                start_managed_worker(
-                                                    state.clone(),
-                                                    service,
-                                                    meeting_id,
-                                                    Some(job_id),
-                                                )
-                                                .await;
+                            }
+                            if managed {
+                                match managed_service_from_state(&state).await {
+                                    Ok(service) => match retry_managed_upload(|| {
+                                        upload_managed_recording(&state.store, meeting_id, &service)
+                                    })
+                                    .await
+                                    {
+                                        Ok(job_id) => {
+                                            if let Err(error) =
+                                                state.store.set_managed_job_id(meeting_id, &job_id)
+                                            {
+                                                tracing::error!(%meeting_id, %error, "could not persist managed job id");
                                             }
-                                            Err(error) => send_meeting_message(
-                                                &state,
+                                            start_managed_worker(
+                                                state.clone(),
+                                                service,
                                                 meeting_id,
-                                                HelperToExtension::ManagedJobStatus {
-                                                    meeting_id,
-                                                    job_id: String::new(),
-                                                    status: "error".into(),
-                                                    message: Some(error),
-                                                    summary: None,
-                                                    action_items: None,
-                                                },
-                                            ),
-                                        },
+                                                Some(job_id),
+                                            )
+                                            .await;
+                                        }
                                         Err(error) => send_meeting_message(
                                             &state,
                                             meeting_id,
@@ -2907,26 +2899,38 @@ async fn handle_message(
                                                 action_items: None,
                                             },
                                         ),
-                                    }
+                                    },
+                                    Err(error) => send_meeting_message(
+                                        &state,
+                                        meeting_id,
+                                        HelperToExtension::ManagedJobStatus {
+                                            meeting_id,
+                                            job_id: String::new(),
+                                            status: "error".into(),
+                                            message: Some(error),
+                                            summary: None,
+                                            action_items: None,
+                                        },
+                                    ),
                                 }
                             }
-                            Err(e) => {
-                                let _ = out_tx_for_stop.send(HelperToExtension::Error {
-                                    meeting_id: Some(meeting_id),
-                                    code: ErrorCode::ProviderUnreachable,
-                                    message: e.to_string(),
-                                });
-                            }
+                        }
+                        Err(e) => {
+                            let _ = out_tx_for_stop.send(HelperToExtension::Error {
+                                meeting_id: Some(meeting_id),
+                                code: ErrorCode::ProviderUnreachable,
+                                message: e.to_string(),
+                            });
                         }
                     }
-                    // Keep the worker alive after capture stops so persisted failed
-                    // chunks still retry. It exits once the queue drains (or the
-                    // connection disappears), rather than being abandoned here.
-                    if let Some(worker) = state.retry_tasks.lock().await.get(&meeting_id) {
-                        worker.request_stop();
-                    }
-                });
-            }
+                }
+                // Keep the worker alive after capture stops so persisted failed
+                // chunks still retry. It exits once the queue drains (or the
+                // connection disappears), rather than being abandoned here.
+                if let Some(worker) = state.retry_tasks.lock().await.get(&meeting_id) {
+                    worker.request_stop();
+                }
+            });
             true
         }
 
@@ -3853,6 +3857,39 @@ mod tests {
         assert!(StopGuard::acquire(Uuid::new_v4()).is_some());
         drop(first);
         assert!(StopGuard::acquire(id).is_some());
+    }
+
+    #[tokio::test]
+    async fn closing_audio_queue_detaches_provider_work_without_waiting_for_it() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let worker = tokio::spawn(async move {
+            let _ = receiver.recv().await;
+            let _ = started_tx.send(());
+            let _ = release_rx.await;
+            while receiver.recv().await.is_some() {}
+        });
+        sender
+            .send(PersistedAudioChunk {
+                channel: notetaker_core::providers::AudioChannel::Mic,
+                sample_rate_hz: 16_000,
+                existing_len: 0,
+                end: 0,
+            })
+            .unwrap();
+        let queue = AudioProcessingQueue {
+            sender: std::sync::Mutex::new(Some(sender)),
+            task: Mutex::new(Some(worker)),
+        };
+
+        started_rx.await.unwrap();
+        let drain_task = queue.close().await.expect("worker handle is detached");
+        assert!(!drain_task.is_finished());
+
+        release_tx.send(()).unwrap();
+        drain_task.await.unwrap();
+        assert!(queue.close().await.is_none());
     }
 
     #[test]
