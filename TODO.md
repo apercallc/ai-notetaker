@@ -12,6 +12,9 @@
       Base64URL padding bits cannot make the modified test input equivalent.
 - [x] Exclude standalone test-only paths from automatic product releases and
       fix the unused shell loop variable flagged by actionlint.
+- [x] Keep every marketing navigation destination visible at narrow mobile
+      widths by allowing the links to wrap; visually checked at 320 px and
+      390 px in a local browser.
 - Verified with webapp lint, typecheck, Prisma generation, all 822
   PostgreSQL-backed tests, and production build; extension typecheck, 645 tests,
   and production build; helper formatting, strict Clippy, and workspace tests.
