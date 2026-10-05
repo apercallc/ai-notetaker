@@ -66,6 +66,14 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
 
 ## Still required before broad public promotion
 
+### Repository governance
+
+- [ ] Review required checks and review policy for `main`. On 2026-10-05,
+      GitHub reported no classic branch protection. Organization ruleset status
+      could not be read with the current token. Design a release-bot bypass
+      before enforcing PR-only updates because auto-release pushes the
+      version-bump commit directly to `main`.
+
 ### Native desktop install and capture
 
 - [x] macOS arm64 on an Apple M4 with macOS 27.0.1: published DMG checksum
