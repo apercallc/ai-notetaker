@@ -50,6 +50,9 @@ Target architecture: `docs/superpowers/specs/2026-10-03-desktop-first-product-de
 - [x] Add `/api/v1/desktop-sync` connection check and idempotent meeting upsert;
       sync finished transcript, summary, and action items only. Reject payloads
       labeled as Meet capture or managed processing at the desktop route.
+- [x] Refresh local copies of workspace-owned notes when a newer web revision
+      arrives. Bind each copy to its server URL and workspace ID; preserve
+      desktop-origin notes with matching IDs.
 - [x] Add an ID-only durable outbox, automatic retry, existing-note sync, and
       visible pending/last-success/error state.
 - [x] Allow nullable transcript timestamps without inventing timing; preserve

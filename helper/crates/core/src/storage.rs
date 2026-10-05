@@ -46,6 +46,12 @@ pub struct MeetingMeta {
     /// Keeping provenance beside the note avoids an ever-growing sync index.
     #[serde(default)]
     pub workspace_import: bool,
+    /// Version of the workspace-owned note represented by this local copy.
+    #[serde(default)]
+    pub workspace_source_updated_at: Option<DateTime<Utc>>,
+    /// Normalized web-app URL and workspace ID that own this copied note.
+    #[serde(default)]
+    pub workspace_source_id: Option<String>,
     #[serde(default)]
     pub extension_source_status: Option<String>,
     #[serde(default)]
@@ -122,6 +128,8 @@ pub struct MeetingScan {
 pub struct ImportedMeetingNote {
     pub id: Uuid,
     pub workspace_import: bool,
+    pub workspace_source_updated_at: Option<DateTime<Utc>>,
+    pub workspace_source_id: Option<String>,
     pub title: String,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
@@ -129,6 +137,14 @@ pub struct ImportedMeetingNote {
     pub mode: MeetingMode,
     pub transcript: Vec<TranscriptSegment>,
     pub summary: Option<Summary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceImportOutcome {
+    Created,
+    Updated,
+    Unchanged,
+    PreservedLocalNote,
 }
 
 /// `meta.json` is a read-modify-write document updated from several tasks
@@ -205,6 +221,8 @@ impl MeetingStore {
             id,
             text_only_import: false,
             workspace_import: false,
+            workspace_source_updated_at: None,
+            workspace_source_id: None,
             extension_source_status: None,
             reprocessed_from: None,
             title: None,
@@ -243,6 +261,8 @@ impl MeetingStore {
             id: note.id,
             text_only_import: true,
             workspace_import: note.workspace_import,
+            workspace_source_updated_at: note.workspace_source_updated_at,
+            workspace_source_id: note.workspace_source_id,
             extension_source_status: Some(note.extension_source_status),
             reprocessed_from: None,
             title: Some(note.title.trim().chars().take(200).collect()),
@@ -301,6 +321,77 @@ impl MeetingStore {
         }
     }
 
+    /// Applies a newer web revision only to the text-only copy imported from
+    /// that workspace. Desktop-owned notes with the same ID remain untouched.
+    pub fn refresh_workspace_import(
+        &self,
+        note: ImportedMeetingNote,
+    ) -> Result<WorkspaceImportOutcome, StorageError> {
+        let Some(source_updated_at) = note.workspace_source_updated_at else {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "workspace refresh requires a source version",
+            )));
+        };
+        if !note.workspace_import
+            || note
+                .workspace_source_id
+                .as_deref()
+                .is_none_or(str::is_empty)
+        {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "workspace refresh requires a source version",
+            )));
+        };
+        let target = self.meeting_dir(note.id);
+        if !target.exists() {
+            return Ok(if self.import_text_only_note(note)? {
+                WorkspaceImportOutcome::Created
+            } else {
+                WorkspaceImportOutcome::PreservedLocalNote
+            });
+        }
+
+        let lock = meeting_lock(note.id);
+        let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut meta = self.load_meta(note.id)?;
+        if !meta.workspace_import || !meta.text_only_import {
+            return Ok(WorkspaceImportOutcome::PreservedLocalNote);
+        }
+        if meta.workspace_source_id != note.workspace_source_id {
+            return Ok(WorkspaceImportOutcome::PreservedLocalNote);
+        }
+        if meta
+            .workspace_source_updated_at
+            .is_some_and(|current| current >= source_updated_at)
+        {
+            return Ok(WorkspaceImportOutcome::Unchanged);
+        }
+
+        meta.title = Some(note.title.trim().chars().take(200).collect());
+        meta.started_at = note.started_at;
+        meta.ended_at = note.ended_at;
+        meta.summary_options.mode = note.mode;
+        meta.workspace_source_updated_at = Some(source_updated_at);
+        meta.workspace_source_id = note.workspace_source_id;
+        atomic_write(
+            &target.join("transcript.json"),
+            &serde_json::to_vec_pretty(&note.transcript)?,
+        )?;
+        let summary_path = target.join("summary.json");
+        match note.summary {
+            Some(summary) => atomic_write(&summary_path, &serde_json::to_vec_pretty(&summary)?)?,
+            None => match fs::remove_file(summary_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(StorageError::Io(error)),
+            },
+        }
+        self.write_meta_unlocked(&meta)?;
+        Ok(WorkspaceImportOutcome::Updated)
+    }
+
     /// Imports a portable note with its original browser-captured PCM tracks.
     /// Source files are copied into a private staging directory and committed
     /// with one rename; the transfer source is never modified.
@@ -336,6 +427,8 @@ impl MeetingStore {
             id: note.id,
             text_only_import: false,
             workspace_import: note.workspace_import,
+            workspace_source_updated_at: note.workspace_source_updated_at,
+            workspace_source_id: note.workspace_source_id,
             extension_source_status: Some(note.extension_source_status),
             reprocessed_from: None,
             title: Some(note.title.trim().chars().take(200).collect()),
@@ -478,6 +571,8 @@ impl MeetingStore {
             id,
             text_only_import: false,
             workspace_import: false,
+            workspace_source_updated_at: None,
+            workspace_source_id: None,
             extension_source_status: source.extension_source_status.clone(),
             reprocessed_from: Some(source_id),
             title: Some(title),
@@ -535,6 +630,8 @@ impl MeetingStore {
             id,
             text_only_import: false,
             workspace_import: false,
+            workspace_source_updated_at: None,
+            workspace_source_id: None,
             extension_source_status: None,
             reprocessed_from: None,
             title: None,
@@ -1404,6 +1501,136 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&meta).unwrap()).unwrap();
 
         assert!(!store.load_meta(id).unwrap().workspace_import);
+        assert!(store
+            .load_meta(id)
+            .unwrap()
+            .workspace_source_updated_at
+            .is_none());
+    }
+
+    #[test]
+    fn workspace_import_refresh_updates_newer_web_versions_only() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        let source_version = Utc::now();
+        let imported = |updated_at, title: &str, text: &str, summary| ImportedMeetingNote {
+            id,
+            workspace_import: true,
+            workspace_source_updated_at: Some(updated_at),
+            workspace_source_id: Some("https://notes.example.test/workspace-1".into()),
+            title: title.into(),
+            started_at: source_version,
+            ended_at: Some(source_version + Duration::minutes(30)),
+            extension_source_status: "complete".into(),
+            mode: MeetingMode::General,
+            transcript: vec![TranscriptSegment {
+                speaker: "you".into(),
+                text: text.into(),
+                is_final: true,
+                timestamp: None,
+            }],
+            summary,
+        };
+
+        assert_eq!(
+            store
+                .refresh_workspace_import(imported(
+                    source_version,
+                    "Initial title",
+                    "Original text",
+                    Some(Summary {
+                        summary: "Original summary".into(),
+                        action_items: vec![],
+                    }),
+                ))
+                .unwrap(),
+            WorkspaceImportOutcome::Created
+        );
+        assert_eq!(
+            store
+                .refresh_workspace_import(imported(
+                    source_version - Duration::seconds(1),
+                    "Stale title",
+                    "Stale text",
+                    None,
+                ))
+                .unwrap(),
+            WorkspaceImportOutcome::Unchanged
+        );
+
+        let next_version = source_version + Duration::seconds(1);
+        assert_eq!(
+            store
+                .refresh_workspace_import(imported(
+                    next_version,
+                    "Updated title",
+                    "Updated text",
+                    None,
+                ))
+                .unwrap(),
+            WorkspaceImportOutcome::Updated
+        );
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("Updated title"));
+        assert_eq!(meta.workspace_source_updated_at, Some(next_version));
+        assert_eq!(store.load_transcript(id).unwrap()[0].text, "Updated text");
+        assert!(store.load_summary(id).unwrap().is_none());
+
+        let mut other_workspace = imported(
+            next_version + Duration::seconds(1),
+            "Other workspace title",
+            "Other workspace text",
+            None,
+        );
+        other_workspace.workspace_source_id =
+            Some("https://other.example.test/workspace-workspace-1".into());
+        assert_eq!(
+            store.refresh_workspace_import(other_workspace).unwrap(),
+            WorkspaceImportOutcome::PreservedLocalNote
+        );
+        assert_eq!(store.load_transcript(id).unwrap()[0].text, "Updated text");
+    }
+
+    #[test]
+    fn workspace_refresh_never_replaces_a_desktop_owned_note() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        let started_at = Utc::now();
+        store.create_meeting(id, started_at).unwrap();
+        store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "Desktop original".into(),
+                    is_final: true,
+                    timestamp: None,
+                },
+            )
+            .unwrap();
+
+        let outcome = store
+            .refresh_workspace_import(ImportedMeetingNote {
+                id,
+                workspace_import: true,
+                workspace_source_updated_at: Some(started_at + Duration::seconds(1)),
+                workspace_source_id: Some("https://notes.example.test/workspace-1".into()),
+                title: "Remote replacement".into(),
+                started_at,
+                ended_at: Some(started_at + Duration::minutes(10)),
+                extension_source_status: "complete".into(),
+                mode: MeetingMode::General,
+                transcript: vec![],
+                summary: None,
+            })
+            .unwrap();
+
+        assert_eq!(outcome, WorkspaceImportOutcome::PreservedLocalNote);
+        assert_eq!(
+            store.load_transcript(id).unwrap()[0].text,
+            "Desktop original"
+        );
+        assert_eq!(store.load_meta(id).unwrap().title, None);
     }
 
     fn flag(offset_ms: u64, note: &str, position_percent: Option<u8>) -> FlaggedMoment {
@@ -1520,6 +1747,8 @@ mod tests {
         let note = ImportedMeetingNote {
             id,
             workspace_import: false,
+            workspace_source_updated_at: None,
+            workspace_source_id: None,
             title: "Imported meeting".into(),
             started_at: Utc::now(),
             ended_at: None,
@@ -1574,6 +1803,8 @@ mod tests {
                 ImportedMeetingNote {
                     id: source_id,
                     workspace_import: false,
+                    workspace_source_updated_at: None,
+                    workspace_source_id: None,
                     title: "Imported meeting".into(),
                     started_at: Utc::now(),
                     ended_at: None,

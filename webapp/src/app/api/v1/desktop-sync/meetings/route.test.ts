@@ -58,6 +58,7 @@ describe("GET /api/v1/desktop-sync/meetings", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({
+      workspaceId: "workspace-1",
       hasMore: false,
       nextCursor: { updatedAt: "2026-10-04T12:00:00.000Z", id: "meeting-1" },
       meetings: [{ title: "Planning", transcript: [{ text: "Ship it", timestamp: null }], actionItems: [{ text: "Ship" }] }],

@@ -21,15 +21,16 @@
       extension captures browser tabs, desktop captures browser and native
       desktop calls, and desktop creates/optionally syncs finished notes.
 - [ ] Complete shared notes/settings across extension, desktop, and web app.
-      Desktop now uploads finished notes and imports workspace notes as local
+      Desktop uploads finished notes and imports/refreshes workspace-owned
       copies; workspace pulls scan lightweight cursors and load note details in
-      small batches under the desktop response-size limit. Web edits do not
-      update those copies, settings remain per app, and extension recordings
-      still require archive export/import.
-- [ ] Define and implement safe conflict handling for web-edited notes and
-      deletions before updating existing desktop copies. Desktop uploads now
-      use an optimistic version check and preserve an identical retry after a
-      lost response; updating/deleting imported desktop copies remains open.
+      small batches under the desktop response-size limit. Web changes do not
+      overwrite desktop-origin notes. Each imported copy is bound to its server
+      URL and workspace ID; web deletions/settings remain per app. Extension
+      recordings still require archive export/import.
+- [ ] Define and implement safe conflict handling for web-edited desktop-origin
+      notes and deletions. Desktop uploads use an optimistic version check and
+      preserve an identical retry after a lost response; matching local notes
+      remain protected and remote deletions do not propagate.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
 - [ ] Show workspace notes in the extension through its authenticated desktop
@@ -66,14 +67,16 @@ call or real archive import was completed.
 - [x] Cover managed worker polling authorization, database-selected workspace
       dispatch, idle response, claim races, and safe unexpected-error handling;
       remove duplicate error logging from the polling route.
+- [x] Refresh workspace-origin desktop note copies from newer web revisions;
+      matching desktop-origin notes remain untouched.
 - [x] Fix import duration rounding at the hour boundary and show correct byte
       labels for empty and sub-kilobyte files.
-- Verified in this pass: helper fmt, Clippy, workspace tests and build; extension
-  typecheck, 645 tests, coverage and build; webapp Prisma generation, lint,
-  typecheck, 822 PostgreSQL-backed tests (90.67% statement, 84.11% branch,
-  91.76% function, 94.02% line coverage), and production build. Live
-  cross-platform audio, real workspace-token recovery,
-  Chrome capture, and installed archive migration remain unverified.
+- Verified for this sync slice: helper fmt, Clippy, and all 260 workspace tests;
+  webapp Prisma generation, lint, typecheck, all 822 PostgreSQL-backed tests,
+  and production build. Desktop settings copy passed design and guardrails review;
+  JS syntax and diff checks pass. Rendered native UI, extension gates, live
+  cross-platform audio, real workspace-token recovery, Chrome capture, and
+  installed archive migration were not verified here.
 
 ## Desktop-first app migration — 2026-10-03
 

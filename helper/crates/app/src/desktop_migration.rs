@@ -265,6 +265,8 @@ fn into_imported_note(meeting: MigrationMeeting) -> ImportedMeetingNote {
     ImportedMeetingNote {
         id: meeting.id,
         workspace_import: false,
+        workspace_source_updated_at: None,
+        workspace_source_id: None,
         title: meeting.title,
         started_at: meeting.started_at,
         ended_at: meeting.ended_at,

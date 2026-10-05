@@ -4,7 +4,9 @@
 use chrono::{DateTime, Utc};
 use notetaker_core::native_messaging::{ActionItem, MeetingMode};
 use notetaker_core::providers::{http_client_builder, Summary, TranscriptSegment};
-use notetaker_core::storage::{ImportedMeetingNote, MeetingState, MeetingStore};
+use notetaker_core::storage::{
+    ImportedMeetingNote, MeetingState, MeetingStore, WorkspaceImportOutcome,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -51,6 +53,7 @@ struct RemoteCursor {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemotePage {
+    workspace_id: String,
     meetings: Vec<RemoteMeeting>,
     has_more: bool,
     next_cursor: Option<RemoteCursor>,
@@ -217,7 +220,6 @@ impl DesktopSync {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| "Web-app connection could not be configured.".to_string())?;
-
         for meeting_id in pending {
             let store = store.clone();
             let payload = tokio::task::spawn_blocking(move || build_payload(&store, meeting_id))
@@ -304,6 +306,11 @@ impl DesktopSync {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| "Web-app connection could not be configured.".to_string())?;
+        let source_base = reqwest::Url::parse(base_url)
+            .map_err(|_| "Web-app URL is invalid.".to_string())?
+            .to_string()
+            .trim_end_matches('/')
+            .to_owned();
         let saved_cursor = self.lock_state().remote_cursor.clone();
         // Re-read a small overlap so edits that land on the same database
         // timestamp as the previous checkpoint are not skipped by ID order.
@@ -377,6 +384,10 @@ impl DesktopSync {
             if page.meetings.len() > 50 {
                 return Err("The web app returned too many notes in one page.".into());
             }
+            if page.workspace_id.trim().is_empty() || page.workspace_id.len() > 128 {
+                return Err("The web app returned an invalid workspace identity.".into());
+            }
+            let source_id = format!("{source_base}/workspace/{}", page.workspace_id);
             let next_cursor = page.next_cursor;
             let has_more = page.has_more;
             if has_more && next_cursor.is_none() {
@@ -389,7 +400,7 @@ impl DesktopSync {
                 let mut count = 0;
                 for meeting in page.meetings {
                     validate_remote_meeting(&meeting)?;
-                    let _remote_updated_at = meeting.updated_at;
+                    let source_updated_at = meeting.updated_at;
                     let action_items = meeting.action_items;
                     let summary = (!meeting.summary.trim().is_empty() || !action_items.is_empty()).then_some(Summary {
                         summary: meeting.summary,
@@ -398,6 +409,8 @@ impl DesktopSync {
                     let note = ImportedMeetingNote {
                         id: meeting.id,
                         workspace_import: true,
+                        workspace_source_updated_at: Some(source_updated_at),
+                        workspace_source_id: Some(source_id.clone()),
                         title: meeting.title,
                         started_at: meeting.started_at,
                         ended_at: Some(meeting.ended_at),
@@ -411,9 +424,9 @@ impl DesktopSync {
                         }).collect(),
                         summary,
                     };
-                    if store_for_import.import_text_only_note(note)
-                        .map_err(|_| "A workspace note could not be saved locally. Retry sync; existing notes are safe.".to_string())?
-                    {
+                    let outcome = store_for_import.refresh_workspace_import(note)
+                        .map_err(|_| "A workspace note could not be saved locally. Retry sync; existing notes are safe.".to_string())?;
+                    if matches!(outcome, WorkspaceImportOutcome::Created | WorkspaceImportOutcome::Updated) {
                         count += 1;
                     }
                 }
@@ -778,6 +791,7 @@ mod tests {
         let id = Uuid::new_v4();
         let updated_at = Utc::now();
         let page = serde_json::json!({
+            "workspaceId": "workspace-1",
             "meetings": [{
                 "id": id,
                 "title": "Workspace planning",
@@ -839,7 +853,73 @@ mod tests {
                 .count(),
             20_000
         );
-        assert!(store.load_meta(id).unwrap().workspace_import);
+        let imported_meta = store.load_meta(id).unwrap();
+        assert!(imported_meta.workspace_import);
+        assert_eq!(imported_meta.workspace_source_updated_at, Some(updated_at));
+        assert_eq!(
+            imported_meta.workspace_source_id.as_deref(),
+            Some(format!("http://{address}/workspace/workspace-1").as_str())
+        );
+
+        let newer_at = updated_at + chrono::Duration::seconds(1);
+        let updated_page = serde_json::json!({
+            "workspaceId": "workspace-1",
+            "meetings": [{
+                "id": id,
+                "title": "Workspace planning updated",
+                "mode": "general",
+                "startedAt": "2026-10-04T10:00:00Z",
+                "endedAt": "2026-10-04T10:30:00Z",
+                "summary": "Updated online.",
+                "updatedAt": newer_at,
+                "transcript": [{"speaker": "you", "text": "Edited online.", "timestamp": null}],
+                "actionItems": []
+            }],
+            "hasMore": false,
+            "nextCursor": {"updatedAt": newer_at, "id": id.to_string()},
+            "serverCursorVersion": 2
+        })
+        .to_string();
+        let update_listener = tokio::net::TcpListener::bind(address).await.unwrap();
+        let update_address = update_listener.local_addr().unwrap();
+        let expected_update = updated_page.clone();
+        let update_server = tokio::spawn(async move {
+            let (stream, _) = update_listener.accept().await.unwrap();
+            let mut stream = BufReader::new(stream);
+            let mut line = String::new();
+            while stream.read_line(&mut line).await.unwrap() > 0 && line != "\r\n" {
+                line.clear();
+            }
+            let mut stream = stream.into_inner();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                expected_update.len(), expected_update
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        assert_eq!(
+            sync.pull_workspace_notes(
+                store.clone(),
+                &format!("http://{update_address}"),
+                "sync-token"
+            )
+            .await
+            .unwrap(),
+            1
+        );
+        update_server.await.unwrap();
+        let updated_meta = store.load_meta(id).unwrap();
+        assert_eq!(
+            updated_meta.title.as_deref(),
+            Some("Workspace planning updated")
+        );
+        assert_eq!(updated_meta.workspace_source_updated_at, Some(newer_at));
+        assert_eq!(
+            store.load_summary(id).unwrap().unwrap().summary,
+            "Updated online."
+        );
+        assert_eq!(store.load_transcript(id).unwrap()[0].text, "Edited online.");
         let reopened = DesktopSync::load(directory.path());
         assert_eq!(
             reopened.lock_state().remote_cursor.as_ref().unwrap().id,

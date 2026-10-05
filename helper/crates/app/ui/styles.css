@@ -191,7 +191,9 @@ p { line-height: 1.55; }
 .inline-link:hover { text-decoration: underline; }
 .settings-footer { display: flex; align-items: center; justify-content: flex-end; gap: 11px; }
 .settings-hint { margin-right: auto; color: var(--muted); font-size: 11px; }
-.privacy-note { padding: 12px 14px; border-radius: 9px; color: var(--muted); background: var(--surface-soft); font-size: 11px; line-height: 1.5; }
+.privacy-note { padding: 12px 14px; border-radius: 9px; color: var(--ink); background: var(--surface-soft); font-size: 12px; line-height: 1.5; }
+.privacy-note p { margin: 0; }
+.privacy-note p + p { margin-top: 8px; }
 .sync-controls { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .inline-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 

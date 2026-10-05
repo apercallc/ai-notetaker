@@ -113,6 +113,7 @@ export async function GET(request: Request) {
     }
     if (!hasMore && (processedCandidates < candidates.length || candidates.length > PULL_PAGE_SIZE)) hasMore = true;
     return NextResponse.json({
+      workspaceId: auth.auth.workspaceId,
       meetings,
       hasMore,
       nextCursor: lastScannedCandidate
