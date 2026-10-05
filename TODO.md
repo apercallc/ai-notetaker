@@ -10,11 +10,14 @@
       the selected summary provider.
 - [x] Make the secret-box tampering fixture flip an actual ciphertext byte so
       Base64URL padding bits cannot make the modified test input equivalent.
+- [x] Exclude standalone test-only paths from automatic product releases and
+      fix the unused shell loop variable flagged by actionlint.
 - Verified with webapp lint, typecheck, Prisma generation, all 822
   PostgreSQL-backed tests, and production build; extension typecheck, 645 tests,
   and production build; helper formatting, strict Clippy, and workspace tests.
   The local download page was visually checked at 390 px; real cross-platform
-  installs and meeting capture remain acceptance work below.
+  installs and meeting capture remain acceptance work below. `actionlint`
+  passes for the release workflow.
 
 ## Browser meeting recorder extension — 2026-10-04
 

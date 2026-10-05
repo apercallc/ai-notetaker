@@ -18,6 +18,12 @@ on:
       - "!webapp/src/marketing/**"
       - "!webapp/src/app/(marketing)/**"
       - "!webapp/public/marketing/**"
+      # Test-only changes still run their CI workflow, but do not need a new
+      # customer-facing desktop/extension release.
+      - "!**/*.test.*"
+      - "!**/*.spec.*"
+      - "!**/__tests__/**"
+      - "!**/tests/**"
   workflow_dispatch:
     inputs:
       bump:
@@ -60,7 +66,7 @@ jobs:
           # Give the other workflows a minute to register so a single fast
           # check cannot look like "everything finished".
           sleep 60
-          for attempt in $(seq 1 120); do
+          for _ in $(seq 1 120); do
             runs=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100" \
               --jq '[.check_runs[] | select(.name != "Tag and dispatch release")]')
             total=$(jq 'length' <<<"$runs")
