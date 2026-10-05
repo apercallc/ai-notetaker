@@ -32,6 +32,14 @@ it("shows direct desktop downloads and extension capture when installers are pub
   const desktopSection = html.split('<details id="legacy-downloads"')[0];
   expect(desktopSection).toContain("Download AI Notetaker");
   expect(desktopSection).toContain("Installer not published yet.");
+  expect(desktopSection).toContain("Preview release.");
+  expect(desktopSection).toContain("These installers are unsigned");
+  expect(desktopSection).toContain('aria-label="Download installer for macOS · Apple silicon"');
+  expect(desktopSection).toContain('href="https://github.com/apercallc/ai-notetaker/blob/main/docs/launch/release-candidate-checklist.md"');
+  expect(desktopSection).toContain("Download installer");
+  expect(desktopSection).toContain("Raw recordings are saved on this device before processing.");
+  expect(desktopSection).toContain("audio is sent directly to your chosen transcription provider");
+  expect(desktopSection).toContain("the resulting transcript is sent to your chosen summary provider");
   expect(desktopSection).toContain("Install on macOS · Apple silicon");
   expect(desktopSection).toContain("macOS · Intel");
   expect(desktopSection).toContain('href="https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app-x86_64.dmg"');

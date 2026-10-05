@@ -8,6 +8,7 @@ import { chromeWebStoreUrl, formatBytes, type DownloadLinks } from "./release";
 import type { ShellContext } from "./Shell";
 
 const UNSIGNED_DOC = "https://github.com/apercallc/ai-notetaker/blob/main/docs/code-signing-policy.md";
+const ACCEPTANCE_DOC = "https://github.com/apercallc/ai-notetaker/blob/main/docs/launch/release-candidate-checklist.md";
 const EFFECTIVE = "September 30, 2026";
 
 function PageHead({ title, lede }: { title: string; lede?: string }) {
@@ -245,11 +246,11 @@ export function PricingView({ context, prices }: { context: ShellContext; prices
 
 /* ------------------------------------------------------------------ */
 
-function AssetButton({ asset, label, primary }: { asset?: { url: string; bytes: number }; label: string; primary?: boolean }) {
+function AssetButton({ asset, label, accessibleLabel, primary }: { asset?: { url: string; bytes: number }; label: string; accessibleLabel?: string; primary?: boolean }) {
   if (!asset) return null;
   const size = formatBytes(asset.bytes);
   return (
-    <a className={`mk-btn ${primary ? "mk-btn--solid" : "mk-btn--quiet"}`} href={asset.url}>
+    <a className={`mk-btn ${primary ? "mk-btn--solid" : "mk-btn--quiet"}`} href={asset.url} aria-label={accessibleLabel}>
       <Icon as={Download} size={18} />
       {label}
       {size && <span className="mk-small">({size})</span>}
@@ -287,13 +288,16 @@ export function DownloadView({
           {hasDesktopAssets ? (
             <>
               <p className="mk-lede">Choose the installer for your computer. The desktop app handles setup, browser and desktop capture, processing, and local notes.</p>
+              <div className="mk-notice mk-mt-m" role="note">
+                <strong>Preview release.</strong> These installers are unsigned, so your operating system may show a warning. Fresh-install and real-call checks are still incomplete across supported platforms. Read the <a href={UNSIGNED_DOC}>first-open guide</a> and <a href={ACCEPTANCE_DOC}>platform acceptance checklist</a>.
+              </div>
               <div className="mk-downloads">
                 {desktopAssets.map(({ platform: assetPlatform, label, asset }) => (
                   <article className="mk-download" key={assetPlatform}>
                     <h3 className="mk-h3"><Icon as={Laptop} size={22} />{label}</h3>
                     {asset ? (
                       <>
-                        <AssetButton asset={asset} label={`Download for ${label}`} primary={platform === assetPlatform} />
+                        <AssetButton asset={asset} label="Download installer" accessibleLabel={`Download installer for ${label}`} primary={platform === assetPlatform} />
                         <details open={platform === (assetPlatform.startsWith("macos") ? "macos" : assetPlatform)}>
                           <summary>Install on {label}</summary>
                           {assetPlatform.startsWith("macos") ? (
@@ -350,7 +354,7 @@ export function DownloadView({
               <p><a className="mk-btn mk-btn--solid" href={SITE.releasesUrl}>View all releases</a></p>
             </div>
           )}
-          <p className="mk-small mk-mt-m">Local desktop recording uses your provider keys and keeps audio on this device. Optional sync sends finished desktop notes to a web workspace and copies workspace notes into desktop. Web edits, deletions, and settings do not sync back yet.</p>
+          <p className="mk-small mk-mt-m">Raw recordings are saved on this device before processing. To process them, audio is sent directly to your chosen transcription provider; the resulting transcript is sent to your chosen summary provider. Optional sync sends finished desktop notes to a web workspace and copies workspace notes into desktop. Web edits, deletions, and settings do not sync back yet.</p>
         </div>
       </section>
       <section id="browser-extension" className="mk-section mk-section--flush" aria-labelledby="browser-extension-title">

@@ -1,5 +1,21 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Download page and test reliability — 2026-10-04
+
+- [x] Mark published installers as unsigned previews before download choices,
+      link the platform acceptance checklist, and shorten platform download
+      buttons while keeping visible wording in their accessible names.
+- [x] Clarify that raw recordings are saved locally before processing, audio
+      goes to the selected transcription provider, and transcript text goes to
+      the selected summary provider.
+- [x] Make the secret-box tampering fixture flip an actual ciphertext byte so
+      Base64URL padding bits cannot make the modified test input equivalent.
+- Verified with webapp lint, typecheck, Prisma generation, all 822
+  PostgreSQL-backed tests, and production build; extension typecheck, 645 tests,
+  and production build; helper formatting, strict Clippy, and workspace tests.
+  The local download page was visually checked at 390 px; real cross-platform
+  installs and meeting capture remain acceptance work below.
+
 ## Browser meeting recorder extension — 2026-10-04
 
 - [x] Make new extension Meet sessions audio-only: save separate mic/call PCM,
