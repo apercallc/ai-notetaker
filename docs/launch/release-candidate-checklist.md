@@ -68,11 +68,18 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
 
 ### Repository governance
 
-- [ ] Review required checks and review policy for `main`. On 2026-10-05,
-      GitHub reported no classic branch protection. Organization ruleset status
-      could not be read with the current token. Design a release-bot bypass
-      before enforcing PR-only updates because auto-release pushes the
-      version-bump commit directly to `main`.
+- [x] Protect `main` from force-push and deletion with the active GitHub
+      `Protect main history` ruleset (ID `24497715`).
+- [x] Give the extension and webapp CI jobs unique check names in merged
+      [PR #40](https://github.com/apercallc/ai-notetaker/pull/40), so their
+      required-check contexts can be selected without colliding with other
+      workflow jobs.
+- [ ] Require pull requests, reviews, and passing CI checks before merging to
+      `main`. This is not enabled: the release workflow currently pushes version
+      bumps directly to `main`, and GitHub rejected the attempted Actions
+      integration bypass actor. Resolve the release-bot path before enforcing
+      PR-only updates. Organization-level rules remain unverified because the
+      current token cannot inspect them.
 
 ### Native desktop install and capture
 
@@ -123,11 +130,11 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
 - [ ] Complete a real `.ntarchive` export/import and confirm extension source
       records remain intact and imported audio stays on separate tracks.
 - [ ] Publish the Chrome Web Store listing and verify store installation,
-      permissions, screenshots, extension ID, and Native Messaging origin. The
-      `v0.18.2`, `v0.18.6`, `v0.18.7`, and `v0.18.8` store upload jobs were
-      skipped; manual ZIP installation remains available. The published
-      extension ID is absent from this Mac's Chrome Default profile, so the
-      registered host has not been exercised through Chrome.
+      permissions, screenshots, extension ID, and Native Messaging origin.
+      Store upload jobs through `v0.18.10` were skipped; manual ZIP
+      installation remains available. The published extension ID is absent
+      from this Mac's Chrome Default profile, so the registered host has not
+      been exercised through Chrome.
 
 ### Managed service and operations
 
