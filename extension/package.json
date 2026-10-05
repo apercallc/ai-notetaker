@@ -1,6 +1,6 @@
 {
   "name": "ai-notetaker-extension",
-  "version": "0.18.7",
+  "version": "0.18.8",
   "description": "AI Notetaker Chrome extension — Google Meet audio recorder for desktop import.",
   "private": true,
   "type": "module",
