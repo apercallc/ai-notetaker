@@ -36,7 +36,10 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
 
 - [x] macOS arm64 on an Apple M4 with macOS 27.0.1: published DMG checksum
       verified, guided installer completed, installed bundle signature
-      verified, and v0.18.2 opened to its first-run screen and Settings.
+      verified, and v0.18.2 opened to its first-run screen. Record, Settings,
+      and Notes navigation worked; the empty library rendered and Start
+      recording correctly remained disabled without provider keys and system
+      audio access.
       Chrome and Edge Native Messaging manifests point to the installed host
       and allow the published extension ID.
 - [ ] Finish macOS arm64 update/uninstall checks; install and verify macOS

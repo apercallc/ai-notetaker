@@ -96,7 +96,9 @@ call or real archive import was completed.
   was correctly skipped. On an Apple
   M4 Mac running macOS 27.0.1, the v0.18.2 arm64 DMG checksum verified, the
   guided installer completed, the installed ad-hoc signature verifies, and
-  the app launched to its first-run screen and Settings. Chrome and Edge
+  the app launched to its first-run screen. Record, Settings, and Notes
+  navigation worked; the empty library rendered and Start stayed disabled
+  until provider keys and audio access are configured. Chrome and Edge
   Native Messaging manifests point at the installed host and allow the current
   extension ID. No host connection, screen-audio permission, provider key,
   recording, or real meeting was exercised. Rendered native UI, live
