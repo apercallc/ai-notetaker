@@ -72,6 +72,8 @@ call or real archive import was completed.
 - [x] Scope desktop sync versions and conflict actions to the authenticated
       web-app workspace; show upload and pull conflicts without replacing the
       local note and link to the matching web version.
+- [x] Read the extension protocol version from its exported constant in the
+      release metadata gate so tagged builds validate the live contract.
 - [ ] Add a deliberate conflict resolution path after product rules define
       whether users keep the desktop copy, keep the web copy, or merge text.
 - [x] Fix import duration rounding at the hour boundary and show correct byte
@@ -79,10 +81,12 @@ call or real archive import was completed.
 - Verified for this sync slice: helper fmt, Clippy, and all 258 workspace tests;
   extension typecheck, all 645 tests, and production build; webapp Prisma
   generation, lint, typecheck, all 822 PostgreSQL-backed tests, and production
-  build. Desktop settings copy passed design and guardrails review; JS syntax
-  and diff checks pass. Rendered native UI, live cross-platform audio, real
-  workspace-token recovery, Chrome capture, and installed archive migration
-  were not verified here.
+  build. Desktop settings copy passed design and guardrails review; release CI
+  passed across OSes and v0.18.1 assets published. Docker Hub mirroring and
+  Chrome Web Store upload were skipped because listing variables are unset.
+  JS syntax and diff checks pass. Rendered native UI, live cross-platform
+  audio, real workspace-token recovery, Chrome capture, and installed archive
+  migration were not verified here.
 
 ## Desktop-first app migration — 2026-10-03
 
