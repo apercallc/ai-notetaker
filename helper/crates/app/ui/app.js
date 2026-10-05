@@ -119,9 +119,10 @@
     const appReady = !snapshot.credentialStoreError && providersReady;
     const processing = snapshot.meetings.some((meeting) => meeting.status === "processing");
     const finalizing = snapshot.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
-    const needsAttention = !recording && !processing && !finalizing && (!appReady || !snapshot.audio.ready);
+    const audioChecking = snapshot.audio.checking;
+    const needsAttention = !recording && !processing && !finalizing && (!appReady || (!audioChecking && !snapshot.audio.ready));
     setTopbarStatus(
-      recording ? "Recording on this device" : finalizing ? "Finishing saved audio" : processing ? "Preparing saved notes" : !appReady ? "Setup needed" : snapshot.audio.ready ? "Ready to record" : snapshot.audio.permissionRequired ? "Audio permission needed" : "Audio setup needed",
+      recording ? "Recording on this device" : finalizing ? "Finishing saved audio" : processing ? "Preparing saved notes" : !appReady ? "Setup needed" : audioChecking ? snapshot.audio.timedOut ? "Audio check taking longer" : "Checking audio" : snapshot.audio.ready ? "Ready to record" : snapshot.audio.permissionRequired ? "Audio permission needed" : "Audio setup needed",
       recording ? "recording" : needsAttention ? "needs-attention" : "",
     );
     $("#open-webapp").hidden = !snapshot.settings.preferences.webappUrl;
@@ -154,6 +155,8 @@
       audio,
       consentAcknowledged: state.recordConsentAcknowledged,
       busy: state.busy,
+      audioChecking: audio.checking,
+      audioTimedOut: audio.timedOut,
     });
     const openAudioSettings = audio.platform === "macos" && audio.driver === "Unavailable"
       ? '<button class="small-button" id="open-screen-recording-settings">Open macOS audio permissions</button>'
@@ -179,7 +182,7 @@
           </div>
         </section>
         <section class="card audio-card" aria-labelledby="audio-heading">
-          <div class="audio-card-head"><h2 id="audio-heading">Audio setup</h2><span class="readiness ${audio.ready ? "" : "warn"}">${audio.ready ? "Ready" : audio.permissionRequired ? "Permission needed" : "Check setup"}</span></div>
+          <div class="audio-card-head"><h2 id="audio-heading">Audio setup</h2><span class="readiness ${audio.checking ? "checking" : audio.ready ? "" : "warn"}">${audio.checking ? audio.timedOut ? "Check taking longer" : "Checking audio" : audio.ready ? "Ready" : audio.permissionRequired ? "Permission needed" : "Check setup"}</span></div>
           <div class="device-list">
             <div class="device-row"><span class="device-icon" aria-hidden="true">◖</span><div><strong>Microphone</strong><span>${esc(audio.microphone || "Default microphone")}</span></div></div>
             <div class="device-row"><span class="device-icon" aria-hidden="true">◉</span><div><strong>System audio</strong><span>${esc(audio.speaker || "Default output")}</span></div></div>
@@ -204,6 +207,8 @@
         audio,
         consentAcknowledged: state.recordConsentAcknowledged,
         busy: state.busy,
+        audioChecking: audio.checking,
+        audioTimedOut: audio.timedOut,
       });
     });
     $("#meeting-title")?.addEventListener("input", (event) => { state.recordTitle = event.currentTarget.value; });
@@ -221,12 +226,14 @@
     return `<button class="meeting-card" data-meeting-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><time>${esc(prettyDate(meeting.startedAt))}</time><span class="preview">${esc(preview)}</span></button>`;
   }
 
-  function recordingStartHint({ credentialStoreError, keyReady, audio, consentAcknowledged, busy }) {
+  function recordingStartHint({ credentialStoreError, keyReady, audio, consentAcknowledged, busy, audioChecking, audioTimedOut }) {
     if (busy) return "Starting recording…";
     const blockers = [];
     if (credentialStoreError) blockers.push("Resolve the secure storage issue above to enable recording.");
     else if (!keyReady) blockers.push("Finish provider setup above to enable recording.");
-    if (!audio.ready) blockers.push("Resolve the audio issue below to enable recording.");
+    if (!audio.ready) blockers.push(audioChecking
+      ? audioTimedOut ? "The audio check is taking longer than expected. Follow the guidance below before recording." : "Wait for the audio device check to finish."
+      : "Resolve the audio issue below to enable recording.");
     if (!consentAcknowledged) blockers.push("Confirm recording consent above to enable recording.");
     return blockers.length ? blockers.join(" ") : "Microphone and system audio are kept on separate tracks.";
   }

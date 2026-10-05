@@ -144,6 +144,7 @@ p { line-height: 1.55; }
 .audio-card-head h2 { font-size: 15px; }
 .readiness { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 999px; color: var(--green-strong); background: var(--green-soft); font-size: 10px; font-weight: 700; }
 .readiness.warn { color: var(--amber); background: #fbf1d9; }
+.readiness.checking { color: var(--muted); background: var(--surface-soft); }
 .device-list { display: grid; gap: 14px; margin: 22px 0 17px; }
 .device-row { display: flex; align-items: flex-start; gap: 10px; }
 .device-icon { display: grid; flex: 0 0 29px; width: 29px; height: 29px; place-items: center; border-radius: 8px; color: var(--green); background: var(--green-soft); font-size: 13px; }

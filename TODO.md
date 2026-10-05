@@ -27,6 +27,17 @@
       Real capture latency and provider failure recovery still need device
       acceptance.
 
+## Audio preflight responsiveness — 2026-10-05
+
+- [x] Cache device diagnostics briefly, allow only one native probe at a time,
+      and return a conservative pending state after three seconds. Keep the
+      desktop status neutral while checking and explain when a stalled native
+      API requires restarting the app.
+- Verified with slow-probe/coalescing tests, helper gates, and source review.
+      A blocked OS API call cannot be cancelled safely; it is not duplicated.
+      Windows/macOS slow-device behavior and rendered accessibility still need
+      device acceptance.
+
 ## Download page and test reliability — 2026-10-04
 
 - [x] Mark published installers as unsigned previews before download choices,
@@ -388,9 +399,10 @@ or BlackHole steps relevant to this Mac.
       updates.
 - [x] Run audio preflight outside the IPC executor and bound Linux `pactl`
       discovery commands to two seconds each.
-- Follow-up: bound platform audio discovery subprocess timeouts and verify
-  Windows and macOS diagnostics against slow device APIs; Linux `pactl` calls
-  now have a two-second per-command timeout.
+- Follow-up: verify the three-second Windows/macOS diagnostic response against
+  slow device APIs on real machines. OS calls cannot be force-cancelled, so
+  only one can remain active; Linux `pactl` subprocesses have a two-second
+  timeout.
 
 ## CI supply-chain hardening — 2026-10-02
 

@@ -8,6 +8,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio_diagnostics;
 mod desktop_library;
 mod desktop_migration;
 mod desktop_settings;
@@ -22,6 +23,7 @@ mod tray;
 mod update_check;
 
 use async_trait::async_trait;
+use audio_diagnostics::AudioDiagnosticsCoordinator;
 use desktop_sync::{DesktopSync, DesktopSyncStatus, SyncConflictReason};
 use notetaker_audio::{AudioCapture, AudioDiagnostics};
 use notetaker_core::native_messaging::{
@@ -240,6 +242,7 @@ struct AppState {
     data_dir: std::path::PathBuf,
     library: Arc<desktop_library::DesktopLibrary>,
     audio: Arc<dyn AudioCapture>,
+    audio_diagnostics: AudioDiagnosticsCoordinator,
     pairing_token: Mutex<Option<String>>,
     settings: Mutex<Option<Settings>>,
     active: Mutex<HashMap<Uuid, ActiveRecording>>,
@@ -271,6 +274,8 @@ struct DesktopCommandContext {
 struct DesktopAudioStatus {
     platform: String,
     driver: String,
+    checking: bool,
+    timed_out: bool,
     microphone: Option<String>,
     speaker: Option<String>,
     ready: bool,
@@ -1164,6 +1169,7 @@ fn main() {
                 data_dir: root.clone(),
                 library: library.clone(),
                 audio,
+                audio_diagnostics: AudioDiagnosticsCoordinator::default(),
                 pairing_token: Mutex::new(existing_token),
                 settings: Mutex::new(None),
                 active: Mutex::new(HashMap::new()),
@@ -1338,13 +1344,17 @@ async fn desktop_snapshot(
                 .is_some(),
     );
 
-    let audio = context.app.audio.clone();
-    let diagnostics = tokio::task::spawn_blocking(move || audio.diagnostics())
-        .await
-        .map_err(|error| format!("Audio status could not be checked: {error}"))?;
+    let audio_diagnostics = context
+        .app
+        .audio_diagnostics
+        .get(context.app.audio.clone())
+        .await;
+    let diagnostics = audio_diagnostics.diagnostics;
     let audio = DesktopAudioStatus {
         platform: diagnostics.platform,
         driver: diagnostics.driver,
+        checking: audio_diagnostics.checking,
+        timed_out: audio_diagnostics.timed_out,
         microphone: diagnostics.microphone,
         speaker: diagnostics.speaker,
         ready: diagnostics.ready,
@@ -2112,6 +2122,7 @@ fn spawn_desktop_sync(
 async fn desktop_test_audio(
     context: tauri::State<'_, DesktopCommandContext>,
 ) -> Result<(), String> {
+    context.app.audio_diagnostics.invalidate();
     handle_message(
         context.app.clone(),
         context.tray.clone(),
@@ -3081,27 +3092,10 @@ async fn handle_message(
 
         ExtensionToHelper::AudioPreflight => {
             let audio = state.audio.clone();
-            // Device discovery invokes native platform APIs and, on Linux,
-            // several pactl subprocesses. Keep that synchronous work off the
-            // Tokio IPC executor so a slow or wedged audio server cannot make
-            // unrelated helper messages appear frozen.
-            let probe = tokio::task::spawn_blocking(move || {
-                let prepare_error = audio.prepare().err().map(|error| error.to_string());
-                let diagnostics = audio.diagnostics();
-                (diagnostics, prepare_error)
-            })
-            .await;
-            let (diagnostics, prepare_error) = match probe {
-                Ok(result) => result,
-                Err(error) => {
-                    let _ = out_tx.send(HelperToExtension::Error {
-                        meeting_id: None,
-                        code: ErrorCode::DeviceNotFound,
-                        message: format!("Audio diagnostics could not finish: {error}"),
-                    });
-                    return true;
-                }
-            };
+            let prepare_error = audio.prepare().err().map(|error| error.to_string());
+            state.audio_diagnostics.invalidate();
+            let diagnostics_snapshot = state.audio_diagnostics.get(audio).await;
+            let diagnostics = diagnostics_snapshot.diagnostics;
             let _ = out_tx.send(audio_status_message(diagnostics.clone(), prepare_error));
             let _ = out_tx.send(HelperToExtension::CaptureCapabilities {
                 capabilities: CaptureCapabilitiesMessage {
