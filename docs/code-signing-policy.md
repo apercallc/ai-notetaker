@@ -50,9 +50,10 @@ It passes the published DMG checksum but fails `codesign --verify --deep
 --strict` because the completed app resources were never sealed. Redownloading
 that same release does not correct the defect.
 
-Prefer the guided installer when it is published. For an older build you trust
-from our official GitHub release, compare the downloaded DMG's SHA-256 with its
-release's `SHA256SUMS` before repairing it. A checksum is not publisher identity.
+Prefer the guided installer included with current releases. For an older build
+you trust from our official GitHub release, compare the downloaded DMG's
+SHA-256 with its release's `SHA256SUMS` before repairing it. A checksum is not
+publisher identity.
 Quit AI Notetaker before repairing; keep your recordings and settings.
 
 For a copy installed at `/Applications/AI Notetaker.app`, run these in Terminal

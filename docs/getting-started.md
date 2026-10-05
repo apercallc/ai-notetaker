@@ -399,8 +399,8 @@ docker compose -f docker-compose.registry.yml --env-file .env up -d
 ```
 
 The image is for the history webapp only. It never captures audio or replaces
-the native helper. If the registry image is not published yet, use the local
-build Compose flow in [`webapp/README.md`](../webapp/README.md#deploy-with-docker-compose).
+the native helper. If the registry image cannot be pulled, use the local build
+Compose flow in [`webapp/README.md`](../webapp/README.md#deploy-with-docker-compose).
 
 ## Other browsers
 
@@ -487,8 +487,8 @@ for the OS-specific cleanup and the official BlackHole/VB-CABLE uninstall path.
 ## Build from source
 
 This section documents development and legacy builds. For the desktop app
-preview, use the quickstart command above. Installers for general users are not
-published yet.
+preview, use the [installer quickstart](#quickstart-install-the-desktop-preview).
+Source builds are optional and are not the general-user install path.
 
 ### 1. Get the repository
 
