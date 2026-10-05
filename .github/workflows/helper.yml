@@ -81,11 +81,13 @@ jobs:
             exit 1
           fi
           lipo "$swift_runtime" -verify_arch "$(uname -m)"
-          swift_lib="$(dirname "$swift_runtime")"
           cargo test --workspace --no-run
-          cp "$swift_lib"/*.dylib target/debug/deps/
 
       - name: cargo test
+        env:
+          # macOS ships the Swift runtime in the shared cache. Copying the
+          # Xcode dylibs into deps loads duplicate Swift classes in tests.
+          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && '/usr/lib/swift' || '' }}
         run: cargo test --workspace
 
       # Exercise the real Tauri bundle configuration on every native runner.

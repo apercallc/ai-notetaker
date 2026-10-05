@@ -32,6 +32,10 @@
       version, recreate a physically removed web note, or keep copies separate.
       Trashed notes must be restored before replacement. Conflicted uploads stay
       paused until a choice; neither recording nor local audio is overwritten.
+- [x] Run macOS Rust tests against the system Swift runtime instead of copying
+      Xcode dylibs beside test binaries. This avoids duplicate Swift class
+      warnings; the full 267-test helper workspace passes with the local Xcode
+      27 toolchain and `DYLD_LIBRARY_PATH=/usr/lib/swift`.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
 - [ ] Show workspace notes in the extension through its authenticated desktop

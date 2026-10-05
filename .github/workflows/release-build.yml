@@ -147,10 +147,12 @@ jobs:
             exit 1
           fi
           lipo "$swift_runtime" -verify_arch "$(uname -m)"
-          swift_lib="$(dirname "$swift_runtime")"
           cargo test --workspace --no-run
-          cp "$swift_lib"/*.dylib target/debug/deps/
       - run: cargo test --workspace
+        env:
+          # Use macOS's shared Swift runtime instead of copying Xcode dylibs
+          # beside the tests, which loads duplicate Swift classes.
+          DYLD_LIBRARY_PATH: ${{ runner.os == 'macOS' && '/usr/lib/swift' || '' }}
       - name: Stage pinned base VB-CABLE payload
         if: runner.os == 'Windows'
         working-directory: .
