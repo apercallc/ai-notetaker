@@ -85,11 +85,19 @@ call or real archive import was completed.
   webapp Prisma generation, lint, typecheck, all 822 PostgreSQL-backed tests,
   and production build. The changed UI script passes Node syntax validation.
   The design review and guardrails review found no remaining source-level
-  findings. Release CI passed across OSes and v0.18.1 assets are published.
-  Docker Hub mirroring and Chrome Web Store upload were skipped because their
-  listing variables are unset. Rendered native UI, live cross-platform audio,
-  real workspace-token recovery, Chrome capture, and installed archive
-  migration remain unverified.
+  findings. Commit `4fd9ebc` passed CI across helper, extension, webapp, and
+  CodeQL. The auto-release workflow published `v0.18.2`; its four native
+  desktop jobs, extension package, webapp image, checksum/manifest validation,
+  and GitHub asset publication passed. Docker Hub mirroring and Chrome Web
+  Store upload were skipped because their credentials are unset. On an Apple
+  M4 Mac running macOS 27.0.1, the v0.18.2 arm64 DMG checksum verified, the
+  guided installer completed, the installed ad-hoc signature verifies, and
+  the app launched to its first-run screen and Settings. Chrome and Edge
+  Native Messaging manifests point at the installed host and allow the current
+  extension ID. No host connection, screen-audio permission, provider key,
+  recording, or real meeting was exercised. Rendered native UI, live
+  cross-platform audio, real workspace-token recovery, Chrome capture, and
+  installed archive migration remain unverified.
 
 ## Desktop-first app migration — 2026-10-03
 

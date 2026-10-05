@@ -1,20 +1,20 @@
 # Release and production acceptance
 
-Updated 2026-10-04 against the published `v0.18.1` release and its release
+Updated 2026-10-04 against the published `v0.18.2` release and its release
 workflow. Keep repository/CI evidence separate from install, provider, account,
 and physical-device acceptance.
 
 ## Verified release evidence
 
-- [x] GitHub Release [`v0.18.1`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.1)
+- [x] GitHub Release [`v0.18.2`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.2)
       is published with macOS arm64 and x86_64 DMGs, Windows x64 installer,
       Debian package, extension ZIPs, generated release manifest, and checksums.
-- [x] Release workflow [37250885566](https://github.com/apercallc/ai-notetaker/actions/runs/37250885566)
+- [x] Release workflow [37254643304](https://github.com/apercallc/ai-notetaker/actions/runs/37254643304)
       passed release metadata validation, package builds, cross-platform helper
       jobs, asset verification, and GitHub Release publication.
 - [x] Production `/api/health` returned HTTP 200 with `managedReady: true` on
-      2026-10-04. This confirms service readiness checks, not an end-to-end
-      customer journey.
+      2026-10-04 after the `v0.18.2` release. This confirms service readiness
+      checks, not an end-to-end customer journey.
 - [x] Stripe checkout, webhook, and portal cancellation were exercised on
       2026-09-30 with a 100%-off test promotion; recheck paid billing before
       changing pricing or billing configuration.
@@ -29,13 +29,20 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
 
 ### Native desktop install and capture
 
-- [ ] Install the published build on supported macOS arm64, macOS x86_64,
-      Windows x64, and Debian/Ubuntu x64 machines. Verify first launch,
-      permissions, update check, uninstall, and Native Messaging registration
-      where the extension compatibility path is used.
+- [x] macOS arm64 on an Apple M4 with macOS 27.0.1: published DMG checksum
+      verified, guided installer completed, installed bundle signature
+      verified, and v0.18.2 opened to its first-run screen and Settings.
+      Chrome and Edge Native Messaging manifests point to the installed host
+      and allow the published extension ID.
+- [ ] Finish macOS arm64 update/uninstall checks; install and verify macOS
+      x86_64, Windows x64, and Debian/Ubuntu x64 builds. Native Messaging
+      manifest inspection does not prove a browser-to-host connection.
 - [ ] On each OS, make a real meeting call and verify separate microphone and
       speaker tracks, visible recording state, stop/finalize, provider failure
       recovery, and restart recovery of an interrupted recording.
+      On the tested Mac, system-audio capture remains unavailable until the
+      user grants macOS Screen & System Audio Recording access or installs
+      BlackHole; no permission was granted and no capture was attempted.
 - [ ] Verify a fresh user can configure a local provider key in the OS vault,
       test it, record, and open the local note without an AI Notetaker account.
       Do not use a test key to claim provider quality or paid-path acceptance.
@@ -49,7 +56,7 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       records remain intact and imported audio stays on separate tracks.
 - [ ] Publish the Chrome Web Store listing and verify store installation,
       permissions, screenshots, extension ID, and Native Messaging origin. The
-      `v0.18.1` store upload job was skipped; manual ZIP installation remains
+      `v0.18.2` store upload job was skipped; manual ZIP installation remains
       available.
 
 ### Managed service and operations
