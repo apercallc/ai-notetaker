@@ -2,7 +2,7 @@
 
 Updated 2026-10-05. Keep repository/CI evidence separate from install,
 provider, account, and physical-device acceptance. The installed Mac app was
-still v0.18.2 during this review; the newer v0.18.6 release has build and
+still v0.18.2 during this review; the newer v0.18.7 release has build and
 publication proof but does not inherit the older app's device acceptance.
 
 ## Verified release evidence
@@ -14,6 +14,12 @@ publication proof but does not inherit the older app's device acceptance.
       was published on 2026-10-05. Its release workflow passed metadata
       validation, webapp image and extension builds, native builds for all four
       targets, package verification, and GitHub Release publication. Docker Hub
+      mirroring and Chrome Web Store upload were skipped.
+- [x] GitHub Release [`v0.18.7`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.7)
+      was published on 2026-10-05. Release workflow
+      [37281422274](https://github.com/apercallc/ai-notetaker/actions/runs/37281422274)
+      passed metadata validation, webapp image and extension builds, all four
+      native builds, asset/checksum verification, and publication. Docker Hub
       mirroring and Chrome Web Store upload were skipped.
 - [x] Release workflow [37254643304](https://github.com/apercallc/ai-notetaker/actions/runs/37254643304)
       passed release metadata validation, package builds, cross-platform helper
@@ -74,8 +80,8 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       records remain intact and imported audio stays on separate tracks.
 - [ ] Publish the Chrome Web Store listing and verify store installation,
       permissions, screenshots, extension ID, and Native Messaging origin. The
-      `v0.18.2` and `v0.18.6` store upload jobs were skipped; manual ZIP
-      installation remains available. The published extension ID is absent
+      `v0.18.2`, `v0.18.6`, and `v0.18.7` store upload jobs were skipped; manual
+      ZIP installation remains available. The published extension ID is absent
       from this Mac's Chrome Default profile, so the registered host has not
       been exercised through Chrome.
 

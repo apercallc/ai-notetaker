@@ -49,7 +49,7 @@ export async function syncMeetingToWebapp(
     });
     if (response.status === 400 || response.status === 413 || response.status === 422) {
       // The server read the meeting and refused it. Resending the same payload can never succeed, and
-      // keeping it would fill the outbox (capped at 50) with a meeting that blocks fresh ones.
+      // keeping it would retry a permanently invalid meeting on every future flush.
       console.warn(`Webapp rejected meeting ${meeting.id} (HTTP ${response.status}); not retrying`);
       await removeWebappSyncOutbox(meeting.id);
       return false;

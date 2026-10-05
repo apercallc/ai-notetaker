@@ -1,5 +1,16 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Extension offline sync queue — 2026-10-05
+
+- [x] Store newly queued web-app sync work as local meeting IDs instead of
+      duplicating full transcripts or silently evicting notes after 50 failures.
+- [x] Continue reading legacy full-meeting queue entries and avoid re-queuing
+      notes deleted while their network request was in flight; serialize
+      read-modify-write with a shared Web Lock across extension contexts.
+- Verified with extension typecheck, 653 tests, 91.95% statement / 83.34%
+      branch coverage, and production build. Live web-app outage recovery still
+      needs account-level acceptance.
+
 ## Extension transcript write efficiency — 2026-10-05
 
 - [x] Broadcast interim transcript revisions immediately without persisting
@@ -289,7 +300,8 @@ The one-app workflow is not shipped.
       acceptance gates pass; only then retire extension setup and packaging.
 - [ ] Verify fresh install and real capture on macOS, Windows, and Linux.
 
-Verified in the latest pass: Apple silicon and x86_64 Mac release app/DMG builds;
+Verified in the last full desktop-first migration pass: Apple silicon and
+x86_64 Mac release app/DMG builds;
 the x86_64 DMG checksum and seven installer regression tests pass. The webapp
 passes lint, strict typecheck, 801 PostgreSQL-backed tests, and production build;
 its measured coverage scope is 90.09% statements and 83.60% branches;

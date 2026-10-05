@@ -345,14 +345,31 @@ export async function deleteMeeting(id: string): Promise<void> {
   });
 }
 
-const MAX_WEBAPP_OUTBOX_ITEMS = 50;
 let webappOutboxWriteQueue: Promise<void> = Promise.resolve();
 
-function enqueueWebappOutboxMutation(mutation: (outbox: MeetingRecord[]) => MeetingRecord[]): Promise<void> {
-  const current = webappOutboxWriteQueue.catch(() => undefined).then(async () => {
-    const outbox = await getWebappSyncOutbox();
-    await storageSet({ [KEYS.webappSyncOutbox]: mutation(outbox) });
+type WebappSyncOutboxEntry = string | MeetingRecord;
+
+async function readWebappSyncOutboxEntries(): Promise<WebappSyncOutboxEntry[]> {
+  const stored = await storageGet<unknown>(KEYS.webappSyncOutbox);
+  if (!Array.isArray(stored)) return [];
+  return stored.flatMap((entry): WebappSyncOutboxEntry[] => {
+    if (typeof entry === "string" && entry.length > 0) return [entry];
+    const meeting = normalizeMeeting(entry);
+    return meeting ? [meeting] : [];
   });
+}
+
+function webappSyncOutboxMeetingId(entry: WebappSyncOutboxEntry): string {
+  return typeof entry === "string" ? entry : entry.id;
+}
+
+function enqueueWebappOutboxMutation(mutation: (outbox: WebappSyncOutboxEntry[]) => WebappSyncOutboxEntry[]): Promise<void> {
+  const current = webappOutboxWriteQueue.catch(() => undefined).then(() =>
+    withCrossContextLock("notetaker.webappSync.outbox", async () => {
+      const outbox = await readWebappSyncOutboxEntries();
+      await storageSet({ [KEYS.webappSyncOutbox]: mutation(outbox) });
+    }),
+  );
   webappOutboxWriteQueue = current.then(
     () => undefined,
     () => undefined,
@@ -361,18 +378,36 @@ function enqueueWebappOutboxMutation(mutation: (outbox: MeetingRecord[]) => Meet
 }
 
 export async function getWebappSyncOutbox(): Promise<MeetingRecord[]> {
-  const stored = await storageGet<MeetingRecord[]>(KEYS.webappSyncOutbox);
-  return Array.isArray(stored)
-    ? stored.filter((meeting): meeting is MeetingRecord => !!meeting && typeof meeting.id === "string")
-    : [];
+  const entries = await readWebappSyncOutboxEntries();
+  const uniqueIds = [...new Set(entries.map(webappSyncOutboxMeetingId))];
+  if (uniqueIds.length === 0) return [];
+
+  const records = (await storageGet<Record<string, unknown>>(
+    uniqueIds.map((id) => KEYS.meetingPrefix + id),
+  )) ?? {};
+  return uniqueIds
+    .map((id) => normalizeMeeting(records[KEYS.meetingPrefix + id]))
+    .filter((meeting): meeting is MeetingRecord => meeting !== null && meeting !== undefined);
 }
 
 export async function queueWebappSync(meeting: MeetingRecord): Promise<void> {
-  await enqueueWebappOutboxMutation((outbox) => [...outbox.filter((queued) => queued.id !== meeting.id), meeting].slice(-MAX_WEBAPP_OUTBOX_ITEMS));
+  // The meeting archive is the durable payload source; keeping only ids here
+  // avoids duplicating potentially large transcripts and silently evicting
+  // older notes when an outage leaves more than 50 syncs pending.
+  await enqueueMeetingMutation(meeting.id, async () => {
+    // Do not resurrect a note that the user deleted while its network request
+    // was in flight. The active archive write and delete paths share this lock.
+    const archivedMeeting = await getMeeting(meeting.id);
+    if (!archivedMeeting) return;
+    await enqueueWebappOutboxMutation((outbox) => {
+      const retained = outbox.filter((entry) => webappSyncOutboxMeetingId(entry) !== meeting.id);
+      return [...retained, meeting.id];
+    });
+  });
 }
 
 export async function removeWebappSyncOutbox(id: string): Promise<void> {
-  await enqueueWebappOutboxMutation((outbox) => outbox.filter((meeting) => meeting.id !== id));
+  await enqueueWebappOutboxMutation((outbox) => outbox.filter((entry) => webappSyncOutboxMeetingId(entry) !== id));
 }
 
 export interface RemindedCall {

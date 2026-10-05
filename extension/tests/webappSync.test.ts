@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
-import { getWebappSyncOutbox } from "../src/lib/storage";
+import { getWebappSyncOutbox, saveMeeting } from "../src/lib/storage";
 import { flushWebappSyncOutbox, syncMeetingToWebapp } from "../src/lib/webappSync";
 import type { MeetingRecord } from "../src/types";
 
@@ -19,7 +19,10 @@ const settings = {
   webapp: { url: "https://notes.example.test", token: "secret" },
 };
 
-beforeEach(() => chromeMock.reset());
+beforeEach(async () => {
+  chromeMock.reset();
+  await saveMeeting(meeting);
+});
 
 describe("webapp sync durability", () => {
   it("queues a failed optional sync for a later flush", async () => {
@@ -42,6 +45,7 @@ describe("webapp sync durability", () => {
   it("keeps a meeting queued when the server is merely down or unauthorized", async () => {
     for (const status of [401, 429, 503]) {
       chromeMock.reset();
+      await saveMeeting(meeting);
       const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status }));
       await syncMeetingToWebapp(meeting, settings, fetchImpl);
       expect(await getWebappSyncOutbox()).toEqual([meeting]);

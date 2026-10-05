@@ -291,24 +291,85 @@ describe("meeting storage", () => {
     expect(meetings[0]?.summary).toBe("Updated summary");
   });
 
-  it("persists a bounded webapp sync outbox and removes delivered meetings", async () => {
+  it("persists sync outbox ids and hydrates pending meetings from the local archive", async () => {
+    await saveMeeting(meeting);
     await queueWebappSync(meeting);
 
+    expect(chromeMock.storage.local._dump()["notetaker.webappSync.outbox"]).toEqual([meeting.id]);
     expect(await getWebappSyncOutbox()).toEqual([meeting]);
     await removeWebappSyncOutbox(meeting.id);
     expect(await getWebappSyncOutbox()).toEqual([]);
   });
 
+  it("keeps more than 50 pending syncs without duplicating full meeting payloads", async () => {
+    const meetings = Array.from({ length: 60 }, (_, index) => ({
+      ...meeting,
+      id: `queued-${index}`,
+      title: `Meeting ${index}`,
+    }));
+    await Promise.all(meetings.map((item) => saveMeeting(item)));
+    await Promise.all(meetings.map((item) => queueWebappSync(item)));
+
+    expect((await getWebappSyncOutbox()).map((item) => item.id)).toEqual(meetings.map((item) => item.id));
+    const storedOutbox = chromeMock.storage.local._dump()["notetaker.webappSync.outbox"];
+    expect(storedOutbox).toEqual(meetings.map((item) => item.id));
+    expect((storedOutbox as unknown[]).every((entry) => typeof entry === "string")).toBe(true);
+  });
+
+  it("reads and migrates legacy outbox entries stored as full meetings", async () => {
+    await saveMeeting(meeting);
+    await chromeMock.storage.local.set({ "notetaker.webappSync.outbox": [meeting] });
+
+    expect(await getWebappSyncOutbox()).toEqual([meeting]);
+    await queueWebappSync(meeting);
+    expect(chromeMock.storage.local._dump()["notetaker.webappSync.outbox"]).toEqual([meeting.id]);
+    expect(await getWebappSyncOutbox()).toEqual([meeting]);
+  });
+
   it("filters malformed entries restored from an older outbox", async () => {
+    await saveMeeting(meeting);
     await chrome.storage.local.set({ "notetaker.webappSync.outbox": [null, { id: 3 }, meeting] });
     expect(await getWebappSyncOutbox()).toEqual([meeting]);
   });
 
+  it("does not flush a legacy inline entry after its archived meeting is gone", async () => {
+    await saveMeeting(meeting);
+    await deleteMeeting(meeting.id);
+    await chrome.storage.local.set({ "notetaker.webappSync.outbox": [meeting] });
+
+    expect(await getWebappSyncOutbox()).toEqual([]);
+  });
+
   it("serializes concurrent webapp outbox updates without dropping a meeting", async () => {
     const second = { ...meeting, id: "m2", title: "Second meeting" };
+    await Promise.all([saveMeeting(meeting), saveMeeting(second)]);
     await Promise.all([queueWebappSync(meeting), queueWebappSync(second)]);
 
     expect((await getWebappSyncOutbox()).map((item) => item.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("uses a shared Web Lock for outbox updates across extension contexts", async () => {
+    const previousLocks = (navigator as Navigator & { locks?: LockManager }).locks;
+    const request = vi.fn(async (_name: string, callback: (lock: Lock) => Promise<unknown>) => callback({} as Lock));
+    Object.defineProperty(navigator, "locks", { configurable: true, value: { request } as unknown as LockManager });
+
+    try {
+      await saveMeeting(meeting);
+      await queueWebappSync(meeting);
+      expect(request).toHaveBeenCalledWith("notetaker.webappSync.outbox", expect.any(Function));
+    } finally {
+      Object.defineProperty(navigator, "locks", { configurable: true, value: previousLocks });
+    }
+  });
+
+  it("does not queue a meeting after it has been deleted", async () => {
+    await saveMeeting(meeting);
+    await deleteMeeting(meeting.id);
+
+    await queueWebappSync(meeting);
+
+    expect(await getWebappSyncOutbox()).toEqual([]);
+    expect(chromeMock.storage.local._dump()["notetaker.webappSync.outbox"]).toEqual([]);
   });
 });
 
