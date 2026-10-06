@@ -11,20 +11,8 @@
       "strict_min_version": "121.0"
     }
   },
-  "permissions": [
-    "storage",
-    "activeTab",
-    "tabCapture",
-    "offscreen",
-    "notifications",
-    "unlimitedStorage",
-    "clipboardWrite"
-  ],
-  "optional_permissions": [
-    "nativeMessaging",
-    "alarms",
-    "identity"
-  ],
+  "permissions": ["storage", "activeTab", "tabCapture", "offscreen", "notifications", "unlimitedStorage", "clipboardWrite"],
+  "optional_permissions": ["nativeMessaging", "alarms", "identity"],
   "minimum_chrome_version": "116",
   "optional_host_permissions": [
     "https://*/*",
@@ -38,9 +26,7 @@
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": [
-      "background.js"
-    ],
+    "scripts": ["background.js"],
     "type": "module"
   },
   "action": {
@@ -51,67 +37,35 @@
       "128": "icons/icon128.png"
     }
   },
-  "host_permissions": [
-    "https://meet.google.com/*",
-    "https://teams.microsoft.com/*",
-    "https://teams.live.com/*",
-    "https://teams.cloud.microsoft/*",
-    "https://*.zoom.us/*",
-    "https://discord.com/*",
-    "https://app.slack.com/*"
-  ],
+  "host_permissions": ["https://meet.google.com/*", "https://teams.microsoft.com/*", "https://teams.live.com/*", "https://teams.cloud.microsoft/*", "https://*.zoom.us/*", "https://discord.com/*", "https://app.slack.com/*"],
   "content_scripts": [
     {
-      "matches": [
-        "https://meet.google.com/*"
-      ],
-      "js": [
-        "content/directMain.js"
-      ],
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content/directMain.js"],
       "world": "MAIN",
       "run_at": "document_start",
       "all_frames": false
     },
     {
-      "matches": [
-        "https://meet.google.com/*"
-      ],
-      "js": [
-        "content/directBridge.js"
-      ],
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content/directBridge.js"],
       "run_at": "document_start",
       "all_frames": false
     },
     {
-      "matches": [
-        "https://meet.google.com/*",
-        "https://teams.microsoft.com/*",
-        "https://teams.live.com/*",
-        "https://teams.cloud.microsoft/*",
-        "https://*.zoom.us/*",
-        "https://discord.com/*",
-        "https://app.slack.com/*"
-      ],
-      "js": [
-        "content/meetWidget.js"
-      ],
+      "matches": ["https://meet.google.com/*", "https://teams.microsoft.com/*", "https://teams.live.com/*", "https://teams.cloud.microsoft/*", "https://*.zoom.us/*", "https://discord.com/*", "https://app.slack.com/*"],
+      "js": ["content/meetWidget.js"],
       "run_at": "document_idle",
       "all_frames": false
     }
   ],
   "commands": {
     "toggle-recording": {
-      "suggested_key": {
-        "default": "Alt+Shift+R",
-        "mac": "Alt+Shift+R"
-      },
+      "suggested_key": { "default": "Alt+Shift+R", "mac": "Alt+Shift+R" },
       "description": "Start or stop recording the current browser meeting tab"
     },
     "add-bookmark": {
-      "suggested_key": {
-        "default": "Alt+Shift+B",
-        "mac": "Alt+Shift+B"
-      },
+      "suggested_key": { "default": "Alt+Shift+B", "mac": "Alt+Shift+B" },
       "description": "Flag this moment in the current recording"
     }
   },
