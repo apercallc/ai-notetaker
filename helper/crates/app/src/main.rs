@@ -3847,6 +3847,25 @@ fn build_audio_backend() -> Arc<dyn AudioCapture> {
     }
 }
 
+#[cfg(desktop)]
+fn apply_default_autostart<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    data_dir: &std::path::Path,
+) {
+    use tauri_plugin_autostart::ManagerExt;
+    let marker = data_dir.join("autostart-default-applied");
+    if marker.exists() {
+        return;
+    }
+    if let Err(error) = app.autolaunch().enable() {
+        tracing::warn!(%error, "could not enable launch at login by default");
+        return;
+    }
+    if let Err(error) = std::fs::write(&marker, b"1") {
+        tracing::warn!(%error, "could not record the launch-at-login default");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4280,24 +4299,5 @@ mod tests {
                 std::time::Duration::from_secs(4),
             ]
         );
-    }
-}
-
-#[cfg(desktop)]
-fn apply_default_autostart<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    data_dir: &std::path::Path,
-) {
-    use tauri_plugin_autostart::ManagerExt;
-    let marker = data_dir.join("autostart-default-applied");
-    if marker.exists() {
-        return;
-    }
-    if let Err(error) = app.autolaunch().enable() {
-        tracing::warn!(%error, "could not enable launch at login by default");
-        return;
-    }
-    if let Err(error) = std::fs::write(&marker, b"1") {
-        tracing::warn!(%error, "could not record the launch-at-login default");
     }
 }
