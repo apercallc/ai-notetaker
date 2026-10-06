@@ -10,6 +10,12 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  // Directives that never block Next's inline bootstrap scripts, so no nonce
+  // plumbing is needed: no framing, no plugins, no base-tag or form hijacking.
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+  },
 ];
 
 const nextConfig = {

@@ -8,8 +8,9 @@ extension saves tab and microphone audio in Chrome; export its archive and
 import it in desktop for transcription. Add your own transcription and summary
 API keys in desktop Settings. Optional workspace sync sends finished desktop
 notes to the web app and copies workspace notes into the desktop library.
-Web edits refresh workspace copies on sync; deletions and settings do not sync back. extension recordings
-still need archive export and import. Audio and provider keys stay on this device.
+Web edits refresh workspace copies on sync; deletions and settings do not sync
+back. Extension recordings still need archive export and import. Audio and
+provider keys stay on this device.
 
 > **Status:** Preview installers are published for macOS, Windows, and
 > Debian/Ubuntu Linux. They are unsigned, and real-call capture and

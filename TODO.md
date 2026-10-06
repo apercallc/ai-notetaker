@@ -685,6 +685,12 @@ Moved out of the checklist so that every unchecked box in this file needs you.
       dashboards remain engineering follow-ups; live budgets, CORS and restore
       proof need the deployment accounts. Pricing/allowances remain a decision.
 - Dependencies (waiting on upstream): CPAL 0.17+ once macOS 13 support is preserved (CoreAudio releases need macOS 14.2).
+- Dependencies (waiting on upstream): extension ESLint. `typescript-eslint` 8.71.1
+      peers `typescript <6.1`, and the extension is on TypeScript 7, so a
+      TS-aware lint step cannot be installed without a downgrade or
+      `--legacy-peer-deps`. Strict `tsc --noEmit` is the extension's gate until then.
+- Webapp CSP is a baseline (`frame-ancestors`, `object-src`, `base-uri`,
+      `form-action`); restricting `script-src`/`style-src` needs per-request nonces.
 - Dependencies (waiting on upstream): webapp TypeScript 7 and ESLint 10 once `eslint-config-next` supports them; Dependabot ignores only the blocked majors.
 - Enable live transcription for Hosted AI only after adding server-owned
       real-time usage reservation/metering and a verified short-lived Deepgram
