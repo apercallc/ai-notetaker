@@ -218,10 +218,14 @@ workflow targets Apple silicon and Intel Macs, 64-bit Windows, and 64-bit
 Debian/Ubuntu Linux.
 
 - **Mac:** choose the Apple silicon or Intel DMG that matches your Mac, open it,
-  and double-click **Install AI Notetaker.command**. Approve this app in the
-  confirmation prompt. The guided installer copies AI Notetaker to
-  Applications and opens it. The package is not notarized; never run a command
-  that disables Gatekeeper globally.
+  and double-click **Install AI Notetaker.command**. The package is not
+  notarized, so macOS blocks it the first time with a "Not Opened" dialog that
+  offers only Cancel and Move to Trash. Choose **Cancel**, open **System
+  Settings → Privacy & Security → Security**, click **Open Anyway** next to the
+  installer, and enter your password. Then double-click the installer again and
+  choose **Install**; it copies AI Notetaker to Applications and opens it. Repeat
+  **Open Anyway** if macOS also blocks the app. Never run a command that
+  disables Gatekeeper globally.
 - **Windows:** run the downloaded installer. If SmartScreen appears, confirm
   the file came from the official GitHub release and compare its SHA-256 with
   `SHA256SUMS`; then choose **More info → Run anyway**. Never disable

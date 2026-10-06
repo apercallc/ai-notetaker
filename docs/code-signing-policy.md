@@ -17,12 +17,13 @@ signing. The manifest marks unsigned artifacts as `unsigned`.
 ## First-open warnings
 
 - **macOS guided installer:** open a DMG whose name ends in
-  `-installer.dmg`, double-click **Install AI Notetaker.command**, and choose
-  **Install**. It verifies the bundle, copies the app to Applications, removes
+  `-installer.dmg`, double-click **Install AI Notetaker.command**. macOS blocks it
+  the first time ("Not Opened", only Cancel and Move to Trash): choose Cancel,
+  approve it in **System Settings → Privacy & Security → Open Anyway**, then
+  run it again and choose **Install**. It verifies the bundle, copies the app to Applications, removes
   the download quarantine from that app only after explicit approval, registers
   the browser connection, and opens the menu bar app. No sudo, driver, or
-  global Gatekeeper change is used. If macOS blocks the installer itself, use
-  **System Settings → Privacy & Security → Open Anyway** if offered. Device
+  global Gatekeeper change is used. Device
   management policies may require administrator approval; this is not a
   guaranteed warning-free substitute for notarization.
 - **Windows:** check that the installer came from the official GitHub release
