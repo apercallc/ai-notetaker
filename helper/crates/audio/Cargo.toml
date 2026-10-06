@@ -22,7 +22,7 @@ tokio = { workspace = true }
 # cpal does not expose Windows output-loopback capture. Keep the native
 # WASAPI implementation target-specific so Linux/macOS builds do not pull in
 # Windows bindings.
-wasapi = "0.24"
+wasapi = "0.25"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # ScreenCaptureKit captures the default system output without requiring a
