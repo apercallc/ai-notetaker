@@ -1155,9 +1155,12 @@ fn main() {
             ))?;
 
             let root = root.clone();
-            // Launch-at-login remains opt-in. The desktop window is now the
-            // primary surface; the Native Messaging socket stays for old installs.
             secure_data_dir(&root).map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
+            // Launch-at-login is on by default so recovery and the tray are
+            // available after a reboot. It is applied once per install: the
+            // marker keeps a later tray opt-out from being undone on upgrade.
+            #[cfg(desktop)]
+            apply_default_autostart(app.handle(), &root);
             let store = Arc::new(
                 MeetingStore::new(&root)
                     .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?,
@@ -4277,5 +4280,21 @@ mod tests {
                 std::time::Duration::from_secs(4),
             ]
         );
+    }
+}
+
+#[cfg(desktop)]
+fn apply_default_autostart<R: tauri::Runtime>(app: &tauri::AppHandle<R>, data_dir: &std::path::Path) {
+    use tauri_plugin_autostart::ManagerExt;
+    let marker = data_dir.join("autostart-default-applied");
+    if marker.exists() {
+        return;
+    }
+    if let Err(error) = app.autolaunch().enable() {
+        tracing::warn!(%error, "could not enable launch at login by default");
+        return;
+    }
+    if let Err(error) = std::fs::write(&marker, b"1") {
+        tracing::warn!(%error, "could not record the launch-at-login default");
     }
 }

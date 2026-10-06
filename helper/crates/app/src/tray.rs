@@ -2,7 +2,7 @@
 //!
 //! The helper has no main window. Tauri owns the process main thread, while
 //! this module keeps the menu small and platform-native: status first, recent
-//! notes next, an explicit opt-in launch-at-login action, and quit last.
+//! notes next, a launch-at-login toggle (on by default), and quit last.
 //!
 //! The icon is the recording consent cue: a red dot while capturing, a
 //! neutral ring when idle, and an amber attention icon while recordings from
