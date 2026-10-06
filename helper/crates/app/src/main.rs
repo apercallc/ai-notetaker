@@ -4284,7 +4284,10 @@ mod tests {
 }
 
 #[cfg(desktop)]
-fn apply_default_autostart<R: tauri::Runtime>(app: &tauri::AppHandle<R>, data_dir: &std::path::Path) {
+fn apply_default_autostart<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    data_dir: &std::path::Path,
+) {
     use tauri_plugin_autostart::ManagerExt;
     let marker = data_dir.join("autostart-default-applied");
     if marker.exists() {
