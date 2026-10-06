@@ -24,6 +24,12 @@ legacy extension path, load `extension/dist` separately.
 
 ## macOS
 
+Approve the app once, with no Terminal commands: open **System Settings →
+Privacy & Security**, scroll to **Security**, choose **Open Anyway** next to
+AI Notetaker, and enter your password (macOS 13/14: Control-click the file and
+choose **Open**). The guided installer's approval also clears the download
+quarantine on the installed app, so the app itself does not prompt again.
+
 Open the downloaded preview or locally built `.app` from Finder. macOS may show
 an unidentified developer warning. Only bypass that warning for an artifact
 from the official release page or a build whose source and checksum you have
@@ -41,9 +47,10 @@ claim.
 
 ## Windows
 
-Run the preview MSI/NSIS installer only if you trust the official release and
-have verified its checksum. Windows SmartScreen warnings are expected for an
-unsigned installer. Do not disable SmartScreen globally; use the installer’s
+Run the preview installer only if you trust the official release and have
+verified its checksum. It installs for the current user and needs no
+administrator password. SmartScreen warnings are expected for an unsigned
+installer: choose **More info → Run anyway**. Do not disable SmartScreen globally; use the installer’s
 per-file **More info → Run anyway** path only for this preview.
 
 Do not treat a checksum as proof of publisher identity. Only install preview

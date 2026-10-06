@@ -307,18 +307,18 @@ export function DownloadView({
                                   <li>Open the downloaded .dmg and double-click <strong>Install AI Notetaker.command</strong>.</li>
                                   <li>Choose <strong>Install</strong> in the confirmation dialog. It copies the app to Applications and opens it.</li>
                                 </ol>
-                                <p>This release is not notarized by Apple. If macOS blocks it, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</p>
+                                <p>This release is not notarized by Apple, so macOS asks you to approve it once. If it says &quot;cannot be opened&quot;, open <strong>System Settings → Privacy &amp; Security</strong>, scroll to <strong>Security</strong>, choose <strong>Open Anyway</strong> next to AI Notetaker, and enter your password. No Terminal commands are needed. More detail: <a href={UNSIGNED_DOC}>first-open guide</a>.</p>
                               </>
                             ) : (
                               <ol>
                                 <li>Open the downloaded .dmg and drag <strong>AI Notetaker</strong> into Applications.</li>
-                                <li>Open the app. If macOS blocks it, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
+                                <li>Open the app. If macOS says it cannot be opened, go to <strong>System Settings → Privacy &amp; Security</strong>, choose <strong>Open Anyway</strong> next to AI Notetaker, and enter your password. No Terminal commands are needed. More detail: <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
                               </ol>
                             )
                           ) : assetPlatform === "windows" ? (
                             <ol>
-                              <li>Run the downloaded installer and follow its prompts.</li>
-                              <li>Open <strong>AI Notetaker</strong> from the Start menu. If SmartScreen blocks the unsigned installer, see the <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
+                              <li>Run the downloaded installer. If Windows shows &quot;Windows protected your PC&quot;, choose <strong>More info</strong>, then <strong>Run anyway</strong>. It installs for your account only and needs no administrator password.</li>
+                              <li>Open <strong>AI Notetaker</strong> from the Start menu. More detail: <a href={UNSIGNED_DOC}>first-open guide</a>.</li>
                             </ol>
                           ) : (
                             <ol>

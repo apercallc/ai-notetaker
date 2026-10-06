@@ -41,6 +41,7 @@ it("shows direct desktop downloads and extension capture when installers are pub
   expect(desktopSection).toContain("audio is sent directly to your chosen transcription provider");
   expect(desktopSection).toContain("the resulting transcript is sent to your chosen summary provider");
   expect(desktopSection).toContain("Install on macOS · Apple silicon");
+  expect(desktopSection).toContain("Open Anyway");
   expect(desktopSection).toContain("macOS · Intel");
   expect(desktopSection).toContain('href="https://github.com/apercallc/ai-notetaker/releases/download/v1.0.0/app-x86_64.dmg"');
   expect(desktopSection).toContain("No AI Notetaker account is needed.");

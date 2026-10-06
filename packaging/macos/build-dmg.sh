@@ -26,8 +26,15 @@ release: https://github.com/apercallc/ai-notetaker/releases/latest
 Existing extension users may keep using their browser connection during
 migration. New desktop users do not need Chrome or Native Messaging.
 
-If macOS blocks the installer itself, choose System Settings > Privacy & Security
-> Open Anyway, if offered. Managed Macs may require administrator approval.
+macOS asks you to approve this free app once. If it says the installer or app
+"cannot be opened" or "could not be verified":
+  1. Open System Settings > Privacy & Security.
+  2. Scroll to Security and choose Open Anyway next to AI Notetaker.
+  3. Enter your Mac password and choose Open.
+(On macOS 13 and 14 you can instead Control-click the file and choose Open.)
+No Terminal commands are needed. If you drag AI Notetaker to Applications
+yourself instead of using the installer, approve it the same way the first time.
+Managed Macs may require administrator approval.
 EOF
 mkdir -p "$(dirname "$output")"
 hdiutil create -volname "AI Notetaker" -srcfolder "$stage" -ov -format UDZO "$output"
