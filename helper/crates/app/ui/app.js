@@ -3,7 +3,7 @@
 
   const invoke = window.__TAURI__?.core?.invoke;
   const listen = window.__TAURI__?.event?.listen;
-  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0 };
+  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const prettyDate = (value) => {
@@ -15,6 +15,7 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
   };
+  const DEFAULT_WEBAPP_URL = "https://ai-notetaker.apercallc.com";
   const providerName = (id) => ({ deepgram: "Deepgram", groq: "Groq", claude: "Claude", gemini: "Gemini", deepseek: "DeepSeek" })[id] || id;
   const providerKeySaved = (settings, id) => settings[{ deepgram: "hasDeepgramKey", groq: "hasGroqKey", claude: "hasClaudeKey", gemini: "hasGeminiKey", deepseek: "hasDeepseekKey" }[id]];
   const meetingModeName = (id) => ({ general: "General", standup: "Stand-up", sales: "Sales", one_on_one: "1:1", interview: "Interview", lecture: "Lecture", custom: "Custom" })[id] || id;
@@ -126,6 +127,7 @@
       recording ? "recording" : needsAttention ? "needs-attention" : "",
     );
     $("#open-webapp").hidden = !snapshot.settings.preferences.webappUrl;
+    $("#settings-nav-dot").hidden = appReady;
     if (snapshot.credentialStoreError) notify(snapshot.credentialStoreError, "error");
     else if (snapshot.unreadableRecordings) notify(`${snapshot.unreadableRecordings} recording${snapshot.unreadableRecordings === 1 ? "" : "s"} could not be read. Other notes remain available.`, "warn");
     try {
@@ -146,7 +148,7 @@
     const keyReady = providerKeySaved(s.settings, s.settings.preferences.transcriptionProvider)
       && providerKeySaved(s.settings, s.settings.preferences.summarizationProvider);
     const setup = s.credentialStoreError || !keyReady;
-    const setupMessage = s.credentialStoreError || `Add your ${providerName(s.settings.preferences.transcriptionProvider)} and ${providerName(s.settings.preferences.summarizationProvider)} API keys in Settings to start.`;
+    const setupMessage = s.credentialStoreError || `${s.webappSync.configured ? "Web app sync is connected, but it only syncs notes. " : ""}Recording runs on this device with your own provider keys. Add a ${providerName(s.settings.preferences.transcriptionProvider)} key (transcription) and a ${providerName(s.settings.preferences.summarizationProvider)} key (summaries) in Settings → AI providers. You can switch providers there to use ones you already have.`;
     const startHint = recordingStartHint({
       credentialStoreError: s.credentialStoreError,
       keyReady,
@@ -171,7 +173,7 @@
     const processing = s.meetings.filter((meeting) => meeting.status === "processing").length;
     const finalizing = s.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
     $("#content").innerHTML = `
-      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError ? "" : " Your provider keys stay in this device’s credential store."}</span></div></div>` : ""}
+      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError ? "" : " Your provider keys stay in this device’s credential store."}</span>${s.credentialStoreError ? "" : '<button class="small-button" id="goto-providers">Add provider keys</button>'}</div></div>` : ""}
       ${recoverable ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Saved audio needs recovery</strong><span>${esc(recoverable.title)} was interrupted. Its audio is still on this device.</span><button class="small-button" id="open-recoverable">Open recording</button></div></div>` : ""}
       ${processing ? `<p class="process-status" role="status">Preparing notes from ${processing} saved recording${processing === 1 ? "" : "s"}. You can keep using the app.</p>` : ""}
       ${finalizing ? '<p class="process-status">Finishing saved audio. It stays on this device while notes are prepared.</p>' : ""}
@@ -186,8 +188,8 @@
             : `<button class="primary-button" id="start-recording" aria-describedby="start-recording-hint" ${!state.recordConsentAcknowledged || !audio.ready || !keyReady || s.credentialStoreError || state.busy ? "disabled" : ""}><span class="record-icon"></span>Start recording</button><span class="fine-print" id="start-recording-hint">${esc(startHint)}</span>`}
           </div>
         </section>
-        <section class="card audio-card" aria-labelledby="audio-heading">
-          <div class="audio-card-head"><h2 id="audio-heading">Audio setup</h2><span class="readiness ${audio.checking ? "checking" : audio.ready ? "" : "warn"}">${audio.checking ? audio.timedOut ? "Check taking longer" : "Checking audio" : audio.ready ? "Ready" : audio.permissionRequired ? "Permission needed" : "Check setup"}</span></div>
+        <details class="card audio-card" ${audio.ready && !audio.checking ? "" : "open"}>
+          <summary class="audio-card-head"><h2 id="audio-heading">Audio setup</h2><span class="readiness ${audio.checking ? "checking" : audio.ready ? "" : "warn"}">${audio.checking ? audio.timedOut ? "Check taking longer" : "Checking audio" : audio.ready ? "Ready" : audio.permissionRequired ? "Permission needed" : "Check setup"}</span></summary>
           <div class="device-list">
             <div class="device-row"><span class="device-icon" aria-hidden="true">◖</span><div><strong>Microphone</strong><span>${esc(audio.microphone || "Default microphone")}</span></div></div>
             <div class="device-row"><span class="device-icon" aria-hidden="true">◉</span><div><strong>System audio</strong><span>${esc(audio.speaker || "Default output")}</span></div></div>
@@ -196,7 +198,7 @@
           ${audioGuidance}
           <p class="guidance">System audio can include other apps and notifications. Keep unrelated audio quiet during the call.</p>
           <div class="audio-actions">${openAudioSettings}<button class="small-button" id="check-audio">Check audio again</button></div>
-        </section>
+        </details>
       </div>
       <div class="section-heading"><div><h2>Recent notes</h2><p>Your recordings are saved locally first.</p></div><button class="small-button" id="all-notes">View all</button></div>
       ${recent.length ? `<div class="recent-list">${recent.map((meeting) => meetingCard(meeting)).join("")}</div>` : `<div class="empty-state"><strong>No recordings yet</strong>Start a recording. Your transcript and notes will appear here.</div>`}`;
@@ -229,6 +231,7 @@
       catch (error) { notify(String(error), "error"); }
     });
     $("#all-notes")?.addEventListener("click", () => setPage("notes"));
+    $("#goto-providers")?.addEventListener("click", () => { state.settingsOpen.providers = true; setPage("settings"); requestAnimationFrame(() => $("#settings-providers h2")?.focus({ preventScroll: false })); });
     for (const button of document.querySelectorAll("[data-meeting-id]")) button.addEventListener("click", () => openMeeting(button.dataset.meetingId));
   }
 
@@ -567,7 +570,7 @@
     const modes = `<option value="general" ${p.defaultMeetingMode === "general" ? "selected" : ""}>General</option><option value="standup" ${p.defaultMeetingMode === "standup" ? "selected" : ""}>Stand-up</option><option value="sales" ${p.defaultMeetingMode === "sales" ? "selected" : ""}>Sales</option><option value="one_on_one" ${p.defaultMeetingMode === "one_on_one" ? "selected" : ""}>1:1</option><option value="interview" ${p.defaultMeetingMode === "interview" ? "selected" : ""}>Interview</option><option value="lecture" ${p.defaultMeetingMode === "lecture" ? "selected" : ""}>Lecture</option><option value="custom" ${p.defaultMeetingMode === "custom" ? "selected" : ""}>Custom</option>`;
     let providerKeyMarkup = "";
     keyFields.forEach((key) => {
-      providerKeyMarkup += `<div class="form-field"><label class="field-label" for="key-${key.id}">${key.label} <span class="fine-print">· ${key.description}</span></label><div class="key-row"><input class="text-input" id="key-${key.id}" type="password" autocomplete="new-password" placeholder="${s[key.saved] ? "Saved securely · blank keeps current key" : "Paste API key"}" /><button type="button" class="secondary-button test-key" data-provider="${key.id}">Check</button></div><label class="key-status" id="key-status-${key.id}">${s[key.saved] ? "A key is saved securely on this device." : "No key saved."}</label><label class="fine-print"><input type="checkbox" id="clear-${key.id}" /> Remove saved key</label></div>`;
+      providerKeyMarkup += `<div class="form-field" data-key-field="${key.id}"><label class="field-label" for="key-${key.id}">${key.label} <span class="fine-print">· ${key.description}</span></label><div class="key-row"><input class="text-input" id="key-${key.id}" type="password" autocomplete="new-password" placeholder="${s[key.saved] ? "Saved securely · blank keeps current key" : "Paste API key"}" /><button type="button" class="secondary-button test-key" data-provider="${key.id}">Check</button></div><label class="key-status" id="key-status-${key.id}">${s[key.saved] ? "A key is saved securely on this device." : "No key saved."}</label><label class="fine-print"><input type="checkbox" id="clear-${key.id}" /> Remove saved key</label></div>`;
     });
     const conflicts = state.snapshot.webappSync.conflicts || [];
     const conflictSummary = "Choose an action for each note: replace edited web versions, recreate removed web notes, or keep copies separate. Restore trashed notes before replacing them.";
@@ -591,38 +594,63 @@
         return `<div class="sync-conflict-item"><strong>${title}</strong><div class="inline-actions">${reviewAction}<button type="button" class="${desktopClass}" data-sync-resolution="use_desktop" data-sync-reason="${esc(conflict.reason)}" data-sync-replace-unavailable="${replaceUnavailable}" data-sync-conflict="${esc(conflict.key)}" aria-label="${desktopLabel}: ${title}" ${replaceUnavailable || state.syncInProgress ? "disabled" : ""}>${desktopLabel}</button><button type="button" class="secondary-button" data-sync-resolution="keep_separate" data-sync-reason="${esc(conflict.reason)}" data-sync-conflict="${esc(conflict.key)}" aria-label="${separateLabel}: ${title}" ${state.syncInProgress ? "disabled" : ""}>${separateLabel}</button></div>${hintMarkup}</div>`;
       }).join("")}</div></details>`
       : "";
-    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="providers" aria-current="true">AI providers</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button></nav><form id="settings-form" class="settings-stack">
+    const providersReady = providerKeySaved(s, p.transcriptionProvider) && providerKeySaved(s, p.summarizationProvider);
+    const syncState = state.snapshot.webappSync;
+    const syncBadge = conflicts.length ? ["Needs review", "warn"] : syncState.configured ? ["Connected", "ok"] : s.hasWebappToken ? ["Check connection", "warn"] : ["Optional", ""];
+    const defaultOpen = { providers: !providersReady, "note-style": false, sync: Boolean(conflicts.length || syncState.lastError), import: false };
+    const isOpen = (id) => (id in state.settingsOpen ? state.settingsOpen[id] : defaultOpen[id]);
+    const section = (id, title, badge, intro, body) => `<details class="card settings-card" id="settings-${id}" ${isOpen(id) ? "open" : ""}><summary><h2 tabindex="-1">${title}</h2><span class="section-badge ${badge[1]}">${esc(badge[0])}</span></summary><div class="settings-body"><p>${intro}</p>${body}</div></details>`;
+    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="providers" aria-current="true">AI providers${providersReady ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
       ${state.snapshot.credentialStoreError ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Secure storage is unavailable</strong><span>${esc(state.snapshot.credentialStoreError)}</span></div></div>` : ""}
-      <section class="card settings-card" id="settings-providers"><h2 tabindex="-1">AI providers</h2><p>Use your provider API keys. They are stored in your operating system’s credential store.</p>
-        <div class="form-grid"><div class="form-field"><label class="field-label" for="transcription-provider">Transcription provider</label><select class="select-input" id="transcription-provider">${transcription}</select></div><div class="form-field"><label class="field-label" for="summarization-provider">Summary provider</label><select class="select-input" id="summarization-provider">${summarization}</select></div>
-        ${providerKeyMarkup}</div>
-      </section>
-      <section class="card settings-card" id="settings-note-style"><h2 tabindex="-1">Notes &amp; language</h2><p>Choose the default summary style and words your providers should recognize.</p><div class="form-grid">
+      ${section("providers", "AI providers", providersReady ? ["Ready", "ok"] : ["Keys needed", "warn"],
+        "Recording runs on this device with your own API keys, stored in your operating system’s credential store. You only need one transcription key and one summary key.",
+        `<div class="form-grid"><div class="form-field"><label class="field-label" for="transcription-provider">Transcription provider</label><select class="select-input" id="transcription-provider">${transcription}</select></div><div class="form-field"><label class="field-label" for="summarization-provider">Summary provider</label><select class="select-input" id="summarization-provider">${summarization}</select></div></div>
+        <h3 class="subhead">Keys you need</h3><div class="form-grid" id="keys-active"></div>
+        <details class="other-keys" id="other-keys-details"><summary>Other providers <span class="fine-print">optional · switch providers above to use them</span></summary><div class="form-grid" id="keys-other"></div></details>
+        <template id="key-fields">${providerKeyMarkup}</template>`)}
+      ${section("note-style", "Notes &amp; language", [meetingModeName(p.defaultMeetingMode), ""], "Choose the default summary style and words your providers should recognize.",
+        `<div class="form-grid">
         <div class="form-field wide"><label class="field-label" for="meeting-mode">Default meeting style</label><select class="select-input" id="meeting-mode">${modes}</select></div>
         <div class="form-field wide"><label class="field-label" for="vocabulary">Custom vocabulary <span class="fine-print">one term per line</span></label><textarea class="text-area" id="vocabulary" placeholder="Product names, acronyms, and people">${esc(vocabulary)}</textarea></div>
-        <div class="form-field wide"><label class="field-label" for="instructions">Summary instructions <span class="fine-print">optional</span></label><textarea class="text-area" id="instructions" maxlength="4000" placeholder="What should summaries focus on?">${esc(p.customSummaryInstructions)}</textarea></div></div>
-      </section>
-      <section class="card settings-card" id="settings-sync"><h2 tabindex="-1">Web app sync</h2><p>Optional. Local recording works without an account. Upload finished desktop notes to a workspace and bring notes from the web app into this library.</p>
-        <div class="form-grid"><div class="form-field wide"><label class="field-label" for="webapp-url">Web-app URL</label><input class="text-input" id="webapp-url" type="url" value="${esc(p.webappUrl)}" placeholder="https://notes.example.com" autocomplete="url" /></div>
-        <div class="form-field wide"><label class="field-label" for="webapp-token">Desktop sync token</label><div class="key-row"><input class="text-input" id="webapp-token" type="password" autocomplete="new-password" placeholder="${s.hasWebappToken ? "Saved securely · blank keeps current token" : "Paste desktop sync token"}" /><button type="button" class="secondary-button" id="test-webapp">Test connection</button></div><label class="key-status" id="webapp-status">${s.hasWebappToken ? (state.snapshot.webappSync.configured ? `Sync enabled · ${state.snapshot.webappSync.pending} note(s) pending` : "Token saved. Check the URL and connection.") : "No sync token saved."}</label><label class="fine-print"><input type="checkbox" id="clear-webapp-token" /> Remove saved token</label></div></div>
-        <div class="privacy-note"><p>To connect, sign in to the web app, create a “Desktop note sync” token in Settings → Integrations, and paste it here.</p><p>Finished desktop notes upload to the selected workspace. Notes created in the web app are copied here and updated on the next sync. Web edits do not change recordings made on this desktop. Note deletions and settings do not sync between the desktop and web app.</p><p>This workspace sync sends notes only; it does not send raw audio or provider keys. Import extension recordings from an archive.</p></div>
+        <div class="form-field wide"><label class="field-label" for="instructions">Summary instructions <span class="fine-print">optional</span></label><textarea class="text-area" id="instructions" maxlength="4000" placeholder="What should summaries focus on?">${esc(p.customSummaryInstructions)}</textarea></div></div>`)}
+      ${section("sync", "Web app sync", syncBadge, "Optional. Local recording works without an account. Upload finished desktop notes to a workspace and bring web app notes into this library.",
+        `<div class="form-grid">${url_field}
+        ${token_field}</div>
+        <p class="fine-print">Get a token: sign in at <button type="button" class="inline-link" id="open-webapp-account">the web app</button>, then Settings → Integrations → create a “Desktop note sync” token and copy it here.</p>
         ${conflictMarkup}
-        ${state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : ""}
-        ${state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : ""}
-      </section>
-      <section class="card settings-card" id="settings-import"><h2 tabindex="-1">Import from the extension</h2><p>Import a full archive to bring over new browser meeting recordings, older notes, partial transcripts, and any raw audio still saved by the extension. Older completed-call audio may already have been removed after notes were saved. API keys, web-app credentials, and Google connections stay separate. Import copies data; it never removes the extension source.</p>
-        <button type="button" class="secondary-button" id="import-desktop-audio-transfer">Choose full archive</button>
+        ${sync_status}
+        ${sync_controls}
+        <details class="other-keys"><summary>What gets synced</summary><div class="privacy-note"><p>Finished desktop notes upload to the selected workspace. Notes created in the web app are copied here and updated on the next sync. Web edits do not change recordings made on this desktop. Note deletions and settings do not sync between the desktop and web app.</p><p>This workspace sync sends notes only; it does not send raw audio or provider keys.</p></div></details>`)}
+      ${section("import", "Import from the extension", ["Optional", ""], "Bring over browser meeting recordings and older notes. Import copies data; it never removes the extension source.",
+        `<details class="other-keys"><summary>What is included</summary><p class="fine-print">A full archive brings new browser meeting recordings, older notes, partial transcripts, and any raw audio still saved by the extension. Older completed-call audio may already have been removed after notes were saved. API keys, web-app credentials, and Google connections stay separate.</p></details>
+        <div class="inline-actions"><button type="button" class="secondary-button" id="import-desktop-audio-transfer">Choose full archive</button><button type="button" class="secondary-button" id="choose-desktop-transfer">Import notes-only file</button></div>
         <p class="key-status" id="desktop-audio-transfer-status" role="status" aria-live="polite"></p>
-        <p class="fine-print">Older notes-only JSON transfer files can still be imported below.</p>
         <input id="desktop-transfer-file" type="file" accept=".json,application/json" hidden />
-        <button type="button" class="secondary-button" id="choose-desktop-transfer">Import notes-only file</button>
-        <p class="key-status" id="desktop-transfer-status" role="status" aria-live="polite"></p>
-      </section>
-      <div class="settings-footer"><span class="settings-hint">Blank credential fields keep saved values.</span><button type="submit" class="primary-button" id="save-settings">Save settings</button></div>
+        <p class="key-status" id="desktop-transfer-status" role="status" aria-live="polite"></p>`)}
+      <div class="settings-footer"><span class="settings-hint" id="settings-hint">Blank credential fields keep saved values.</span><button type="submit" class="primary-button" id="save-settings">Save settings</button></div>
     </form></div>`;
+    const arrangeProviderKeys = () => {
+      const chosen = new Set([$("#transcription-provider").value, $("#summarization-provider").value]);
+      const active = $("#keys-active");
+      const other = $("#keys-other");
+      for (const field of document.querySelectorAll("[data-key-field]")) (chosen.has(field.dataset.keyField) ? active : other).append(field);
+    };
+    const keyTemplate = $("#key-fields");
+    $("#keys-other").append(keyTemplate.content);
+    arrangeProviderKeys();
+    $("#transcription-provider").addEventListener("change", arrangeProviderKeys);
+    $("#summarization-provider").addEventListener("change", arrangeProviderKeys);
+    for (const details of document.querySelectorAll(".settings-card")) details.addEventListener("toggle", () => {
+      state.settingsOpen[details.id.replace("settings-", "")] = details.open;
+    });
+    const setAll = (open) => { for (const details of document.querySelectorAll(".settings-card")) details.open = open; };
+    $("#expand-all").addEventListener("click", () => setAll(true));
+    $("#collapse-all").addEventListener("click", () => setAll(false));
+    $("#open-webapp-account")?.addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
     $("#settings-form").addEventListener("submit", saveSettings);
-    $("#settings-form").addEventListener("input", () => { state.settingsDirty = true; });
-    $("#settings-form").addEventListener("change", () => { state.settingsDirty = true; });
+    const markDirty = () => { state.settingsDirty = true; const hint = $("#settings-hint"); if (hint) { hint.textContent = "Unsaved changes"; hint.classList.add("dirty"); } };
+    $("#settings-form").addEventListener("input", markDirty);
+    $("#settings-form").addEventListener("change", markDirty);
     for (const button of document.querySelectorAll(".test-key")) button.addEventListener("click", () => testKey(button.dataset.provider));
     $("#test-webapp")?.addEventListener("click", testWebapp);
     $("#sync-existing")?.addEventListener("click", syncExisting);
@@ -656,6 +684,7 @@
       for (const item of document.querySelectorAll("[data-settings-section]")) item.removeAttribute("aria-current");
       button.setAttribute("aria-current", "true");
       const section = document.getElementById(`settings-${button.dataset.settingsSection}`);
+      if (section) section.open = true;
       section?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
       section?.querySelector("h2")?.focus({ preventScroll: true });
     });

@@ -305,9 +305,11 @@ export function DownloadView({
                               <>
                                 <ol>
                                   <li>Open the downloaded .dmg and double-click <strong>Install AI Notetaker.command</strong>.</li>
-                                  <li>Choose <strong>Install</strong> in the confirmation dialog. It copies the app to Applications and opens it.</li>
+                                  <li>macOS blocks it the first time because this release is not notarized by Apple. The dialog says &quot;Not Opened&quot; with only Cancel and Move to Trash. Choose <strong>Cancel</strong>, not Move to Trash.</li>
+                                  <li>Open <strong>System Settings → Privacy &amp; Security</strong>, scroll to <strong>Security</strong>, choose <strong>Open Anyway</strong> next to Install AI Notetaker.command, and enter your password.</li>
+                                  <li>Double-click the installer again and choose <strong>Install</strong>. It copies the app to Applications and opens it. If macOS blocks the app itself, repeat step 3 for AI Notetaker.</li>
                                 </ol>
-                                <p>This release is not notarized by Apple, so macOS asks you to approve it once. If it says &quot;cannot be opened&quot;, open <strong>System Settings → Privacy &amp; Security</strong>, scroll to <strong>Security</strong>, choose <strong>Open Anyway</strong> next to AI Notetaker, and enter your password. No Terminal commands are needed. More detail: <a href={UNSIGNED_DOC}>first-open guide</a>.</p>
+                                <p>No Terminal commands are needed. More detail: <a href={UNSIGNED_DOC}>first-open guide</a>.</p>
                               </>
                             ) : (
                               <ol>

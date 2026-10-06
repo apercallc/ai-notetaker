@@ -11,6 +11,8 @@ use std::path::Path;
 const SERVICE: &str = "com.ainotetaker.desktop";
 const SETTINGS_FILE: &str = "desktop-settings.json";
 
+pub const DEFAULT_WEBAPP_URL: &str = "https://ai-notetaker.apercallc.com";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopPreferences {
@@ -30,7 +32,7 @@ impl Default for DesktopPreferences {
             default_meeting_mode: MeetingMode::General,
             custom_vocabulary: Vec::new(),
             custom_summary_instructions: String::new(),
-            webapp_url: String::new(),
+            webapp_url: DEFAULT_WEBAPP_URL.to_string(),
         }
     }
 }

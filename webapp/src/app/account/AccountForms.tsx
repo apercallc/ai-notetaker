@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { CopyButton } from "@/components/CopyButton";
 import {
   changePasswordAction,
   createApiTokenAction,
@@ -137,7 +138,8 @@ export function ApiTokenPanel({ tokens, activeWorkspaceName }: { tokens: TokenRo
       {result?.ok === true && (
         <p role="status" className="empty-state">
           Copy this token now — it won&apos;t be shown again:{" "}
-          <code>{result.token}</code>
+          <code>{result.token}</code>{" "}
+          <CopyButton text={result.token} label="Copy token" className="button button-secondary button-small" />
         </p>
       )}
       {result?.ok === false && (
