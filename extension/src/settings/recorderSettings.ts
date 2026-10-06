@@ -11,9 +11,9 @@ async function render(): Promise<void> {
     <header class="settings-header"><h1>Browser meeting recorder</h1><p>Capture a meeting playing in the current Chrome tab, including Google Meet, Zoom, Teams, Slack, and Discord web. Your microphone and tab audio stay on separate local tracks.</p></header>
     <section class="settings-section">
       <h2>Recording</h2>
-      <label><input id="show-widget" type="checkbox" ${settings.showMeetWidget ? "checked" : ""} /> Show the in-call recording control in Google Meet</label>
+      <label><input id="show-widget" type="checkbox" ${settings.showMeetWidget ? "checked" : ""} /> Show recording controls in Meet, Teams, Zoom, Discord, and Slack</label>
       <label><input id="auto-record" type="checkbox" ${settings.autoRecordOnMeetJoin ? "checked" : ""} /> Start recording when I join a Google Meet call</label>
-      <p class="field-hint">For Zoom, Teams, Slack, and Discord web calls, use the popup or shortcut on the meeting tab. Behavior can vary by site.</p>
+      <p class="field-hint">Use the floating control on supported meeting sites. If Chrome asks, click the toolbar icon or use the recording shortcut to enable tab audio. Other secure tabs use the popup or shortcut.</p>
       <p class="field-hint">Tell everyone before recording. Chrome may ask for microphone access when capture starts.</p>
       <button class="primary" id="save-settings">Save recording settings</button>
       <p id="save-status" role="status" aria-live="polite"></p>

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AI Notetaker",
   "short_name": "AI Notetaker",
-  "description": "Record microphone and browser meeting audio on this device for use in AI Notetaker desktop.",
+  "description": "Record Meet, Teams, Zoom, Discord and Slack browser audio locally. Export to AI Notetaker desktop for notes.",
   "version": "0.18.11",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4K2Qmk5RfHSNTe7xD+KH626c5l6kNO7FpEiLNpdjnmxR7grcXy5wFIddPzg/aQKlQX4rKHpUz5lH6WUkZ0M6hdl7aLAmCWwb1FoK/s50BkL+9OcNUhIWFG41HgLmwf3RAGfAFI1wagJ/T4yYJOyamtU7wppGPYEQqLRU1lBN/x47GQC/yU5PQhcta3C+eAqALfvfNuXQZS0ud1E4Mj0PFBvXGVfyeBO/AoxiW4RL2CgJFzR8F0rg5ZU2w8VsuI+TVlh56CA0ZsVSZ4Y9LzbjaJrwftIQNVYls0lvwC5hOGgf8Z+XxKeMBNwepYEPaFJCRU+uBTJJXDNm/8ELyarIBQIDAQAB",
   "browser_specific_settings": {
@@ -37,9 +37,7 @@
       "128": "icons/icon128.png"
     }
   },
-  "host_permissions": [
-    "https://meet.google.com/*"
-  ],
+  "host_permissions": ["https://meet.google.com/*", "https://teams.microsoft.com/*", "https://teams.live.com/*", "https://teams.cloud.microsoft/*", "https://*.zoom.us/*", "https://discord.com/*", "https://app.slack.com/*"],
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],
@@ -55,7 +53,7 @@
       "all_frames": false
     },
     {
-      "matches": ["https://meet.google.com/*"],
+      "matches": ["https://meet.google.com/*", "https://teams.microsoft.com/*", "https://teams.live.com/*", "https://teams.cloud.microsoft/*", "https://*.zoom.us/*", "https://discord.com/*", "https://app.slack.com/*"],
       "js": ["content/meetWidget.js"],
       "run_at": "document_idle",
       "all_frames": false

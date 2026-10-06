@@ -1,9 +1,9 @@
 # Chrome Web Store: step by step
 
-> **Legacy extension listing draft.** New users should install the standalone
-> Tauri desktop app when its installers are published. This checklist records
-> the old extension-led submission flow; re-audit every permission and remove
-> obsolete Hosted AI sign-in steps before any extension resubmission.
+> **Browser recorder listing draft.** New recordings stay in Chrome until the
+> user exports them and imports the archive in AI Notetaker desktop for notes.
+> Validate screenshots and real calls before submission. Expanded site access
+> may require existing users to approve new permissions and reload meeting tabs.
 
 Everything you paste is in this file. Budget about an hour for the dashboard,
 then wait for review (a first submission commonly takes a few days, sometimes
@@ -50,162 +50,106 @@ The upload in this step is only to create the draft. Do not submit it.
 3. In the left menu open **Package**, then **View public key**. Copy the whole
    base64 block. Also note the **Item ID** (32 letters, a to p).
 
-## 3. Make the project match the store's ID
+## 3. Verify the stable extension ID
 
-On your machine, in the repository:
-
-```sh
-node scripts/rotate-extension-id.mjs --dry-run "<paste the public key>"
-node scripts/rotate-extension-id.mjs "<paste the public key>"
-```
-
-The script derives the ID from the key itself, so a typo cannot produce a
-mismatched pair. It rewrites the manifest `key` and every pinned ID (helper
-installers for macOS, Windows and Linux, the hosted API's CORS default, the
-release validator, the docs). Check that the ID it prints equals the **Item
-ID** from step 2. Then run the tests, commit, and merge. The auto-release
-publishes a new helper and extension build that agree with the store.
-
-Anyone who installed an earlier helper (only you, so far) should reinstall it.
+The committed manifest key and ID must remain unchanged while existing users
+rely on Native Messaging. Compare the store Item ID with
+`jidooookkdbbbhkkdmcajnnnhhphodok`. Stop submission if they differ and resolve
+the publisher/package identity before proceeding; do not rotate the key as a
+routine release step.
 
 ## 4. Upload the real package
 
 1. Wait for the new release (about 20 minutes) and download its
    `ai-notetaker-chrome-web-store-<version>.zip`.
-2. Dashboard, **Package**, **Upload new package**. The manifest `key` now
-   matches the store's key.
+2. Dashboard, **Package**, **Upload new package**. Confirm the package retains
+   the committed manifest `key` that matches the store's key.
 3. Confirm the version shown is the new one.
 
-## 5. Store listing tab
+## 5. Store listing
 
-| Field | Value |
+**Name:** AI Notetaker
+
+**Summary:** Record Meet, Teams, Zoom, Discord and Slack browser audio locally. Export to AI Notetaker desktop for notes.
+
+**Description** (plain text):
+
+```
+Record your meeting without adding a bot.
+
+Capture the audio playing in a Chrome meeting tab and your microphone as separate local tracks. Use Google Meet, Microsoft Teams, Zoom web meetings, Discord calls, or Slack huddles. A floating recording control is available on supported web app pages; other secure meeting tabs use the toolbar popup or recording shortcut.
+
+1. Complete microphone and recording-consent setup.
+2. Join the call in Chrome and tell everyone before recording.
+3. Choose Start recording. If Chrome asks, click the AI Notetaker toolbar icon or use the recording shortcut to enable tab audio.
+4. Stop recording, then export the archive from extension Settings.
+5. Import the archive in AI Notetaker desktop and use your provider keys to create a transcript, summary and action items.
+
+No AI Notetaker account or provider key is required to record browser audio. Transcription and summaries happen in the desktop app after import. Optional workspace sync shares finished note text; the extension does not yet share a live desktop library.
+
+For meetings in a desktop app, use AI Notetaker desktop for macOS, Windows or Linux. System audio can include other apps and notifications. Site and device behavior varies; see the current acceptance status in the project documentation.
+
+Recordings are saved on your device as capture progresses. Keep exported copies before removing the extension or its browser profile.
+
+Open source: https://github.com/apercallc/ai-notetaker
+Desktop downloads: https://ai-notetaker.apercallc.com/download
+Privacy: https://ai-notetaker.apercallc.com/privacy
+
+Tell everyone before recording and obtain the consent required by your workplace and local rules. No bot or automatic participant notification is added.
+```
+
+Replace historical screenshots with current captures of setup, a floating
+control, the popup, archive export, and desktop import before submission.
+Do not submit images that imply new calls are processed in the extension.
+
+## 6. Privacy practices and permissions
+
+**Single purpose:** Record a user-selected meeting tab and microphone locally
+for export to AI Notetaker desktop.
+
+| Permission | Purpose |
 | --- | --- |
-| Name | AI Notetaker (comes from the manifest) |
-| Summary (132 max) | Meeting notes without the meeting bot: record Google Meet from your browser, get a transcript and action items. |
-| Category | Productivity |
-| Language | English |
-| Icon | `assets/chrome-web-store/icon-128.png` |
-| Screenshots | `screenshot-1.png` to `screenshot-5.png` (1280x800), captions below |
-| Small promo tile | `promo-small-440x280.png` |
-| Marquee promo tile | `promo-marquee-1400x560.png` (optional) |
-| Official URL | none, or your verified domain |
-| Homepage URL | https://ai-notetaker.apercallc.com |
-| Support URL | https://github.com/apercallc/ai-notetaker/issues |
-| Mature content | No |
+| `storage` | Local recording settings and preserved legacy notes/settings. No synced secret storage. |
+| `unlimitedStorage` | Durable local recording audio, including long calls and recovery. |
+| `activeTab` | Access to the current tab after the user invokes the toolbar action or shortcut. An in-page click alone does not grant it. |
+| `tabCapture` | Capture the meeting audio in the user-selected browser tab. |
+| `offscreen` | Keep separate microphone and meeting audio capture running after the popup closes. |
+| `notifications` | Recording errors and preserved legacy notes-ready notifications. |
+| `clipboardWrite` | User-initiated copy of disclosure text or existing notes. |
+| Meeting-site hosts | Floating controls on `meet.google.com`, `teams.microsoft.com`, `teams.live.com`, `teams.cloud.microsoft`, `*.zoom.us`, `discord.com`, and `app.slack.com`. Only Google Meet receives the direct audio bridge; other sites use Chrome tab capture. No chat markup is read. |
+| `nativeMessaging` (optional) | Preserve the installed extension/helper compatibility path. New browser recordings do not need it. |
+| `alarms` (optional) | Existing bounded retry and reminder features. |
+| `identity` (optional) | User-initiated legacy Google/Calendar/Drive features. |
+| Optional service and provider hosts | Retained for existing records and settings during migration, requested only for the configured origin. New browser recording does not call providers. |
 
-**Description** (plain text, paste as is):
+**Remote code:** No. Code ships in the extension package.
 
-```
-Meeting notes without the meeting bot.
+**Data usage:** Meeting audio and retained transcripts are personal
+communications. Preserved legacy accounts and credentials also require the
+applicable identity/authentication disclosures. Audit the packaged build
+against the dashboard declarations before submission.
 
-AI Notetaker records the meeting you are in from your own browser, then turns it into a transcript, a summary, decisions and action items. No bot joins your call, and nothing is added to the participant list.
+**Privacy policy:** https://ai-notetaker.apercallc.com/privacy
 
-HOW IT WORKS
-1. Install the extension and choose how the AI runs.
-2. Open a Google Meet and start recording. You confirm a recording notice first.
-3. When the call ends, review the transcript, summary and action items, and search across all your meetings.
+## 7. Distribution
 
-Your microphone and the meeting's audio are recorded as two separate channels, so what you said and what everyone else said stay distinct. Audio is saved on your device before anything is sent anywhere, so a crash or a failed upload never loses a recording.
+The extension is free to record. Processing requires AI Notetaker desktop and
+the user's provider keys. Keep browser capture and desktop processing clear
+in the listing and screenshots.
 
-TWO WAYS TO RUN THE AI
-- Your own keys (free): bring your own AI provider keys. No AI Notetaker account is needed. Keys stay in protected storage on your device and go only to the providers you choose.
-- Hosted AI: we run transcription and summaries for you. Your first 3 meetings are free with no card. Pro is $12 a month for up to 300 meetings, and Team is $39 a month for a shared workspace with up to 2,500. Audio is deleted from our servers as soon as processing succeeds, and we keep your text notes, not your recordings.
-
-ZOOM, TEAMS AND SLACK
-Google Meet needs only this extension. For desktop calls, install the optional AI Notetaker desktop helper for macOS, Windows or Linux from https://ai-notetaker.apercallc.com/download. We are still verifying each app on every operating system.
-
-OPEN AND PRIVATE
-AI Notetaker is open source under the MIT license: https://github.com/apercallc/ai-notetaker
-Privacy notice: https://ai-notetaker.apercallc.com/privacy
-
-Always tell participants you are recording and get the consent your local law and workplace policy require. AI Notetaker asks you to acknowledge this before every recording. It is not legal advice.
-```
-
-**Screenshot captions**
-
-1. Choose how the AI runs: your own keys or Hosted AI.
-2. Join a Google Meet and notes begin, with audio saved on your device first.
-3. A transcript that keeps you and everyone else separate.
-4. Decisions and action items from every meeting, in one inbox.
-5. Free with your own keys, or hosted for a flat monthly price.
-
-## 6. Privacy practices tab
-
-**Single purpose**
-
-> AI Notetaker records the audio of a meeting the user chooses to record and turns it into a transcript, summary and action items.
-
-**Permission justifications** (one box per permission)
-
-| Permission | Paste this |
-| --- | --- |
-| `storage` | Saves the user's settings, provider keys (own-keys mode), sign-in session (Hosted AI) and meeting notes in `chrome.storage.local`. Nothing is written to `chrome.storage.sync`. |
-| `unlimitedStorage` | Keeps recoverable meeting audio and notes on the device, so a long meeting is not interrupted or lost when the ordinary extension quota is reached. |
-| `activeTab` | Lets the user start capture on the Google Meet tab they are looking at, only when they click the extension or the in-call button. |
-| `tabCapture` | Captures the audio of the user's own Google Meet tab so the meeting can be transcribed without a bot. Only starts after the user chooses to record. |
-| `offscreen` | Chrome requires an offscreen document to process tab audio in Manifest V3. It exists only while a recording is running. |
-| `notifications` | Tells the user when their notes are ready or when a recording needs attention. |
-| `clipboardWrite` | Lets the user copy a summary, transcript or share link with one click. |
-| Host permission `https://meet.google.com/*` | Runs the in-call Record button and reads the call title on Google Meet, the only site the extension acts on by default. |
-| `nativeMessaging` (optional) | Requested only when the user chooses desktop-call recording. Talks to the AI Notetaker desktop helper they installed, using Chrome Native Messaging. No network port is opened. |
-| `alarms` (optional) | Schedules bounded background retries and reminders while the service worker is asleep. |
-| `identity` (optional) | Runs user-initiated Google sign-in for Hosted AI and optional Calendar or Drive features. Hosted sign-in returns a one-use code to the extension; it does not put a bearer token in the OAuth redirect. |
-| Optional host permissions (`https://*/*`, `http://localhost/*`, `http://127.0.0.1/*`) | Requested at runtime, never at install, and only for the single origin the user enters: the Hosted AI service when they sign in, or their own self-hosted history server. |
-| Optional provider hosts (Deepgram, Groq, Anthropic, Google Generative Language, DeepSeek) | In own-keys mode, requested only for the AI providers the user picks, so their audio and text can be sent to that provider with their own key. |
-
-If review pushes back on `https://*/*` even as an optional permission, the
-fallback is to request the fixed Hosted AI origin only and keep the self-hosted
-server as a separate, explicitly entered origin.
-
-**Remote code:** No. All code ships in the package. The extension sends data to
-AI providers and the Hosted AI service but never downloads or runs code from
-them.
-
-**Data usage** (tick these, leave the rest unticked)
-
-- Personally identifiable information: the email address of a Hosted AI account.
-- Authentication information: the user's own provider keys, stored locally, and the Hosted AI session.
-- Personal communications: meeting audio and the transcripts made from it.
-
-**Certifications** (tick all three; each is true)
-
-- I do not sell or transfer user data to third parties, outside of the approved use cases.
-- I do not use or transfer user data for purposes unrelated to the item's single purpose.
-- I do not use or transfer user data to determine creditworthiness or for lending purposes.
-
-**Privacy policy URL:** https://ai-notetaker.apercallc.com/privacy
-
-The policy includes the Google API Services Limited Use statement, which the
-store also expects when an extension touches Google user data.
-
-## 7. Distribution tab
-
-- Visibility: **Public**.
-- Regions: all regions.
-- Pricing: free. (The store no longer handles payments; Hosted AI is billed on
-  the website through Stripe.)
-
-## 8. Notes for the reviewer
-
-Paste into **Test instructions** (Privacy practices tab). Create the reviewer
-account first (Hosted AI free trial, three meetings) and fill in the two
-bracketed lines.
+## 8. Reviewer instructions
 
 ```
-No account is needed to load the extension and see the setup screen.
+No AI Notetaker account or provider key is required for extension recording.
 
-To try recording with Hosted AI, sign in with this reviewer account:
-  Email: [reviewer email]
-  Password: [reviewer password]
-  (Open the extension, choose "Hosted AI", then "Sign in".)
+1. Complete setup: grant microphone access and acknowledge recording consent.
+2. Open a meeting in Chrome (Meet, Teams, Zoom web, Discord, or Slack).
+3. Tell participants, then use the floating recording control. If prompted, click the extension toolbar icon or use the recording shortcut to grant tab capture. The popup also offers Start recording.
+4. Speak and play call audio, then stop recording. The popup shows Audio saved.
+5. Open Settings and export recordings. Import the .ntarchive in AI Notetaker desktop to process it using provider keys.
+6. Confirm both microphone and meeting audio are present after import. Check stop, tab close, navigation, permission denial, and a second recording.
 
-Steps:
-1. Open https://meet.google.com/new and join the call.
-2. Click the AI Notetaker icon (or the in-call "Record" button) and confirm the recording notice.
-3. Chrome may ask once to capture the tab. Approve it.
-4. Talk for about 30 seconds, then stop. Notes appear in the extension a minute or two later, and in the library at https://ai-notetaker.apercallc.com.
-
-Notes: the extension records the user's own Meet tab and microphone. No bot joins the call. The desktop helper is optional and only used for Zoom, Teams and Slack.
+The extension saves audio locally. No bot joins the call. Native Messaging is retained for compatibility and is not required for this recording/export flow.
 ```
 
 ## 9. Submit
@@ -252,5 +196,5 @@ publishing API to a new version.
 From `extension/manifest.json`: permissions `storage`, `activeTab`,
 `tabCapture`, `offscreen`, `notifications`, `unlimitedStorage`,
 `clipboardWrite`; optional `nativeMessaging`, `alarms`, `identity`; host
-permission `https://meet.google.com/*`; optional hosts as listed above. If the
+permissions for the meeting-site hosts listed above; optional hosts as listed above. If the
 manifest changes, update the justifications before submitting.

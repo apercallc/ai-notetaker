@@ -60,7 +60,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
             </div>
           </div>
           <p className="mk-small mk-mt-m">
-            Sync sends finished desktop notes to the workspace and copies workspace notes into the desktop library. Web edits, deletions, and settings do not sync back yet. Browser extension recordings still need archive export and import.
+            Sync sends finished desktop notes to the workspace and copies workspace notes into the desktop library. Web edits refresh workspace copies on the next sync. Desktop-origin notes are protected from automatic overwrites; deletions and settings do not sync back. Browser extension recordings still need archive export and import.
           </p>
         </div>
       </section>
@@ -136,7 +136,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
               <h3 className="mk-h3">Meetings in Chrome</h3>
               <p className="mk-small">Use the extension for a meeting playing in the current Chrome tab, including web versions of Meet, Zoom, Teams, Slack, and Discord.</p>
               <ol>
-                <li>Open the meeting in a secure Chrome tab and start the extension from that tab.</li>
+                <li>Join the meeting in Chrome. Use its floating recording control, the extension toolbar popup, or the recording shortcut.</li>
                 <li>Confirm the recording notice. The extension saves tab and microphone audio separately in Chrome.</li>
                 <li>Export the archive and import it in the desktop app to transcribe the audio and create notes.</li>
               </ol>
@@ -354,7 +354,7 @@ export function DownloadView({
               <p><a className="mk-btn mk-btn--solid" href={SITE.releasesUrl}>View all releases</a></p>
             </div>
           )}
-          <p className="mk-small mk-mt-m">Raw recordings are saved on this device before processing. To process them, audio is sent directly to your chosen transcription provider; the resulting transcript is sent to your chosen summary provider. Optional sync sends finished desktop notes to a web workspace and copies workspace notes into desktop. Web edits, deletions, and settings do not sync back yet.</p>
+          <p className="mk-small mk-mt-m">Raw recordings are saved on this device before processing. To process them, audio is sent directly to your chosen transcription provider; the resulting transcript is sent to your chosen summary provider. Optional sync sends finished desktop notes to a web workspace and copies workspace notes into desktop. Web edits refresh workspace copies on the next sync. Desktop-origin notes are protected from automatic overwrites; deletions and settings do not sync back.</p>
         </div>
       </section>
       <section id="browser-extension" className="mk-section mk-section--flush" aria-labelledby="browser-extension-title">
@@ -368,6 +368,7 @@ export function DownloadView({
             </div>
             {!store && !release?.extension && <p className="mk-small">The extension download could not be loaded. Check the <a href={SITE.releasesUrl}>releases page</a>.</p>}
             {!store && release?.extension && <p className="mk-small">Unzip the file, open <code>chrome://extensions</code>, turn on Developer mode, choose Load unpacked, and select the unzipped folder containing manifest.json.</p>}
+            <p className="mk-small">Floating controls appear in Meet, Teams, Zoom web meetings, Discord channels, and Slack workspaces. If Chrome asks, click the extension toolbar icon or use the recording shortcut to enable tab audio. Other secure meeting tabs use the popup or shortcut.</p>
             <p className="mk-small">Extension recording settings stay in Chrome. Transcription providers, local notes, and optional web-app sync are managed in the desktop app.</p>
           </div>
         </div>
@@ -586,7 +587,7 @@ export function PrivacyView() {
               AI Notetaker has two modes and this notice covers both: free local mode with your own AI keys, and Hosted
               AI, the service we operate. Optional desktop sync is a separate authenticated connection that sends
               finished note text from desktop to a workspace and copies workspace notes into the desktop library.
-              Web edits, deletions, and settings do not sync back yet, and extension recordings still need archive import. This notice also covers the website.
+              Web edits refresh workspace copies on sync; deletions and settings do not sync back, and extension recordings still need archive import. This notice also covers the website.
             </p>
 
             <h2>This website</h2>
@@ -602,7 +603,7 @@ export function PrivacyView() {
               <li>Raw microphone and meeting audio is saved on your device before any provider request. The two channels stay separate.</li>
               <li>Your provider keys stay in the desktop app&apos;s operating-system credential store. Existing extension users keep their keys in protected browser storage. We never receive them.</li>
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
-              <li>If you connect a web-app workspace, finished desktop note text syncs there and workspace notes are copied into the desktop library. Later web edits, deletions, and settings do not sync back. Raw audio and provider keys remain on this device.</li>
+              <li>If you connect a web-app workspace, finished desktop note text syncs there and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
               <li>Google Drive export and a self-hosted history server are optional. Their operators receive what you send them.</li>
             </ul>

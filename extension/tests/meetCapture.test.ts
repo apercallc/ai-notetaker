@@ -32,6 +32,18 @@ function grantStreamId(id: string | undefined, lastError?: string): void {
 }
 
 describe("Google Meet capture orchestration", () => {
+  it("remembers the widget owner after stop and service-worker restart", async () => {
+    grantStreamId("stream-abc");
+    const capture = new MeetCaptureController();
+    await capture.start(7, "saved-call");
+    await capture.stop("saved-call");
+    expect(capture.isActiveForTab("saved-call", 7)).toBe(false);
+    expect(capture.widgetTabId("saved-call")).toBe(7);
+    const resumed = new MeetCaptureController();
+    await resumed.restoreCaptures();
+    expect(resumed.widgetTabId("saved-call")).toBe(7);
+    expect(resumed.widgetTabId("unrelated-call")).toBeUndefined();
+  });
   it("does not report a recording when the offscreen page never acknowledges start", async () => {
     grantStreamId("stream-abc");
     chromeMock.runtime.sendMessage.mockResolvedValue(undefined);

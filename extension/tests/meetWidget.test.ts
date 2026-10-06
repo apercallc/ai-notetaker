@@ -123,6 +123,13 @@ afterEach(() => {
 });
 
 describe("MeetWidget: idle", () => {
+  it("explains another tab's recording without showing start or stop here", async () => {
+    harness = await createHarness(baseState({ recordingElsewhere: true }));
+    await harness.click("#toggle");
+    expect(harness.$(".panel")?.textContent).toContain("This tab is not being recorded");
+    expect(harness.$("#start")).toBeNull();
+    expect(harness.$("#pill-stop")).toBeNull();
+  });
   it("mounts a collapsed pill on the page and hides the panel until opened", async () => {
     harness = await createHarness();
     const { $, widget } = harness;
@@ -892,7 +899,7 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     harness.$<HTMLButtonElement>("#start")!.click();
     await harness.flush();
 
-    expect(harness.$(".panel")?.textContent).toMatch(/Connecting to this Meet tab and microphone/);
+    expect(harness.$(".panel")?.textContent).toMatch(/Connecting to this meeting tab and microphone/);
     expect(harness.$(".panel")?.textContent).toMatch(/saved on this device/);
     release?.();
     await harness.flush();

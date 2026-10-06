@@ -1,18 +1,19 @@
 /**
- * Content script for meet.google.com. Shows the notes widget only on a call
- * route (abc-defg-hij), follows Meet's single-page navigation, and forwards
+ * Content script for supported meeting web apps. Follows single-page
+ * navigation and forwards
  * background events to the widget. It reads nothing from Meet's markup and
  * has no storage access: the background denies it (see background.ts).
  */
 import styles from "./widget.css";
-import { meetTitle, meetingCodeFromPath } from "../meet/meetContext";
+import { browserTitleForTab } from "../meet/meetContext";
+import { hasMeetingWidget } from "../meet/meetingSites";
 import { MeetWidget } from "./widget";
 import type { BackgroundToUiMessage, UiToBackgroundMessage } from "../lib/internalMessages";
 
 const ROUTE_POLL_MS = 1000;
 
 function inCall(): boolean {
-  return meetingCodeFromPath(window.location.pathname) !== null;
+  return hasMeetingWidget(window.location.href);
 }
 
 let widget: MeetWidget | null = null;
@@ -22,7 +23,7 @@ function ensureWidget(): void {
     if (widget) return;
     widget = new MeetWidget({
       send: <T>(message: UiToBackgroundMessage) => chrome.runtime.sendMessage(message) as Promise<T>,
-      titleHint: () => meetTitle(document.title, meetingCodeFromPath(window.location.pathname)),
+      titleHint: () => browserTitleForTab({ url: window.location.href, title: document.title }),
       reload: () => window.location.reload(),
       styles,
     });

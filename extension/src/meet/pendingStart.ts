@@ -16,6 +16,7 @@
  */
 
 const PENDING_START_KEY = "notetaker.pendingMeetStart";
+const MAX_AGE_MS = 2 * 60_000;
 
 export interface PendingMeetStart {
   /** The Meet tab whose capture was blocked. */
@@ -28,25 +29,28 @@ export interface PendingMeetStart {
 
 export async function savePendingMeetStart(intent: PendingMeetStart): Promise<void> {
   try {
-    await chrome.storage.session.set({ [PENDING_START_KEY]: intent });
+    await chrome.storage.session.set({ [PENDING_START_KEY]: { ...intent, createdAt: Date.now() } });
   } catch {
     // Best-effort by design: without the handoff the widget's own hint still
     // tells the user what to do.
   }
 }
 
-export async function takePendingMeetStart(): Promise<PendingMeetStart | null> {
+export async function takePendingMeetStart(tabId?: number): Promise<PendingMeetStart | null> {
   try {
     const items = (await chrome.storage.session.get(PENDING_START_KEY)) as Record<string, unknown>;
-    const intent = items[PENDING_START_KEY] as PendingMeetStart | undefined;
-    if (!intent || typeof intent !== "object" || typeof intent.tabId !== "number") {
+    const intent = items[PENDING_START_KEY] as (PendingMeetStart & { createdAt?: number }) | undefined;
+    const age = Date.now() - (intent?.createdAt ?? NaN);
+    if (!intent || typeof intent !== "object" || !Number.isInteger(intent.tabId)
+      || !Number.isFinite(age) || age < 0 || age > MAX_AGE_MS) {
       // A malformed entry is discarded, not merely skipped: leaving it would
       // make every future popup open re-read the same poison.
       if (intent !== undefined) await chrome.storage.session.remove(PENDING_START_KEY);
       return null;
     }
+    if (tabId !== undefined && intent.tabId !== tabId) return null;
     await chrome.storage.session.remove(PENDING_START_KEY);
-    return intent;
+    return { tabId: intent.tabId, ...(intent.meetingMode ? { meetingMode: intent.meetingMode } : {}), ...(intent.titleHint ? { titleHint: intent.titleHint } : {}) };
   } catch {
     return null;
   }

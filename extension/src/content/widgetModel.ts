@@ -5,6 +5,7 @@ export type WidgetView =
   | "disconnected"
   | "setup"
   | "ready"
+  | "busy"
   | "starting"
   | "recording"
   | "processing"
@@ -29,6 +30,7 @@ export const DONE_CARD_WINDOW_MS = 30 * 60_000;
 
 export function deriveView(state: WidgetState | null, ui: WidgetUi, now: number = Date.now()): WidgetView {
   if (ui.contextLost || !state) return "disconnected";
+  if (state.recordingElsewhere) return "busy";
   if (state.active?.captureStarting) return "starting";
   if (state.active?.status === "recording") return "recording";
   if (ui.starting) return "starting";
@@ -48,7 +50,7 @@ export function deriveView(state: WidgetState | null, ui: WidgetUi, now: number 
 
 export function canStart(state: WidgetState | null): boolean {
   // The Meet widget records in Chrome, so helper status does not block it.
-  return !!state?.onboardingComplete && !!state?.consentAcknowledged;
+  return !!state?.onboardingComplete && !!state?.consentAcknowledged && !state.recordingElsewhere;
 }
 
 export function formatElapsed(startedAt: string, now: number): string {

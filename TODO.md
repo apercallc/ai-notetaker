@@ -1,5 +1,32 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Cross-site browser recorder controls — 2026-10-05
+
+- [x] Add a floating recorder control for supported Google Meet, Microsoft
+      Teams, Zoom web, Discord, and Slack Chrome pages. Keep Meet's direct
+      page bridge and automatic-start option exclusive to Meet; all other
+      sites use Chrome tab capture after an explicit toolbar click or shortcut.
+- [x] Keep each widget's active, saved, failure, and action state scoped to
+      the tab that owns its recording. Opening another supported meeting tab
+      never exposes transcript, note state, or controls for the active call.
+- [x] Expire and clear blocked first-use capture requests so a later popup
+      cannot unexpectedly begin recording after the person has navigated away.
+- [x] Update extension setup, popup, settings, website, privacy copy, README,
+      getting-started guide, and Chrome Web Store draft to describe the actual
+      path: capture stays in Chrome, then archive export/import sends audio to
+      the desktop app for provider processing and notes.
+- [ ] Verify installed Chrome against live Meet, Teams, Zoom web, Discord, and
+      Slack calls: microphone and remote audio, Chrome's first-use capture
+      gate, tab close/navigation, separate-tab state, export, desktop import,
+      and processing. The local direct-capture harness cannot load its
+      unpacked service worker in this Mac's installed Chrome headless mode.
+- Verified with extension typecheck, 683 tests, 92.08% statement / 83.83%
+      branch / 90.64% function coverage, build, production dependency audit,
+      and focused cross-tab tests. Webapp lint/typecheck, Prisma generation,
+      822 PostgreSQL-backed tests, build, and production dependency audit pass.
+      Helper format, strict Clippy, and 267 workspace tests pass with the
+      command-local Swift runtime workaround on this Mac.
+
 ## Dependency audit — 2026-10-05
 
 - [ ] Recheck `braces` after upstream publishes a patched release. The webapp

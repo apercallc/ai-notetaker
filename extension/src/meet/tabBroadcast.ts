@@ -1,3 +1,4 @@
+import { MEETING_TAB_PATTERNS } from "./meetingSites";
 import type { BackgroundToUiMessage } from "../lib/internalMessages";
 
 export const MEET_TAB_PATTERN = "https://meet.google.com/*";
@@ -7,17 +8,21 @@ export const MEET_TAB_PATTERN = "https://meet.google.com/*";
  * scripts, so the in-call widget needs each Meet tab addressed directly.
  * Tabs without a listening widget reject the send; that is expected.
  */
-export async function broadcastToMeetTabs(message: BackgroundToUiMessage): Promise<void> {
+export async function broadcastToMeetTabs(message: BackgroundToUiMessage, ownerTabId?: number): Promise<void> {
+  const global = message.type === "MEETING_STATE_CHANGED" || message.type === "HELPER_STATUS";
+  const target = message.type === "CAPTURE_INVOCATION_REQUIRED" ? message.tabId
+    : message.type === "RECORDING_ERROR" ? message.tabId ?? ownerTabId : ownerTabId;
+  if (!global && target === undefined) return;
   if (!chrome.tabs?.query) return;
   let tabs: chrome.tabs.Tab[];
   try {
-    tabs = await chrome.tabs.query({ url: MEET_TAB_PATTERN });
+    tabs = await chrome.tabs.query({ url: MEETING_TAB_PATTERNS });
   } catch {
     return;
   }
   await Promise.all(
     tabs
-      .filter((tab) => message.type !== "CAPTURE_INVOCATION_REQUIRED" || tab.id === message.tabId)
+      .filter((tab) => global || tab.id === target)
       .map(async (tab) => {
         if (typeof tab.id !== "number") return;
         try {

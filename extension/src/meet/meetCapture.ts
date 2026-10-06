@@ -17,6 +17,7 @@ export interface MeetAudioChunk {
 const SAMPLE_RATE_HZ = 48_000;
 /** chrome.storage.session key for the active-capture map. */
 const SESSION_CAPTURES_KEY = "meet-active-captures";
+const SESSION_WIDGET_OWNERS_KEY = "meet-widget-owners";
 
 /** Converts Web Audio's normalized float samples to little-endian PCM16. */
 export function float32ToPcm16(samples: Float32Array): Uint8Array {
@@ -95,6 +96,7 @@ function callCodeOf(url: string | undefined): string | null {
 
 export class MeetCaptureController {
   private readonly activeMeetings = new Map<string, ActiveCapture>();
+  private readonly widgetOwners = new Map<string, number>();
   private starting: { meetingId: string; cancelled: boolean; task?: Promise<void> } | null = null;
 
   constructor(private readonly sendChunk: (chunk: Uint8Array, meetingId: string, channel: BrowserAudioChannel, chunkId?: string) => void | Promise<void> = () => {}) {}
@@ -120,6 +122,12 @@ export class MeetCaptureController {
   /** Restores the capture map after a service-worker restart. */
   async restoreCaptures(): Promise<void> {
     try {
+      const entries: unknown = (await chrome.storage.session?.get?.(SESSION_WIDGET_OWNERS_KEY))?.[SESSION_WIDGET_OWNERS_KEY];
+      if (Array.isArray(entries)) for (const entry of entries.slice(-50)) {
+        if (Array.isArray(entry) && typeof entry[0] === "string" && Number.isInteger(entry[1])) this.widgetOwners.set(entry[0], entry[1]);
+      }
+    } catch { /* The active capture map can still be recovered independently. */ }
+    try {
       const stored = (await chrome.storage.session?.get?.(SESSION_CAPTURES_KEY))?.[SESSION_CAPTURES_KEY] as
         | Array<[string, { tabId: number; callCode: string | null; origin?: string }]>
         | undefined;
@@ -131,6 +139,7 @@ export class MeetCaptureController {
             ...(typeof capture.origin === "string" ? { origin: capture.origin } : {}),
             ...(validSession(direct.directSession) && validSession(direct.documentKey) ? { directSession: direct.directSession, documentKey: direct.documentKey } : {}),
           });
+          this.widgetOwners.set(meetingId, capture.tabId);
         }
       }
     } catch {
@@ -176,6 +185,9 @@ export class MeetCaptureController {
     }
     const start = { meetingId, cancelled: false, task: undefined as Promise<void> | undefined };
     this.starting = start;
+    this.widgetOwners.set(meetingId, tabId);
+    if (this.widgetOwners.size > 50) this.widgetOwners.delete(this.widgetOwners.keys().next().value!);
+    void chrome.storage.session?.set({ [SESSION_WIDGET_OWNERS_KEY]: [...this.widgetOwners] }).catch(() => {});
     start.task = this.startAttempt(tabId, meetingId, true, start);
     try { await start.task; }
     finally { if (this.starting === start) this.starting = null; }
@@ -298,6 +310,10 @@ export class MeetCaptureController {
 
   isActiveForTab(meetingId: string, tabId: number): boolean {
     return this.activeMeetings.get(meetingId)?.tabId === tabId;
+  }
+
+  widgetTabId(meetingId: string): number | undefined {
+    return this.widgetOwners.get(meetingId);
   }
 
   /** Rehydrates the capture marker after an MV3 service-worker wake. */

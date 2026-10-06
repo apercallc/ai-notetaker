@@ -419,8 +419,8 @@ export class BackgroundController {
    * Tells whoever asked for a recording that it never began. Nothing was
    * created, so there is no meeting to fail and no reason for a toolbar badge.
    */
-  reportStartFailure(message: string): void {
-    this.broadcast({ type: "RECORDING_ERROR", meetingId: null, message, phase: "start" });
+  reportStartFailure(message: string, tabId?: number): void {
+    this.broadcast({ type: "RECORDING_ERROR", meetingId: null, message, phase: "start", ...(tabId === undefined ? {} : { tabId }) });
   }
 
   /** Expected first-use Chrome gate: show a brief, non-error instruction only on this Meet tab. */

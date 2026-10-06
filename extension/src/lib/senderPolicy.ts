@@ -1,8 +1,8 @@
 import type { UiToBackgroundMessage } from "./internalMessages";
-import { isMeetUrl } from "../meet/meetContext";
+import { hasMeetingWidget } from "../meet/meetingSites";
 import type { CaptureSource } from "../types";
 
-/** The only requests the Google Meet content script may make; everything else needs an extension page. */
+/** The only requests a supported meeting content script may make; everything else needs an extension page. */
 const CONTENT_SCRIPT_MESSAGES = new Set<UiToBackgroundMessage["type"]>([
   "GET_WIDGET_STATE",
   "SAVE_WIDGET_POSITION",
@@ -33,13 +33,13 @@ export function classifySender(sender: SenderLike, context: SenderPolicyContext)
   const url = sender.url ?? "";
   if (url === context.offscreenUrl) return "offscreen";
   if (url.startsWith(context.extensionBaseUrl)) return "extension-page";
-  if (sender.tab !== undefined && isMeetUrl(url)) return "meet-content-script";
+  if (sender.tab !== undefined && hasMeetingWidget(url)) return "meet-content-script";
   return "untrusted";
 }
 
 /**
  * A page-side sender never picks the capture tab or the capture mode: it is
- * always its own tab, always Meet. Extension pages (the popup) may choose.
+ * always its own tab, always browser capture. Extension pages (the popup) may choose.
  */
 export function resolveStartRequest(
   message: Extract<UiToBackgroundMessage, { type: "START_RECORDING" }>,

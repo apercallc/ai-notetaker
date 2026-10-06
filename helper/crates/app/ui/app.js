@@ -69,8 +69,8 @@
         || document.activeElement?.id === "note-folder")) return;
       if (state.selectedId && state.page === "notes") await loadDetail(state.selectedId, false);
       const focused = document.activeElement;
-      const focusedId = ["meeting-title", "notes-search"].includes(focused?.id) ? focused.id : null;
-      const selection = focusedId ? [focused.selectionStart, focused.selectionEnd] : null;
+      const focusedId = focused?.id || null;
+      const selection = focusedId && typeof focused.selectionStart === "number" ? [focused.selectionStart, focused.selectionEnd] : null;
       render();
       if (focusedId) {
         const replacement = document.getElementById(focusedId);
@@ -177,7 +177,7 @@
       ${finalizing ? '<p class="process-status">Finishing saved audio. It stays on this device while notes are prepared.</p>' : ""}
       <div class="record-grid">
         <section class="card record-card" aria-labelledby="record-heading">
-          <div class="record-intro"><h2 id="record-heading">${active ? "Recording is in progress" : "Start a recording"}</h2><p>${active ? "Audio is being saved on this device while your notes are prepared." : "Record a browser or desktop call and keep the audio and notes on this device."}</p></div>
+          <div class="record-intro"><h2 id="record-heading">${active ? "Recording is in progress" : "Start a recording"}</h2><p>${active ? "Audio is being saved on this device while your notes are prepared." : "Record Google Meet, Teams, Zoom, Discord, or Slack calls in a browser or desktop app. Audio is saved on this device."}</p></div>
           <label class="field-label" for="meeting-title">Meeting title <span class="fine-print">(optional)</span></label>
           <input id="meeting-title" class="text-input" maxlength="200" value="${esc(state.recordTitle)}" placeholder="e.g. Product planning" ${active ? "disabled" : ""} />
           <label class="consent-row"><input id="record-consent" type="checkbox" ${state.recordConsentAcknowledged ? "checked" : ""} ${active ? "disabled" : ""} /><span>I’ve told everyone on the call that recording is starting.</span></label>
@@ -194,6 +194,7 @@
             <div class="device-row"><span class="device-icon" aria-hidden="true">⌘</span><div><strong>${esc(platformName(audio.platform))} audio</strong><span>${esc(audio.driver)}</span></div></div>
           </div>
           ${audioGuidance}
+          <p class="guidance">System audio can include other apps and notifications. Keep unrelated audio quiet during the call.</p>
           <div class="audio-actions">${openAudioSettings}<button class="small-button" id="check-audio">Check audio again</button></div>
         </section>
       </div>

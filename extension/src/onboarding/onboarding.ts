@@ -21,7 +21,7 @@ function render(): void {
       <button class="secondary" id="allow-microphone" ${busy ? "disabled" : ""}>${microphoneReady ? "Microphone ready" : "Allow microphone"}</button>
       <h2>2. Confirm recording consent</h2>
       <label class="consent"><input type="checkbox" id="recording-consent" ${consent ? "checked" : ""} /> I will tell everyone on the call before recording.</label>
-      <p class="text-secondary">Recording is visible in the extension popup. Google Meet also has an in-call control. Use this for Meet, Zoom, Teams, Slack, Discord, and other meetings playing in Chrome. Audio stays on this device until you export it.</p>
+      <p class="text-secondary">Recording is visible in the extension popup. A floating control is available in Meet, Teams, Zoom web, Discord, and Slack. Use this for Meet, Zoom, Teams, Slack, Discord, and other meetings playing in Chrome. Audio stays on this device until you export it.</p>
       <button class="primary" id="finish-setup" ${microphoneReady && consent && !busy ? "" : "disabled"}>Finish setup</button>
       <p id="setup-status" role="status" aria-live="polite">${escapeHtml(message)}</p>
     </section>`;
@@ -45,7 +45,7 @@ function render(): void {
     try {
       const settings = await getSettings();
       await sendToBackground({ type: "SAVE_SETTINGS", settings: { ...settings, onboardingComplete: true, consentDisclosureAcknowledged: true, processingMode: { kind: "local_byok" } } });
-      app.innerHTML = '<div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div><h1>Ready to record</h1><p>Open a meeting in Chrome, tell everyone, then choose Start recording in the extension popup or use the shortcut. Meet, Zoom, Teams, Slack, Discord web, and other meeting tabs are supported. Google Meet also offers an in-call control.</p><p>After the call, export the saved audio from extension Settings and import it in the desktop app to make notes.</p><div class="setup-actions"><button class="primary" id="done-setup">Done</button><button class="secondary" id="open-meet">Open Google Meet</button></div>';
+      app.innerHTML = '<div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div><h1>Ready to record</h1><p>Open a meeting in Chrome, tell everyone, then choose Start recording in the extension popup or use the shortcut. Meet, Zoom, Teams, Slack, Discord web, and other meeting tabs are supported. Use the floating control on supported meeting sites. If Chrome asks, click the extension toolbar icon to allow this tab’s audio.</p><p>After the call, export the saved audio from extension Settings and import it in the desktop app to make notes.</p><div class="setup-actions"><button class="primary" id="done-setup">Done</button><button class="secondary" id="open-meet">Open Google Meet</button></div>';
       document.getElementById("done-setup")?.addEventListener("click", () => void chrome.tabs.getCurrent().then((tab) => tab?.id !== undefined ? chrome.tabs.remove(tab.id) : undefined));
       document.getElementById("open-meet")?.addEventListener("click", () => void chrome.tabs.create({ url: "https://meet.google.com/" }));
     } catch (error) {

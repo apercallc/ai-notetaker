@@ -18,6 +18,8 @@ export default defineConfig({
         "src/content/widgetModel.ts",
         "src/content/widgetTemplates.ts",
         "src/meet/meetContext.ts",
+        "src/meet/meetingSites.ts",
+        "src/meet/pendingStart.ts",
         "src/meet/session.ts",
         "src/meet/tabBroadcast.ts",
         // OAuth token handling plus every calendar network call — exactly the

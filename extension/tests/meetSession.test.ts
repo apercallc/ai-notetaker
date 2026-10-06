@@ -73,7 +73,7 @@ describe("startMeetRecording", () => {
     capture.isActiveForTab.mockReturnValue(false);
     const [c, k] = asTypes();
     expect(await startMeetRecording(c, k, { tabId: 10 })).toBe("");
-    expect(controller.reportStartFailure).toHaveBeenCalledWith(expect.stringContaining("Another browser tab"));
+    expect(controller.reportStartFailure).toHaveBeenCalledWith(expect.stringContaining("Another browser tab"), 10);
     expect(controller.startRecording).not.toHaveBeenCalled();
     expect(capture.start).not.toHaveBeenCalled();
   });
@@ -134,7 +134,7 @@ describe("startMeetRecording", () => {
     const [c, k] = asTypes();
 
     expect(await startMeetRecording(c, k, { tabId: 9 })).toBe("");
-    expect(controller.reportStartFailure).toHaveBeenCalledWith(CAPTURE_PERMISSION_HINT);
+    expect(controller.reportStartFailure).toHaveBeenCalledWith(CAPTURE_PERMISSION_HINT, 9);
     expect(controller.startRecording).not.toHaveBeenCalled();
     expect(controller.abortStart).not.toHaveBeenCalled();
   });
@@ -159,7 +159,7 @@ describe("startMeetRecording", () => {
     await startMeetRecording(c, k, { tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
 
     // The blocked start's options survive for the popup's one-click handoff.
-    expect(chromeMock.storage.session._dump()["notetaker.pendingMeetStart"]).toEqual({ tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
+    expect(chromeMock.storage.session._dump()["notetaker.pendingMeetStart"]).toMatchObject({ tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
   });
 
   it("does not remember a start that failed for any other reason", async () => {

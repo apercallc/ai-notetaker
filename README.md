@@ -8,7 +8,7 @@ extension saves tab and microphone audio in Chrome; export its archive and
 import it in desktop for transcription. Add your own transcription and summary
 API keys in desktop Settings. Optional workspace sync sends finished desktop
 notes to the web app and copies workspace notes into the desktop library.
-Web edits, deletions, and settings do not sync back yet; extension recordings
+Web edits refresh workspace copies on sync; deletions and settings do not sync back. extension recordings
 still need archive export and import. Audio and provider keys stay on this device.
 
 > **Status:** Preview installers are published for macOS, Windows, and
@@ -57,9 +57,9 @@ Notetaker does not bundle a custom audio driver; see the
 The Chrome extension records microphone and meeting-tab audio separately
 in local browser storage. Export a full `.ntarchive` from extension Settings,
 import it in the desktop app, then create notes from the saved audio. The
-desktop app handles AI processing and desktop call sources. Google Meet also
-has an in-call control; Teams, Zoom, and other secure web tabs use the popup
-or shortcut. Older extension
+desktop app handles AI processing and desktop call sources. Meet, Teams, Zoom web meetings, Discord channels, and Slack workspaces
+have floating recording controls. Chrome may require a toolbar click or shortcut
+to enable tab audio. Other secure tabs use the popup or shortcut. Older extension
 notes and settings remain accessible during migration. See the
 [recorder guide](docs/getting-started.md#browser-meeting-recorder-extension).
 
@@ -92,7 +92,7 @@ migration.
 | Piece | What it does |
 | --- | --- |
 | Desktop app | Owns setup, provider keys, microphone/system-audio capture, local notes, retries, and recovery. |
-| Web app (optional) | Shows finished desktop note text synced to one authenticated workspace. Sync is currently desktop to web app only. |
+| Web app (optional) | Shows finished desktop note text synced to one authenticated workspace. Workspace notes are also copied to desktop; web edits refresh those copies on sync. |
 | Chrome extension | Records secure Chrome meeting-tab audio locally and exports it to the desktop app for transcription and notes. Settings are separate. |
 
 The desktop window controls Rust through Tauri IPC; it does not open a

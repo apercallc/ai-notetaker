@@ -34,7 +34,7 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           <div>
             <h1 className="mk-h1" id="hero-title">{SITE.tagline}</h1>
             <p className="mk-lede">
-              Record a meeting playing in a Chrome tab with the extension, or use the desktop app for browser and
+              Record Google Meet, Microsoft Teams, Zoom, Discord calls, and Slack huddles. Use the Chrome extension for a meeting tab, or the desktop app for browser and
               desktop calls on macOS, Windows, or Linux. The desktop app creates local notes; optionally sync finished
               notes to your web workspace. Nobody joins your call.
             </p>
@@ -57,7 +57,7 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           <div className="mk-section-head">
             <h2 className="mk-h2" id="setup-title">Choose how you capture the meeting.</h2>
             <p className="mk-lede">
-              Use the extension for a Chrome meeting tab, or the desktop app for a browser in any browser and for
+              Use the extension for a Chrome meeting tab, or the desktop app for calls in any browser and for
               native desktop meeting apps. Desktop notes can optionally sync to a web workspace.
             </p>
           </div>
@@ -75,7 +75,7 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
               <h3 className="mk-h3" id="choice-keys">Chrome extension · browser meetings</h3>
               <p className="mk-panel-price"><strong>Capture the current Chrome tab</strong></p>
               <p className="mk-panel-copy">
-                Save tab audio and your microphone separately in Chrome. Export the archive and import it in the
+                Use the floating recording control in Meet, Teams, Zoom web meetings, Discord, or Slack. Chrome may require a toolbar click or shortcut to start. Save tab audio and your microphone separately, then export the archive and import it in the
                 desktop app to transcribe and create notes. For direct system-audio capture, use the desktop app.
               </p>
               <Link className="mk-btn mk-btn--ghost-on-deep" href="/download#browser-extension">Get the Chrome extension</Link>

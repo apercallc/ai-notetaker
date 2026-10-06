@@ -29,6 +29,11 @@ const latest = (overrides: Partial<NonNullable<WidgetState["latest"]>> = {}): No
 });
 
 describe("deriveView", () => {
+  it("does not offer capture controls for another tab's recording", () => {
+    const elsewhere = state({ recordingElsewhere: true });
+    expect(deriveView(elsewhere, ui(), NOW)).toBe("busy");
+    expect(canStart(elsewhere)).toBe(false);
+  });
   it("keeps a pending capture in Connecting even when another surface initiated it", () => {
     const active = { id: "m", title: "t", startedAt: "2026-09-24T11:59:00.000Z", status: "recording" as const, captureStarting: true, bookmarks: [], transcript: [] };
     expect(deriveView(state({ active }), ui(), NOW)).toBe("starting");

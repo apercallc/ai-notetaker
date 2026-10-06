@@ -66,7 +66,7 @@ export async function startMeetRecording(
     if (activeRecord?.captureSource === "meet") {
       const requestedTabId = options.tabId ?? (await discoverActiveBrowserTab())?.id;
       if (requestedTabId !== undefined && capture.isActiveForTab(active.id, requestedTabId)) return active.id;
-      controller.reportStartFailure("Another browser tab is already recording. Stop it before starting this call.");
+      controller.reportStartFailure("Another browser tab is already recording. Stop it before starting this call.", requestedTabId);
       return "";
     }
     controller.reportStartFailure(
@@ -90,7 +90,7 @@ export async function startMeetRecording(
     // popup completes it — one click total instead of click-then-click.
     if (description === CAPTURE_PERMISSION_HINT) await savePendingMeetStart({ tabId, ...(options.meetingMode ? { meetingMode: options.meetingMode } : {}), ...(titleHint ? { titleHint } : {}) });
     if (options.silent && description === CAPTURE_PERMISSION_HINT) controller.reportCaptureInvocationRequired(tabId);
-    else if (!options.silent) controller.reportStartFailure(description);
+    else if (!options.silent) controller.reportStartFailure(description, tabId);
     return "";
   }
   const allowProviderWarning = options.allowProviderWarning === true || options.silent === true;

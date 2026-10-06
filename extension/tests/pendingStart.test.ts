@@ -10,10 +10,22 @@ beforeEach(() => {
 });
 
 describe("pendingMeetStart", () => {
+  it("keeps another tab's intent until its own popup opens", async () => {
+    await savePendingMeetStart({ tabId: 9 });
+    expect(await takePendingMeetStart(7)).toBeNull();
+    expect(await takePendingMeetStart(9)).toEqual({ tabId: 9 });
+  });
+
+  it.each([undefined, Date.now() - 180_000, Date.now() + 180_000])("discards stale or undated intent (%s)", async (createdAt) => {
+    await chromeMock.storage.session.set({ [KEY]: { tabId: 9, createdAt } });
+    expect(await takePendingMeetStart(9)).toBeNull();
+    expect(chromeMock.storage.session._dump()[KEY]).toBeUndefined();
+  });
+
   it("saves a blocked widget start and hands it back exactly once", async () => {
     await savePendingMeetStart({ tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
 
-    expect(chromeMock.storage.session._dump()[KEY]).toEqual({ tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
+    expect(chromeMock.storage.session._dump()[KEY]).toEqual({ tabId: 9, meetingMode: "sales", titleHint: "Roadmap", createdAt: expect.any(Number) });
     expect(await takePendingMeetStart()).toEqual({ tabId: 9, meetingMode: "sales", titleHint: "Roadmap" });
     // Taken means taken: a second popup open must not auto-start again.
     expect(await takePendingMeetStart()).toBeNull();
@@ -23,7 +35,7 @@ describe("pendingMeetStart", () => {
     await savePendingMeetStart({ tabId: 9, meetingMode: "sales" });
 
     await clearPendingMeetStartFor(7);
-    expect(chromeMock.storage.session._dump()[KEY]).toEqual({ tabId: 9, meetingMode: "sales" });
+    expect(chromeMock.storage.session._dump()[KEY]).toEqual({ tabId: 9, meetingMode: "sales", createdAt: expect.any(Number) });
 
     await clearPendingMeetStartFor(9);
     expect(chromeMock.storage.session._dump()[KEY]).toBeUndefined();

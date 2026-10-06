@@ -76,6 +76,8 @@ export interface WidgetState {
   /** Show the one-tap-copy attendee disclosure notice while recording. */
   disclosureNoticeEnabled: boolean;
   active: WidgetMeeting | null;
+  /** Another tab owns capture; this widget must not claim it is recording. */
+  recordingElsewhere?: boolean;
   /** Most recent finished (or finishing) meeting, so the widget can show "notes ready". */
   latest: Omit<WidgetMeeting, "bookmarks" | "transcript"> & { endedAt: string | null } | null;
 }
@@ -94,7 +96,7 @@ export type BackgroundToUiMessage =
   | { type: "SUMMARY_READY"; meetingId: string; summary: string; actionItems: ActionItem[] }
   | { type: "PROCESSING_WARNING"; meetingId: string; message: string; recovery?: ErrorRecoveryCategory }
   /** `phase: "start"` marks a recording that never began: the person who asked for it is told in place, not by a toolbar badge. */
-  | { type: "RECORDING_ERROR"; meetingId: string | null; message: string; recovery?: ErrorRecoveryCategory; phase?: "start" }
+  | { type: "RECORDING_ERROR"; meetingId: string | null; message: string; recovery?: ErrorRecoveryCategory; phase?: "start"; tabId?: number }
   | { type: "RECOVERABLE_RECORDING"; meetingId: string; startedAt: string }
   | { type: "DRIVE_EXPORT"; meetingId: string; status: DriveExportState["status"]; webViewLink?: string; message?: string }
   | { type: "HELPER_STATUS"; status: HelperConnectionStatus }

@@ -23,6 +23,7 @@ import { saveWidgetPosition } from "./lib/storage";
 import { MeetCaptureController, type MeetAudioChunk } from "./meet/meetCapture";
 import { finishMeetCaptureForTab, handleMeetCommand, startMeetRecording, stopMeetRecording } from "./meet/session";
 import { broadcastToMeetTabs } from "./meet/tabBroadcast";
+import { clearPendingMeetStartFor } from "./meet/pendingStart";
 
 // API keys and calendar tokens live in chrome.storage.local. Keep it out of
 // reach of content scripts (the Meet widget runs next to a web page); every
@@ -66,6 +67,7 @@ const readyPromise = (async () => {
 // REC badge.
 chrome.tabs.onRemoved?.addListener((tabId) => {
   clearAutoRecordAttempt(tabId);
+  void clearPendingMeetStartFor(tabId);
   void readyPromise
     .then(() => finishMeetCaptureForTab(controller, meetCapture, tabId))
     .catch((error) => {
@@ -74,6 +76,7 @@ chrome.tabs.onRemoved?.addListener((tabId) => {
 });
 chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
   if (typeof changeInfo.url !== "string") return;
+  void clearPendingMeetStartFor(tabId);
   void readyPromise
     .then(() => finishMeetCaptureForTab(controller, meetCapture, tabId, changeInfo.url))
     .catch((error) => {
@@ -120,7 +123,7 @@ function broadcastToUi(message: BackgroundToUiMessage): void {
   // No listener (e.g. popup closed) rejects this silently — that's fine,
   // the UI reads persisted state from storage when it next opens.
   chrome.runtime.sendMessage(message).catch(() => {});
-  void broadcastToMeetTabs(message);
+  void broadcastToMeetTabs(message, "meetingId" in message && message.meetingId ? meetCapture.widgetTabId(message.meetingId) : undefined);
 
   updateBadge(message);
   if (message.type === "SUMMARY_READY") void notifyNotesReady(message.meetingId).catch(() => {});
@@ -224,13 +227,23 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
     }
     case "STOP_RECORDING":
       // A page-side sender may only stop the recording that is actually live.
-      if (kind === "meet-content-script" && controller.getState().activeMeeting?.id !== message.meetingId) return {};
+      if (kind === "meet-content-script" && (sender.tab?.id === undefined || !meetCapture.isActiveForTab(message.meetingId, sender.tab.id))) return {};
       await stopMeetRecording(controller, meetCapture, message.meetingId);
       return {};
     case "ADD_BOOKMARK":
+      if (kind === "meet-content-script" && (sender.tab?.id === undefined || !meetCapture.isActiveForTab(message.meetingId, sender.tab.id))) return { ok: false };
       return { ok: await controller.addBookmark(message.meetingId, message.note) };
-    case "GET_WIDGET_STATE":
-      return controller.getWidgetState();
+    case "GET_WIDGET_STATE": {
+      const state = await controller.getWidgetState();
+      if (kind === "meet-content-script") {
+        state.callTitle = null;
+        if (state.latest && meetCapture.widgetTabId(state.latest.id) !== sender.tab?.id) state.latest = null;
+      }
+      if (kind === "meet-content-script" && state.active && (sender.tab?.id === undefined || !meetCapture.isActiveForTab(state.active.id, sender.tab.id))) {
+        return { ...state, active: null, latest: null, callTitle: null, recordingElsewhere: true };
+      }
+      return state;
+    }
     case "SAVE_WIDGET_POSITION":
       await saveWidgetPosition(message.position);
       return {};

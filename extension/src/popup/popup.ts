@@ -1,7 +1,7 @@
 import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import { sendToBackground } from "../lib/sendToBackground";
 import { escapeHtml } from "../lib/html";
-import { browserTitleForTab, isMeetUrl, isRecordableTabUrl } from "../meet/meetContext";
+import { browserTitleForTab, isRecordableTabUrl } from "../meet/meetContext";
 import { takePendingMeetStart } from "../meet/pendingStart";
 import type { BackgroundState } from "../lib/internalMessages";
 import type { MeetingRecord } from "../types";
@@ -36,7 +36,7 @@ async function render(): Promise<void> {
       <header class="app-header"><div class="brand-lockup"><img src="../icons/icon48.png" alt="" /><h1>AI Notetaker</h1></div><button class="icon-button" id="open-settings" aria-label="Open recording settings">Settings</button></header>
       <section class="banner">
         <strong>Browser meeting recorder</strong>
-        <p>Capture meeting audio playing in this secure Chrome tab. Your microphone and tab audio stay separate and local. Tell everyone before you record.</p>
+        <p>For Google Meet, Microsoft Teams, Zoom, Discord calls, and Slack huddles playing in Chrome. Your microphone and this tab’s audio stay separate and local. Tell everyone before you record.</p>
       </section>
       ${error ? `<p class="start-error" role="alert">${escapeHtml(error)}</p>` : ""}
       ${state.activeMeeting && !activeMeet ? '<p class="banner">Another recording is active. Finish it before starting a browser recording.</p>' : ""}
@@ -71,8 +71,8 @@ async function render(): Promise<void> {
     }
     // Opening the popup invokes the extension on this tab. Complete a widget
     // start that Chrome previously held behind that invocation gate.
-    if (ready && tab?.id !== undefined && isMeetUrl(tab.url) && !state.activeMeeting && !busy) {
-      const intent = await takePendingMeetStart();
+    if (ready && tab?.id !== undefined && !state.activeMeeting && !busy) {
+      const intent = await takePendingMeetStart(tab.id);
       if (intent?.tabId === tab.id) {
         void run(async () => {
           const result = await sendToBackground<{ meetingId: string }>({
@@ -95,6 +95,10 @@ async function run(action: () => Promise<void>): Promise<void> {
   if (busy) return;
   busy = true;
   error = "";
+  for (const button of app.querySelectorAll<HTMLButtonElement>(".record-toggle")) {
+    button.disabled = true;
+    button.textContent = button.id === "stop-recording" ? "Stopping…" : "Starting…";
+  }
   try {
     await action();
   } catch (cause) {

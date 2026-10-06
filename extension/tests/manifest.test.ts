@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MEETING_TAB_PATTERNS } from "../src/meet/meetingSites";
 import manifest from "../manifest.json";
 
 describe("manifest.json cross-browser fields", () => {
@@ -16,15 +17,15 @@ describe("manifest.json cross-browser fields", () => {
     expect(manifest.background.scripts).toEqual(["background.js"]);
   });
 
-  it("injects the Meet widget only on meet.google.com, with capture kept to that host", () => {
+  it("injects meeting controls on supported sites and keeps the direct bridge exclusive to Meet", () => {
     for (const script of manifest.content_scripts) {
-      expect(script.matches).toEqual(["https://meet.google.com/*"]);
+      expect(script.matches).toEqual(script.js.includes("content/meetWidget.js") ? MEETING_TAB_PATTERNS : ["https://meet.google.com/*"]);
       expect(script.all_frames).toBe(false);
     }
     expect(manifest.content_scripts.find(script => script.js.includes("content/directMain.js"))).toMatchObject({ world: "MAIN", run_at: "document_start" });
     expect(manifest.content_scripts.find(script => script.js.includes("content/directBridge.js"))).toMatchObject({ run_at: "document_start" });
     expect(manifest.content_scripts.find(script => script.js.includes("content/meetWidget.js"))).toMatchObject({ run_at: "document_idle" });
-    expect(manifest.host_permissions).toEqual(["https://meet.google.com/*"]);
+    expect(manifest.host_permissions).toEqual(MEETING_TAB_PATTERNS);
     expect(manifest.optional_host_permissions).toEqual([
       "https://*/*",
       "http://localhost/*",

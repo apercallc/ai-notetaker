@@ -93,7 +93,7 @@ captures must still be exported and imported in desktop.
   summary provider keys in the desktop app when you create notes.
 - Consent from the people you record when local law requires it.
 - Start and stop from the extension popup or shortcut on the meeting tab.
-  Google Meet also has an in-call control. Keep the popup's recording state
+  Meet, Teams, Zoom web meetings, Discord channels, and Slack workspaces also have floating recording controls. Chrome may require a toolbar click or shortcut to enable tab audio. Keep the popup's recording state
   visible and stop manually when a same-site call ends.
 
 ### For desktop calls in the desktop app

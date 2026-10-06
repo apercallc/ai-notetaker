@@ -3,8 +3,9 @@
 Manifest V3. This package is an optional browser meeting recorder during the
 desktop-first migration. New calls capture separate mic and meeting tracks in
 IndexedDB; the Tauri desktop app owns provider keys, notes, and desktop calls.
-Google Meet keeps its in-call control; other secure web tabs use the popup or
-shortcut. Keep older recordings, notes, settings, and the explicit archive export
+Meet, Teams, Zoom web meetings, Discord channels, and Slack workspaces have
+floating recording controls. Other secure tabs use the popup or shortcut.
+Only Meet uses the MAIN-world audio bridge. Keep older recordings, notes, settings, and the explicit archive export
 available until acceptance passes. Do not remove storage or alter the stable
 manifest key during the transition. See the root `CLAUDE.md` and
 `docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`.

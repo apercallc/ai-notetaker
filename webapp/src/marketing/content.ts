@@ -63,7 +63,7 @@ export const FAQS: Faq[] = [
     question: "What is the difference between Hosted AI and using my own keys?",
     topics: ["setup", "pricing"],
     answer:
-      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. You can separately sign in to a web-app workspace and create a revocable desktop sync token. Sync sends finished desktop notes to the web app and copies workspace notes into the desktop library. Web edits, deletions, and settings do not sync back, and extension recordings still need archive export and import.",
+      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. You can separately sign in to a web-app workspace and create a revocable desktop sync token. Sync sends finished desktop notes to the web app and copies workspace notes into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back, and extension recordings still need archive export and import.",
   },
   {
     question: "How much does AI Notetaker cost?",
@@ -134,7 +134,7 @@ export const FAQS: Faq[] = [
     question: "Can I record browser meetings in Google Meet, Zoom, Teams, Slack or Discord?",
     topics: ["setup"],
     answer:
-      "Yes. In Chrome, start the extension on the secure browser tab where the meeting audio is playing. This works for web versions of Google Meet, Zoom, Microsoft Teams, Slack, Discord, and other meeting sites; exact behavior depends on the browser and site. For a meeting in a desktop app or another browser, use AI Notetaker for macOS, Windows, or Linux to capture system audio and your microphone. Cross-platform app and device checks are still in progress.",
+      "Yes. In Chrome, use the floating control on supported meeting sites, the toolbar popup, or the recording shortcut on the tab where the call audio is playing. Chrome may require a toolbar click or shortcut before the floating control can start capture. This works for web versions of Google Meet, Zoom, Microsoft Teams, Slack, Discord, and other meeting sites; exact behavior depends on the browser and site. For a meeting in a desktop app or another browser, use AI Notetaker for macOS, Windows, or Linux to capture system audio and your microphone. Cross-platform app and device checks are still in progress.",
   },
   {
     question: "When should I use the extension or desktop app?",
@@ -158,7 +158,7 @@ export const FAQS: Faq[] = [
   {
     question: "Where can I read my notes?",
     topics: ["setup"],
-    answer: "If you enable workspace sync, finished desktop notes appear in your selected workspace, and workspace notes are copied into the desktop library for local viewing. Later web edits, deletions, and settings are not synced back. Browser extension recordings remain in Chrome until you export and import them into the desktop app, so the extension does not yet share the live library.",
+    answer: "If you enable workspace sync, finished desktop notes appear in your selected workspace, and workspace notes are copied into the desktop library for local viewing. Web edits refresh workspace copies on the next sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Browser extension recordings remain in Chrome until you export and import them into the desktop app, so the extension does not yet share the live library.",
   },
 ];
 

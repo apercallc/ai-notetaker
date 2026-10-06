@@ -13,7 +13,7 @@ async function loadPopup(tab: { id: number; url: string } | null, settings = { .
     message.type === "GET_STATE" ? { ...state, ...stateOverride } : message.type === "START_RECORDING" ? { meetingId: "new-meet" } : {},
   );
   await new Promise<void>((resolve) => chromeMock.storage.local.set({ "notetaker.settings": settings }, resolve));
-  if (pendingTabId !== undefined) await chromeMock.storage.session.set({ "notetaker.pendingMeetStart": { tabId: pendingTabId } });
+  if (pendingTabId !== undefined) await chromeMock.storage.session.set({ "notetaker.pendingMeetStart": { tabId: pendingTabId, createdAt: Date.now() } });
   await import("../src/popup/popup");
   await vi.waitFor(() => expect(document.querySelector("#export-recordings")).not.toBeNull());
 }
@@ -74,8 +74,8 @@ describe("browser recorder popup", () => {
     expect(chromeMock.runtime.openOptionsPage).toHaveBeenCalled();
   });
 
-  it("completes the widget's pending start on the same Meet tab", async () => {
-    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, {}, 7);
+  it.each(["https://meet.google.com/abc-defg-hij", "https://teams.microsoft.com/v2/", "https://us02web.zoom.us/wc/123/join", "https://discord.com/channels/@me/123", "https://app.slack.com/client/T1/C1"])("completes the widget pending start on %s", async (url) => {
+    await loadPopup({ id: 7, url }, undefined, {}, 7);
     await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "START_RECORDING", captureSource: "meet", tabId: 7 }));
   });
 

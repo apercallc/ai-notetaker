@@ -32,6 +32,7 @@ export function errorMessage(ctx: TemplateContext): string {
 }
 
 export const PILL_LABELS: Partial<Record<WidgetView, string>> = {
+  busy: "Recording in another tab",
   recording: "Recording",
   starting: "Starting…",
   processing: "Writing notes…",
@@ -75,10 +76,12 @@ export function renderPill(view: WidgetView, ctx: TemplateContext): string {
 
 export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
   switch (view) {
+    case "busy":
+      return `<div class="stack"><h2>Another recording is running</h2><p class="sub">This tab is not being recorded. Open the AI Notetaker toolbar popup to stop the other recording before starting here.</p></div>`;
     case "disconnected":
       return `
           <div class="stack">
-            <div><h2>AI Notetaker was updated</h2><p class="sub">Reload this tab to reconnect. Reloading rejoins your call.</p></div>
+            <div><h2>AI Notetaker was updated</h2><p class="sub">Reload this tab to reconnect. Reloading may interrupt your call. Rejoin if needed.</p></div>
             <button type="button" class="btn secondary block" id="reload">Reload tab</button>
           </div>`;
     case "setup":
@@ -112,7 +115,7 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
     case "saved":
       return `
           <div class="stack">
-            <div><h2>Meet audio saved</h2><p class="sub">Your microphone and the call audio are stored on this device. Export them from extension Settings and import the archive in the desktop app to make notes.</p></div>
+            <div><h2>Meeting audio saved</h2><p class="sub">Your microphone and the call audio are stored on this device. Export them from extension Settings and import the archive in the desktop app to make notes.</p></div>
             <button type="button" class="btn primary block" id="open-ai-settings">Export recordings</button>
             <button type="button" class="btn secondary block" id="dismiss">Dismiss</button>
           </div>`;
@@ -136,7 +139,7 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
               <div class="transcript" id="transcript" role="log" aria-live="off" aria-label="Live transcript" tabindex="0"></div>
               <button type="button" class="jump" id="jump" hidden>Jump to latest</button>
             </div>`
-                : `<p class="sub" id="written-on-stop">Recording. Your microphone and Meet audio are being saved separately on this device.</p>`
+                : `<p class="sub" id="written-on-stop">Recording. Your microphone and tab audio are being saved separately on this device.</p>`
             }
             <form class="row" id="moment-form" autocomplete="off">
               <input type="text" id="moment-note" maxlength="280" placeholder="Add a note to this moment" aria-label="Note for this moment (optional)" />
@@ -185,7 +188,7 @@ function renderError(ctx: TemplateContext): string {
 
 function startingCopy(state: WidgetState | null): string {
   void state;
-  return "Connecting to this Meet tab and microphone. Audio will be saved on this device.";
+  return "Connecting to this meeting tab and microphone. Audio will be saved on this device.";
 }
 
 function renderReady(ctx: TemplateContext): string {
@@ -193,7 +196,7 @@ function renderReady(ctx: TemplateContext): string {
   void ctx.selectedMode;
   const intro = state?.callTitle
     ? `Record <strong>${escapeHtml(state.callTitle)}</strong> and export it to the desktop app after the call.`
-    : "Save this Meet call locally and export it to the desktop app after the call.";
+    : "Save this call locally and export it to the desktop app after the call.";
   const startHint = state?.shortcuts.toggle
     ? `Start recording here, or press ${keysHtml(state.shortcuts.toggle)}.`
     : `Start recording here when everyone is ready. <button type="button" class="link" id="set-shortcut">Set a shortcut</button>`;
