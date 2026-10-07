@@ -15,17 +15,15 @@
       getting-started guide, and Chrome Web Store draft to describe the actual
       path: capture stays in Chrome, then archive export/import sends audio to
       the desktop app for provider processing and notes.
-- [ ] Verify installed Chrome against live Meet, Teams, Zoom web, Discord, and
-      Slack calls: microphone and remote audio, Chrome's first-use capture
-      gate, tab close/navigation, separate-tab state, export, desktop import,
-      and processing. The local direct-capture harness cannot load its
-      unpacked service worker in this Mac's installed Chrome headless mode.
-- Verified with extension typecheck, 683 tests, 92.08% statement / 83.83%
-      branch / 90.64% function coverage, build, production dependency audit,
-      and focused cross-tab tests. Webapp lint/typecheck, Prisma generation,
-      822 PostgreSQL-backed tests, build, and production dependency audit pass.
-      Helper format, strict Clippy, and 267 workspace tests pass with the
-      command-local Swift runtime workaround on this Mac.
+- [ ] Live-call acceptance in installed Chrome (one pass covers all of it):
+      Meet (multiple participants, reconnects, presentation audio, headphones,
+      mute/device changes, long capture), Teams and Zoom web, Discord, and Slack.
+      For each: microphone and remote audio, Chrome's first-use capture gate,
+      same-origin navigation, tab close/cross-origin navigation, separate-tab
+      state, export `.ntarchive`, desktop import, and notes made with real
+      provider keys. Unit tests, builds and synthetic Chromium proof
+      (`npm run test:direct-browser`) do not replace this. Browser-native app
+      windows and standalone apps need desktop capture.
 
 ## Dependency audit — 2026-10-05
 
@@ -209,9 +207,6 @@
       to Meet; other sites use the popup or shortcut and stop on tab close or
       cross-origin navigation. The persisted capture source retains its legacy
       `meet` identifier for archive compatibility.
-- [ ] Verify real Teams and Zoom browser calls in installed Chrome, including
-      mic/remote audio, same-origin navigation, tab close, export, and desktop
-      import. Browser-native app windows and standalone apps need desktop capture.
 - [x] Expose full archive export for desktop import and accept the saved audio
       state in desktop migration. Keep source browser data after export.
 - [x] Align website, extension, desktop settings, README, and setup-guide copy:
@@ -242,14 +237,9 @@
       requests so slow local scans cannot overlap or render out of order.
 - [ ] Sync an agreed set of non-secret preferences across web and desktop;
       provider keys, auth tokens, and device-specific capture choices stay local.
-- [ ] Show workspace notes in the extension through its authenticated desktop
-      bridge, without copying secrets into extension storage.
-- [ ] Add resumable chunked extension-audio handoff over Native Messaging;
-      preserve IndexedDB source recordings until desktop durability is confirmed.
-- [ ] Verify the complete flow in an installed Chrome extension and live Google
-      Meet call: record, stop, export `.ntarchive`, import in the desktop app,
-      and create notes with real desktop provider keys. Unit tests and a build
-      do not prove browser capture or provider processing.
+- [x] ~~Show workspace notes in the extension through its authenticated desktop
+      bridge~~ Dropped: the extension is a recorder; notes live in the desktop app.
+- [x] ~~Add resumable chunked extension-audio handoff over Native Messaging;~~ Dropped for the manual `.ntarchive` path (see the automatic-handoff decision below).
 - [ ] Decide whether to add automatic extension-to-desktop handoff after the
       manual archive path passes end-to-end acceptance.
 
@@ -372,7 +362,7 @@ The one-app workflow is not shipped.
 - [x] Allow nullable transcript timestamps so sync preserves segment order
       without inventing times. Existing exports and Google/Notion outputs handle
       untimed segments.
-- [ ] Verify against a real web-app workspace/token and prove recovery after a
+- [ ] Verify against a real signed-in web-app account and prove recovery after a
       network failure and app restart. Automated route and outbox tests pass.
 - [x] Add local history detail/delete and open-notes-folder controls.
 - [x] Add nested local folders and sectioned desktop Settings. Folder moves
@@ -496,9 +486,6 @@ or BlackHole steps relevant to this Mac.
 - [x] Prove non-silent mic and speaker PCM in IndexedDB from a fresh synthetic
       Meet-origin tab without a tabCapture invocation grant, including restored
       capture metadata and stop/restart. See `npm run test:direct-browser`.
-- [ ] Verify an actual Google Meet call (multiple participants, reconnects,
-      presentation audio, headphones, mute/device changes, and long capture)
-      before publishing. Synthetic Chromium proof is not live Meet acceptance.
 
 ## Cross-surface latency and stability — 2026-10-02
 
