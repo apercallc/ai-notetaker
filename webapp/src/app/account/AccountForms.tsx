@@ -118,7 +118,7 @@ export interface TokenRow {
   expiresAt: string;
 }
 
-export function ApiTokenPanel({ tokens, activeWorkspaceName }: { tokens: TokenRow[]; activeWorkspaceName: string }) {
+export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
   const [result, formAction, pending] = useActionState<CreateApiTokenState | null, FormData>(callCreateToken, null);
   return (
     <div>
@@ -126,10 +126,9 @@ export function ApiTokenPanel({ tokens, activeWorkspaceName }: { tokens: TokenRo
         <label htmlFor="token-label">Label</label>
         <input id="token-label" name="label" type="text" className="text-input" placeholder="AI Notetaker desktop" maxLength={80} />
         <label htmlFor="token-purpose">Use</label>
-        <select id="token-purpose" name="purpose" className="text-input" defaultValue="desktop_sync">
-          <option value="desktop_sync">Sync notes from the desktop app to {activeWorkspaceName}</option>
-          <option value="extension">Sign in the legacy extension or helper</option>
+        <select id="token-purpose" name="purpose" className="text-input" defaultValue="mcp">
           <option value="mcp">Read-only, for AI assistants (MCP)</option>
+          <option value="extension">Sign in the legacy extension or helper</option>
         </select>
         <button type="submit" className="button button-primary" disabled={pending} aria-busy={pending}>
           {pending ? "Creating…" : "Create API token"}

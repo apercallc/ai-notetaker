@@ -173,7 +173,3 @@ export async function finishImport(session: ManagedSession, uploadId: string) {
   return { meetingId: upload.meetingId, jobId: job.id, status: job.status };
 }
 
-/** Test and cleanup helper: the import's meeting row, workspace-scoped. */
-export async function findImportMeeting(workspaceId: string, meetingId: string) {
-  return prisma.meeting.findFirst({ where: { id: meetingId, workspaceId, captureSource: "import" } });
-}

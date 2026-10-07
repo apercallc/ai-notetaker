@@ -112,13 +112,12 @@ export default async function AccountPage({
           {tab === "integrations" && (
             <>
               <section className="settings-card">
-                <h2>Desktop app and API tokens</h2>
+                <h2>API tokens</h2>
                 <p className="muted-copy">
-                  Create a workspace-scoped token for optional desktop note sync. Legacy extension and read-only API
-                  tokens remain separate. Tokens expire after 90 days without use and can be revoked here.
+                  To sync the desktop app, sign in from the app instead (see Connect the desktop app). These tokens are for
+                  AI assistants (MCP) and the legacy extension. Tokens expire after 90 days without use and can be revoked here.
                 </p>
                 <ApiTokenPanel
-                  activeWorkspaceName={workspaces.find((item) => item.id === session.workspaceId)?.name ?? "this workspace"}
                   tokens={tokens.map((token) => ({
                     id: token.id,
                     label: token.label,

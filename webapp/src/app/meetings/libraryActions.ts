@@ -42,16 +42,6 @@ export async function renameFolderAction(formData: FormData): Promise<LibraryRes
   return { ok: true };
 }
 
-export async function moveFolderAction(formData: FormData): Promise<LibraryResult> {
-  const session = await requireSession();
-  const blocked = await writeBlock(session.workspaceId);
-  if (blocked) return { ok: false, error: blocked };
-  const result = await moveFolder(session, text(formData, "id"), optionalId(formData, "parentId"));
-  if (!result.ok) return result;
-  refresh();
-  return { ok: true };
-}
-
 export async function moveNotesAction(formData: FormData): Promise<LibraryResult> {
   const session = await requireSession();
   const blocked = await writeBlock(session.workspaceId);
@@ -70,14 +60,6 @@ export async function trashFolderAction(formData: FormData): Promise<LibraryResu
   refresh();
   const items = result.notes === 1 ? "1 note" : `${result.notes} notes`;
   return { ok: true, message: `Folder moved to Trash with ${items}.` };
-}
-
-export async function trashNoteAction(formData: FormData): Promise<LibraryResult> {
-  const session = await requireSession();
-  const result = await trashNote(session, text(formData, "id"));
-  if (!result.ok) return result;
-  refresh();
-  return { ok: true, message: "Moved to Trash." };
 }
 
 /** Creates an empty note and opens it for typing. */
