@@ -620,7 +620,7 @@ export async function getMeeting(workspaceId: string, id: string): Promise<Meeti
   };
 }
 
-export const ACTION_ITEMS_PAGE_SIZE = 50;
+const ACTION_ITEMS_PAGE_SIZE = 50;
 
 export interface ListActionItemsOptions {
   status?: "open" | "done";

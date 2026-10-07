@@ -18,8 +18,8 @@ export class MediaDecodeError extends Error {
   }
 }
 
-export const DECODE_SAMPLE_RATE_HZ = 16_000;
-export const DECODE_BYTES_PER_SAMPLE = 2;
+const DECODE_SAMPLE_RATE_HZ = 16_000;
+const DECODE_BYTES_PER_SAMPLE = 2;
 export const DECODE_BYTES_PER_SECOND = DECODE_SAMPLE_RATE_HZ * DECODE_BYTES_PER_SAMPLE;
 
 const PROBE_TIMEOUT_MS = 60_000;

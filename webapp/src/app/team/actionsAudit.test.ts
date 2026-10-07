@@ -7,7 +7,12 @@ vi.mock("next/headers", () => ({ cookies: vi.fn(async () => cookieStore) }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn((url: string) => { throw new Error(`REDIRECT:${url}`); }) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const { addMember, manageTeam, updateRetentionPolicy } = await import("./actions");
+const { manageTeam, updateRetentionPolicy } = await import("./actions");
+const { requireSession } = await import("@/lib/currentUser");
+const { addMemberAs } = await import("@/lib/teamAdmin");
+
+// Members are added through the REST team route (addMemberAs); exercise it under a real session here.
+const addMember = async (data: FormData) => addMemberAs(await requireSession(), String(data.get("email") ?? ""));
 
 function formData(fields: Record<string, string>): FormData {
   const data = new FormData();

@@ -25,6 +25,7 @@ import {
   registerHostedAccount,
 } from "@/lib/accounts";
 import { loginUrl } from "./url";
+import { formText } from "@/lib/formData";
 
 // Responses that must not reveal whether an address has an account take the
 // same minimum time whether or not one exists.
@@ -35,14 +36,10 @@ async function padTo(startedAt: number): Promise<void> {
   if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
 }
 
-function field(formData: FormData, name: string): string {
-  return String(formData.get(name) ?? "");
-}
-
 function nextField(formData: FormData): string {
   // Protocol-relative URLs such as //evil.example also start with `/` but
   // would turn the post-login redirect into an open redirect.
-  return safeNextPath(field(formData, "next") || "/meetings");
+  return safeNextPath(formText(formData, "next") || "/meetings");
 }
 
 async function hasAnyUser(): Promise<boolean> {
@@ -60,10 +57,10 @@ async function hasAnyUser(): Promise<boolean> {
 export async function bootstrap(formData: FormData): Promise<void> {
   if (await hasAnyUser()) redirect("/login");
 
-  const setupToken = field(formData, "setupToken");
-  const email = normalizeEmail(field(formData, "email"));
-  const password = field(formData, "password");
-  const confirmPassword = field(formData, "confirmPassword");
+  const setupToken = formText(formData, "setupToken");
+  const email = normalizeEmail(formText(formData, "email"));
+  const password = formText(formData, "password");
+  const confirmPassword = formText(formData, "confirmPassword");
 
   const throttleContext = await getRequestContext();
   if ((await bootstrapThrottleStatus({ ip: throttleContext.ip })).blocked) redirect("/login?error=bootstrap");
@@ -91,8 +88,8 @@ export async function bootstrap(formData: FormData): Promise<void> {
 }
 
 export async function login(formData: FormData): Promise<void> {
-  const email = field(formData, "email");
-  const password = field(formData, "password");
+  const email = formText(formData, "email");
+  const password = formText(formData, "password");
   const safeNext = nextField(formData);
   const context = await getRequestContext();
 
@@ -122,10 +119,10 @@ export async function signup(formData: FormData): Promise<void> {
   const next = nextField(formData);
   const context = await getRequestContext();
   const result = await registerHostedAccount({
-    email: field(formData, "email"),
-    password: field(formData, "password"),
-    confirmPassword: field(formData, "confirmPassword"),
-    workspaceName: field(formData, "workspaceName"),
+    email: formText(formData, "email"),
+    password: formText(formData, "password"),
+    confirmPassword: formText(formData, "confirmPassword"),
+    workspaceName: formText(formData, "workspaceName"),
     acceptedTerms: formData.get("acceptTerms") === "on",
     context,
   });
@@ -151,7 +148,7 @@ export async function signup(formData: FormData): Promise<void> {
  */
 export async function requestPasswordReset(formData: FormData): Promise<void> {
   const startedAt = Date.now();
-  const email = normalizeEmail(field(formData, "email"));
+  const email = normalizeEmail(formText(formData, "email"));
   const next = nextField(formData);
   const context = await getRequestContext();
 
@@ -173,7 +170,7 @@ export async function requestPasswordReset(formData: FormData): Promise<void> {
 /** Resends the verification link for an unverified account; neutral like reset. */
 export async function resendVerification(formData: FormData): Promise<void> {
   const startedAt = Date.now();
-  const email = normalizeEmail(field(formData, "email"));
+  const email = normalizeEmail(formText(formData, "email"));
   const next = nextField(formData);
   const context = await getRequestContext();
 
@@ -194,14 +191,14 @@ export async function resendVerification(formData: FormData): Promise<void> {
 /** Spends an email-verification link. A POST on purpose: mail scanners that
  * prefetch links with GET must not be able to consume a single-use token. */
 export async function verifyEmail(formData: FormData): Promise<void> {
-  const result = await completeEmailVerification(field(formData, "token"));
+  const result = await completeEmailVerification(formText(formData, "token"));
   if (!result.ok) redirect(loginUrl({ error: "token-invalid" }));
   redirect(loginUrl({ notice: "verified" }));
 }
 
 export async function resetPassword(formData: FormData): Promise<void> {
-  const token = field(formData, "token");
-  const result = await completePasswordReset(token, field(formData, "password"), field(formData, "confirmPassword"));
+  const token = formText(formData, "token");
+  const result = await completePasswordReset(token, formText(formData, "password"), formText(formData, "confirmPassword"));
   if (!result.ok) {
     if (result.reason === "invalid-token") redirect(loginUrl({ error: "token-invalid" }));
     redirect(loginUrl({
@@ -216,7 +213,7 @@ export async function resetPassword(formData: FormData): Promise<void> {
 
 /** A signed-in user joins the workspace an invite email names. */
 export async function acceptInvite(formData: FormData): Promise<void> {
-  const token = field(formData, "token");
+  const token = formText(formData, "token");
   const store = await cookies();
   const context = await getSessionContext(store.get(SESSION_COOKIE)?.value);
   if (!context) redirect(loginUrl({ next: `/login?tab=invite&token=${encodeURIComponent(token)}` }));
@@ -235,11 +232,11 @@ export async function acceptInvite(formData: FormData): Promise<void> {
 
 /** An invitee with no account creates one and joins in a single step. */
 export async function acceptInviteNewAccount(formData: FormData): Promise<void> {
-  const token = field(formData, "token");
+  const token = formText(formData, "token");
   const result = await acceptInviteWithNewAccount({
     token,
-    password: field(formData, "password"),
-    confirmPassword: field(formData, "confirmPassword"),
+    password: formText(formData, "password"),
+    confirmPassword: formText(formData, "confirmPassword"),
     acceptedTerms: formData.get("acceptTerms") === "on",
   });
   if (!result.ok) {

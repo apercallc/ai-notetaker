@@ -31,7 +31,7 @@ export const GOOGLE_OAUTH_SCOPES = [
 ].join(" ");
 
 /** Sign-in asks for identity only, so it needs no Google sensitive-scope review. */
-export const GOOGLE_SIGNIN_SCOPES = "openid email";
+const GOOGLE_SIGNIN_SCOPES = "openid email";
 
 export class GoogleIntegrationError extends Error {
   constructor(

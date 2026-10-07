@@ -6,16 +6,9 @@ import { revalidatePath } from "next/cache";
 import { getRequestContext } from "@/lib/requestContext";
 import { recordAudit } from "@/lib/audit";
 import { teamPlanActive } from "@/lib/teamAccess";
-import { addMemberAs, manageTeamAs, type AddMemberResult, type TeamActionResult } from "@/lib/teamAdmin";
+import { manageTeamAs, type TeamActionResult } from "@/lib/teamAdmin";
 
-export type { AddMemberResult, TeamActionResult };
-
-export async function addMember(formData: FormData): Promise<AddMemberResult> {
-  const session = await requireSession();
-  const result = await addMemberAs(session, String(formData.get("email") ?? ""));
-  if (result.ok) revalidatePath("/team");
-  return result;
-}
+export type { TeamActionResult };
 
 export async function manageTeam(formData: FormData): Promise<TeamActionResult> {
   // requireSession signals "sign in" by throwing a redirect, so it stays outside the try inside manageTeamAs.

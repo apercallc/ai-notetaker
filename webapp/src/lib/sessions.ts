@@ -1,7 +1,7 @@
 import { prisma } from "./db";
 import { looksLikeApiToken, resolveApiToken } from "./apiTokens";
 
-export const SESSION_LIFETIME_MS = 1000 * 60 * 60 * 24 * 30; // 30 days, matches the previous cookie maxAge
+const SESSION_LIFETIME_MS = 1000 * 60 * 60 * 24 * 30; // 30 days, matches the previous cookie maxAge
 const TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 
 export interface SessionMetadata {

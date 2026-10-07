@@ -45,7 +45,7 @@ export function managedUnauthorized(requestId?: string): Response {
 }
 
 /** Header the import form sets on every request; a cross-site page cannot add it without a CORS preflight we never grant. */
-export const BROWSER_API_HEADER = "x-notetaker-browser";
+const BROWSER_API_HEADER = "x-notetaker-browser";
 
 function cookieValue(header: string | null, name: string): string | undefined {
   if (!header) return undefined;

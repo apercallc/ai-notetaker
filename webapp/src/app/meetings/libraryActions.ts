@@ -7,6 +7,7 @@ import { writeBlock } from "@/lib/workspaceAccess";
 import { createFolder, moveFolder, moveNotes, renameFolder, restoreFromTrash, trashFolder, trashNote } from "@/lib/library";
 import { ValidationError, renameMeeting } from "@/lib/meetings";
 import { MAX_NOTE_UPLOAD_BYTES, createNote, isNoteUploadName, titleFromFileName } from "@/lib/noteEditing";
+import { formText } from "@/lib/formData";
 
 /**
  * Library actions. Expected failures come back as values, never thrown: Next
@@ -14,8 +15,7 @@ import { MAX_NOTE_UPLOAD_BYTES, createNote, isNoteUploadName, titleFromFileName 
  */
 export type LibraryResult = { ok: true; message?: string; id?: string; name?: string } | { ok: false; error: string };
 
-const text = (formData: FormData, name: string) => String(formData.get(name) ?? "");
-const optionalId = (formData: FormData, name: string): string | null => text(formData, name).trim() || null;
+const optionalId = (formData: FormData, name: string): string | null => formText(formData, name).trim() || null;
 
 function refresh(): void {
   revalidatePath("/meetings");
@@ -26,7 +26,7 @@ export async function createFolderAction(formData: FormData): Promise<LibraryRes
   const session = await requireSession();
   const blocked = await writeBlock(session.workspaceId);
   if (blocked) return { ok: false, error: blocked };
-  const result = await createFolder(session, optionalId(formData, "parentId"), text(formData, "name"));
+  const result = await createFolder(session, optionalId(formData, "parentId"), formText(formData, "name"));
   if (!result.ok) return result;
   refresh();
   return { ok: true, id: result.id, name: result.name };
@@ -36,7 +36,7 @@ export async function renameFolderAction(formData: FormData): Promise<LibraryRes
   const session = await requireSession();
   const blocked = await writeBlock(session.workspaceId);
   if (blocked) return { ok: false, error: blocked };
-  const result = await renameFolder(session, text(formData, "id"), text(formData, "name"));
+  const result = await renameFolder(session, formText(formData, "id"), formText(formData, "name"));
   if (!result.ok) return result;
   refresh();
   return { ok: true };
@@ -55,7 +55,7 @@ export async function moveNotesAction(formData: FormData): Promise<LibraryResult
 
 export async function trashFolderAction(formData: FormData): Promise<LibraryResult> {
   const session = await requireSession();
-  const result = await trashFolder(session, text(formData, "id"));
+  const result = await trashFolder(session, formText(formData, "id"));
   if (!result.ok) return result;
   refresh();
   const items = result.notes === 1 ? "1 note" : `${result.notes} notes`;
@@ -78,8 +78,8 @@ export async function uploadNoteAction(formData: FormData): Promise<LibraryResul
   const session = await requireSession();
   const blocked = await writeBlock(session.workspaceId);
   if (blocked) return { ok: false, error: blocked };
-  const fileName = text(formData, "fileName");
-  const body = text(formData, "body");
+  const fileName = formText(formData, "fileName");
+  const body = formText(formData, "body");
   if (!isNoteUploadName(fileName)) return { ok: false, error: "Upload a .md, .markdown or .txt file." };
   if (new TextEncoder().encode(body).length > MAX_NOTE_UPLOAD_BYTES) return { ok: false, error: `That file is too large. The limit is ${MAX_NOTE_UPLOAD_BYTES / 1024} KB.` };
   const result = await createNote(session, { title: titleFromFileName(fileName), body, folderId: optionalId(formData, "folderId"), source: "upload" });
@@ -94,7 +94,7 @@ export async function renameNoteAction(formData: FormData): Promise<LibraryResul
   const blocked = await writeBlock(session.workspaceId);
   if (blocked) return { ok: false, error: blocked };
   try {
-    const renamed = await renameMeeting(session.workspaceId, text(formData, "id"), text(formData, "title"));
+    const renamed = await renameMeeting(session.workspaceId, formText(formData, "id"), formText(formData, "title"));
     if (!renamed) return { ok: false, error: "This note no longer exists." };
   } catch (error) {
     if (error instanceof ValidationError) return { ok: false, error: error.message.replace(/^title is required$/u, "Enter a title.") };

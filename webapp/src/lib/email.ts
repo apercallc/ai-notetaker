@@ -9,7 +9,7 @@ export function normalizeEmail(value: string): string {
   return value.normalize("NFC").trim().toLowerCase().normalize("NFC");
 }
 
-export const MAX_EMAIL_LENGTH = 254;
+const MAX_EMAIL_LENGTH = 254;
 
 // Deliberately permissive: real validation is "can this mailbox receive a
 // link", which only a verification email can prove.

@@ -18,7 +18,7 @@ import type { LibrarySession } from "./library";
  * delivery table.
  */
 export type IntegrationKind = "webhook" | "slack" | "notion";
-export const INTEGRATION_KINDS: IntegrationKind[] = ["webhook", "slack", "notion"];
+const INTEGRATION_KINDS: IntegrationKind[] = ["webhook", "slack", "notion"];
 export const MAX_INTEGRATIONS_PER_WORKSPACE = 10;
 export const MAX_DELIVERY_ATTEMPTS = 6;
 /** Delay before attempt N+1 after attempt N failed. */
@@ -359,7 +359,7 @@ async function transport(request: Parameters<typeof safeRequest>[0]): Promise<Se
   }
 }
 
-export const defaultSender: Sender = async (kind, config, event, deliveryId, note) => {
+const defaultSender: Sender = async (kind, config, event, deliveryId, note) => {
   if (kind === "webhook") {
     const webhook = config as WebhookConfig;
     const body = JSON.stringify({ id: deliveryId, event, createdAt: new Date().toISOString(), note });

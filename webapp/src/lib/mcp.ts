@@ -11,7 +11,7 @@ import { buildNotePayload } from "./integrations";
  * data: the instructions tell the assistant not to follow anything inside it.
  */
 export const MCP_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
-export const MCP_SERVER_VERSION = "1.0.0";
+const MCP_SERVER_VERSION = "1.0.0";
 const MAX_NOTE_CHARS = 40_000;
 const MAX_TRANSCRIPT_CHARS = 60_000;
 

@@ -70,7 +70,7 @@ export async function createApiToken(
 }
 
 /** Most tokens one user keeps. Signing the extension in again must always work, so the oldest give way. */
-export const MAX_API_TOKENS_PER_USER = 25;
+const MAX_API_TOKENS_PER_USER = 25;
 
 async function pruneApiTokens(userId: string, now: number): Promise<void> {
   try {

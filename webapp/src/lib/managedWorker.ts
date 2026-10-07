@@ -129,9 +129,9 @@ export interface ManagedJobClaim {
 /** A crashed worker must not strand a hosted meeting forever. */
 export const MANAGED_JOB_LEASE_MS = 15 * 60 * 1_000;
 /** A live worker renews its lease this often, so long recordings are never reclaimed mid-run. */
-export const MANAGED_JOB_HEARTBEAT_MS = 2 * 60 * 1_000;
+const MANAGED_JOB_HEARTBEAT_MS = 2 * 60 * 1_000;
 /** Claims allowed before a stalled job is failed instead of reclaimed again. */
-export const MANAGED_JOB_MAX_ATTEMPTS = 4;
+const MANAGED_JOB_MAX_ATTEMPTS = 4;
 const PROVIDER_REQUEST_TIMEOUT_MS = 60_000;
 const PROVIDER_MAX_ATTEMPTS = 3;
 
