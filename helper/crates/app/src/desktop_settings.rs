@@ -59,6 +59,10 @@ pub struct DesktopPreferences {
     pub processing: ProcessingChoice,
     #[serde(default)]
     pub hosted_account: Option<HostedAccount>,
+    /// Cloud sync was connected automatically by signing in (not by a token the user pasted), so
+    /// signing out must disconnect it again and leave the app fully offline.
+    #[serde(default)]
+    pub sync_from_sign_in: bool,
 }
 
 impl Default for DesktopPreferences {
@@ -72,6 +76,7 @@ impl Default for DesktopPreferences {
             webapp_url: DEFAULT_WEBAPP_URL.to_string(),
             processing: ProcessingChoice::Local,
             hosted_account: None,
+            sync_from_sign_in: false,
         }
     }
 }

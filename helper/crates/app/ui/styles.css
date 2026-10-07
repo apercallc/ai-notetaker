@@ -406,3 +406,7 @@ h3 { font-size: 15px; font-weight: 650; }
 .filter-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 13px; font-weight: 620; }
 .filter-chip span { color: var(--muted); font-weight: 500; }
 .filter-chip.active { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); color: var(--ink); background: var(--green-soft); }
+.note-actions { align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.cloud-status { margin: 0 0 16px; }
+.browser-signin .key-row { margin-top: 12px; }
+.browser-signin .inline-actions { margin-top: 10px; }
