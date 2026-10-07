@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { prisma } from "./db";
+import { captureWarning } from "./observability";
 import { ValidationError } from "./meetings";
 import { DeploymentConfigError, getAppUrl } from "./deploymentConfig";
 import { PLAN_MEETING_LIMITS, planLabel } from "./plans";
@@ -542,6 +543,8 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
           workspaceId,
           priceId: priceId ?? "(none)",
         });
+        // A customer has paid but no plan was activated: make sure an operator is told, not just the log.
+        captureWarning("paid subscription ignored: price is not a configured plan", { eventId, eventType, workspaceId, priceId: priceId ?? "(none)" });
         return;
       }
     }

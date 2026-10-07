@@ -4,6 +4,7 @@ import "./globals.css";
 import { AppHeader } from "@/components/AppHeader";
 import { getAppUrl } from "@/lib/deploymentConfig";
 import { hostedAiEnabled } from "@/lib/deploymentConfig";
+import { getWorkspaceAccess } from "@/lib/workspaceAccess";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { SESSION_COOKIE } from "@/lib/sessionCookie";
 import { getSessionContextForRequest, resolveWorkspaceForRequest } from "@/lib/currentUser";
@@ -31,13 +32,16 @@ export const metadata: Metadata = {
  * requireSession(); a failure here must never take the page down, so it just
  * means no header.
  */
-async function headerRole(): Promise<"owner" | "member" | null> {
+async function headerState(): Promise<{ role: "owner" | "member"; lapsed: boolean } | null> {
   try {
     const store = await cookies();
     const session = await getSessionContextForRequest(store.get(SESSION_COOKIE)?.value);
     if (!session || session.user.mustChangePassword) return null;
     const active = await resolveWorkspaceForRequest(session.user.id, session.activeWorkspaceId);
-    return active?.role ?? null;
+    if (!active) return null;
+    // A workspace whose plan ended is read-only, never locked: say so on every page.
+    const lapsed = managedHostingEnabled() ? (await getWorkspaceAccess(active.workspaceId)).lapsed : false;
+    return { role: active.role, lapsed };
   } catch (error) {
     console.error("header session lookup failed", error instanceof Error ? error.message : String(error));
     return null;
@@ -55,12 +59,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </html>
     );
   }
-  const role = await headerRole();
+  const header = await headerState();
+  const role = header?.role ?? null;
   return (
     <html lang="en">
       <body>
         <a href="#main" className="skip-link">Skip to content</a>
         {role && <AppHeader role={role} managed={managedHostingEnabled()} hostedAi={hostedAiEnabled()} />}
+        {header?.lapsed && (
+          <p className="notice-bar" role="status">
+            Your plan has ended, so this library is read-only. Your notes are safe: you can still read, search and export them.{" "}
+            <a href="/billing">{role === "owner" ? "Choose a plan" : "See the plan"}</a>
+          </p>
+        )}
         <main id="main" tabIndex={-1}>{children}</main>
       </body>
     </html>

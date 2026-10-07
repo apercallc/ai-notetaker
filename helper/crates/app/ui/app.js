@@ -690,7 +690,7 @@
     const reset = e.period?.end ? longDate(e.period.end) : "";
     const notices = [];
     if (e.inPaymentGrace) notices.push(`Your last payment failed. Sync continues until ${longDate(e.graceEndsAt)} while we retry. Update your payment method to keep it.`);
-    if (!e.canSync) notices.push("Cloud sync is off. Your notes stay on this device. Choose a plan to sync them across your devices.");
+    if (!e.canSync) notices.push("Cloud sync is off. Your notes stay on this device and upload when a plan is active. Notes already in your account stay readable and exportable on the web.");
     if (data.subscription.cancelsAt) notices.push(`Your plan is set to end on ${longDate(data.subscription.cancelsAt)}.`);
     const current = e.plan;
     const offers = (data.offers || []).filter((offer) => offer.id !== current && offer.priceId);
@@ -823,7 +823,7 @@
       ? ["Offline", ""]
       : !s.hasHostedSession ? ["Sign in again", "warn"] : needsPlan ? ["Needs plan", "warn"] : ["Signed in", "ok"];
     const syncOn = state.snapshot.webappSync.configured && !needsPlan;
-    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : needsPlan ? "Cloud sync is off." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device." : needsPlan ? "Your notes stay on this device. Choose a Pro or Team plan to sync them across your devices and your team." : "Your notes stay on this device. Sign in if you want an account; a subscription adds cloud sync."}</p>${needsPlan ? '<div class="inline-actions"><button type="button" class="primary-button" id="upgrade-plan">See plans</button></div>' : ""}`;
+    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : needsPlan ? "Cloud sync is off." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device." : needsPlan ? "Your notes stay on this device, and anything you make now uploads when a plan is active. Notes already in your account stay readable on the web, and still download here. Choose a Pro or Team plan to sync again." : "Your notes stay on this device. Sign in if you want an account; a subscription adds cloud sync."}</p>${needsPlan ? '<div class="inline-actions"><button type="button" class="primary-button" id="upgrade-plan">See plans</button></div>' : ""}`;
     const processingBody = cloudLine + (account
       ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(planName(accountState.overview?.entitlements?.plan || account.plan))} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep your notes syncing.</p>'}
         <div class="inline-actions"><button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button><button type="button" class="secondary-button" id="hosted-manage-web">Manage account, devices &amp; data on the web</button></div></div>

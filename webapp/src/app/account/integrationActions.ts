@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/currentUser";
+import { writeBlock } from "@/lib/workspaceAccess";
 import { createIntegration, deleteIntegration, rotateWebhookSecret, sendTestDelivery, setIntegrationEnabled, type IntegrationKind } from "@/lib/integrations";
 
 export type IntegrationResult = { ok: true; message?: string; secret?: string } | { ok: false; error: string };
@@ -10,6 +11,8 @@ const text = (formData: FormData, name: string) => String(formData.get(name) ?? 
 
 export async function createIntegrationAction(formData: FormData): Promise<IntegrationResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const kind = text(formData, "kind") as IntegrationKind;
   const result = await createIntegration(session, {
     kind,
@@ -50,6 +53,8 @@ export async function testIntegrationAction(formData: FormData): Promise<Integra
 
 export async function rotateSecretAction(formData: FormData): Promise<IntegrationResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const result = await rotateWebhookSecret(session, text(formData, "id"));
   if (!result.ok) return result;
   revalidatePath("/account");

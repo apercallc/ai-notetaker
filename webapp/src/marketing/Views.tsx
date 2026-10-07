@@ -782,7 +782,7 @@ export function TermsView() {
             <h2>Plans and billing</h2>
             <ul>
               <li>The desktop app and a free account cost nothing. Pro (cloud sync) and Team (team sync) are monthly subscriptions billed in US dollars through Stripe, as shown on the pricing page.</li>
-              <li>Without an active subscription, cloud sync is off. Your notes stay on your device and keep working, and nothing is deleted when a plan ends.</li>
+              <li>Without an active subscription, cloud sync is off. Your notes stay on your device and keep working. Notes already in your account stay there, read-only: you can read, search, export and delete them, and download them to the desktop app. We do not delete notes because a plan ended; editing, sharing, integrations, invitations and new uploads need a plan.</li>
               <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for, and it does not renew.</li>
               <li>
                 Fees for a billing period that has started are not refunded, except where the law requires it or we

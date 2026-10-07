@@ -6,6 +6,7 @@ import { getChatEntitlement } from "@/lib/chatQuota";
 import { getPlanCatalog, hasLiveSubscription } from "@/lib/billing";
 import { planLabel, statusLabel } from "@/lib/plans";
 import { hostedAiEnabled } from "@/lib/deploymentConfig";
+import { accessFromSubscription } from "@/lib/workspaceAccess";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { openBillingPortal, startCheckout } from "./actions";
 import { BillingActionForm } from "./BillingActionForm";
@@ -58,6 +59,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const resetDate = formatDate(entitlements.period.end);
   const graceDate = formatDate(entitlements.graceEndsAt);
   const cancelsDate = live ? formatDate(subscription?.cancelsAt?.toISOString()) : null;
+  const access = accessFromSubscription(subscription);
 
   return (
     <div className="container">
@@ -157,6 +159,24 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         {(entitlements.status === "past_due" && !entitlements.inPaymentGrace) || entitlements.status === "unpaid" ? (
           <p className="error-text" role="alert">Sync is paused because payment could not be collected. Update your payment method to resume.</p>
         ) : null}
+        {cancelsDate && (
+          <p className="muted-copy">
+            Until then everything works as usual. After that your notes stay in your account, read-only, and you can export them
+            {isOwner ? <> any time from <Link href="/account">Account</Link></> : " any time"}. Notes on your computer are never affected.
+          </p>
+        )}
+        {access.lapsed && (
+          <div className="callout" role="status">
+            <p><strong>Your notes are safe.</strong> Your plan has ended, so this library is read-only.</p>
+            <ul>
+              <li>You can still read, search, export and delete your notes, and download them to the desktop app.</li>
+              <li>Notes made on your computer stay on your computer and upload when a plan is active again.</li>
+              <li>Editing, sharing, integrations, inviting people and uploading new notes need a plan.</li>
+              <li>We do not delete notes because a plan ended.</li>
+            </ul>
+            {isOwner && <p><Link className="button button-secondary button-small" href="/account/export">Export all notes</Link></p>}
+          </div>
+        )}
         {entitlements.status === "canceled" && <p className="muted-copy">Your subscription has ended.</p>}
         {(entitlements.status === "paused" || entitlements.status === "incomplete") && (
           <p className="error-text" role="alert">

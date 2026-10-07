@@ -1338,7 +1338,7 @@ fn main() {
                     ).await;
                     // A workspace without a plan answers 402 to every request; asking again every
                     // minute only repeats the same refusal. A manual "Sync now" still tries at once.
-                    let plan_blocked = outcome.err().is_some_and(|error| error.contains("HTTP 402"));
+                    let plan_blocked = matches!(outcome, Ok(true));
                     let wait = if plan_blocked { 15 * 60 } else { 60 };
                     tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                 }
@@ -1601,7 +1601,7 @@ async fn desktop_test_webapp(url: String, token: String) -> Result<WebappConnect
         }
         let message = match status.as_u16() {
             401 => "Token is invalid, expired, or revoked. Create a new desktop sync token.",
-            402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
+            402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
             403 => "Token does not have desktop note sync access to a workspace.",
             404 => "This web-app version does not support desktop note sync yet.",
             _ => "The web app could not validate this token.",
@@ -3102,15 +3102,20 @@ async fn run_desktop_sync(
     preferences: Arc<std::sync::Mutex<desktop_settings::DesktopPreferences>>,
     sync: Arc<DesktopSync>,
     ui_app: tauri::AppHandle<tauri::Wry>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let preferences = preferences
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
     let url = desktop_settings::normalize_webapp_url(&preferences.webapp_url)?;
     let token = desktop_settings::get_webapp_token()?;
+    // True when the service answered an upload with 402: the workspace has no active plan. Uploads
+    // wait (nothing is lost), but downloading workspace notes below still runs, so a lapsed
+    // account can always bring its cloud notes to this device.
+    let mut plan_blocked = false;
     if let (Some(url), Some(token)) = (url, token.filter(|token| !token.trim().is_empty())) {
         if let Err(error) = sync.sync_pending(app.store.clone(), &url, &token).await {
+            plan_blocked = error.contains("HTTP 402");
             tracing::warn!(%error, "desktop note sync attempt failed");
         }
         if let Err(error) = sync
@@ -3126,7 +3131,7 @@ async fn run_desktop_sync(
     if let Err(error) = ui_app.emit("webapp-sync-updated", sync.status(configured)) {
         tracing::debug!(%error, "desktop sync status event could not be emitted");
     }
-    Ok(())
+    Ok(plan_blocked)
 }
 
 #[tauri::command]
