@@ -109,7 +109,7 @@ describe("plan and route error copy", () => {
   });
 
   it("shows route-specific recovery guidance without saying billing notes are safe", () => {
-    expect(errorCopyForPath("/billing").title).toContain("Plans & usage");
+    expect(errorCopyForPath("/billing").title).toContain("your plan");
     expect(errorCopyForPath("/team/members").title).toContain("team");
     expect(errorCopyForPath("/account/security").title).toContain("account");
     expect(errorCopyForPath("/login").backHref).toBe("/login");

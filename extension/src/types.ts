@@ -162,7 +162,7 @@ export interface NotetakerSettings {
   autoRecordOnMeetJoin: boolean;
   /** Show a one-tap-copy attendee disclosure notice while recording a Meet call. */
   meetDisclosureNotice: boolean;
-  /** Automatically create an expiring share link for finished notes (Hosted AI or connected webapp). */
+  /** Automatically create an expiring share link for finished notes (connected web app). */
   autoShareNotesWithAttendees: boolean;
   /** Open the notes in a new tab as soon as they are ready, not just notify. */
   openNotesWhenReady: boolean;

@@ -2,10 +2,9 @@
 
 AI Notetaker is one desktop app for macOS, Windows, and Linux. It records your
 microphone and the meeting audio, saves the audio on your device first, and creates
-notes, all without a browser extension. Choose **Hosted AI** (sign in; no provider
-keys) or **your own keys** (account-free) in **Settings → Processing**. Optional
-workspace sync sends finished notes to the web app and copies workspace notes into
-the desktop library. The Chrome extension is an optional extra for recording a
+notes, all without a browser extension. Notes are made with **your own keys**
+(account-free) set in **Settings → Own API keys**. A free account lets you sign in and
+manage your devices; a subscription adds cloud sync of finished notes and team sync. The Chrome extension is an optional extra for recording a
 browser tab.
 
 For the release and installation model, including direct platform downloads,
@@ -28,7 +27,7 @@ you are contributing, keep user-facing copy consistent with each surface.
 | **Start recording / Stop recording** | Begin or end saving the active Chrome tab and microphone audio in the extension. |
 | **Create notes from saved audio** | Use desktop provider keys to transcribe and summarize imported audio. |
 | **Notes style** | The summary template for a meeting: General, Standup, Sales call, 1:1, Interview, or your own. |
-| **Hosted AI** | Sign in to your AI Notetaker account and we run transcription and summaries for you, within your plan. No provider keys needed. |
+| **Account** | Optional and free. Sign in to manage your devices and data. A subscription adds cloud sync and team sync. |
 | **Your own keys** | You provide transcription and summarization keys and pay those providers directly. No AI Notetaker account or sign-in is needed. |
 
 "Managed" and "BYOK" are internal engineering terms. They appear in code,
@@ -69,7 +68,7 @@ Building from source is optional; it is not the end-user install path.
    cargo run -p notetaker-app
    ```
 
-3. In **Settings → Processing**, sign in to Hosted AI, or choose providers and
+3. In **Settings → Own API keys**, choose providers and
    enter and test your own API keys, then save.
 4. Allow microphone and system-audio access when the OS asks.
 5. In **Record**, enter an optional title, confirm recording consent, then

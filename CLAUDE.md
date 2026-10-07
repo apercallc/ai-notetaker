@@ -83,7 +83,10 @@ local recording or self-hosted sync is paid.
 
 "Self-hosted" means BYOK only. We don't support users running their own
 backend; the legacy `AUTH_TOKEN` webapp contract is kept only for installed
-extensions. Recording and BYOK are never paid.
+extensions. Recording and BYOK are never paid. The service never runs AI for users:
+hosted processing, imports and "Ask your notes" stay off unless an operator sets
+`HOSTED_AI_ENABLED=true`, and cloud sync (`/api/v1/desktop-sync/*`) requires an
+active Pro or Team subscription (HTTP 402 otherwise).
 
 ## Repo structure
 

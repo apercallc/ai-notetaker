@@ -34,7 +34,7 @@ export default async function AskPage() {
           <p className="muted-copy">
             {entitlement.reason === "limit"
               ? "Your question allowance resets with your billing period."
-              : "Ask questions across every meeting and get answers with links to the notes they came from. Included with Hosted Pro and Hosted Team."}
+              : "Ask questions across every meeting and get answers with links to the notes they came from. Included with Pro and Team."}
           </p>
           <Link className="button button-primary" href="/billing">See plans</Link>
         </section>

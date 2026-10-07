@@ -212,7 +212,7 @@ function render(options: RenderOptions = {}): void {
       <div class="field checkbox-field">
         <label for="auto-share-notes">
           <input type="checkbox" id="auto-share-notes" ${settings.autoShareNotesWithAttendees ? "checked" : ""} />
-          Create a share link for the notes when a meeting ends (Hosted AI)
+          Create a share link for the notes when a meeting ends (connected web app)
         </label>
         <p class="field-hint text-secondary">
           After notes are written, an expiring attendee link is created automatically and shown

@@ -4,7 +4,7 @@ This document covers two additive contracts:
 
 - `/api/meetings` is the legacy ingestion API, kept only for already-installed extensions.
 - `/api/v1/*` is the authenticated managed-service API used by the extension
-  and helper when the user selects hosted AI.
+  and helper for account sign-in, plan and sync.
 - `/api/v1/desktop-sync/*` is optional text-only sync from the Tauri desktop
   app, authenticated by a revocable user token bound to one workspace.
 

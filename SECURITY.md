@@ -30,12 +30,12 @@ AI Notetaker has two modes, and the guarantees differ:
 - Raw audio and local meeting data stay on the user's machine unless the user
   deliberately sends finished notes to their own webapp or provider.
 
-**Hosted AI mode (project-operated service)**
-- The service is a multi-tenant web application. Audio is uploaded to private
-  temporary staging, processed with server-side provider credentials that
-  never reach the client, and deleted after successful processing (failed or
-  abandoned uploads expire within 24 hours). Transcripts, summaries and action
-  items are stored per workspace and isolated from other workspaces.
+**Account and sync service (project-operated)**
+- The service is a multi-tenant web application. It never receives audio or
+  provider keys. Finished note text (transcripts, summaries and action items)
+  is stored per workspace for subscribers who turn sync on, and isolated from
+  other workspaces. Hosted AI processing code is disabled by default
+  (`HOSTED_AI_ENABLED`).
 - Billing runs through Stripe; card data never touches the service. Optional
   Google sign-in requests only `openid email`; optional Drive
   export is a separate opt-in that can only reach files the app creates, with

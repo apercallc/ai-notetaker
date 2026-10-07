@@ -40,11 +40,10 @@ vocabulary so people never have to relearn the product:
 - Tokens come from `webapp/src/app/globals.css`: paper `#f7f8f4`, surface, border
   `#dce4dc`, forest green `#176c4b`, danger `#c0392b`, and the dark-mode values. Controls
   are 40 px or taller, inputs 44 px, buttons and inputs use 10 px radius, cards 12–14 px.
-- Navigation uses the web app's names, order and Lucide icons: **Library, Actions, Ask,
-  Team, Plans & usage, Settings**. **Record** is the one desktop-only item. Ask, Team and
-  Plans & usage appear once signed in to a hosted account, and Team only for owners.
-- Page titles match the web: Library, Action items, Ask your notes, Team, Hosted AI
-  (nav label "Plans & usage"), Settings. Each page has one short sentence-case line under
+- Navigation uses the web app's names, order and Lucide icons: **Library, Actions,
+  Team, Plan, Settings**. **Record** is the one desktop-only item. Team and
+  Plan appear once signed in to an account, and Team only for owners.
+- Page titles match the web: Library, Action items, Team, Plan, Settings. Each page has one short sentence-case line under
   the title; there are no all-caps eyebrows.
 - Any new screen is added to both surfaces, or documented here as intentionally one-sided.
 

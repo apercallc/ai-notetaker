@@ -8,11 +8,12 @@ app) on your device, saves the audio first, then turns it into a transcript, sum
 and action items. Everything works the same on all three systems, and no browser
 extension is required.
 
-Choose how notes are made when you first open the app:
+Notes are made with **your own keys**: paste your own transcription and summary
+API keys. Free, account-free, and audio goes straight from your device to the
+providers you pick.
 
-- **Hosted AI** — sign in to your AI Notetaker account. No provider keys to manage.
-- **Your own keys** — paste your own transcription and summary API keys. Free,
-  account-free, and audio goes straight from your device to the providers you pick.
+- **Free account** — optional. Sign in to manage your devices and your data.
+- **Subscription** — cloud sync of your notes across devices, and team sync.
 
 Optional workspace sync copies finished notes to the web app and brings workspace
 notes into the desktop library. Provider keys never leave your device.
@@ -30,7 +31,7 @@ notes into the desktop library. Provider keys never leave your device.
 2. Open **AI Notetaker**. It starts at login so recovery and the tray are always
    available; closing the window keeps it running in the tray (relaunching brings
    the window back).
-3. In **Settings → Processing**, sign in to Hosted AI or add your own keys.
+3. In **Settings → Own API keys**, add your own keys. Sign in under **Account & sync** if you want an account.
 4. Allow microphone and system-audio access when your system asks.
 5. In **Record**, confirm everyone knows recording is starting, then start and stop.
    Notes appear under **Notes**.
@@ -50,7 +51,7 @@ notes into the desktop library. Provider keys never leave your device.
 
 | You want to record | You need |
 | --- | --- |
-| **Any meeting, in a browser or a desktop app** | The AI Notetaker desktop app, a Hosted AI account or your own transcription and summary API keys, and operating-system audio permission. Native loopback is supported on macOS 13+, Windows, and Linux; see the [audio setup guide](docs/helper-packaging.md) for fallbacks. |
+| **Any meeting, in a browser or a desktop app** | The AI Notetaker desktop app, your own transcription and summary API keys, and operating-system audio permission. Native loopback is supported on macOS 13+, Windows, and Linux; see the [audio setup guide](docs/helper-packaging.md) for fallbacks. |
 | **A Chrome tab, optionally** | The optional AI Notetaker Chrome extension saves tab and microphone audio; export its archive and import it in the desktop app. |
 
 Get permission from the people you record where local law requires it. AI

@@ -99,7 +99,13 @@ impl DesktopPreferences {
     pub fn load(data_dir: &Path) -> Result<Self, String> {
         let path = data_dir.join(SETTINGS_FILE);
         match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
+            Ok(bytes) => serde_json::from_slice::<Self>(&bytes)
+                .map(|mut preferences| {
+                    // Hosted AI is not offered: the subscription sells sync, and notes are made
+                    // with the user's own keys. Settings saved while it existed fall back to keys.
+                    preferences.processing = ProcessingChoice::Local;
+                    preferences
+                })
                 .map_err(|error| format!("Saved desktop settings could not be read: {error}")),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(format!("Saved desktop settings could not be read: {error}")),

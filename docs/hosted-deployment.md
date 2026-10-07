@@ -1,4 +1,4 @@
-# Hosted AI deployment runbook
+# Account and sync service deployment runbook
 
 This runbook is for the optional project-operated managed service. Free local
 BYOK remains the default and does not require an account or this deployment.

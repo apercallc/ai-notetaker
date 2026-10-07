@@ -29,7 +29,7 @@ export function AppHeader({ role, managed, hostedAi }: { role: "owner" | "member
     { href: "/actions", label: "Actions", icon: CheckSquare },
     ...(managed && hostedAi ? [{ href: "/ask", label: "Ask", icon: MessageSquare }] : []),
     ...(role === "owner" ? [{ href: "/team", label: "Team", icon: Users }] : []),
-    ...(managed ? [{ href: "/billing", label: "Plans & usage", short: "Plans", icon: CreditCard }] : []),
+    ...(managed ? [{ href: "/billing", label: "Plan", icon: CreditCard }] : []),
     { href: "/account", label: "Settings", icon: Settings },
   ];
 
