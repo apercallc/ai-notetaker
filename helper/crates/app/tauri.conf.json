@@ -16,7 +16,8 @@
         "height": 760,
         "minWidth": 780,
         "minHeight": 620,
-        "resizable": true
+        "resizable": true,
+        "visible": false
       }
     ],
     "security": {
@@ -43,6 +44,7 @@
           "librsvg2-2",
           "pulseaudio-utils"
         ],
+        "desktopTemplate": "scripts/debian/main.desktop",
         "postInstallScript": "scripts/debian/postinst",
         "postRemoveScript": "scripts/debian/postrm"
       }

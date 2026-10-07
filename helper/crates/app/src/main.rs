@@ -623,7 +623,7 @@ async fn upload_managed_recording(
                     }
                     // Separate client has no account headers/cookies. Never
                     // follow a storage redirect with a signed upload capability.
-                    let storage_client = reqwest::Client::builder()
+                    let storage_client = notetaker_core::providers::http_client_builder()
                         .redirect(reqwest::redirect::Policy::none())
                         .timeout(std::time::Duration::from_secs(180))
                         .build()
@@ -1104,11 +1104,23 @@ fn main() {
     let _instance = match single_instance::acquire(&root) {
         Ok(single_instance::Acquired::Yes(lock)) => lock,
         Ok(single_instance::Acquired::AlreadyRunning) => {
-            notify::Notifier::default().notify_deduped(
-                "already-running",
-                "AI Notetaker",
-                "The helper is already running.",
-            );
+            // Launching the app again (launcher, dock, Start menu) must raise the running
+            // window. The plugin tells the first instance and exits this process; the setup
+            // hook is only reached when the first instance could not be contacted.
+            let _ = tauri::Builder::default()
+                .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                    show_main_window(app);
+                }))
+                .setup(|app| {
+                    notify::Notifier::default().notify_deduped(
+                        "already-running",
+                        "AI Notetaker",
+                        "AI Notetaker is already running. Open it from the tray menu.",
+                    );
+                    app.handle().exit(0);
+                    Ok(())
+                })
+                .run(tauri::generate_context!());
             return;
         }
         Err(error) => {
@@ -1117,8 +1129,23 @@ fn main() {
         }
     };
 
-    tauri::Builder::default()
+    let start_hidden = std::env::args().any(|arg| arg == BACKGROUND_FLAG);
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            // Closing the window must not end a recording or the recovery tray. Where no tray
+            // exists (GNOME without an indicator extension) a closed window quits unless a
+            // capture is live; relaunching always raises the running window.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if tray::keeps_running_when_window_closes() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             desktop_snapshot,
             desktop_test_provider_key,
@@ -1151,7 +1178,7 @@ fn main() {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-                None,
+                Some(vec![BACKGROUND_FLAG]),
             ))?;
 
             let root = root.clone();
@@ -1300,14 +1327,38 @@ fn main() {
                 }
             });
 
+            if !start_hidden {
+                show_main_window(app.handle());
+            }
             tracing::info!("notetaker-helper starting");
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .unwrap_or_else(|error| {
             tracing::error!(%error, "AI Notetaker helper stopped during startup");
             std::process::exit(1);
         });
+    app.run(|app, event| {
+        // Clicking the dock icon of a running app raises its window.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            show_main_window(app);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app, event);
+    });
+}
+
+/// Passed by the launch-at-login entry so a login start stays in the tray.
+const BACKGROUND_FLAG: &str = "--background";
+
+pub(crate) fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 #[tauri::command]

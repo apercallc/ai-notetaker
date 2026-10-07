@@ -1,6 +1,6 @@
 //! Native system-tray menu for the persistent helper.
 //!
-//! The helper has no main window. Tauri owns the process main thread, while
+//! Tauri owns the process main thread, while
 //! this module keeps the menu small and platform-native: status first, recent
 //! notes next, a launch-at-login toggle (on by default), and quit last.
 //!
@@ -30,6 +30,15 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 /// Mirrors the tray's recording state so the menu's Quit handler (which has no
 /// controller handle) can ask before ending a live capture.
 static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Set once the tray icon exists, so closing the window knows whether the app stays reachable.
+static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+/// Closing the window hides it (instead of quitting) when a tray icon can bring it back or a
+/// capture is live.
+pub fn keeps_running_when_window_closes() -> bool {
+    TRAY_AVAILABLE.load(Ordering::Acquire) || RECORDING_ACTIVE.load(Ordering::Acquire)
+}
 
 const TRAY_ID: &str = "ai-notetaker-tray";
 
@@ -171,6 +180,7 @@ fn try_initialize<R: Runtime>(
     };
 
     let status = MenuItem::with_id(app, "status", "Status: Idle", false, None::<&str>)?;
+    let open_app = MenuItem::with_id(app, "open-app", "Open AI Notetaker", true, None::<&str>)?;
     let open_latest =
         MenuItem::with_id(app, "open-latest", "Open Latest Note", true, None::<&str>)?;
     let open_folder =
@@ -194,8 +204,13 @@ fn try_initialize<R: Runtime>(
         true,
         None::<&str>,
     )?;
-    let pair_browser =
-        MenuItem::with_id(app, "pair-browser", "Pair New Browser…", true, None::<&str>)?;
+    let pair_browser = MenuItem::with_id(
+        app,
+        "pair-browser",
+        "Pair Browser Extension (Optional)…",
+        true,
+        None::<&str>,
+    )?;
     let launch_at_login = MenuItem::with_id(
         app,
         "launch-at-login",
@@ -217,6 +232,7 @@ fn try_initialize<R: Runtime>(
         app,
         &[
             &status,
+            &open_app,
             &open_latest,
             &open_folder,
             &open_logs,
@@ -235,7 +251,18 @@ fn try_initialize<R: Runtime>(
         .tooltip("AI Notetaker — Idle")
         .icon(icons.idle.clone())
         .icon_as_template(cfg!(target_os = "macos"))
+        .on_tray_icon_event(|tray, event| {
+            if let tauri::tray::TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                crate::show_main_window(tray.app_handle());
+            }
+        })
         .on_menu_event(move |app, event| match event.id().as_ref() {
+            "open-app" => crate::show_main_window(app),
             "open-latest" => open_latest_note(&data_dir),
             "open-folder" => {
                 let _ = open_with_default_app(&data_dir.join("meetings"));
@@ -291,6 +318,7 @@ fn try_initialize<R: Runtime>(
         })
         .build(app)?;
 
+    TRAY_AVAILABLE.store(true, Ordering::Release);
     Ok(Arc::new(TrayController {
         status: Some(status),
         tray: Some(tray),
