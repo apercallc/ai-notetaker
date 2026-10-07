@@ -136,6 +136,7 @@
     try {
       if (state.page === "record") renderRecord();
       else if (state.page === "notes") renderNotes();
+      else if (state.page === "account") renderAccount();
       else renderSettings();
     } catch (error) {
       console.error("Page render failed", state.page, error);
@@ -587,6 +588,163 @@
     }
   }
 
+
+  // ---- Account: usage and plan, Ask your notes, action items, team (same data as the web app) ----
+  const accountState = { tab: "usage", overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionDone: new Set(), billingBusy: false };
+  const hostedSignedIn = () => Boolean(state.snapshot?.settings.hasHostedSession);
+  const formatHours = (seconds) => { const hours = (seconds || 0) / 3600; return hours >= 10 ? String(Math.round(hours)) : String(Math.round(hours * 10) / 10); };
+  const longDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
+
+  function meter(label, used, limit, text) {
+    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    const level = limit > 0 && used >= limit ? "full" : pct >= 80 ? "high" : "";
+    return `<div class="meter-row"><div class="meter-head"><strong>${esc(label)}</strong><span>${esc(text)}</span></div><div class="meter ${level}" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="${limit}" aria-valuenow="${Math.min(used, limit)}"><span style="width:${pct}%"></span></div></div>`;
+  }
+
+  async function loadOverview(force = false) {
+    if (!hostedSignedIn() || accountState.loading || (accountState.overview && !force)) return;
+    accountState.loading = true;
+    accountState.error = "";
+    try { accountState.overview = await invoke("desktop_account_overview"); }
+    catch (error) { accountState.error = String(error); }
+    finally { accountState.loading = false; if (state.page === "account") renderAccount(); }
+  }
+
+  async function loadRoster(force = false) {
+    const team = accountState.team;
+    if (!hostedSignedIn() || team.loading || (team.roster && !force)) return;
+    team.loading = true;
+    team.error = "";
+    try { team.roster = await invoke("desktop_team_roster"); }
+    catch (error) { team.error = String(error); }
+    finally { team.loading = false; if (state.page === "account") renderAccount(); }
+  }
+
+  function signInPrompt(what) {
+    return `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Sign in to use ${esc(what)}</strong><span>Your AI Notetaker account shows the same plan, usage, questions and team as the web app. Recording and your local notes work without an account.</span><button class="small-button" id="account-sign-in">Sign in</button></div></div>`;
+  }
+
+  function usagePanel() {
+    if (!hostedSignedIn()) return signInPrompt("your plan and usage");
+    if (accountState.error) return `<div class="empty-state"><strong>Could not load your plan</strong><p>${esc(accountState.error)}</p><button class="small-button" id="account-reload">Try again</button></div>`;
+    const data = accountState.overview;
+    if (!data) { void loadOverview(); return '<div class="loading-state"><span class="spinner"></span><span>Loading your plan…</span></div>'; }
+    const e = data.entitlements;
+    const chat = data.chat;
+    const owner = data.account.role === "owner";
+    const reset = e.period?.end ? longDate(e.period.end) : "";
+    const notices = [];
+    if (e.inPaymentGrace) notices.push(`Your last payment failed. Processing continues until ${longDate(e.graceEndsAt)} while we retry. Update your payment method to keep it.`);
+    if (e.warning === "exhausted") notices.push("You have used all of this period's allowance, so new recordings cannot be processed until it resets or you change plan. Your audio is still saved on this device.");
+    else if (e.warning === "low") notices.push("You are close to this period's limit.");
+    if (data.subscription.cancelsAt) notices.push(`Your plan is set to end on ${longDate(data.subscription.cancelsAt)}.`);
+    const chatLine = chat.limit > 0 ? meter("Ask your notes", chat.used, chat.limit, `${chat.used} of ${chat.limit} questions`) : `<div class="meter-row"><div class="meter-head"><strong>Ask your notes</strong><span>Not included in this plan</span></div></div>`;
+    const current = e.plan;
+    const offers = (data.offers || []).filter((offer) => offer.id !== current && offer.priceId);
+    const billing = !owner
+      ? '<p class="fine-print">Only the workspace owner can change the plan or billing.</p>'
+      : `<div class="inline-actions">${offers.map((offer) => `<button class="${data.subscription.live ? "secondary-button" : "primary-button"}" data-upgrade="${esc(offer.priceId)}" ${accountState.billingBusy ? "disabled" : ""}>${data.subscription.live ? "Change to" : "Upgrade to"} ${esc(offer.name)}${offer.priceLabel ? ` · ${esc(offer.priceLabel)}` : ""}</button>`).join("")}${data.subscription.live || data.subscription.hasBillingAccount ? `<button class="secondary-button" id="manage-plan" ${accountState.billingBusy ? "disabled" : ""}>${data.subscription.live ? "Manage or cancel plan" : "Manage billing"}</button>` : ""}</div><p class="fine-print">Plan changes, payment details and cancellation open in your browser, on our payment provider’s secure page.</p>`;
+    return `<section class="card account-card"><div class="account-head"><div><h2>${esc(e.planLabel)} plan</h2><p class="fine-print">${esc(data.workspace.name)} · ${esc(data.account.email)} · ${esc(data.statusLabel || e.status)}</p></div><button class="small-button" id="account-reload">Refresh</button></div>
+      ${notices.map((text) => `<p class="setup-note">${esc(text)}</p>`).join("")}
+      ${meter("Meetings", e.used, e.limit, `${e.used} of ${e.limit} meetings`)}
+      ${meter("Meeting hours", e.audio.usedSeconds, e.audio.limitSeconds, `${formatHours(e.audio.usedSeconds)} of ${formatHours(e.audio.limitSeconds)} hours`)}
+      ${chatLine}
+      <p class="fine-print">${e.isTrial ? "This is your free allowance; it does not reset." : reset ? `Usage resets on ${esc(reset)}.` : ""}</p>${billing}</section>`;
+  }
+
+  function askPanel() {
+    if (!hostedSignedIn()) return signInPrompt("Ask your notes");
+    const ask = accountState.ask;
+    const chat = accountState.overview?.chat;
+    const left = chat ? (chat.limit > 0 ? `${chat.remaining} of ${chat.limit} questions left this period.` : "Ask your notes is not included in your plan.") : "";
+    const history = ask.history.map((entry) => `<article class="card ask-entry"><p class="ask-q">${esc(entry.question)}</p>${entry.error ? `<p class="key-status warn">${esc(entry.error)}</p>` : `<div class="ask-a">${esc(entry.answer).replace(/\n/g, "<br>")}</div>${entry.sources?.length ? `<p class="fine-print">From: ${entry.sources.map((source) => `${esc(source.title)} (${esc(longDate(source.startedAt))})`).join(" · ")}</p>` : ""}`}</article>`).join("");
+    return `<section class="card account-card"><h2>Ask your notes</h2><p class="fine-print">Search everything in your workspace, including notes made on the web. Answers are written by AI from your notes; check the sources. ${esc(left)}</p>
+      <textarea class="text-area" id="ask-question" maxlength="2000" placeholder="What did we decide about pricing?" ${ask.busy ? "disabled" : ""}>${esc(ask.draft)}</textarea>
+      <div class="inline-actions"><button class="primary-button" id="ask-send" ${ask.busy ? "disabled" : ""}>${ask.busy ? "Thinking…" : "Ask"}</button></div></section>${history}`;
+  }
+
+  function actionItemsPanel() {
+    const query = accountState.actionQuery.trim().toLowerCase();
+    const rows = [];
+    for (const meeting of state.snapshot.meetings) {
+      for (const [index, item] of (meeting.actionItems || []).entries()) rows.push({ meeting, item, key: `${meeting.id}:${index}` });
+    }
+    const shown = rows.filter((row) => !query || `${row.item.text} ${row.item.owner || ""} ${row.meeting.title}`.toLowerCase().includes(query));
+    const list = shown.length
+      ? `<ul class="action-board">${shown.map(({ meeting, item, key }) => `<li><label><input type="checkbox" data-action-key="${esc(key)}" ${accountState.actionDone.has(key) ? "checked" : ""} /><span class="${accountState.actionDone.has(key) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
+      : `<div class="empty-state"><strong>${rows.length ? "No matches" : "No action items yet"}</strong>${rows.length ? "Try a different search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
+    return `<section class="card account-card"><div class="account-head"><div><h2>Action items</h2><p class="fine-print">${rows.length} across your notes. Ticking one marks it done on this screen only.</p></div></div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}</section>`;
+  }
+
+  function teamPanel() {
+    if (!hostedSignedIn()) return signInPrompt("team management");
+    const team = accountState.team;
+    if (team.error) return `<div class="empty-state"><strong>Team</strong><p>${esc(team.error)}</p><button class="small-button" id="team-reload">Try again</button></div>`;
+    if (!team.roster) { void loadRoster(); return '<div class="loading-state"><span class="spinner"></span><span>Loading your team…</span></div>'; }
+    const you = accountState.overview?.account.email;
+    const members = team.roster.members.map((member) => `<li class="team-row"><div><strong>${esc(member.email)}</strong><span class="fine-print"> ${member.email === you ? "(you) " : ""}· joined ${esc(longDate(member.joinedAt))}</span></div><div class="inline-actions"><select class="select-input" data-role-for="${esc(member.id)}" aria-label="Role for ${esc(member.email)}"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="owner" ${member.role === "owner" ? "selected" : ""}>Owner</option></select><button class="small-button" data-team-reset="${esc(member.id)}">Send password reset</button><button class="small-button danger" data-team-remove="${esc(member.id)}" data-email="${esc(member.email)}">Remove</button></div></li>`).join("");
+    const invites = team.roster.invites.length ? `<h3 class="subhead">Pending invitations</h3><ul class="team-list">${team.roster.invites.map((invite) => `<li class="team-row"><span>${esc(invite.email)}</span><button class="small-button" data-team-revoke="${esc(invite.id)}">Revoke</button></li>`).join("")}</ul>` : "";
+    return `<section class="card account-card"><h2>Team</h2><p class="fine-print">${team.roster.members.length} member${team.roster.members.length === 1 ? "" : "s"}. Members share this workspace’s notes, plan and usage.</p>
+      <div class="key-row"><input class="text-input" id="team-invite-email" type="email" placeholder="teammate@company.com" autocomplete="off" /><button class="primary-button" id="team-invite" ${team.busy ? "disabled" : ""}>Send invite</button></div>
+      ${team.message ? `<p class="key-status" role="status">${esc(team.message)}${team.link ? ` <br><code>${esc(team.link)}</code>` : ""}</p>` : ""}
+      <h3 class="subhead">Members</h3><ul class="team-list">${members}</ul>${invites}</section>`;
+  }
+
+  function renderAccount() {
+    setHeader("Account", "PLAN, QUESTIONS, ACTION ITEMS AND TEAM");
+    const tabs = [["usage", "Usage & plan"], ["ask", "Ask your notes"], ["actions", "Action items"], ["team", "Team"]];
+    const body = { usage: usagePanel, ask: askPanel, actions: actionItemsPanel, team: teamPanel }[accountState.tab]();
+    $("#content").innerHTML = `<div class="account-layout"><div class="tab-row" role="tablist">${tabs.map(([id, label]) => `<button role="tab" class="tab-button ${accountState.tab === id ? "active" : ""}" aria-selected="${accountState.tab === id}" data-account-tab="${id}">${label}</button>`).join("")}</div>${body}</div>`;
+    wireAccount();
+  }
+
+  async function accountAction(run, failure) {
+    try { await run(); } catch (error) { notify(String(error || failure), "error"); }
+  }
+
+  function wireAccount() {
+    for (const tab of document.querySelectorAll("[data-account-tab]")) tab.addEventListener("click", () => { accountState.tab = tab.dataset.accountTab; renderAccount(); });
+    $("#account-sign-in")?.addEventListener("click", () => { state.settingsOpen.processing = true; setPage("settings"); });
+    $("#account-reload")?.addEventListener("click", () => { accountState.overview = null; accountState.error = ""; renderAccount(); void loadOverview(true); });
+    $("#team-reload")?.addEventListener("click", () => { accountState.team.error = ""; accountState.team.roster = null; renderAccount(); });
+    for (const button of document.querySelectorAll("[data-upgrade]")) button.addEventListener("click", () => accountAction(async () => { accountState.billingBusy = true; renderAccount(); try { await invoke("desktop_account_billing", { priceId: button.dataset.upgrade, manage: false }); notify("Opening the secure checkout in your browser. Come back and press Refresh when you finish."); } finally { accountState.billingBusy = false; renderAccount(); } }));
+    $("#manage-plan")?.addEventListener("click", () => accountAction(async () => { accountState.billingBusy = true; renderAccount(); try { await invoke("desktop_account_billing", { priceId: null, manage: true }); notify("Opening billing in your browser. Come back and press Refresh when you finish."); } finally { accountState.billingBusy = false; renderAccount(); } }));
+    const question = $("#ask-question");
+    if (question) {
+      question.addEventListener("input", () => { accountState.ask.draft = question.value; });
+      question.addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); $("#ask-send").click(); } });
+      $("#ask-send").addEventListener("click", async () => {
+        const text = question.value.trim();
+        if (!text) return;
+        const ask = accountState.ask;
+        ask.busy = true; renderAccount();
+        try {
+          const reply = await invoke("desktop_account_ask", { question: text });
+          ask.history.unshift(reply.ok ? { question: text, answer: reply.answer, sources: reply.sources } : { question: text, error: reply.error });
+          if (reply.ok) { ask.draft = ""; accountState.overview = null; void loadOverview(true); }
+        } catch (error) { ask.history.unshift({ question: text, error: String(error) }); }
+        finally { ask.busy = false; renderAccount(); }
+      });
+    }
+    $("#action-search")?.addEventListener("input", (event) => { accountState.actionQuery = event.target.value; const pos = event.target.selectionStart; renderAccount(); const box = $("#action-search"); box.focus(); box.setSelectionRange(pos, pos); });
+    for (const box of document.querySelectorAll("[data-action-key]")) box.addEventListener("change", () => { box.checked ? accountState.actionDone.add(box.dataset.actionKey) : accountState.actionDone.delete(box.dataset.actionKey); box.nextElementSibling.classList.toggle("done", box.checked); });
+    for (const link of document.querySelectorAll("[data-open-note]")) link.addEventListener("click", () => { state.selectedId = link.dataset.openNote; setPage("notes"); });
+    const team = accountState.team;
+    const act = (args, done) => accountAction(async () => {
+      team.busy = true; team.message = ""; team.link = "";
+      try {
+        const reply = await invoke("desktop_team_action", args);
+        if (reply.ok) { team.message = reply.message || "Saved."; team.link = reply.link || ""; team.roster = null; await loadRoster(true); done?.(); }
+        else notify(reply.error, "error");
+      } finally { team.busy = false; renderAccount(); }
+    });
+    $("#team-invite")?.addEventListener("click", () => { const email = $("#team-invite-email").value.trim(); if (email) act({ operation: "invite", email }); });
+    for (const select of document.querySelectorAll("[data-role-for]")) select.addEventListener("change", () => act({ operation: "role", id: select.dataset.roleFor, role: select.value }));
+    for (const button of document.querySelectorAll("[data-team-reset]")) button.addEventListener("click", () => act({ operation: "reset", id: button.dataset.teamReset }));
+    for (const button of document.querySelectorAll("[data-team-revoke]")) button.addEventListener("click", () => act({ operation: "revoke-invite", id: button.dataset.teamRevoke }));
+    for (const button of document.querySelectorAll("[data-team-remove]")) button.addEventListener("click", () => { if (window.confirm(`Remove ${button.dataset.email} from this workspace? They lose access to its notes.`)) act({ operation: "remove", id: button.dataset.teamRemove }); });
+  }
+
   function renderSettings() {
     setHeader("Settings", "LOCAL APP SETTINGS");
     const s = state.snapshot.settings;
@@ -934,7 +1092,7 @@
   function startRefreshPolling() {
     if (refreshInterval !== null || document.visibilityState !== "visible") return;
     refreshInterval = window.setInterval(() => {
-      if (refreshTask === null && !state.busy && state.page !== "settings") void refresh();
+      if (refreshTask === null && !state.busy && state.page !== "settings" && state.page !== "account") void refresh();
     }, REFRESH_INTERVAL_MS);
   }
   document.addEventListener("visibilitychange", () => {

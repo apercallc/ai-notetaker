@@ -1161,6 +1161,11 @@ fn main() {
             desktop_hosted_sign_in,
             desktop_hosted_sign_out,
             desktop_set_processing,
+            desktop_account_overview,
+            desktop_account_ask,
+            desktop_team_roster,
+            desktop_team_action,
+            desktop_account_billing,
             desktop_import_transfer,
             desktop_import_audio_transfer,
             desktop_sync_existing_notes,
@@ -1785,11 +1790,268 @@ async fn desktop_hosted_sign_in(
         }),
         ..previous
     };
+    // Signing in also connects the notes library to this workspace, so the desktop and the
+    // web app show the same notes. A sync token the user already set up is never replaced.
+    let mut preferences = preferences;
+    let mut connected_sync = false;
+    if desktop_settings::get_webapp_token()
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        match fetch_desktop_sync_token(&preferences).await {
+            Ok(token) => match desktop_settings::set_webapp_token(Some(&token)) {
+                Ok(()) => {
+                    if let Some(account) = &preferences.hosted_account {
+                        preferences.webapp_url = account.base_url.clone();
+                    }
+                    connected_sync = true;
+                }
+                Err(error) => tracing::warn!(%error, "could not store the notes-sync token"),
+            },
+            Err(error) => tracing::warn!(%error, "could not connect notes sync after sign-in"),
+        }
+    }
     if let Err(error) = preferences.save(&context.app.data_dir) {
         let _ = desktop_settings::set_hosted_token(previous_token.as_deref());
+        if connected_sync {
+            let _ = desktop_settings::set_webapp_token(None);
+        }
         return Err(error);
     }
-    apply_preferences(context.inner(), preferences).await
+    let view = apply_preferences(context.inner(), preferences).await?;
+    if connected_sync {
+        spawn_desktop_sync(
+            context.app.clone(),
+            context.preferences.clone(),
+            context.sync.clone(),
+            context.ui_app.clone(),
+        );
+    }
+    Ok(view)
+}
+
+async fn fetch_desktop_sync_token(
+    preferences: &desktop_settings::DesktopPreferences,
+) -> Result<String, String> {
+    let body = hosted_call(
+        preferences,
+        reqwest::Method::POST,
+        "account/desktop-sync-token",
+        Some(serde_json::json!({})),
+        std::time::Duration::from_secs(20),
+    )
+    .await?;
+    body.get("token")
+        .and_then(serde_json::Value::as_str)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "The service sent no sync token.".to_string())
+}
+
+/// One authenticated call to the hosted service as the signed-in user. `path` is relative to
+/// `/api/v1/` and is always chosen by this app, never by the UI.
+async fn hosted_call(
+    preferences: &desktop_settings::DesktopPreferences,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, String> {
+    let service = desktop_settings::hosted_service(preferences).ok_or_else(|| {
+        "Sign in to your AI Notetaker account in Settings → Processing.".to_string()
+    })?;
+    if !hosted_url_is_allowed(&service.base_url) {
+        return Err("The hosted service address must use https.".into());
+    }
+    let client = notetaker_core::providers::http_client_builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("Could not start the request: {error}"))?;
+    let mut request = client
+        .request(method, format!("{}/api/v1/{path}", service.base_url))
+        .bearer_auth(&service.access_token)
+        .header("x-workspace-id", &service.workspace_id);
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request.send().await.map_err(|_| {
+        "Could not reach the AI Notetaker service. Check your internet connection and try again."
+            .to_string()
+    })?;
+    let status = response.status().as_u16();
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or(serde_json::Value::Null);
+    interpret_hosted_response(status, body)
+}
+
+/// Success and structured refusals (`{ok:false,error}` on a 4xx) are returned to the screen to
+/// show; an ended session and unexpected failures become plain error messages.
+fn interpret_hosted_response(
+    status: u16,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if status == 401 {
+        return Err("Your hosted session ended. Sign in again in Settings → Processing.".into());
+    }
+    if (200..300).contains(&status)
+        || body.get("ok").is_some()
+        || body.get("portalRequired").is_some()
+    {
+        return Ok(body);
+    }
+    Err(body
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("The service could not complete that ({status}). Try again.")))
+}
+
+fn current_preferences(context: &DesktopCommandContext) -> desktop_settings::DesktopPreferences {
+    context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+/// Plan, usage (meetings, audio hours, questions) and what the owner can buy or manage.
+#[tauri::command]
+async fn desktop_account_overview(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<serde_json::Value, String> {
+    hosted_call(
+        &current_preferences(&context),
+        reqwest::Method::GET,
+        "account/overview",
+        None,
+        std::time::Duration::from_secs(20),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn desktop_account_ask(
+    context: tauri::State<'_, DesktopCommandContext>,
+    question: String,
+) -> Result<serde_json::Value, String> {
+    if question.trim().is_empty() || question.chars().count() > 2_000 {
+        return Err("Ask a question of up to 2,000 characters.".into());
+    }
+    hosted_call(
+        &current_preferences(&context),
+        reqwest::Method::POST,
+        "ask",
+        Some(serde_json::json!({ "question": question })),
+        std::time::Duration::from_secs(120),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn desktop_team_roster(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<serde_json::Value, String> {
+    hosted_call(
+        &current_preferences(&context),
+        reqwest::Method::GET,
+        "team",
+        None,
+        std::time::Duration::from_secs(20),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn desktop_team_action(
+    context: tauri::State<'_, DesktopCommandContext>,
+    operation: String,
+    id: Option<String>,
+    email: Option<String>,
+    role: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if !matches!(
+        operation.as_str(),
+        "invite" | "add" | "role" | "remove" | "reset" | "revoke-invite"
+    ) {
+        return Err("Unknown team action.".into());
+    }
+    hosted_call(
+        &current_preferences(&context),
+        reqwest::Method::POST,
+        "team",
+        Some(serde_json::json!({
+            "operation": operation,
+            "id": id.unwrap_or_default(),
+            "email": email.unwrap_or_default(),
+            "role": role.unwrap_or_default(),
+        })),
+        std::time::Duration::from_secs(30),
+    )
+    .await
+}
+
+/// Opens Stripe Checkout for `price_id` or, with `manage`, the billing portal (upgrade,
+/// change plan, payment method, cancel). A workspace with a live plan is sent to the portal.
+#[tauri::command]
+async fn desktop_account_billing(
+    context: tauri::State<'_, DesktopCommandContext>,
+    price_id: Option<String>,
+    manage: bool,
+) -> Result<(), String> {
+    let preferences = current_preferences(&context);
+    let base = desktop_settings::hosted_service(&preferences)
+        .ok_or_else(|| {
+            "Sign in to your AI Notetaker account in Settings → Processing.".to_string()
+        })?
+        .base_url;
+    let timeout = std::time::Duration::from_secs(30);
+    let mut reply = None;
+    if !manage {
+        let price_id = price_id
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| "Choose a plan first.".to_string())?;
+        let checkout = hosted_call(
+            &preferences,
+            reqwest::Method::POST,
+            "billing/checkout",
+            Some(serde_json::json!({
+                "priceId": price_id,
+                "successUrl": format!("{base}/billing?checkout=success"),
+                "cancelUrl": format!("{base}/billing?checkout=cancelled"),
+            })),
+            timeout,
+        )
+        .await?;
+        if checkout.get("portalRequired").is_none() {
+            reply = Some(checkout);
+        }
+    }
+    let reply = match reply {
+        Some(reply) => reply,
+        None => {
+            hosted_call(
+                &preferences,
+                reqwest::Method::POST,
+                "billing/portal",
+                Some(serde_json::json!({})),
+                timeout,
+            )
+            .await?
+        }
+    };
+    let url = reply
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .filter(|url| url.starts_with("https://"))
+        .ok_or_else(|| {
+            "The billing page could not be opened. Try again, or use the web app.".to_string()
+        })?;
+    open_external(url)
 }
 
 #[tauri::command]
@@ -4211,6 +4473,28 @@ fn apply_default_autostart<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hosted_responses_show_refusals_and_report_an_ended_session() {
+        use super::interpret_hosted_response as interpret;
+        let ok = serde_json::json!({ "ok": true, "answer": "x" });
+        assert_eq!(interpret(200, ok.clone()).unwrap(), ok);
+        // A refusal such as "question limit reached" is data for the screen, not a crash.
+        let refused = serde_json::json!({ "ok": false, "error": "Limit reached" });
+        assert_eq!(interpret(422, refused.clone()).unwrap(), refused);
+        // A live plan sends checkout to the billing portal.
+        assert!(interpret(409, serde_json::json!({ "portalRequired": true })).is_ok());
+        assert!(interpret(401, serde_json::Value::Null)
+            .unwrap_err()
+            .contains("session ended"));
+        assert_eq!(
+            interpret(500, serde_json::json!({ "error": "boom" })).unwrap_err(),
+            "boom"
+        );
+        assert!(interpret(502, serde_json::Value::Null)
+            .unwrap_err()
+            .contains("502"));
+    }
+
     use super::*;
     use notetaker_core::storage::MeetingStore;
 

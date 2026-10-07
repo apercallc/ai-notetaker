@@ -4,6 +4,15 @@ All notable changes to AI Notetaker are documented here.
 
 ## Unreleased
 
+- Desktop app ↔ web app parity for hosted accounts. A new **Account** screen shows
+  plan and usage (meetings, meeting hours, Ask-your-notes questions), upgrades and
+  cancels through the secure billing page, lets you ask questions of your notes,
+  lists action items across all notes, and lets workspace owners invite, change
+  roles, reset passwords and remove teammates. Signing in on the desktop also
+  connects notes sync, so the desktop library and the web library match.
+- New hosted API routes for the desktop: `/api/v1/account/overview`, `/api/v1/ask`,
+  `/api/v1/team`, `/api/v1/account/desktop-sync-token`. The web pages and the
+  desktop now share one implementation of team management and Ask your notes.
 - Desktop app: hosted sign-in. Settings → Processing lets you sign in to Hosted AI
   (no provider keys) or keep your own keys, the same on macOS, Windows, and Linux.
   The session token lives in the OS credential store; the password is never stored.
