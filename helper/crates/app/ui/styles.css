@@ -340,3 +340,27 @@ p { line-height: 1.55; }
 .hosted-account p { margin: 0 0 8px; font-size: 12px; }
 .hosted-form { margin-top: 4px; }
 .brand-mark svg { border-radius: 10px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .28); }
+.account-layout { display: grid; gap: 14px; max-width: 760px; }
+.tab-row { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line, #dfe6e1); }
+.tab-button { padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.tab-button.active { border-bottom-color: #176c4b; font-weight: 700; }
+.account-card { display: grid; gap: 12px; padding: 18px; }
+.account-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.account-head h2, .account-card h2 { margin: 0; font-size: 15px; }
+.meter-row { display: grid; gap: 5px; }
+.meter-head { display: flex; justify-content: space-between; font-size: 12px; }
+.meter { height: 8px; overflow: hidden; border-radius: 99px; background: #e4ebe6; }
+.meter span { display: block; height: 100%; border-radius: 99px; background: #176c4b; }
+.meter.high span { background: #c98a1c; }
+.meter.full span { background: #b3361f; }
+.setup-note { margin: 0; padding: 9px 11px; border-radius: 8px; background: #fff7e4; color: #76510e; font-size: 12px; }
+.ask-entry { display: grid; gap: 8px; }
+.ask-q { margin: 0; font-weight: 700; font-size: 13px; }
+.ask-a { font-size: 13px; line-height: 1.55; }
+.action-board, .team-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.action-board li, .team-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #edf1ee; font-size: 12px; }
+.action-board label { display: flex; align-items: flex-start; gap: 8px; }
+.action-board .done { color: #6c7a72; text-decoration: line-through; }
+.team-row { flex-wrap: wrap; }
+.small-button.danger { color: #b3361f; }
+@media (prefers-color-scheme: dark) { .meter { background: #2c3a32; } .setup-note { background: #332d1e; color: #f1d489; } .action-board li, .team-row { border-color: #2c3a32; } }
