@@ -44,7 +44,7 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
           <li><Icon as={Check} /><span>No AI Notetaker account needed</span></li>
           <li><Icon as={Check} /><span>You pay your AI providers directly</span></li>
           <li><Icon as={Check} /><span>Keys stay in protected storage on your device</span></li>
-          <li><Icon as={Check} /><span>Open source, self-host the history app if you like</span></li>
+          <li><Icon as={Check} /><span>Open source, so you can read exactly what runs</span></li>
         </ul>
         <Link className="mk-btn mk-btn--quiet" href="/how-it-works#own-keys">Set up with my keys</Link>
       </article>

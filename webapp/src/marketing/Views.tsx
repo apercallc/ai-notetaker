@@ -608,7 +608,7 @@ export function PrivacyView() {
               <li>If you connect a web-app workspace, finished desktop note text syncs there and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
               <li>The desktop app keeps itself up to date. It checks for a newer signed release on GitHub (about every six hours, and at startup) and installs it for you, restarting only when nothing is recording. GitHub, not us, receives your IP address and the app version. Turn automatic updates off in the tray menu and the app only checks when you ask.</li>
-              <li>Google Drive export and a self-hosted history server are optional. Their operators receive what you send them.</li>
+              <li>Google Drive export is optional. Google receives what you send it.</li>
             </ul>
 
             <h2>Hosted AI: what we collect</h2>
@@ -698,12 +698,6 @@ export function PrivacyView() {
               including the Limited Use requirements.
             </p>
 
-            <h2>Self-hosted history</h2>
-            <p>
-              If you run the optional history app yourself, notes go to the server you chose. You control its access,
-              storage, backups and retention, and you are responsible for it.
-            </p>
-
             <h2>Keeping, deleting and exporting your data</h2>
             <ul>
               <li>Delete any meeting or folder from the app. In Hosted AI it moves to Trash, where you can restore it for 30 days; after that, or when you delete it from Trash, its transcript and summary are removed.</li>
@@ -716,10 +710,9 @@ export function PrivacyView() {
                 folder, so clearing browser history, cookies or cache leaves them alone. They are removed if you delete
                 that app data or reset or lose the device; nothing is stored on our servers to restore them. Existing
                 extension users keep their local notes in the browser profile until they export them to the desktop app.
-                A self-hosted history server keeps its own copy of what was synced to it. Export local notes you need
-                to preserve, or enable optional workspace sync for finished note text.
+                Export local notes you need to preserve, or use a subscription to sync finished note text to the cloud.
               </li>
-              <li>Deleting the legacy extension does not delete desktop app data, provider account data, exported files, or data on a server you set up. Delete those where they live.</li>
+              <li>Deleting the legacy extension does not delete desktop app data, provider account data, exported files, or data held by services you connected. Delete those where they live.</li>
             </ul>
 
             <h2>Your rights</h2>

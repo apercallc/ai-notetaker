@@ -3,7 +3,7 @@
   "$id": "https://apercallc.github.io/ai-notetaker/release/manifest.schema.json",
   "title": "AI Notetaker release manifest",
   "type": "object",
-  "required": ["schemaVersion", "product", "version", "status", "extension", "protocol", "artifacts", "docker"],
+  "required": ["schemaVersion", "product", "version", "status", "extension", "protocol", "artifacts"],
   "allOf": [
     {
       "if": { "properties": { "status": { "const": "published" } }, "required": ["status"] },
@@ -67,15 +67,6 @@
         },
         "additionalProperties": false
       }
-    },
-    "docker": {
-      "type": "object",
-      "required": ["composeFile", "scope"],
-      "properties": {
-        "composeFile": { "type": "string" },
-        "scope": { "const": "history-webapp-only" }
-      },
-      "additionalProperties": false
     }
   },
   "additionalProperties": false

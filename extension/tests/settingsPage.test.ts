@@ -45,7 +45,7 @@ describe("settings page: API keys", () => {
     expect(document.getElementById("mode-managed")).toBeNull();
   });
 
-  it("keeps self-hosted history optional alongside API keys", async () => {
+  it("keeps web app history optional alongside API keys", async () => {
     await openSettings(DEFAULT_SETTINGS);
     expect(document.getElementById("webapp-url")).not.toBeNull();
     expect(document.getElementById("meeting-minutes")).not.toBeNull();

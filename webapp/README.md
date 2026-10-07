@@ -1,117 +1,30 @@
-# AI Notetaker — History and Managed Processing Web App
+# AI Notetaker — Account, Sync and Team Web App
 
-Optional companion to the AI Notetaker extension/helper. Entirely additive:
-the extension works with zero setup using local BYOK storage. Deploy this for
-persistent, cross-device history, or configure managed processing for signed-in
-workspaces.
+The web app behind AI Notetaker accounts. It is operated by the project; users
+do not run their own copy. Recording and local notes never need it: the desktop
+app works with no account and the user's own provider keys (BYOK).
 
-Most users should begin with the [main getting-started guide](../docs/getting-started.md)
-and skip this component. The webapp is an optional server you deploy and own;
-it is never required for recording or local meeting history.
+- **Free account:** sign in, manage devices and your data.
+- **Subscription:** cloud sync of notes and team sync (shared workspaces).
 
-Self-hosted deployments remain user-owned and BYOK. A managed operator can run
-the same app with server-side provider credentials, private object storage,
-worker credentials, and Stripe billing; the extension never receives provider
-secrets.
+Most users should begin with the [main getting-started guide](../docs/getting-started.md).
+The extension and desktop app never receive provider secrets or server-side
+credentials.
 
-## Deploy with the prebuilt container image
-
-Release tags publish the history webapp image to GitHub Container Registry:
-
-```bash
-mkdir -p ai-notetaker-webapp && cd ai-notetaker-webapp
-curl -fsSLo docker-compose.registry.yml https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/docker-compose.registry.yml
-curl -fsSLo .env.docker.example https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/.env.docker.example
-cp .env.docker.example .env
-docker compose -f docker-compose.registry.yml --env-file .env pull
-docker compose -f docker-compose.registry.yml --env-file .env up -d
-```
-
-Set `AI_NOTETAKER_WEBAPP_IMAGE` if you use a versioned tag or a Docker Hub
-mirror, for example
-`docker.io/your-namespace/ai-notetaker-webapp:0.1.0`. The image contains only
-the optional authenticated history webapp; it does not capture audio or run the
-desktop helper.
-
-For managed processing with the prebuilt image, include the worker profile:
-
-```bash
-docker compose -f docker-compose.registry.yml --env-file .env --profile managed up -d
-```
-
-To update a registry deployment without rebuilding locally:
-
-```bash
-docker compose -f docker-compose.registry.yml --env-file .env pull
-docker compose -f docker-compose.registry.yml --env-file .env up -d
-```
-
-Add `--profile managed` to both commands when running hosted processing.
-
-The entrypoint applies pending Prisma migrations before the server starts.
-Back up the Postgres volume before upgrades. The registry Compose file passes
-the managed worker, provider, Stripe, and private temporary-storage variables from `.env`;
-leave managed variables blank for a local/BYOK-only deployment.
-
-Managed API CORS is restricted to the fixed Chrome extension origin by
-default. Set `MANAGED_EXTENSION_ORIGIN` only when using a controlled extension
-fork with a different manifest key; arbitrary origins are rejected.
-
-## Deploy with Docker Compose
-
-Docker is an optional deployment path for this history webapp only. It does
-not capture microphone/system audio, run the desktop helper, install Chrome,
-or receive AI provider keys.
-
-```bash
-cp .env.docker.example .env
-# Replace both values with URL-safe random values, for example:
-#   openssl rand -hex 32
-docker compose up -d --build
-```
-
-The default bind is `127.0.0.1:3000`; open `http://127.0.0.1:3000/login`
-and enter the `AUTH_TOKEN`. Prisma migrations run in the webapp container
-before Next.js starts, and Postgres data persists in the
-`ai-notetaker-postgres` named volume. Back up that volume and put HTTPS and
-network controls in front of the service before exposing it remotely.
-
-For managed processing, start the first-party worker profile as well:
-
-```bash
-docker compose --profile managed up -d --build
-```
-
-The worker polls the authenticated job endpoint and is not started for the
-default local/BYOK-only profile. It shares the webapp image but does not
-publish an HTTP port.
-
-Managed API sign-in, billing, entitlement, and worker routes are also disabled
-unless `MANAGED_HOSTING=true`; leaving that flag unset keeps this deployment a
-self-hosted history/BYOK service even if unrelated Stripe variables exist.
-
-To stop the containers without deleting notes:
-
-```bash
-docker compose down
-```
-
-Do not use `docker compose down -v` unless you intentionally want to delete
-the Postgres volume and all stored meeting history.
-
-## Deploy on Railway (recommended)
+## Deploy on Railway (project operator)
 
 1. If a published Railway template link is available, open it. Otherwise,
    create a new Railway project, add this repo's `webapp/` directory as a
    service, and add a Postgres database to the same project.
 2. Railway links `DATABASE_URL` from its Postgres addon automatically.
 3. Set `AUTH_TOKEN` — a long random string. Generate one with `openssl rand
-   -hex 32`. This is the token for self-hosted extension sync.
+   -hex 32`. This is the token for the legacy extension ingestion route, kept only for
+   already-installed extensions.
 4. For project-operated multi-tenant hosting, also set `MANAGED_HOSTING=true`
    and configure the managed worker/provider, private R2 or S3-compatible
    temporary audio staging, and Stripe secrets from `.env.example`; hosted visitors can then
-   create isolated workspaces from `/login`. Leave it `false` for the
-   one-workspace self-hosted flow. See
+   create isolated workspaces from `/login`. Leave it `false` only for local
+   development. See
    [`docs/hosted-deployment.md`](../docs/hosted-deployment.md) for the
    acceptance and operations checklist.
 5. Deploy. The start command (`railway.json`) runs pending database
@@ -131,9 +44,8 @@ the Postgres volume and all stored meeting history.
 7. Open the deployed URL and use `/login` for the web history UI. Workspace
    owners can manage hosted payment from `/billing` when Stripe is configured.
 
-For self-hosted history, that's the whole setup — one token and the linked
-Postgres addon. Managed hosting additionally requires the worker service,
-provider/object-storage secrets, and Stripe configuration described above.
+Production additionally requires the worker service, provider/object-storage
+secrets, and Stripe configuration described above.
 
 ## Local development
 
@@ -191,9 +103,9 @@ parallel would let one file's cleanup race another's assertions.
   `docs/webapp-api.md`), and a session cookie for the browser UI (set once
   via `/login`, so a human isn't retyping the token on every page).
 - Managed hosting uses real per-user sessions and workspace-scoped reads and
-  writes; each hosted signup receives an isolated owner workspace. Self-hosted
-  deployments retain the legacy single default workspace and `AUTH_TOKEN`
-  ingestion contract.
+  writes; each hosted signup receives an isolated owner workspace. The legacy
+  `AUTH_TOKEN` ingestion contract and single default workspace remain only for
+  already-installed extensions.
 - In local/BYOK mode this app only stores and serves finished notes. In managed
   mode the worker defaults to Groq Whisper Large V3 Turbo and OpenAI GPT-6
   Luna using server-side secrets after an authenticated, checksummed upload.
@@ -202,8 +114,8 @@ parallel would let one file's cleanup race another's assertions.
   can retain individual remote-speaker labels. Provider requests have bounded
   cancellation and transient retry behavior. Managed audio uploads use private
   temporary R2 or S3-compatible staging and are deleted after processing or
-  within 24 hours. Single-node self-hosted/Docker deployments can use the local
-  filesystem backend.
+  within 24 hours. Local development can use the filesystem
+  backend.
 - The authenticated `/actions` page is a cross-meeting action-item inbox. It
   supports open/completed filtering, completion toggles, and due dates, while
   keeping the meeting detail page as the source context for each item.

@@ -53,12 +53,37 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
 - **Every webapp data route authenticates its client.** Browser pages use a
   user session; managed APIs use their scoped auth; desktop note sync uses a
   revocable user token bound to one workspace. The legacy `/api/meetings`
-  contract keeps its self-hosted `AUTH_TOKEN`. The only public web routes are
+  contract keeps its `AUTH_TOKEN` for installed extensions only. The only public web routes are
   the health check and the managed deployment's exact marketing allowlist in
   `webapp/src/marketing/paths.ts`.
 - **Helper checks for and offers to resume an in-progress recording on
   startup** — an unclean shutdown must not silently orphan raw audio
   that's already on disk.
+
+## Product tiers (decided 2026-10-07)
+
+- **Free:** the local desktop app with BYOK. No account needed, ever.
+- **Account (Pro):** creating an account adds cloud sync of notes across
+  devices on the managed web app. Paid subscription.
+- **Team:** shared workspaces, roster and admin controls on the managed
+  service, billed per workspace.
+- **Self-hosted:** free, open-source. Basic sync never requires a
+  subscription or license check; the legacy `AUTH_TOKEN` contract stays.
+  Revenue here, if any, is optional paid support. Do not add license-key
+  gating to the self-hosted web app without a new decision.
+
+Copy, billing code, and UI must use these tier names and must not imply that
+local recording or self-hosted sync is paid.
+
+## Product tiers (decided 2026-10-07)
+
+- **No account:** local app, bring your own keys (BYOK). Free.
+- **Free account:** sign in, manage devices and your data. Free.
+- **Subscription:** cloud sync and team sync. Paid.
+
+"Self-hosted" means BYOK only. We don't support users running their own
+backend; the legacy `AUTH_TOKEN` webapp contract is kept only for installed
+extensions. Recording and BYOK are never paid.
 
 ## Repo structure
 

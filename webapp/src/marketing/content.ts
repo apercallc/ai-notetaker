@@ -143,7 +143,7 @@ export const FAQS: Faq[] = [
   },
   {
     question: "Is AI Notetaker open source?",
-    answer: `Yes. It is ${SITE.license} licensed and the source is on GitHub. You can read exactly what runs on your machine, and you can self-host the optional meeting-history app.`,
+    answer: `Yes. It is ${SITE.license} licensed and the source is on GitHub. You can read exactly what runs on your machine, and you can bring your own AI provider keys.`,
   },
   {
     question: "What happens if my browser or computer crashes mid-meeting?",

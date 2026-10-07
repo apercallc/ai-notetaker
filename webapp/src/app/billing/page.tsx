@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 const ERROR_MESSAGES: Record<string, string> = {
   "billing-not-configured": "Hosted billing is not configured on this server yet.",
-  "managed-disabled": "Hosted AI billing is disabled on this self-hosted instance.",
+  "managed-disabled": "Billing is not available on this deployment.",
   "owner-only": "Only the workspace owner can manage billing.",
 };
 
@@ -39,7 +39,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       <div className="container">
         <Link href="/meetings" className="back-link">← Meetings</Link>
         <div className="page-header"><h1>Hosted AI</h1></div>
-        <p className="muted-copy">Hosted AI billing is available only on the project-operated managed service. This self-hosted instance remains free local BYOK history storage.</p>
+        <p className="muted-copy">Billing is available only on the project-operated service.</p>
       </div>
     );
   }

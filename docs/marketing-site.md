@@ -17,7 +17,7 @@ the one deliberate exception, so they are fenced in four ways:
 
 1. **Managed only.** `proxy.ts` lets these paths through only when
    `MANAGED_HOSTING=true`; every page also calls `requireMarketing()` and 404s
-   otherwise. A self-hosted instance never publishes them.
+   otherwise. A deployment without managed hosting never publishes them.
 2. **Exact paths.** The proxy compares the whole pathname to a fixed set, so
    `/pricing/anything`, `/privacy/` and `/pricing.json` stay behind login.
 3. **Static copy only.** These pages read no meeting, workspace or account data.
@@ -27,7 +27,7 @@ the one deliberate exception, so they are fenced in four ways:
    sets it itself; the root layout uses it only to drop the app chrome.
 
 `robots.txt` disallows `/api/`, every app route and `/share/` (expiring share
-links are private capabilities). On a self-hosted instance robots disallows
+links are private capabilities). Without managed hosting robots disallows
 everything and the sitemap is empty.
 
 ## Single source of truth

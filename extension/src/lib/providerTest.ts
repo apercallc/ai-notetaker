@@ -1,5 +1,5 @@
 /**
- * "Test connection" for the optional self-hosted webapp on the settings
+ * "Test connection" for the optional webapp on the settings
  * page. This is the one legitimate direct-fetch exception: the webapp is
  * the user's own configured instance, not a third-party AI provider — see
  * docs/webapp-api.md and extension/CLAUDE.md.
@@ -52,7 +52,7 @@ export async function testWebappHealth(
   try {
     const response = await fetchImpl(`${normalized}/api/health`, { signal: controller.signal });
     if (response.ok) {
-      return { healthy: true, message: "Connected to your self-hosted webapp." };
+      return { healthy: true, message: "Connected to your web app." };
     }
     return { healthy: false, message: `Webapp responded with HTTP ${response.status}.` };
   } catch {

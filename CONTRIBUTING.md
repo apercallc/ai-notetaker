@@ -37,8 +37,8 @@ signing, deployment, and store submission as separate evidence.
 - Local BYOK provider keys belong in `chrome.storage.local`; never add them to
   sync or send them to the hosted service. Managed provider keys stay
   server-side.
-- The webapp supports both user-operated self-hosting and project-operated
-  managed hosting, and must authenticate every route except `/api/health`.
+- The webapp is the project-operated account, sync and team service (users do
+  not self-host a backend), and must authenticate every route except `/api/health`.
 
 ## Pull requests
 

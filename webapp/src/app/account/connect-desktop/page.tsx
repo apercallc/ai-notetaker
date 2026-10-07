@@ -17,7 +17,7 @@ export default async function ConnectDesktopPage() {
         (Settings → Processing → Sign in with your browser). It signs the desktop app in to this same account and workspace, whether you
         sign in here with a password or with Google, and turns on sync between this web app and your other devices.
       </p>
-      {managedHostingEnabled() ? <ConnectDesktopForm /> : <p className="muted-copy">This deployment is self-hosted. Use a desktop sync token from Settings → Integrations instead.</p>}
+      {managedHostingEnabled() ? <ConnectDesktopForm /> : <p className="muted-copy">Sign-in from the desktop app is not available on this deployment. Use a desktop sync token from Settings → Integrations instead.</p>}
     </div>
   );
 }

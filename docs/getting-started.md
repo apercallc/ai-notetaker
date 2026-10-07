@@ -398,23 +398,6 @@ raw audio and provider keys remain local. The webapp does not call Deepgram,
 Claude, Groq, Gemini, or DeepSeek and never needs those keys. Existing
 extension users keep their prior connection settings during migration.
 
-For a local or private Docker deployment instead, download the two versioned
-configuration files without cloning the repository, then use the prebuilt
-registry image:
-
-```sh
-mkdir -p ai-notetaker-webapp && cd ai-notetaker-webapp
-curl -fsSLo docker-compose.registry.yml https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/docker-compose.registry.yml
-curl -fsSLo .env.docker.example https://raw.githubusercontent.com/apercallc/ai-notetaker/main/webapp/.env.docker.example
-cp .env.docker.example .env
-docker compose -f docker-compose.registry.yml --env-file .env pull
-docker compose -f docker-compose.registry.yml --env-file .env up -d
-```
-
-The image is for the history webapp only. It never captures audio or replaces
-the native helper. If the registry image cannot be pulled, use the local build
-Compose flow in [`webapp/README.md`](../webapp/README.md#deploy-with-docker-compose).
-
 ## Other browsers
 
 Chrome is the supported browser. Non-Chrome browser ports are out of scope for

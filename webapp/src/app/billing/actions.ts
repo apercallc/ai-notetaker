@@ -26,7 +26,7 @@ async function portalUrlFor(workspaceId: string): Promise<string> {
 }
 
 export async function startCheckout(_previous: BillingActionState, formData: FormData): Promise<BillingActionState> {
-  if (!managedHostingEnabled()) return { error: "Hosted AI billing is disabled on this self-hosted instance." };
+  if (!managedHostingEnabled()) return { error: "Billing is not available on this deployment." };
   const session = await requireSession();
   if (session.role !== "owner") return { error: "Only the workspace owner can manage billing." };
   const plan = String(formData.get("plan") ?? "");
@@ -51,7 +51,7 @@ export async function startCheckout(_previous: BillingActionState, formData: For
 }
 
 export async function openBillingPortal(_previous: BillingActionState, _formData?: FormData): Promise<BillingActionState> {
-  if (!managedHostingEnabled()) return { error: "Hosted AI billing is disabled on this self-hosted instance." };
+  if (!managedHostingEnabled()) return { error: "Billing is not available on this deployment." };
   const session = await requireSession();
   if (session.role !== "owner") return { error: "Only the workspace owner can manage billing." };
   let destination: string;

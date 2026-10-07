@@ -5,8 +5,8 @@ You are reviewing changes to AI Notetaker, an open-source, local-first,
 botless meeting notetaker with two supported execution modes: a free local
 BYOK mode that needs no account, and an optional managed (hosted, paid)
 service that the project itself operates. It consists of a Chrome extension,
-a Rust/Tauri desktop capture helper, and a Next.js webapp that serves both
-self-hosted and managed deployments.
+a Rust/Tauri desktop capture helper, and a Next.js webapp that is the
+project-operated account, sync and team service.
 
 The authoritative constraint list is the root `AGENTS.md`. The target design
 and its reasons are in

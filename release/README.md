@@ -33,21 +33,6 @@ node scripts/validate-release-manifest.mjs release/manifest.json
 Read [`../docs/code-signing-policy.md`](../docs/code-signing-policy.md) for the
 current unsigned-install prompts and checksum limitations.
 
-## Optional webapp image
-
-The tagged release workflow publishes the optional webapp image to
-`ghcr.io/apercallc/ai-notetaker-webapp:<tag>` and `:latest`. GitHub Container
-Registry uses the repository's `GITHUB_TOKEN`; the package must be made public
-after the first push. Docker Hub is an optional mirror, not a second helper
-distribution. Set the repository variable `DOCKERHUB_NAMESPACE` and secrets
-`DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` to enable the mirror job. Users can then
-set `AI_NOTETAKER_WEBAPP_IMAGE` to
-`docker.io/<namespace>/ai-notetaker-webapp:<tag>` in `docker-compose.registry.yml`.
-
-The image contains only the self-hosted history server. The desktop helper
-cannot be moved into Docker because it needs host audio devices and Chrome
-Native Messaging registration.
-
 Before a Windows release build, set the repository variable `VB_CABLE_SHA256`
 to the SHA-256 of the official base VB-CABLE archive. The workflow refuses to
 build the Windows helper without that pin and stages the complete archive only

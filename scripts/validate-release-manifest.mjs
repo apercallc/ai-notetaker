@@ -86,7 +86,6 @@ export function validateManifest(manifest) {
     }
   }
 
-  add(manifest.docker?.scope === "history-webapp-only", "docker scope must remain history-webapp-only");
 
   return errors;
 }
