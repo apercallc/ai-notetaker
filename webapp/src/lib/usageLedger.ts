@@ -121,7 +121,9 @@ export async function getEntitlements(workspaceId: string) {
       warning: audioWarning,
     },
     canSync: hasSyncAccess(subscription, now),
-    canProcess: hasProcessingAccess(subscription, now) && limit > used && audioLimitSeconds > audioUsedSeconds,
+    /** Whether this service runs hosted AI at all; clients hide quotas and processing UI when false. */
+    hostedAi: hostedAiEnabled(),
+    canProcess: hostedAiEnabled() && hasProcessingAccess(subscription, now) && limit > used && audioLimitSeconds > audioUsedSeconds,
     period: {
       source: window.source,
       start: window.source === "trial" ? null : window.start.toISOString(),

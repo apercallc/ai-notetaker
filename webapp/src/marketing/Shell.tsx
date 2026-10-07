@@ -66,7 +66,7 @@ export function MarketingShell({
                 {SITE.name}
               </Link>
               <p className="mk-small mk-footer-blurb">
-                {SITE.tagline} Free and open source with your own AI keys, or hosted for a flat monthly price.
+                {SITE.tagline} Free and open source with your own AI keys. Subscribe only for cloud sync and team sync.
               </p>
             </div>
             <div>

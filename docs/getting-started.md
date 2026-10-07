@@ -8,7 +8,7 @@ manage your devices; a subscription adds cloud sync of finished notes and team s
 browser tab.
 
 For the release and installation model, including direct platform downloads,
-first-open warnings, checksums, and the Docker-only webapp option, see the
+first-open warnings, checksums, see the
 [current distribution decision](superpowers/specs/2026-09-28-direct-download-distribution.md).
 
 > **Release status.** Preview installers are published for macOS, Windows, and
@@ -47,13 +47,12 @@ on a platform capture path.
 
 ## Your account in the desktop app
 
-Sign in under **Settings → Processing** and the desktop app shows the same things as the
-web app: **Plans & usage** (meetings, meeting hours and Ask-your-notes questions used, with
-upgrade and cancel through the secure billing page), **Ask**, **Actions** (action items
-across all notes), **Team** (owners invite, change roles and remove members), and a
-**Library** that matches the web library because signing in also connects notes sync.
-Recording is the one thing only the desktop app does. Signing out ends the session on the
-server and the app goes back to your own keys.
+Sign in under **Settings → Account & sync**. A free account lets you manage your
+devices and data. The desktop app then shows **Plan** (your plan, with upgrade and
+cancel through the secure billing page), **Actions** (action items across all notes)
+and, for Team owners, **Team** (invite, change roles and remove members). With a Pro or
+Team plan, signing in also syncs your notes. Recording is the one thing only the
+desktop app does. Signing out ends the session on the server.
 
 ## Developer quickstart: run from source
 
@@ -323,15 +322,14 @@ recoverable: reopen the popup and choose **Resume** or **Discard**.
 
 ### Updating the helper
 
-The helper checks GitHub once a day for a newer stable release and asks before
-opening the official download page. GitHub receives the ordinary network
-metadata for that request; the helper sends no recordings or provider keys.
-The helper never downloads or installs an update for you. Choose **Check for
-Updates…** from the tray menu to check manually, then download and install the
-new build for your platform. For the optional Docker webapp update path, see
-its separate deployment guide.
+The desktop app checks GitHub about every six hours and at startup. On macOS and
+Windows it installs signed updates for you and restarts only when nothing is
+recording; the Linux `.deb` opens the official release page instead. GitHub
+receives the ordinary network metadata for that request; the app sends no
+recordings or provider keys. Choose **Check for Updates…** from the tray menu to
+check manually, and turn automatic updates off there if you prefer.
 
-Download the newer installer from GitHub Releases for each manual update.
+On Linux, download the newer `.deb` from GitHub Releases for each update.
 
 ## Optional: save notes to Google Drive
 
@@ -383,18 +381,19 @@ Then, in the extension:
 - Open Settings to change providers, keys, Notes style, vocabulary, summary
   instructions, or the optional webapp connection.
 
-## Optional web-app sync
+## Optional cloud sync (Pro or Team)
 
-Local history is the default and requires no server. For cross-device history:
+Local history is the default and needs no account or server. For cross-device
+history:
 
-1. Deploy or sign into the webapp and open **Settings → Integrations**.
-2. Create a **Desktop note sync** token for the selected workspace.
-3. In the desktop app's **Settings**, enter the web-app URL and token, then
-   test the connection and save.
+1. In the desktop app, open **Settings → Account & sync** and sign in (or use the
+   one-time code from your account page on the web).
+2. Choose a Pro or Team plan on the web **Plan** page. Without one, sync stays off
+   and your notes stay on your device.
+3. Finished notes then sync to your workspace and your other devices.
 
-Sync is optional. It sends finished transcripts, summaries, and action items;
-raw audio and provider keys remain local. The webapp does not call Deepgram,
-Claude, Groq, Gemini, or DeepSeek and never needs those keys. Existing
+It sends finished transcripts, summaries, and action items; raw audio and
+provider keys remain local. The service never receives those keys. Existing
 extension users keep their prior connection settings during migration.
 
 ## Other browsers

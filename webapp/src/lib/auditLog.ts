@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { teamPlanActive } from "./teamAccess";
 import { AUDIT_ACTIONS, type AuditAction } from "./audit";
 import { managedHostingEnabled } from "./managedAuth";
 
@@ -73,8 +74,7 @@ function actionsIn(category: AuditCategoryId): AuditAction[] {
 /** The audit log is a Team feature on the hosted service; self-hosted instances always have it. */
 export async function auditLogAvailable(workspaceId: string): Promise<boolean> {
   if (!managedHostingEnabled()) return true;
-  const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId }, select: { plan: true, status: true } });
-  return subscription?.plan === "hosted_team" && (subscription.status === "active" || subscription.status === "trialing" || subscription.status === "past_due");
+  return teamPlanActive(workspaceId);
 }
 
 export interface AuditFilters {

@@ -8,6 +8,7 @@ import { sendInviteEmail, sendPasswordResetEmail } from "@/lib/authEmails";
 import type { RequestContext } from "@/lib/requestContext";
 import { listPendingInvites, revokeInvites } from "@/lib/authTokens";
 import { recordAudit } from "@/lib/audit";
+import { TEAM_PLAN_REQUIRED_MESSAGE, teamPlanActive } from "@/lib/teamAccess";
 import { emailRequestStatus, formatRetryAfter, recordEmailRequest } from "@/lib/loginThrottle";
 
 /**
@@ -36,6 +37,7 @@ export async function addMemberAs(session: TeamSession, rawEmail: string): Promi
   if (session.role !== "owner") {
     return { ok: false, error: "Only the workspace owner can add members." };
   }
+  if (!(await teamPlanActive(session.workspaceId))) return { ok: false, error: TEAM_PLAN_REQUIRED_MESSAGE };
 
   const email = normalizeEmail(rawEmail);
   if (!isPlausibleEmail(email)) {
@@ -86,6 +88,7 @@ async function run(session: TeamSession, input: TeamOperation, getContext: () =>
   if (session.role !== "owner") return { ok: false, error: "Only owners can manage this workspace." };
   const { operation, id } = input;
   if (operation === "invite") {
+    if (!(await teamPlanActive(session.workspaceId))) return { ok: false, error: TEAM_PLAN_REQUIRED_MESSAGE };
     const email = normalizeEmail(input.email);
     if (!isPlausibleEmail(email)) return { ok: false, error: "Enter a valid email address." };
     const context = await getContext();

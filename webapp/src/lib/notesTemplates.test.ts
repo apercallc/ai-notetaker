@@ -263,7 +263,7 @@ describe("template-aware processing and regeneration", () => {
   it("requires an active plan and hosted mode", async () => {
     const meetingId = await meeting();
     await prisma.workspaceSubscription.update({ where: { workspaceId }, data: { status: "canceled" } });
-    expect(await regenerateNotes({ workspaceId, userId }, meetingId, "sales")).toMatchObject({ ok: false, error: expect.stringContaining("Plans & usage") });
+    expect(await regenerateNotes({ workspaceId, userId }, meetingId, "sales")).toMatchObject({ ok: false, error: expect.stringContaining("isn't offered") });
     process.env.MANAGED_HOSTING = "false";
     expect(await regenerateNotes({ workspaceId, userId }, meetingId, "sales")).toMatchObject({ ok: false, error: expect.stringContaining("isn't offered") });
   });

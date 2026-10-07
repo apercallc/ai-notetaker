@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ValidationError } from "./meetings";
-import { AUDIO_BUDGET_PUBLIC_MESSAGE, AudioBudgetError, ENTITLEMENT_PUBLIC_MESSAGE, EntitlementError } from "./entitlementError";
+import { AUDIO_BUDGET_PUBLIC_MESSAGE, AudioBudgetError, ENTITLEMENT_PUBLIC_MESSAGE, EntitlementError, HOSTED_AI_DISABLED_PUBLIC_MESSAGE, HostedAiDisabledError } from "./entitlementError";
 import { safeRequestId } from "./requestId";
 import { captureServerError } from "./observability";
 import { ProviderBudgetError } from "./providerSpend";
@@ -32,6 +32,13 @@ export function apiErrorResponse(
     return NextResponse.json(
       { error: error.message },
       { status: 400, headers: { "x-request-id": requestId } },
+    );
+  }
+
+  if (error instanceof HostedAiDisabledError) {
+    return NextResponse.json(
+      { error: HOSTED_AI_DISABLED_PUBLIC_MESSAGE, code: "hosted_ai_disabled", requestId },
+      { status: 410, headers: { "x-request-id": requestId } },
     );
   }
 

@@ -71,6 +71,12 @@ describe("desktop account API", () => {
     const denied = await teamAction(post("http://localhost/api/v1/team", member, { operation: "add", email: "invited-account@example.com" }));
     expect(denied.status).toBe(403);
 
+    // Pro is one person syncing their own devices; inviting teammates is the Team plan.
+    const proDenied = await teamAction(post("http://localhost/api/v1/team", owner, { operation: "add", email: "invited-account@example.com" }));
+    expect(proDenied.status).toBe(422);
+    expect((await proDenied.json()).error).toMatch(/Team plan/i);
+    await prisma.workspaceSubscription.update({ where: { workspaceId: WORKSPACE_ID }, data: { plan: "hosted_team" } });
+
     const added = await teamAction(post("http://localhost/api/v1/team", owner, { operation: "add", email: "invited-account@example.com" }));
     expect(added.status).toBe(200);
     expect((await added.json()).temporaryPassword).toBeTruthy();

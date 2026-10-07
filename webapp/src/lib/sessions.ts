@@ -79,7 +79,9 @@ export async function getSessionUser(
     return token ? { id: token.id, email: token.email } : null;
   }
   const context = await getSessionContext(sessionId);
-  return context ? { id: context.user.id, email: context.user.email } : null;
+  // A temporary password must be changed in the browser before the session works as an API credential.
+  if (!context || context.user.mustChangePassword) return null;
+  return { id: context.user.id, email: context.user.email };
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

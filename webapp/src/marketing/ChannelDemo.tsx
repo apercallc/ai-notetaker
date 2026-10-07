@@ -62,7 +62,7 @@ export function ChannelDemo() {
         </li>
         <li className="mk-note">
           <span className="mk-note-kind">Question</span>
-          <span>Does the trial need a card? Check with finance.</span>
+          <span>Does the vendor need a card? Check with finance.</span>
         </li>
       </ul>
       <figcaption id="mk-demo-caption" className="mk-demo-caption">

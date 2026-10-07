@@ -57,7 +57,7 @@ export async function regenerateNotes(
   if (meeting.transcript.length === 0) return fail("There's no transcript to write notes from.");
 
   const subscription = await prisma.workspaceSubscription.findUnique({ where: { workspaceId: session.workspaceId } });
-  if (!hasProcessingAccess(subscription)) return fail("Your plan has no hosted processing available. See Plans & usage.");
+  if (!hasProcessingAccess(subscription)) return fail("Hosted processing isn't offered. Your audio stays on your desktop.");
 
   // Claim one of the limited regenerations atomically so two clicks cannot both pass the check.
   const claimed = await prisma.meeting.updateMany({
