@@ -182,7 +182,7 @@
     const keyReady = processingReady(s.settings);
     const hosted = hostedSelected(s.settings);
     const setup = s.credentialStoreError || !keyReady;
-    const ownKeysMessage = `${s.webappSync.configured ? "Web app sync is connected, but it only syncs notes. " : ""}Add a ${providerName(s.settings.preferences.transcriptionProvider)} key (transcription) and a ${providerName(s.settings.preferences.summarizationProvider)} key (summaries) in Settings → Processing, or sign in to AI Notetaker hosted AI instead. Recording and audio stay on this device either way.`;
+    const ownKeysMessage = `Choose how to use AI Notetaker. Stay offline: add your own ${providerName(s.settings.preferences.transcriptionProvider)} (transcription) and ${providerName(s.settings.preferences.summarizationProvider)} (summaries) keys, and your notes never leave this device except for calls to those providers. Or sign in: we make the notes, and your notes stay in sync with the web app and your other devices.`;
     const setupMessage = s.credentialStoreError || (hosted
       ? "Your hosted session has ended. Sign in again in Settings → Processing to record."
       : ownKeysMessage);
@@ -500,6 +500,20 @@
     }
   }
 
+
+  // Same export formats as the web app's note page.
+  function noteMarkdown(detail) {
+    const m = detail.meeting;
+    const items = (m.actionItems || []).map((item) => `- [${item.status === "done" ? "x" : " "}] ${item.text}${item.owner ? ` (${item.owner})` : ""}`);
+    return [`# ${m.title}`, "", `Started: ${m.startedAt}`, ...(m.endedAt ? [`Ended: ${m.endedAt}`] : []), "", "## Summary", m.summary || "_No summary available._", "", "## Action Items", ...(items.length ? items : ["_None_"]), "", "## Transcript", ...detail.transcript.map((segment) => `**${segment.speaker}:** ${segment.text}`)].join("\n");
+  }
+  function notePlainText(detail) {
+    const m = detail.meeting;
+    const items = (m.actionItems || []).map((item) => `${item.status === "done" ? "[done]" : "[open]"} ${item.text}${item.owner ? ` (${item.owner})` : ""}`);
+    return [m.title, `Started: ${m.startedAt}`, ...(m.endedAt ? [`Ended: ${m.endedAt}`] : []), "", "SUMMARY", m.summary || "No summary available.", "", "ACTION ITEMS", ...(items.length ? items : ["None"]), "", "TRANSCRIPT", ...detail.transcript.map((segment) => `${segment.speaker}: ${segment.text}`)].join("\n");
+  }
+  const exportName = (title, extension) => `${(title || "meeting").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "meeting"}.${extension}`;
+
   function renderDetail(detail) {
     const root = $("#note-detail");
     if (!root) return;
@@ -521,7 +535,9 @@
       ${importNotice}
       ${meeting.canReprocessExtensionAudio ? `<section class="recovery-actions"><p class="privacy-note">Create a separate desktop note from the saved audio. The imported transcript and summary will stay unchanged.</p><button class="secondary-button" id="reprocess-extension-audio" ${state.reprocessingIds.has(meeting.id) ? "disabled" : ""}>${state.reprocessingIds.has(meeting.id) ? "Preparing audio copy…" : "Create notes from saved audio"}</button></section>` : ""}
       ${meeting.status === "recovered" && !meeting.textOnlyImport ? `<section class="recovery-actions"><p class="privacy-note">Audio is safe on this device. Resume processing it to finish the transcript and notes.</p><button class="secondary-button" id="recover-meeting" ${state.recoveringIds.has(meeting.id) ? "disabled" : ""}>${state.recoveringIds.has(meeting.id) ? "Recovering notes…" : "Recover notes from saved audio"}</button></section>` : ""}
-      <div class="note-actions"><button class="secondary-button" id="delete-note">${meeting.textOnlyImport ? "Delete imported note" : "Delete recording"}</button></div>`;
+      <div class="note-actions"><div class="inline-actions note-export"><button class="secondary-button" id="copy-note">Copy as Markdown</button><button class="secondary-button" id="save-note-md">Save Markdown</button><button class="secondary-button" id="save-note-txt">Save text</button></div><button class="secondary-button" id="delete-note">${meeting.textOnlyImport ? "Delete imported note" : "Delete recording"}</button></div>`;
+    $("#copy-note")?.addEventListener("click", async () => { try { await navigator.clipboard.writeText(noteMarkdown(detail)); notify("Copied to the clipboard."); } catch { notify("Could not copy. Use Save Markdown instead.", "error"); } });
+    for (const [id, extension, build] of [["#save-note-md", "md", noteMarkdown], ["#save-note-txt", "txt", notePlainText]]) $(id)?.addEventListener("click", async () => { try { if (await invoke("desktop_save_text_file", { fileName: exportName(detail.meeting.title, extension), contents: build(detail) })) notify("Saved."); } catch (error) { notify(String(error), "error"); } });
     $("#delete-note")?.addEventListener("click", deleteMeeting);
     $("#recover-meeting")?.addEventListener("click", recoverMeeting);
     $("#reprocess-extension-audio")?.addEventListener("click", reprocessExtensionAudio);
@@ -600,6 +616,10 @@
   function hostedForm(email) {
     return `<div class="form-grid hosted-form"><div class="form-field"><label class="field-label" for="hosted-email">Email</label><input class="text-input" id="hosted-email" type="email" autocomplete="username" value="${esc(email)}" /></div><div class="form-field"><label class="field-label" for="hosted-password">Password</label><input class="text-input" id="hosted-password" type="password" autocomplete="current-password" /></div></div>
       <div class="inline-actions"><button type="button" class="primary-button" id="hosted-sign-in">Sign in</button><button type="button" class="secondary-button" id="hosted-create-account">Create an account</button></div>
+      <details class="other-keys browser-signin"><summary>Signed up with Google, or prefer your browser?</summary>
+        <p class="fine-print">Sign in on the web app any way you like, create a code on its “Connect the desktop app” page, and paste it here. It signs this app in to the same account and workspace.</p>
+        <div class="inline-actions"><button type="button" class="secondary-button" id="hosted-open-connect">Open the web app</button></div>
+        <div class="key-row"><input class="text-input" id="hosted-code" type="text" autocomplete="off" spellcheck="false" placeholder="Paste sign-in code" aria-label="Sign-in code" /><button type="button" class="primary-button" id="hosted-code-submit">Connect</button></div></details>
       <p class="key-status" id="hosted-status" role="status" aria-live="polite"></p>`;
   }
 
@@ -620,7 +640,7 @@
 
 
   // ---- Account: usage and plan, Ask your notes, action items, team (same data as the web app) ----
-  const accountState = { overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionDone: new Set(), billingBusy: false };
+  const accountState = { overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionFilter: "open", billingBusy: false };
   const hostedSignedIn = () => Boolean(state.snapshot?.settings.hasHostedSession);
   const formatHours = (seconds) => { const hours = (seconds || 0) / 3600; return hours >= 10 ? String(Math.round(hours)) : String(Math.round(hours * 10) / 10); };
   const longDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
@@ -695,15 +715,19 @@
 
   function actionItemsPanel() {
     const query = accountState.actionQuery.trim().toLowerCase();
+    const filter = accountState.actionFilter;
     const rows = [];
     for (const meeting of state.snapshot.meetings) {
-      for (const [index, item] of (meeting.actionItems || []).entries()) rows.push({ meeting, item, key: `${meeting.id}:${index}` });
+      for (const [index, item] of (meeting.actionItems || []).entries()) rows.push({ meeting, item, index });
     }
-    const shown = rows.filter((row) => !query || `${row.item.text} ${row.item.owner || ""} ${row.meeting.title}`.toLowerCase().includes(query));
+    const isDone = (item) => item.status === "done";
+    const counts = { open: rows.filter((row) => !isDone(row.item)).length, done: rows.filter((row) => isDone(row.item)).length, all: rows.length };
+    const shown = rows.filter((row) => (filter === "all" || (filter === "done") === isDone(row.item)) && (!query || `${row.item.text} ${row.item.owner || ""} ${row.meeting.title}`.toLowerCase().includes(query)));
     const list = shown.length
-      ? `<ul class="action-board">${shown.map(({ meeting, item, key }) => `<li><label><input type="checkbox" data-action-key="${esc(key)}" ${accountState.actionDone.has(key) ? "checked" : ""} /><span class="${accountState.actionDone.has(key) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
-      : `<div class="empty-state"><strong>${rows.length ? "No matches" : "No action items yet"}</strong>${rows.length ? "Try a different search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
-    return `<section class="card account-card"><div class="account-head"><div><p class="fine-print">${rows.length} across your notes. Ticking one marks it done on this screen only.</p></div></div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}</section>`;
+      ? `<ul class="action-board">${shown.map(({ meeting, item, index }) => `<li><label><input type="checkbox" data-action-meeting="${esc(meeting.id)}" data-action-index="${index}" ${isDone(item) ? "checked" : ""} /><span class="${isDone(item) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
+      : `<div class="empty-state"><strong>${rows.length ? "Nothing here" : "No action items yet"}</strong>${rows.length ? "Try a different filter or search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
+    const chips = [["open", "Open"], ["done", "Done"], ["all", "All"]].map(([id, label]) => `<button class="filter-chip ${filter === id ? "active" : ""}" data-action-filter="${id}" aria-pressed="${filter === id}">${label} <span>${counts[id]}</span></button>`).join("");
+    return `<section class="card account-card"><div class="filter-row">${chips}</div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}<p class="fine-print">Checking an item here updates it everywhere you are signed in. Offline, it stays on this device.</p></section>`;
   }
 
   function teamPanel() {
@@ -762,7 +786,13 @@
       });
     }
     $("#action-search")?.addEventListener("input", (event) => { accountState.actionQuery = event.target.value; const pos = event.target.selectionStart; renderAccount(); const box = $("#action-search"); box.focus(); box.setSelectionRange(pos, pos); });
-    for (const box of document.querySelectorAll("[data-action-key]")) box.addEventListener("change", () => { box.checked ? accountState.actionDone.add(box.dataset.actionKey) : accountState.actionDone.delete(box.dataset.actionKey); box.nextElementSibling.classList.toggle("done", box.checked); });
+    for (const chip of document.querySelectorAll("[data-action-filter]")) chip.addEventListener("click", () => { accountState.actionFilter = chip.dataset.actionFilter; renderAccount(); });
+    for (const box of document.querySelectorAll("[data-action-meeting]")) box.addEventListener("change", async () => {
+      box.disabled = true;
+      try { await invoke("desktop_set_action_item", { meetingId: box.dataset.actionMeeting, index: Number(box.dataset.actionIndex), done: box.checked }); }
+      catch (error) { notify(String(error), "error"); }
+      finally { await refresh(); }
+    });
     for (const link of document.querySelectorAll("[data-open-note]")) link.addEventListener("click", () => { state.selectedId = link.dataset.openNote; setPage("notes"); });
     const team = accountState.team;
     const act = (args, done) => accountAction(async () => {
@@ -820,11 +850,13 @@
     const processingBadge = hostedOn
       ? (s.hasHostedSession ? ["Hosted AI", "ok"] : ["Sign in again", "warn"])
       : (providersReady ? ["Own keys", "ok"] : ["Setup needed", "warn"]);
-    const processingBody = account
+    const syncOn = state.snapshot.webappSync.configured;
+    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device unless Hosted AI is making your notes." : "Your notes stay on this device. Sign in only if you want them on the web app and your other devices."}</p>`;
+    const processingBody = cloudLine + (account
       ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(account.plan)} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep using hosted AI.</p>'}
         <div class="inline-actions">${hostedOn ? '<button type="button" class="secondary-button" id="use-own-keys">Use my own keys instead</button>' : `<button type="button" class="primary-button" id="use-hosted" ${s.hasHostedSession ? "" : "disabled"}>Use hosted AI</button>`}<button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button></div></div>
         ${s.hasHostedSession ? "" : hostedForm(account.email)}`
-      : hostedForm("");
+      : hostedForm(""));
     const syncState = state.snapshot.webappSync;
     const syncBadge = conflicts.length ? ["Needs review", "warn"] : syncState.configured ? ["Connected", "ok"] : s.hasWebappToken ? ["Check connection", "warn"] : ["Optional", ""];
     const defaultOpen = { processing: !processingReady(s), providers: !hostedOn && !providersReady, "note-style": false, sync: Boolean(conflicts.length || syncState.lastError), import: false, about: false };
@@ -837,7 +869,7 @@
     $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Processing${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="providers">Own API keys</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
       ${state.snapshot.credentialStoreError ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Secure storage is unavailable</strong><span>${esc(state.snapshot.credentialStoreError)}</span></div></div>` : ""}
       ${section("processing", "Processing", processingBadge,
-        "Choose who turns your recordings into notes. Audio is always saved on this device first. Hosted AI uses your AI Notetaker account, so you need no provider keys. Or use your own keys below and keep everything account-free.",
+        "Audio is always saved on this device first. Stay offline with your own keys and nothing is stored in the cloud. Sign in to your AI Notetaker account and your notes sync with the web app and every device you are signed in on.",
         processingBody)}
       ${section("providers", "Own API keys", providersReady ? ["Ready", "ok"] : hostedOn ? ["Optional", ""] : ["Keys needed", "warn"],
         "With your own API keys, recordings go directly to the providers you pick and nothing passes through us. Keys are stored in your operating system’s credential store. You need one transcription key and one summary key.",
@@ -902,6 +934,14 @@
       }
     }
     for (const link of document.querySelectorAll("[data-about]")) link.addEventListener("click", async () => { try { await invoke("desktop_open_about_link", { page: link.dataset.about }); } catch (error) { notify(String(error), "error"); } });
+    $("#hosted-open-connect")?.addEventListener("click", async () => { try { await invoke("desktop_open_connect_page"); } catch (error) { notify(String(error), "error"); } });
+    const codeField = $("#hosted-code");
+    if (codeField) {
+      const submitCode = () => hostedAction($("#hosted-code-submit"), "desktop_hosted_sign_in_code", { code: codeField.value, baseUrl: p.hostedAccount?.baseUrl || null }, "Signed in. Your notes now sync with your account.");
+      $("#hosted-code-submit").addEventListener("click", submitCode);
+      codeField.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); submitCode(); } });
+      codeField.addEventListener("input", (event) => event.stopPropagation());
+    }
     $("#hosted-create-account")?.addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
     $("#hosted-sign-out")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_hosted_sign_out", {}, "Signed out. Notes will use your own keys."));
     $("#use-own-keys")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_set_processing", { hosted: false }, "Notes will use your own keys."));

@@ -10,13 +10,15 @@ import { normalizeEmail } from "./email";
  * conditional UPDATE, so two concurrent requests with the same link cannot
  * both succeed.
  */
-export type AuthTokenPurpose = "verify_email" | "reset_password" | "invite";
+export type AuthTokenPurpose = "verify_email" | "reset_password" | "invite" | "desktop_connect";
 
 const HOUR = 60 * 60 * 1000;
 export const AUTH_TOKEN_TTL_MS: Record<AuthTokenPurpose, number> = {
   verify_email: 24 * HOUR,
   reset_password: 1 * HOUR,
   invite: 7 * 24 * HOUR,
+  // A code the user copies from the web app into the desktop app: short-lived and single use.
+  desktop_connect: 10 * 60 * 1000,
 };
 
 export interface IssueAuthTokenInput {

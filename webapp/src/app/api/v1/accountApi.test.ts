@@ -4,6 +4,8 @@ import { GET as overview } from "./account/overview/route";
 import { POST as syncToken } from "./account/desktop-sync-token/route";
 import { POST as ask } from "./ask/route";
 import { POST as logout } from "./auth/logout/route";
+import { POST as desktopCode } from "./auth/desktop-code/route";
+import { issueAuthToken } from "@/lib/authTokens";
 import { createApiToken } from "@/lib/apiTokens";
 import { GET as teamRoster, POST as teamAction } from "./team/route";
 import { resolveApiToken, DESKTOP_NOTES_SCOPE } from "@/lib/apiTokens";
@@ -113,5 +115,20 @@ describe("desktop account API", () => {
     expect((await logout(new Request("http://localhost/api/v1/auth/logout", { method: "POST", headers }))).status).toBe(204);
     expect((await overview(new Request("http://localhost/api/v1/account/overview", { headers }))).status).toBe(401);
     expect((await logout(new Request("http://localhost/api/v1/auth/logout", { method: "POST" }))).status).toBe(401);
+  });
+
+  it("signs the desktop in with a one-time code from the web app, for any kind of account", async () => {
+    const { token } = await issueAuthToken({ purpose: "desktop_connect", email: "account-owner@example.com", userId: OWNER_ID, workspaceId: WORKSPACE_ID });
+    const exchange = (code: string) => desktopCode(new Request("http://localhost/api/v1/auth/desktop-code", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }));
+    const first = await exchange(token);
+    expect(first.status).toBe(200);
+    const body = await first.json();
+    expect(body).toMatchObject({ accountId: OWNER_ID, workspaceId: WORKSPACE_ID, role: "owner", email: "account-owner@example.com" });
+    // The session works as a hosted session.
+    expect((await overview(new Request("http://localhost/api/v1/account/overview", { headers: { authorization: `Bearer ${body.accessToken}` } }))).status).toBe(200);
+    // A code works once, and garbage never does.
+    expect((await exchange(token)).status).toBe(401);
+    expect((await exchange("nope")).status).toBe(401);
+    expect((await desktopCode(new Request("http://localhost/api/v1/auth/desktop-code", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }))).status).toBe(400);
   });
 });

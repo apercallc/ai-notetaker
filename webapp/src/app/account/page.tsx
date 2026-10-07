@@ -58,7 +58,9 @@ export default async function AccountPage({
       {managedHostingEnabled() && (
         <p className="muted-copy">
           Need to install or review setup?{" "}
-          <Link href="/download">Extension and desktop helper downloads &amp; setup</Link>
+          <Link href="/download">Desktop app downloads &amp; setup</Link>
+          {" · "}
+          <Link href="/account/connect-desktop">Connect the desktop app to this account</Link>
         </p>
       )}
 

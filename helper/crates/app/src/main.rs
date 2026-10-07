@@ -1159,6 +1159,8 @@ fn main() {
             desktop_test_webapp,
             desktop_save_settings,
             desktop_hosted_sign_in,
+            desktop_hosted_sign_in_code,
+            desktop_open_connect_page,
             desktop_hosted_sign_out,
             desktop_set_processing,
             desktop_account_overview,
@@ -1170,6 +1172,8 @@ fn main() {
             desktop_import_audio_transfer,
             desktop_sync_existing_notes,
             desktop_retry_webapp_sync,
+            desktop_set_action_item,
+            desktop_save_text_file,
             desktop_start_recording,
             desktop_stop_recording,
             desktop_recover_meeting,
@@ -1654,6 +1658,7 @@ async fn desktop_save_settings(
         webapp_url: normalized_url.unwrap_or_default(),
         processing: current_preferences.processing,
         hosted_account: current_preferences.hosted_account.clone(),
+        sync_from_sign_in: current_preferences.sync_from_sign_in && new_token.is_some(),
     };
 
     if let Err(error) = desktop_settings::save_api_keys(&keys) {
@@ -1720,6 +1725,8 @@ struct HostedLoginReply {
     workspace_id: String,
     #[serde(default)]
     plan: String,
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1785,6 +1792,87 @@ async fn desktop_hosted_sign_in(
         return Err("The service sent an incomplete sign-in reply. Try again.".into());
     }
 
+    finish_hosted_sign_in(&context, email, base_url, reply).await
+}
+
+/// Opens the web app's "Connect the desktop app" page, where a signed-in person (however they
+/// sign in there, including Google) creates a one-time code to paste into the desktop app.
+#[tauri::command]
+fn desktop_open_connect_page(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<(), String> {
+    let preferences = current_preferences(&context);
+    let base = preferences
+        .hosted_account
+        .as_ref()
+        .map(|account| account.base_url.clone())
+        .or_else(|| {
+            desktop_settings::normalize_webapp_url(&preferences.webapp_url)
+                .ok()
+                .flatten()
+        })
+        .unwrap_or_else(|| desktop_settings::DEFAULT_WEBAPP_URL.to_string());
+    open_external(&format!("{base}/account/connect-desktop"))
+}
+
+/// Signs in with the one-time code from the web app's Connect page. Works for every kind of
+/// account, including ones that only have Google sign-in.
+#[tauri::command]
+async fn desktop_hosted_sign_in_code(
+    context: tauri::State<'_, DesktopCommandContext>,
+    code: String,
+    base_url: Option<String>,
+) -> Result<desktop_settings::DesktopSettingsView, String> {
+    let code = code.trim().to_string();
+    if code.is_empty() || code.chars().count() > 128 || code.chars().any(char::is_whitespace) {
+        return Err("Paste the code exactly as the web app shows it.".into());
+    }
+    let base_url = desktop_settings::normalize_webapp_url(
+        base_url
+            .as_deref()
+            .unwrap_or(desktop_settings::DEFAULT_WEBAPP_URL),
+    )?
+    .unwrap_or_else(|| desktop_settings::DEFAULT_WEBAPP_URL.to_string());
+    let client = notetaker_core::providers::http_client_builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("Sign-in could not start: {error}"))?;
+    let response = client
+        .post(format!("{base_url}/api/v1/auth/desktop-code"))
+        .json(&serde_json::json!({ "code": code }))
+        .send()
+        .await
+        .map_err(|_| "Could not reach the AI Notetaker service. Check your internet connection and try again.".to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(match status.as_u16() {
+            401 => "That code is not valid or has expired. Create a new one in the web app."
+                .to_string(),
+            404 => "Hosted AI is not available at this address.".to_string(),
+            _ => format!("Sign-in failed ({status}). Try again in a moment."),
+        });
+    }
+    let reply: HostedLoginReply = response.json().await.map_err(|_| {
+        "The service sent an unexpected sign-in reply. Update AI Notetaker and try again."
+            .to_string()
+    })?;
+    let email = reply.email.clone().unwrap_or_default();
+    finish_hosted_sign_in(&context, email, base_url, reply).await
+}
+
+async fn finish_hosted_sign_in(
+    context: &DesktopCommandContext,
+    email: String,
+    base_url: String,
+    reply: HostedLoginReply,
+) -> Result<desktop_settings::DesktopSettingsView, String> {
+    if reply.access_token.is_empty() || reply.account_id.is_empty() || reply.workspace_id.is_empty()
+    {
+        return Err("The service sent an incomplete sign-in reply. Try again.".into());
+    }
+
     let previous = context
         .preferences
         .lock()
@@ -1823,6 +1911,7 @@ async fn desktop_hosted_sign_in(
                     if let Some(account) = &preferences.hosted_account {
                         preferences.webapp_url = account.base_url.clone();
                     }
+                    preferences.sync_from_sign_in = true;
                     connected_sync = true;
                 }
                 Err(error) => tracing::warn!(%error, "could not store the notes-sync token"),
@@ -1837,7 +1926,7 @@ async fn desktop_hosted_sign_in(
         }
         return Err(error);
     }
-    let view = apply_preferences(context.inner(), preferences).await?;
+    let view = apply_preferences(context, preferences).await?;
     if connected_sync {
         spawn_desktop_sync(
             context.app.clone(),
@@ -1847,6 +1936,26 @@ async fn desktop_hosted_sign_in(
         );
     }
     Ok(view)
+}
+
+/// Asks the service to end a token (best effort; the token also expires on its own).
+async fn revoke_token(base_url: &str, token: &str) {
+    let Ok(client) = notetaker_core::providers::http_client_builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    else {
+        return;
+    };
+    let _ = client
+        .post(format!(
+            "{}/api/v1/auth/logout",
+            base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(token)
+        .send()
+        .await;
 }
 
 async fn fetch_desktop_sync_token(
@@ -2095,9 +2204,21 @@ async fn desktop_hosted_sign_out(
         tracing::debug!(%error, "server-side sign-out did not complete");
     }
     desktop_settings::set_hosted_token(None)?;
+    // Going back to offline also disconnects the cloud sync that signing in turned on. A sync
+    // token the user pasted themselves is left alone.
+    let mut disconnect_sync = false;
+    if previous.sync_from_sign_in {
+        if let Ok(Some(sync_token)) = desktop_settings::get_webapp_token() {
+            if let Some(account) = &previous.hosted_account {
+                revoke_token(&account.base_url, &sync_token).await;
+            }
+            disconnect_sync = desktop_settings::set_webapp_token(None).is_ok();
+        }
+    }
     let preferences = desktop_settings::DesktopPreferences {
         processing: desktop_settings::ProcessingChoice::Local,
         hosted_account: None,
+        sync_from_sign_in: previous.sync_from_sign_in && !disconnect_sync,
         ..previous
     };
     preferences.save(&context.app.data_dir)?;
@@ -2243,6 +2364,7 @@ async fn apply_imported_desktop_preferences(
         webapp_url: current.webapp_url,
         processing: current.processing,
         hosted_account: current.hosted_account,
+        sync_from_sign_in: current.sync_from_sign_in,
     };
     preferences.save(&context.app.data_dir)?;
     *context
@@ -2545,6 +2667,9 @@ async fn desktop_delete_meeting(
         .await
         .map_err(|error| format!("Recording could not be deleted: {error}"))?;
     let _ = context.sync.remove(meeting_id);
+    if let Err(error) = context.sync.dismiss(meeting_id) {
+        tracing::warn!(%error, "could not remember a deleted note for sync");
+    }
     Ok(())
 }
 
@@ -2663,6 +2788,166 @@ async fn desktop_sync_existing_notes(
         context.ui_app.clone(),
     );
     Ok(count)
+}
+
+/// Marks one action item done or open in `summary` and returns the item's workspace id, if it has one.
+fn set_action_status(
+    summary: &mut notetaker_core::providers::Summary,
+    index: usize,
+    done: bool,
+) -> Result<Option<String>, String> {
+    let item = summary
+        .action_items
+        .get_mut(index)
+        .ok_or_else(|| "That action item is no longer in this note.".to_string())?;
+    item.status = Some(if done { "done" } else { "open" }.to_string());
+    item.completed_at = done.then(|| chrono::Utc::now().to_rfc3339());
+    Ok(item.id.clone())
+}
+
+/// Ticks an action item on or off, the same as on the web Actions page. Notes that live in the
+/// workspace (hosted, or copied from it) are updated there first so every device agrees; notes
+/// that only exist on this device change locally and sync like any other edit once signed in.
+#[tauri::command]
+async fn desktop_set_action_item(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+    index: usize,
+    done: bool,
+) -> Result<(), String> {
+    let id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid note id.".to_string())?;
+    let store = context.app.store.clone();
+    let (meta, mut summary) = {
+        let store = store.clone();
+        tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let meta = store
+                .load_meta(id)
+                .map_err(|_| "This note is no longer available.".to_string())?;
+            let summary = store
+                .load_summary(id)
+                .map_err(|_| "This note's action items could not be read.".to_string())?
+                .ok_or_else(|| "This note has no action items yet.".to_string())?;
+            Ok((meta, summary))
+        })
+        .await
+        .map_err(|_| "Action items could not be read.".to_string())??
+    };
+    let item_id = set_action_status(&mut summary, index, done)?;
+    let preferences = current_preferences(&context);
+    let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)?;
+    let workspace_owned = meta.workspace_import || meta.managed_workspace_id.is_some();
+    if workspace_owned {
+        let webapp = webapp.as_ref().ok_or_else(|| {
+            "Sign in to update action items on a note that lives in your workspace.".to_string()
+        })?;
+        let item_id = item_id.ok_or_else(|| {
+            "This action item has not reached your workspace yet. Sync, then try again.".to_string()
+        })?;
+        let client = notetaker_core::providers::http_client_builder()
+            .connect_timeout(std::time::Duration::from_secs(8))
+            .timeout(std::time::Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| "Could not start the request.".to_string())?;
+        let response = client
+            .patch(format!(
+                "{}/api/v1/desktop-sync/action-items/{}",
+                webapp.url.trim_end_matches('/'),
+                item_id
+            ))
+            .bearer_auth(&webapp.token)
+            .json(&serde_json::json!({ "status": if done { "done" } else { "open" } }))
+            .send()
+            .await
+            .map_err(|_| "Could not reach your workspace. Connect to the internet to change this action item.".to_string())?;
+        match response.status().as_u16() {
+            200..=299 => {}
+            401 | 403 => return Err(
+                "Your sign-in no longer has access to this workspace. Sign in again in Settings."
+                    .into(),
+            ),
+            404 => return Err("That action item is no longer in your workspace.".into()),
+            status => {
+                return Err(format!(
+                    "Your workspace could not update the action item ({status}). Try again."
+                ))
+            }
+        }
+    }
+    tokio::task::spawn_blocking(move || store.write_summary(id, &summary))
+        .await
+        .map_err(|_| "The action item could not be saved.".to_string())?
+        .map_err(|_| "The action item could not be saved on this device.".to_string())?;
+    if !workspace_owned && webapp.is_some() {
+        context.sync.enqueue(id)?;
+        spawn_desktop_sync(
+            context.app.clone(),
+            context.preferences.clone(),
+            context.sync.clone(),
+            context.ui_app.clone(),
+        );
+    }
+    Ok(())
+}
+
+/// Saves a note export through the system's save dialog. The text comes from the app's own
+/// screen; the user picks the destination. Returns false when the dialog is dismissed.
+#[tauri::command]
+async fn desktop_save_text_file(
+    context: tauri::State<'_, DesktopCommandContext>,
+    file_name: String,
+    contents: String,
+) -> Result<bool, String> {
+    if contents.len() > 20 * 1024 * 1024 {
+        return Err("This note is too large to export as one file.".into());
+    }
+    let safe_name: String = file_name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' ') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(120)
+        .collect();
+    let extension = if safe_name.ends_with(".md") {
+        "md"
+    } else {
+        "txt"
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    context
+        .ui_app
+        .dialog()
+        .file()
+        .set_file_name(&safe_name)
+        .add_filter(
+            if extension == "md" {
+                "Markdown"
+            } else {
+                "Text"
+            },
+            &[extension],
+        )
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let Some(chosen) = rx
+        .await
+        .map_err(|_| "The save dialog could not open.".to_string())?
+    else {
+        return Ok(false);
+    };
+    let path = chosen
+        .into_path()
+        .map_err(|_| "That location cannot be used.".to_string())?;
+    tokio::task::spawn_blocking(move || std::fs::write(path, contents))
+        .await
+        .map_err(|_| "The file could not be saved.".to_string())?
+        .map_err(|error| format!("The file could not be saved: {error}"))?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -4504,6 +4789,40 @@ fn apply_default_autostart<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ticking_an_action_item_records_status_and_time_and_reports_its_workspace_id() {
+        let mut summary = notetaker_core::providers::Summary {
+            summary: "s".into(),
+            action_items: vec![
+                notetaker_core::native_messaging::ActionItem {
+                    text: "a".into(),
+                    id: Some("item-1".into()),
+                    ..Default::default()
+                },
+                notetaker_core::native_messaging::ActionItem {
+                    text: "b".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+        assert_eq!(
+            super::set_action_status(&mut summary, 0, true)
+                .unwrap()
+                .as_deref(),
+            Some("item-1")
+        );
+        assert_eq!(summary.action_items[0].status.as_deref(), Some("done"));
+        assert!(summary.action_items[0].completed_at.is_some());
+        assert_eq!(
+            super::set_action_status(&mut summary, 1, true).unwrap(),
+            None
+        );
+        super::set_action_status(&mut summary, 0, false).unwrap();
+        assert_eq!(summary.action_items[0].status.as_deref(), Some("open"));
+        assert!(summary.action_items[0].completed_at.is_none());
+        assert!(super::set_action_status(&mut summary, 9, true).is_err());
+    }
+
     #[test]
     fn hosted_responses_show_refusals_and_report_an_ended_session() {
         use super::interpret_hosted_response as interpret;

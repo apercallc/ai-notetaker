@@ -4,6 +4,16 @@ All notable changes to AI Notetaker are documented here.
 
 ## Unreleased
 
+- Multi-device sync you can trust. Notes processed by Hosted AI now follow the workspace on
+  the device that recorded them (web edits and edits from your other devices arrive there, with
+  no false "conflict"); a note you delete on a device stays deleted there instead of coming back;
+  action items you tick on the desktop update the web app and your other devices (and the other
+  way round); and notes whose summary names no owner now sync (the server used to reject them).
+- Staying offline is a real boundary: with no account nothing is stored in the cloud, and signing
+  out disconnects the sync that signing in turned on and revokes its token.
+- Sign in to the desktop app with any account, including Google-only ones, using a one-time code
+  from the web app's new "Connect the desktop app" page.
+- Export notes from the desktop Library (copy Markdown, save Markdown or text), like the web app.
 - Desktop app ↔ web app parity for hosted accounts. A new **Account** screen shows
   plan and usage (meetings, meeting hours, Ask-your-notes questions), upgrades and
   cancels through the secure billing page, lets you ask questions of your notes,

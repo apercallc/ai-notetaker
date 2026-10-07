@@ -61,6 +61,10 @@ struct PersistedSyncState {
     conflicts: Vec<SyncConflict>,
     #[serde(default)]
     separate_copies: HashSet<String>,
+    /// Notes the user deleted on this device. Deleting removes a note from this device only, so
+    /// the next pull must not quietly bring it back (which would look like a duplicate).
+    #[serde(default)]
+    dismissed: HashSet<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -365,6 +369,14 @@ impl DesktopSync {
         self.persist(&state)
     }
 
+    /// Remembers that the user deleted this note here, so workspace sync never re-creates it.
+    pub fn dismiss(&self, meeting_id: Uuid) -> Result<(), String> {
+        let mut state = self.lock_state();
+        state.dismissed.insert(meeting_id);
+        state.pending.retain(|id| *id != meeting_id);
+        self.persist(&state)
+    }
+
     pub fn remove(&self, meeting_id: Uuid) -> Result<(), String> {
         if self.load_error.is_some() {
             return Ok(());
@@ -656,13 +668,22 @@ impl DesktopSync {
             }
             let store_for_import = store.clone();
             let page_source_id = source_id.clone();
-            let known_versions = self.lock_state().scoped_remote_versions.clone();
+            let (known_versions, dismissed) = {
+                let state = self.lock_state();
+                (
+                    state.scoped_remote_versions.clone(),
+                    state.dismissed.clone(),
+                )
+            };
             let page_import = tokio::task::spawn_blocking(move || -> Result<WorkspacePageImport, String> {
                 let mut count = 0;
                 let mut versions = Vec::new();
                 let mut conflicts = Vec::new();
                 for meeting in page.meetings {
                     validate_remote_meeting(&meeting)?;
+                    if dismissed.contains(&meeting.id) {
+                        continue;
+                    }
                     let remote_updated_at = meeting.updated_at;
                     let source_updated_at = meeting.updated_at;
                     let action_items = meeting.action_items;
@@ -1544,5 +1565,64 @@ mod tests {
                 .get(&remote_version_key(id, &source_id)),
             Some(&newer_at)
         );
+    }
+
+    #[tokio::test]
+    async fn a_note_deleted_on_this_device_is_not_brought_back_by_sync() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::new(directory.path()).unwrap());
+        let sync = DesktopSync::load(directory.path());
+        let deleted = Uuid::new_v4();
+        let kept = Uuid::new_v4();
+        let updated_at = Utc::now();
+        let note = |id: Uuid, title: &str| {
+            serde_json::json!({
+                "id": id, "title": title, "mode": "general",
+                "startedAt": "2026-10-04T10:00:00Z", "endedAt": "2026-10-04T10:30:00Z",
+                "summary": "Text", "updatedAt": updated_at,
+                "transcript": [{"speaker": "you", "text": "Hi", "timestamp": null}],
+                "actionItems": []
+            })
+        };
+        let page = serde_json::json!({
+            "workspaceId": "workspace-1",
+            "meetings": [note(deleted, "Deleted here"), note(kept, "Kept")],
+            "hasMore": false,
+            "nextCursor": {"updatedAt": updated_at, "id": kept.to_string()},
+        })
+        .to_string();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = BufReader::new(stream);
+            loop {
+                let mut line = String::new();
+                if stream.read_line(&mut line).await.unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            let mut stream = stream.into_inner();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                page.len(),
+                page
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        sync.dismiss(deleted).unwrap();
+        // The choice survives a restart.
+        let sync = DesktopSync::load(directory.path());
+        let imported = sync
+            .pull_workspace_notes(store.clone(), &format!("http://{address}"), "token")
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(imported, 1);
+        assert!(store.load_meta(deleted).is_err());
+        assert!(store.load_meta(kept).is_ok());
     }
 }
