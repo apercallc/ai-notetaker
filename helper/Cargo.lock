@@ -2740,7 +2740,6 @@ name = "notetaker-app"
 version = "0.20.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "base64 0.22.1",
  "chrono",
  "crc32fast",
