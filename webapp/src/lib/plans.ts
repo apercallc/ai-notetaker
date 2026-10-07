@@ -81,10 +81,10 @@ export function audioSecondsForBytes(bytes: number): number {
 }
 
 const PLAN_LABELS: Record<ManagedPlan, string> = {
-  local: "Local (bring your own keys)",
-  hosted_trial: "Hosted Free Trial",
-  hosted_pro: "Hosted Pro",
-  hosted_team: "Hosted Team",
+  local: "Free (your own keys)",
+  hosted_trial: "Free trial",
+  hosted_pro: "Pro",
+  hosted_team: "Team",
 };
 
 export function isManagedPlan(value: string): value is ManagedPlan {

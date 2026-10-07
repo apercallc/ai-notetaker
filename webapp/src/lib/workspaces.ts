@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { hostedAiEnabled } from "./deploymentConfig";
 import { normalizeEmail } from "./email";
 import { assignHostedTrial } from "./usageLedger";
 import { reserveTrialGrant } from "./trialGrants";
@@ -58,7 +59,8 @@ export async function createHostedWorkspaceWithOwner(
   options: { termsAcceptedAt?: Date; termsVersion?: string; emailVerifiedAt?: Date | null } = {},
 ): Promise<{ userId: string; workspaceId: string }> {
   const user = await prisma.$transaction(async (tx) => {
-    await reserveTrialGrant(tx);
+    // The daily trial-grant cap only exists to bound hosted-AI trial spend.
+    if (hostedAiEnabled()) await reserveTrialGrant(tx);
     const workspace = await tx.workspace.create({ data: { name: workspaceName, isDefault: false } });
     const created = await tx.user.create({
       data: {
@@ -72,9 +74,9 @@ export async function createHostedWorkspaceWithOwner(
     await tx.workspaceMembership.create({
       data: { userId: created.id, workspaceId: workspace.id, role: "owner" },
     });
-    // Every hosted workspace starts with the no-card trial allowance so
-    // signup is never a dead end before the owner picks a paid plan.
-    await assignHostedTrial(tx, workspace.id);
+    // A new account is free and has no subscription row. The no-card hosted
+    // trial exists only while hosted AI is offered.
+    if (hostedAiEnabled()) await assignHostedTrial(tx, workspace.id);
     return { userId: created.id, workspaceId: workspace.id };
   });
   return user;

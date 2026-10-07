@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/currentUser";
+import { hostedAiEnabled } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { getImportCapability } from "@/lib/fileImport";
 import { formatImportDuration } from "@/lib/importFormats";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ImportPage() {
   const { workspaceId } = await requireSession();
-  if (!managedHostingEnabled()) notFound();
+  if (!managedHostingEnabled() || !hostedAiEnabled()) notFound();
   const capability = await getImportCapability(workspaceId);
 
   return (

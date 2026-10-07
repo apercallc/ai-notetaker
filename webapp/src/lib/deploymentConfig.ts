@@ -143,6 +143,16 @@ export function workerJobRunUrl(jobId: string, env: DeploymentEnv = process.env)
 }
 
 /**
+ * Whether the service runs transcription, summaries, imports and "Ask your
+ * notes" on project provider keys. The paid subscription sells cloud sync and
+ * team sync, not hosted AI, so this stays off unless an operator opts in with
+ * HOSTED_AI_ENABLED=true. Every hosted-processing entry point checks it.
+ */
+export function hostedAiEnabled(env: DeploymentEnv = process.env): boolean {
+  return env.HOSTED_AI_ENABLED === "true";
+}
+
+/**
  * The AUTH_TOKEN-protected /api/meetings ingestion API is the self-hosted
  * helper contract. On a managed multi-tenant deployment it has no tenant
  * identity (everything lands in the default workspace), so it is off unless an

@@ -38,8 +38,8 @@ export function OnboardingCard({
           <strong>Sign in from the extension.</strong>{" "}
           {managed ? (
             <>
-              Open it, choose Hosted AI, and sign in as <code>{email}</code>. Prefer your own AI keys?{" "}
-              <a href="/how-it-works#own-keys">See how to set that up</a>; you can switch any time in Settings.
+              Open it and sign in as <code>{email}</code> to manage your devices and, with a subscription, sync your notes. Your own AI keys stay on your device:{" "}
+              <a href="/how-it-works#own-keys">see how to set them up</a>.
             </>
           ) : (
             <>Open its settings and connect this server with the <code>AUTH_TOKEN</code> you deployed it with.</>

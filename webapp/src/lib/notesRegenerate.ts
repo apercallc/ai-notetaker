@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { nextMeetingVersion } from "./meetingVersion";
 import { recordAudit } from "./audit";
+import { hostedAiEnabled } from "./deploymentConfig";
 import { managedHostingEnabled } from "./managedAuth";
 import { ManagedWorkerError, formatSummaryText, summarize, type ManagedUtterance } from "./managedWorker";
 import { MAX_NOTES_REGENERATIONS, NOTE_TEMPLATES, PICKABLE_TEMPLATES, isNoteTemplateId, noteTemplateFor } from "./noteTemplates";
@@ -29,7 +30,7 @@ export async function regenerateNotes(
   templateId: string,
   options: { summaryLanguage?: string } = {},
 ): Promise<RegenerateResult> {
-  if (!managedHostingEnabled()) return fail("Hosted notes aren't enabled on this instance.");
+  if (!managedHostingEnabled() || !hostedAiEnabled()) return fail("Rewriting notes with a template isn't offered.");
   if (!isNoteTemplateId(templateId) || !PICKABLE_TEMPLATES.some((template) => template.id === templateId)) return fail("Choose one of the listed templates.");
   const template = NOTE_TEMPLATES[templateId];
   if (options.summaryLanguage && !isLanguageCode(options.summaryLanguage)) return fail("Choose one of the listed languages.");

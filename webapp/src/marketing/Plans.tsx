@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { getPlanCatalog } from "@/lib/billing";
-import { FALLBACK_PRICE_LABELS, LIMITS } from "./content";
+import { FALLBACK_PRICE_LABELS } from "./content";
 import { Icon } from "./Icon";
 
 export interface PlanDisplay {
@@ -23,8 +23,6 @@ export async function planPrices(): Promise<PlanDisplay> {
   }
 }
 
-const n = (value: number): string => value.toLocaleString("en-US");
-
 function splitPrice(label: string): { amount: string; period: string } {
   const [amount, ...rest] = label.split(" / ");
   return { amount: amount ?? label, period: rest.length ? `/ ${rest.join(" / ")}` : "" };
@@ -36,45 +34,43 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
   const start = signupOpen ? "/login?tab=signup" : "/download";
   return (
     <div className="mk-plans">
-      <article className="mk-plan" aria-labelledby="plan-keys">
-        <h3 className="mk-h3" id="plan-keys">Your own keys</h3>
-        <p className="mk-plan-price">Free<small> you pay your AI providers directly</small></p>
-        <p className="mk-plan-for">For people who want to bring their own AI providers.</p>
+      <article className="mk-plan" aria-labelledby="plan-free">
+        <h3 className="mk-h3" id="plan-free">Free</h3>
+        <p className="mk-plan-price">$0<small> bring your own AI keys</small></p>
+        <p className="mk-plan-for">The full desktop app. No account needed, and a free account if you want one.</p>
         <ul className="mk-checks">
-          <li><Icon as={Check} /><span>No AI Notetaker account needed</span></li>
-          <li><Icon as={Check} /><span>You pay your AI providers directly</span></li>
-          <li><Icon as={Check} /><span>Keys stay in protected storage on your device</span></li>
-          <li><Icon as={Check} /><span>Open source, so you can read exactly what runs</span></li>
+          <li><Icon as={Check} /><span>Record browser and desktop meetings with no bot</span></li>
+          <li><Icon as={Check} /><span>Notes made with your own AI providers, billed to you directly</span></li>
+          <li><Icon as={Check} /><span>Keys and audio stay on your device</span></li>
+          <li><Icon as={Check} /><span>Optional free account: sign in, manage your devices and your data</span></li>
+          <li><Icon as={Check} /><span>Open source</span></li>
         </ul>
-        <Link className="mk-btn mk-btn--quiet" href="/how-it-works#own-keys">Set up with my keys</Link>
+        <Link className="mk-btn mk-btn--quiet" href="/download">Get the desktop app</Link>
       </article>
 
       <article className="mk-plan mk-plan--lead" aria-labelledby="plan-pro">
         <span className="mk-plan-flag">Best for one person</span>
-        <h3 className="mk-h3" id="plan-pro">Hosted Pro</h3>
+        <h3 className="mk-h3" id="plan-pro">Pro</h3>
         <p className="mk-plan-price">{pro.amount}{pro.period && <small> {pro.period}</small>}</p>
-        <p className="mk-plan-for">We run the AI. Up to {n(LIMITS.pro)} meetings or {n(LIMITS.proHours)} meeting hours a month, whichever comes first.</p>
+        <p className="mk-plan-for">Cloud sync of your notes across all your devices.</p>
         <ul className="mk-checks">
-          <li><Icon as={Check} /><span>{LIMITS.trial} free meetings first, no card</span></li>
-          <li><Icon as={Check} /><span>No provider accounts or keys to manage</span></li>
-          <li><Icon as={Check} /><span>Searchable library of your notes</span></li>
-          <li><Icon as={Check} /><span><strong>Ask your notes:</strong> {n(LIMITS.proQuestions)} questions a month, answered from your meetings</span></li>
-          <li><Icon as={Check} /><span>Import audio and video files, up to {LIMITS.importHoursPro} hours each</span></li>
-          <li><Icon as={Check} /><span>Notes templates, speaker names, folders and Trash</span></li>
+          <li><Icon as={Check} /><span>Everything in Free</span></li>
+          <li><Icon as={Check} /><span>Finished notes sync to every device you sign in on</span></li>
+          <li><Icon as={Check} /><span>Searchable library of your notes on the web</span></li>
+          <li><Icon as={Check} /><span>Folders, speaker names, Trash and data export</span></li>
           <li><Icon as={Check} /><span>Slack, Notion, webhooks and an MCP connection for AI assistants</span></li>
-          <li><Icon as={Check} /><span>Audio deleted after processing</span></li>
+          <li><Icon as={Check} /><span>Recordings never leave your device</span></li>
         </ul>
-        <Link className="mk-btn mk-btn--solid" href={start}>{signupOpen ? "Try Hosted AI free" : "Get the desktop app"}</Link>
+        <Link className="mk-btn mk-btn--solid" href={start}>{signupOpen ? "Create an account" : "Get the desktop app"}</Link>
       </article>
 
       <article className="mk-plan" aria-labelledby="plan-team">
-        <h3 className="mk-h3" id="plan-team">Hosted Team</h3>
+        <h3 className="mk-h3" id="plan-team">Team</h3>
         <p className="mk-plan-price">{team.amount}{team.period && <small> {team.period}</small>}</p>
-        <p className="mk-plan-for">One shared workspace. Up to {n(LIMITS.team)} meetings or {n(LIMITS.teamHours)} meeting hours a month, whichever comes first.</p>
+        <p className="mk-plan-for">Team sync: one shared workspace for everyone.</p>
         <ul className="mk-checks">
-          <li><Icon as={Check} /><span>Everything in Pro, with {n(LIMITS.teamQuestions)} Ask-your-notes questions a month</span></li>
-          <li><Icon as={Check} /><span>Invite teammates to one library</span></li>
-          <li><Icon as={Check} /><span>Imports up to {LIMITS.importHoursTeam} hours each</span></li>
+          <li><Icon as={Check} /><span>Everything in Pro</span></li>
+          <li><Icon as={Check} /><span>Invite teammates to one shared library</span></li>
           <li><Icon as={Check} /><span>Activity log for workspace owners</span></li>
           <li><Icon as={Check} /><span>Owners set how long notes are kept</span></li>
           <li><Icon as={Check} /><span>Workspaces are fully isolated from each other</span></li>

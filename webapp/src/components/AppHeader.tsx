@@ -20,14 +20,14 @@ interface NavItem {
  * indicator behave the same everywhere. Hidden on public share pages, which
  * a recipient sees as a standalone document.
  */
-export function AppHeader({ role, managed }: { role: "owner" | "member"; managed: boolean }) {
+export function AppHeader({ role, managed, hostedAi }: { role: "owner" | "member"; managed: boolean; hostedAi: boolean }) {
   const pathname = usePathname() ?? "";
   if (pathname.startsWith("/share/")) return null;
 
   const items: NavItem[] = [
     { href: "/meetings", label: "Library", icon: FolderOpen },
     { href: "/actions", label: "Actions", icon: CheckSquare },
-    ...(managed ? [{ href: "/ask", label: "Ask", icon: MessageSquare }] : []),
+    ...(managed && hostedAi ? [{ href: "/ask", label: "Ask", icon: MessageSquare }] : []),
     ...(role === "owner" ? [{ href: "/team", label: "Team", icon: Users }] : []),
     ...(managed ? [{ href: "/billing", label: "Plans & usage", short: "Plans", icon: CreditCard }] : []),
     { href: "/account", label: "Settings", icon: Settings },

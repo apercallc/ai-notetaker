@@ -89,9 +89,9 @@ describe("structured data", () => {
   it("describes the same three offers the pricing page shows", () => {
     const software = softwareNode(ORIGIN) as { offers: { price: string; name: string }[] };
     expect(software.offers.map((offer) => [offer.name, offer.price])).toEqual([
-      ["Own keys", "0.00"],
-      ["Hosted Pro", FALLBACK_PRICE_AMOUNTS.hosted_pro.toFixed(2)],
-      ["Hosted Team", FALLBACK_PRICE_AMOUNTS.hosted_team.toFixed(2)],
+      ["Free", "0.00"],
+      ["Pro", FALLBACK_PRICE_AMOUNTS.hosted_pro.toFixed(2)],
+      ["Team", FALLBACK_PRICE_AMOUNTS.hosted_team.toFixed(2)],
     ]);
   });
 
@@ -109,13 +109,11 @@ describe("structured data", () => {
 });
 
 describe("facts stay consistent", () => {
-  it("states the real plan limits and fallback prices in the FAQ", () => {
+  it("states the real fallback prices in the FAQ and sells sync, not hosted AI", () => {
     const cost = FAQS.find((faq) => faq.question.startsWith("How much"))?.answer ?? "";
     expect(cost).toContain(FALLBACK_PRICE_LABELS.hosted_pro);
     expect(cost).toContain(FALLBACK_PRICE_LABELS.hosted_team);
-    expect(cost).toContain(String(LIMITS.trial));
-    expect(cost).toContain(LIMITS.pro.toLocaleString("en-US"));
-    expect(cost).toContain(LIMITS.team.toLocaleString("en-US"));
+    expect(cost).not.toMatch(/trial|meetings or|Hosted AI/i);
   });
 
   it("keeps the fallback labels and numeric amounts in step", () => {

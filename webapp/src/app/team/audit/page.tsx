@@ -21,7 +21,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
         {back}
         <section className="settings-card">
           <h2>Activity log</h2>
-          <p className="muted-copy">See who changed what in your workspace: members, notes, folders, sharing, integrations and tokens. Included with Hosted Team.</p>
+          <p className="muted-copy">See who changed what in your workspace: members, notes, folders, sharing, integrations and tokens. Included with Team.</p>
           <Link className="button button-primary" href="/billing">See plans</Link>
         </section>
       </div>

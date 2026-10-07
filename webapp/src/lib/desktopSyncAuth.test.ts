@@ -1,16 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { resolveApiToken, findWorkspace, getUserRole } = vi.hoisted(() => ({
+const { resolveApiToken, findWorkspace, findSubscription, getUserRole } = vi.hoisted(() => ({
+  findSubscription: vi.fn(),
   resolveApiToken: vi.fn(),
   findWorkspace: vi.fn(),
   getUserRole: vi.fn(),
 }));
 
 vi.mock("./apiTokens", () => ({ DESKTOP_NOTES_SCOPE: "desktop_notes_sync", resolveApiToken }));
-vi.mock("./db", () => ({ prisma: { workspace: { findUnique: findWorkspace } } }));
+vi.mock("./db", () => ({ prisma: { workspace: { findUnique: findWorkspace }, workspaceSubscription: { findUnique: findSubscription } } }));
 vi.mock("./workspaces", () => ({ getUserRole }));
 
 import { authenticateDesktopSync } from "./desktopSyncAuth";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -54,5 +59,40 @@ describe("desktop sync authentication", () => {
       headers: { authorization: "Bearer ant_secret" },
     }));
     expect(result).toMatchObject({ ok: false, status: 403 });
+  });
+});
+
+describe("desktop sync is a subscription feature on the managed service", () => {
+  const request = () => new Request("https://notes.example.test/api/v1/desktop-sync", { headers: { authorization: "Bearer ant_secret" } });
+
+  beforeEach(() => {
+    vi.stubEnv("MANAGED_HOSTING", "true");
+  });
+
+  it("allows an active Pro or Team subscription", async () => {
+    findSubscription.mockResolvedValueOnce({ plan: "hosted_pro", status: "active", graceEndsAt: null });
+    await expect(authenticateDesktopSync(request())).resolves.toMatchObject({ ok: true });
+    findSubscription.mockResolvedValueOnce({ plan: "hosted_team", status: "trialing", graceEndsAt: null });
+    await expect(authenticateDesktopSync(request())).resolves.toMatchObject({ ok: true });
+  });
+
+  it("answers 402 with no subscription, a canceled one, or the retired trial plan", async () => {
+    for (const subscription of [null, { plan: "hosted_pro", status: "canceled", graceEndsAt: null }, { plan: "hosted_trial", status: "trialing", graceEndsAt: null }, { plan: "local", status: "inactive", graceEndsAt: null }]) {
+      findSubscription.mockResolvedValueOnce(subscription);
+      await expect(authenticateDesktopSync(request())).resolves.toMatchObject({ ok: false, status: 402 });
+    }
+  });
+
+  it("keeps sync during the payment grace window only", async () => {
+    findSubscription.mockResolvedValueOnce({ plan: "hosted_pro", status: "past_due", graceEndsAt: new Date(Date.now() + 60_000) });
+    await expect(authenticateDesktopSync(request())).resolves.toMatchObject({ ok: true });
+    findSubscription.mockResolvedValueOnce({ plan: "hosted_pro", status: "past_due", graceEndsAt: new Date(Date.now() - 60_000) });
+    await expect(authenticateDesktopSync(request())).resolves.toMatchObject({ ok: false, status: 402 });
+  });
+
+  it("does not gate a deployment without managed hosting", async () => {
+    vi.stubEnv("MANAGED_HOSTING", "false");
+    await expect(authenticateDesktopSync(request())).resolves.toMatchObject({ ok: true });
+    expect(findSubscription).not.toHaveBeenCalled();
   });
 });

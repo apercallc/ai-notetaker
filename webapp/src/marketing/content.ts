@@ -10,7 +10,7 @@ export const SITE = {
   name: "AI Notetaker",
   tagline: "Meeting notes without the meeting bot.",
   description:
-    "One desktop app for macOS, Windows, and Linux records browser and desktop meetings, saves the audio on your device, and makes your notes with Hosted AI or your own keys. An optional Chrome extension can record a browser tab. Optional workspace sync sends finished desktop note text to the web app and copies workspace notes into the desktop library. Raw audio and provider keys stay on the device.",
+    "One desktop app for macOS, Windows, and Linux records browser and desktop meetings, saves the audio on your device, and makes your notes with your own AI provider keys. An optional Chrome extension can record a browser tab. A free account lets you sign in and manage your devices; a subscription adds cloud sync and team sync. Raw audio and provider keys stay on the device.",
   repoUrl: "https://github.com/apercallc/ai-notetaker",
   releasesUrl: "https://github.com/apercallc/ai-notetaker/releases/latest",
   licenseUrl: "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE",
@@ -60,42 +60,20 @@ export const FAQS: Faq[] = [
       "No. The desktop app captures browser or desktop audio from your device (the optional Chrome extension can record a browser tab). Nothing joins the participant list. You are still responsible for telling participants and following the recording-consent rules that apply to you.",
   },
   {
-    question: "What is the difference between Hosted AI and using my own keys?",
+    question: "Do I need an account?",
     topics: ["setup", "pricing"],
-    answer:
-      "Both work in the same desktop app, in Settings → Processing. With Hosted AI you sign in to your AI Notetaker account and we run transcription and summaries within your plan. With your own keys you enter your own transcription and summary API keys; the software is free and needs no AI Notetaker login. You can also separately sign in to a web-app workspace and create a revocable desktop sync token. Sync sends finished desktop notes to the web app and copies workspace notes into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back, and extension recordings still need archive export and import.",
+    answer: `Nothing about recording or notes needs an account. The desktop app records on your device and makes your notes with your own transcription and summary API keys, so the app is free and works with no AI Notetaker login. A free account lets you sign in and manage your devices and data. A subscription adds cloud sync of finished notes across your devices and, with Team, shared workspaces. Your provider keys and raw audio never leave your device.`,
   },
   {
     question: "How much does AI Notetaker cost?",
     topics: ["pricing"],
-    answer: `Using your own AI keys is free (the providers you choose bill you directly). Hosted AI includes ${LIMITS.trial} free meetings with no card. After that, Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for up to ${n(LIMITS.pro)} meetings or ${n(LIMITS.proHours)} meeting hours a month, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace with up to ${n(LIMITS.team)} meetings or ${n(LIMITS.teamHours)} meeting hours a month. Both include Ask your notes (${n(LIMITS.proQuestions)} and ${n(LIMITS.teamQuestions)} questions a month), file import, notes templates, the library, integrations and the MCP connection; Team adds an activity log for workspace owners. Imported recordings use the same monthly meeting hours as live meetings. Cancel any time from the billing page.`,
-  },
-  {
-    question: "Can I ask questions about my past meetings?",
-    topics: ["pricing"],
-    answer: `Yes. Ask your notes is included with Hosted Pro (${n(LIMITS.proQuestions)} questions a month) and Hosted Team (${n(LIMITS.teamQuestions)} a month); the free trial and bring-your-own-keys mode do not include it. Answers come only from your own meeting notes and link to the notes they used. Questions do not use up meeting hours, the allowance resets each billing period, and your questions and answers are not stored.`,
+    answer: `The desktop app is free with your own AI provider keys (the providers you choose bill you directly), and needs no account. A free account is also free. Cloud sync is a subscription: Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for one person, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace. Team adds shared libraries, an activity log and retention controls for workspace owners. Cancel any time from the billing page.`,
   },
   {
     question: "Will I lose my notes if I clear my browser history?",
     topics: ["setup"],
     answer:
-      "Desktop recordings and notes are stored in the app's private data folder, not browser storage. Browser extension recordings stay in Chrome until exported and imported into the desktop app. If you enable workspace sync, finished desktop note text also appears in that web-app workspace; sync currently goes from desktop to web app only.",
-  },
-  {
-    question: "Can I import a recording I already have?",
-    topics: ["pricing"],
-    answer: `Yes, with Hosted AI. Open Import in the web app and choose an audio or video file (mp3, m4a, wav, mp4, mov, mkv and more, up to 1.9 GB). It is transcribed and summarized like a live meeting. A single file can run up to ${LIMITS.importHoursPro} hours on Pro and ${LIMITS.importHoursTeam} hours on Team, and its length counts against your monthly meeting hours. The file is deleted once it has been processed. Imported files have no separate microphone channel, so speakers appear as Speaker 1, Speaker 2 and so on when the provider can tell them apart; you can rename them afterwards. Importing in the free own-keys mode is not available yet.`,
-  },
-  {
-    question: "Can I choose the format of my notes and rename the speakers?",
-    topics: ["pricing"],
-    answer:
-      "Yes, with Hosted AI. Pick a template per meeting: General, Standup, Sales call, 1:1, Interview or Lecture, and rewrite a meeting's notes with a different template later (up to three times per meeting; your action items are kept and the earlier text can be restored). Click a speaker's name in the transcript to rename them once; the new name replaces the old one throughout the transcript, summary, action-item owners, exports, shares and Ask your notes.",
-  },
-  {
-    question: "Which languages are supported?",
-    topics: ["pricing"],
-    answer: `With Hosted AI you can set a spoken-language hint or let the transcriber detect the language, write the notes in a different language than the one spoken (for example, a translated summary), and add custom vocabulary so names and jargon are spelled correctly. ${LIMITS.languages} languages are offered for hints and summaries. Accuracy depends on the transcription provider and the audio.`,
+      "Desktop recordings and notes are stored in the app's private data folder, not browser storage. Browser extension recordings stay in Chrome until exported and imported into the desktop app. With a subscription and sync turned on, finished desktop note text also appears in your web workspace.",
   },
   {
     question: "Can I send notes to Slack, Notion or Zapier, or use them with an AI assistant?",
@@ -104,10 +82,10 @@ export const FAQS: Faq[] = [
       "Yes. A workspace owner can set it up so that when a note is ready it is sent to a signed webhook (use it with Zapier, Make or n8n), a Slack channel or a Notion page. Webhook signing secrets and tokens are stored encrypted and shown only once. For AI assistants, you can create a read-only token in Settings and connect an assistant that supports the Model Context Protocol (MCP) to search and read your own notes; it cannot change or delete anything, and you can revoke the token at any time.",
   },
   {
-    question: "Can I organise notes into folders and recover deleted ones?",
+    question: "Can I organise synced notes into folders and recover deleted ones?",
     topics: ["pricing"],
     answer:
-      "Yes. The hosted library has nested folders, plain text notes you can write or edit yourself, and upload of .md or .txt files. Search and Ask your notes can be limited to a folder. Deleting a note or folder moves it to Trash, where you can restore it for 30 days before it is removed for good.",
+      "Yes. The synced library has nested folders, plain text notes you can write or edit yourself, and upload of .md or .txt files. Search can be limited to a folder. Deleting a note or folder moves it to Trash, where you can restore it for 30 days before it is removed for good.",
   },
   {
     question: "Can I cancel any time?",
@@ -122,13 +100,11 @@ export const FAQS: Faq[] = [
   },
   {
     question: "Where is my audio stored?",
-    answer:
-      "On your device first, before anything is sent anywhere. With Hosted AI the audio is uploaded to a private, temporary staging area only so it can be transcribed, and it is deleted as soon as processing succeeds. Uploads that never finish are removed within 24 hours. The hosted library keeps your text notes, not your recordings.",
+    answer: `On your device, always. Raw audio is saved locally before anything is sent anywhere, and AI Notetaker never uploads your recordings. Only the text of finished notes syncs to the cloud, and only if you subscribe and turn sync on.`,
   },
   {
-    question: "Which AI providers process my meetings in Hosted AI?",
-    answer:
-      "Transcription runs on Groq and summaries run on OpenAI. Both receive only what is needed to process your meeting. In free own-keys mode, audio and text go only to the providers you select, using the keys you supply.",
+    question: "Which AI providers process my meetings?",
+    answer: `Whichever you choose. Audio and text go only to the providers you select, using the keys you supply, under their terms. We never receive your keys or recordings.`,
   },
   {
     question: "Can I record browser meetings in Google Meet, Zoom, Teams, Slack or Discord?",
@@ -153,12 +129,12 @@ export const FAQS: Faq[] = [
   {
     question: "Can I delete my meetings and data?",
     answer:
-      "Yes. You can delete any meeting, workspace owners can set how long hosted notes are kept, and you can export your data from your account page. Deleting a meeting or folder from the hosted library moves it to Trash, where you can restore it for 30 days before it is removed for good; delete it from Trash to remove its transcript and summary immediately.",
+      "Yes. You can delete any meeting, workspace owners can set how long synced notes are kept, and you can export your data from your account page. Deleting a meeting or folder from the synced library moves it to Trash, where you can restore it for 30 days before it is removed for good; delete it from Trash to remove its transcript and summary immediately.",
   },
   {
     question: "Where can I read my notes?",
     topics: ["setup"],
-    answer: "If you enable workspace sync, finished desktop notes appear in your selected workspace, and workspace notes are copied into the desktop library for local viewing. Web edits refresh workspace copies on the next sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Browser extension recordings remain in Chrome until you export and import them into the desktop app, so the extension does not yet share the live library.",
+    answer: "With a subscription, finished desktop notes sync to the cloud and appear in your selected workspace, and workspace notes are copied into the desktop library for local viewing. Web edits refresh workspace copies on the next sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Browser extension recordings remain in Chrome until you export and import them into the desktop app, so the extension does not yet share the live library.",
   },
 ];
 

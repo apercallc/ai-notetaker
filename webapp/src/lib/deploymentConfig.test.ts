@@ -145,3 +145,12 @@ describe("managed URL configuration", () => {
     expect(isLegacyIngestAvailable({ MANAGED_HOSTING: "true", LEGACY_INGEST_ENABLED: "false" })).toBe(false);
   });
 });
+
+describe("hostedAiEnabled", () => {
+  it("is off unless an operator opts in", async () => {
+    const { hostedAiEnabled } = await import("./deploymentConfig");
+    expect(hostedAiEnabled({})).toBe(false);
+    expect(hostedAiEnabled({ HOSTED_AI_ENABLED: "false" })).toBe(false);
+    expect(hostedAiEnabled({ HOSTED_AI_ENABLED: "true" })).toBe(true);
+  });
+});

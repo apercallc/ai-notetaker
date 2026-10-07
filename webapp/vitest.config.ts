@@ -11,6 +11,8 @@ export default defineConfig({
     // file's in-flight assertions against the same tables.
     fileParallelism: false,
     env: {
+      // The suites exercise the hosted-processing code paths; a dedicated test covers the switch being off.
+      HOSTED_AI_ENABLED: "true",
       MANAGED_DAILY_SPEND_MICROS: "1000000000000",
       MANAGED_WORKSPACE_DAILY_SPEND_MICROS: "1000000000000",
       MANAGED_TRIAL_DAILY_SPEND_MICROS: "1000000000000",

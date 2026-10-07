@@ -94,7 +94,7 @@ describe("plan and route error copy", () => {
   it("keeps known plans and billing statuses human-readable while handling future values", () => {
     expect(isManagedPlan("hosted_pro")).toBe(true);
     expect(isManagedPlan("unexpected_plan")).toBe(false);
-    expect(planLabel("hosted_trial")).toBe("Hosted Free Trial");
+    expect(planLabel("hosted_trial")).toBe("Free trial");
     expect(planLabel("future_plan")).toBe("Future Plan");
     expect(statusLabel("active")).toBe("Active");
     expect(statusLabel("trialing")).toBe("Trial");

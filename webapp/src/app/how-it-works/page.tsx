@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 const TITLE = "How AI Notetaker works: set up hosted AI or your own keys";
 const DESCRIPTION =
-  "Set up AI Notetaker in a few minutes. Choose Hosted AI or your own AI keys, record Google Meet or desktop calls with no bot, and review transcripts and action items.";
+  "Set up AI Notetaker in a few minutes. Use your own AI keys, record Google Meet or desktop calls with no bot, and review transcripts and action items.";
 
 export const metadata = pageMetadata({ path: "/how-it-works", title: TITLE, description: DESCRIPTION });
 

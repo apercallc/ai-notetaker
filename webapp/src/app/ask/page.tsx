@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/currentUser";
+import { hostedAiEnabled } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { getChatEntitlement } from "@/lib/chatQuota";
 import { MAX_QUESTION_LENGTH } from "@/lib/notesChatContext";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AskPage() {
   const { workspaceId } = await requireSession();
-  if (!managedHostingEnabled()) notFound();
+  if (!managedHostingEnabled() || !hostedAiEnabled()) notFound();
   const entitlement = await getChatEntitlement(workspaceId);
   const folders = flattenFolders(await listFolders(workspaceId));
 

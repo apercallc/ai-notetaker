@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Download, Laptop, Puzzle, Share2 } from "lucide-react";
-import { LIMITS, NOT_LEGAL_ADVICE, SITE, governingLaw, supportEmail } from "./content";
+import { NOT_LEGAL_ADVICE, SITE, governingLaw, supportEmail } from "./content";
 import { Faq } from "./Faq";
 import { Icon } from "./Icon";
 import { Plans, type PlanDisplay } from "./Plans";
@@ -33,7 +33,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
     <>
       <PageHead
         title="Local notes, with optional web access."
-        lede="One desktop app records browser and desktop meetings on macOS, Windows, and Linux, and makes your notes with Hosted AI or your own keys. An optional Chrome extension can record a browser tab. No bot joins the call."
+        lede="One desktop app records browser and desktop meetings on macOS, Windows, and Linux, and makes your notes with your own AI provider keys. An optional Chrome extension can record a browser tab. No bot joins the call."
       />
 
       <section className="mk-section mk-section--flush" aria-labelledby="choose-title">
@@ -197,7 +197,7 @@ export function PricingView({ context, prices }: { context: ShellContext; prices
     <>
       <PageHead
         title="Simple pricing. Cancel any time."
-        lede="Free with your own AI keys, or one flat monthly price when we run the AI for you."
+        lede="The desktop app is free with your own AI keys. A subscription adds cloud sync and team sync."
       />
       <section className="mk-section mk-section--flush" aria-labelledby="plans-title">
         <div className="mk-wrap">
@@ -212,19 +212,10 @@ export function PricingView({ context, prices }: { context: ShellContext; prices
           </div>
           <div className="mk-prose">
             <ul>
-              <li>Your first {LIMITS.trial} hosted meetings (up to {LIMITS.trialHours} hours in total) are free and need no card. The free allowance is a one-time grant.</li>
+              <li>The desktop app and a free account cost nothing, and need no card.</li>
               <li>Paid plans are billed monthly in US dollars by Stripe. We never see or store your card number.</li>
-              <li>
-                Pro includes up to {LIMITS.pro.toLocaleString("en-US")} meetings or {LIMITS.proHours} meeting hours a
-                month, whichever comes first, and Team up to {LIMITS.team.toLocaleString("en-US")} meetings or{" "}
-                {LIMITS.teamHours} hours. Both reset each billing period. The workspace shows your remaining allowance
-                and stops additional hosted processing when it is used up.
-              </li>
-              <li>
-                Ask your notes is a Pro and Team perk: {LIMITS.proQuestions.toLocaleString("en-US")} questions a month on
-                Pro and {LIMITS.teamQuestions.toLocaleString("en-US")} on Team. Questions are counted separately from
-                meeting hours, reset each billing period, and are not part of the free trial or your-own-keys mode.
-              </li>
+              <li>Pro syncs your finished notes across your devices. Team adds a shared workspace for your teammates.</li>
+              <li>Without a subscription your notes stay on your device and keep working. Nothing is deleted when a plan ends.</li>
               <li>Cancel from the billing page. Your plan stays active until the end of the period you paid for.</li>
               <li>If a payment fails, you keep access for a short grace period while Stripe retries.</li>
               <li>Your recordings are always saved on your device first, whatever your plan.</li>
@@ -467,7 +458,7 @@ export function DownloadView({
 
           <div className="mk-prose mk-mt-l mk-setup" id="choose-ai">
             <h2>Use API keys in the existing extension</h2>
-            <p>In extension setup, choose <strong>Use my own API keys</strong>, add one transcription key and one summary key, then test them. This legacy path does not require an AI Notetaker account or Hosted AI sign-in.</p>
+            <p>In extension setup, choose <strong>Use my own API keys</strong>, add one transcription key and one summary key, then test them. This legacy path does not require an AI Notetaker account.</p>
             <h2>Record with the existing extension</h2>
             <p>Earlier extension releases could process Google Meet calls or relay desktop capture through the helper. New browser-tab recordings only save audio in Chrome; export and import them in desktop to create notes. Use the desktop app controls above for new recordings and current provider settings.</p>
           </div>
@@ -501,8 +492,8 @@ const COMPARE_ROWS: { label: string; bot: string; ours: string }[] = [
   { label: "Where the recording lives", bot: "On the vendor's servers.", ours: "On your device first, before any provider is called." },
   { label: "Audio channels", bot: "Usually one mixed track.", ours: "Your microphone and the meeting's audio are kept separate, so \"you\" is never guessed." },
   { label: "Desktop apps", bot: "Depends on the vendor's integrations.", ours: "Records system audio and microphone from one desktop app." },
-  { label: "Who runs the AI", bot: "The vendor.", ours: "Your choice: your own provider keys, or our Hosted AI." },
-  { label: "Pricing", bot: "Commonly a per-seat subscription.", ours: "Free with your own keys, or a flat monthly price for Hosted AI." },
+  { label: "Who runs the AI", bot: "The vendor.", ours: "You do: your own provider keys, on your device." },
+  { label: "Pricing", bot: "Commonly a per-seat subscription.", ours: "Free with your own keys. A flat monthly price only for cloud sync and team sync." },
   { label: "Source code", bot: "Usually closed.", ours: `Open source under the ${SITE.license} license.` },
 ];
 
@@ -567,13 +558,10 @@ export function CompareView({ context }: { context: ShellContext }) {
 /* ------------------------------------------------------------------ */
 
 const SUBPROCESSORS: { name: string; role: string; data: string }[] = [
-  { name: "Groq", role: "Transcription in Hosted AI", data: "Meeting audio, while it is being transcribed" },
-  { name: "OpenAI", role: "Summaries and Ask your notes in Hosted AI", data: "Transcript text while the summary is written, and your question plus the note excerpts relevant to it while an answer is written" },
-  { name: "Anthropic", role: "Alternative provider for summaries and Ask your notes, used only if the service is switched to it", data: "The same text OpenAI would receive: transcript text for summaries, and your question with relevant note excerpts for answers" },
-  { name: "Railway", role: "Hosting, database and temporary audio staging", data: "Account records, notes, and audio until processing finishes" },
+  { name: "Railway", role: "Hosting and database", data: "Account records and synced notes" },
   { name: "Stripe", role: "Payments and billing portal", data: "Your email and payment details, which Stripe collects directly" },
   { name: "Resend", role: "Sign-up and password-reset email", data: "Your email address" },
-  { name: "Sentry", role: "Error diagnostics for the hosted service", data: "Technical error details and workspace-safe identifiers, not designed to include audio or transcript text" },
+  { name: "Sentry", role: "Error diagnostics for the account and sync service", data: "Technical error details and workspace-safe identifiers, not designed to include audio or transcript text" },
   { name: "Google", role: "Sign-in, and Drive export only if you connect it", data: "What you choose to sync or export" },
 ];
 
@@ -586,10 +574,10 @@ export function PrivacyView() {
         <div className="mk-wrap">
           <div className="mk-prose">
             <p>
-              AI Notetaker has two modes and this notice covers both: free local mode with your own AI keys, and Hosted
-              AI, the service we operate. Optional desktop sync is a separate authenticated connection that sends
-              finished note text from desktop to a workspace and copies workspace notes into the desktop library.
-              Web edits refresh workspace copies on sync; deletions and settings do not sync back, and extension recordings still need archive import. This notice also covers the website.
+              AI Notetaker has a free local mode that needs no account, and an account service we operate. This
+              notice covers both. The local mode uses your own AI provider keys. With a subscription, cloud sync sends
+              finished note text from the desktop app to your workspace and copies workspace notes into the desktop
+              library. This notice also covers the website.
             </p>
 
             <h2>This website</h2>
@@ -605,24 +593,23 @@ export function PrivacyView() {
               <li>Raw microphone and meeting audio is saved on your device before any provider request. The two channels stay separate.</li>
               <li>Your provider keys stay in the desktop app&apos;s operating-system credential store. Existing extension users keep their keys in protected browser storage. We never receive them.</li>
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
-              <li>If you connect a web-app workspace, finished desktop note text syncs there and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
+              <li>If you subscribe and turn on sync, finished desktop note text syncs to your workspace and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
               <li>The desktop app keeps itself up to date. It checks for a newer signed release on GitHub (about every six hours, and at startup) and installs it for you, restarting only when nothing is recording. GitHub, not us, receives your IP address and the app version. Turn automatic updates off in the tray menu and the app only checks when you ask.</li>
               <li>Google Drive export is optional. Google receives what you send it.</li>
             </ul>
 
-            <h2>Hosted AI: what we collect</h2>
+            <h2>Accounts and sync: what we collect</h2>
             <ul>
               <li><strong>Account:</strong> your email address, a salted and hashed password, and your workspace and membership details. You can sign in from the website, the desktop app or the extension. The desktop app sends your password once, never stores it, and keeps only a revocable session token in your operating-system credential store; signing out deletes it.</li>
-              <li><strong>Notes:</strong> the transcripts, summaries, decisions and action items generated from your meetings, stored in your workspace.</li>
-              <li><strong>Usage and billing:</strong> how many meetings, meeting hours and Ask-your-notes questions you have used this period, and your plan status. Stripe holds your payment details, not us.</li>
-              <li><strong>Ask your notes:</strong> when you ask a question, the service searches only your workspace and sends your question with the matching excerpts of your notes to the summary provider to write the answer. Questions and answers are not saved; we keep only a count for your allowance.</li>
+              <li><strong>Notes:</strong> if you subscribe and sync, the transcripts, summaries, decisions and action items from your meetings, stored in your workspace.</li>
+              <li><strong>Billing:</strong> your plan and its status. Stripe holds your payment details, not us.</li>
               <li><strong>Sign-in and security records:</strong> when you sign in we record a description of your device, your IP address and timestamps. We use them to show your signed-in devices, let you revoke them, limit repeated failed sign-ins, and investigate abuse. A session or extension token ends when you sign out, revoke it, or it expires.</li>
-              <li><strong>Audio:</strong> uploaded to private, temporary storage only so it can be transcribed. It is deleted as soon as processing succeeds, and uploads that never finish are removed within 24 hours. We do not keep recordings, and there is no playback or download of audio in the hosted library.</li>
+              <li><strong>Audio:</strong> we never receive or store your recordings. They stay on your device, and there is no audio in the synced library.</li>
             </ul>
             <p>
-              Every workspace is isolated from the others. Provider credentials for Hosted AI live on our servers and are
-              never sent to your browser or extension. Server logs use workspace-safe identifiers and failure
+              Every workspace is isolated from the others. Your AI provider keys stay on your device and are
+              never sent to us. Server logs use workspace-safe identifiers and failure
               categories, not audio, transcript text, keys or tokens.
             </p>
 
@@ -645,14 +632,14 @@ export function PrivacyView() {
             <p>
               Do not record or upload information that law or contract requires a special regime for, such as protected
               health information, payment card data, or government identification numbers, unless you have confirmed that
-              this service is suitable for it. Hosted AI is not offered as a HIPAA-compliant service.
+              this service is suitable for it. The account and sync service is not offered as a HIPAA-compliant service.
             </p>
 
-            <h2>Who processes data for Hosted AI</h2>
+            <h2>Who processes data for accounts and sync</h2>
           </div>
           <div className="mk-table-wrap mk-table-wrap--narrow" role="region" aria-label="Service providers, scrolls sideways on small screens" tabIndex={0}>
             <table className="mk-table">
-              <caption>Service providers used by the hosted service</caption>
+              <caption>Service providers used by the account and sync service</caption>
               <thead>
                 <tr>
                   <th scope="col">Provider</th>
@@ -700,11 +687,11 @@ export function PrivacyView() {
 
             <h2>Keeping, deleting and exporting your data</h2>
             <ul>
-              <li>Delete any meeting or folder from the app. In Hosted AI it moves to Trash, where you can restore it for 30 days; after that, or when you delete it from Trash, its transcript and summary are removed.</li>
+              <li>Delete any meeting or folder from the app. In the synced library it moves to Trash, where you can restore it for 30 days; after that, or when you delete it from Trash, its transcript and summary are removed.</li>
               <li>Workspace owners choose how long hosted notes are kept, and you can export your data from the account page.</li>
               <li>We keep account data while your account exists. After you delete an account or workspace, its notes and account records are removed, and copies in system backups are overwritten on the normal backup schedule. We keep records that the law or our tax and fraud-prevention duties require, such as billing records held by Stripe, for as long as they require.</li>
               <li>
-                <strong>Clearing your browser history does not delete your notes.</strong> Hosted AI notes live in your
+                <strong>Clearing your browser history does not delete your notes.</strong> Synced notes live in your
                 workspace on our servers, so they are unaffected by anything you do in your browser; if you clear cookies
                 you only need to sign in again. The desktop app keeps new local recordings and notes in a private data
                 folder, so clearing browser history, cookies or cache leaves them alone. They are removed if you delete
@@ -764,7 +751,7 @@ export function TermsView() {
   const law = governingLaw();
   return (
     <>
-      <PageHead title="Terms of use" lede={`Effective ${EFFECTIVE}. These cover this website, the software, and the Hosted AI service.`} />
+      <PageHead title="Terms of use" lede={`Effective ${EFFECTIVE}. These cover this website, the software, and the account and sync service.`} />
       <section className="mk-section mk-section--flush">
         <div className="mk-wrap">
           <div className="mk-prose">
@@ -781,30 +768,29 @@ export function TermsView() {
               located. An in-app reminder is not legal advice and does not obtain consent for you.
             </p>
 
-            <h2>Hosted AI accounts</h2>
+            <h2>Accounts</h2>
             <ul>
-              <li>You must be at least 16 years old, and able to form a binding contract, to use Hosted AI. If you use it for an organization, you confirm you may bind it to these terms.</li>
+              <li>You must be at least 16 years old, and able to form a binding contract, to use an AI Notetaker account. If you use it for an organization, you confirm you may bind it to these terms.</li>
               <li>Give us a real email address and keep your password private. You are responsible for activity in your account and workspace.</li>
               <li>Workspace owners manage members and are responsible for what their members record and store.</li>
-              <li>You keep ownership of your recordings and notes. You give us a limited license to store, process, transmit to the providers listed in the privacy notice, and display them, and to create summaries, action items and answers from them, solely to provide the service to you. We do not use them to train AI models.</li>
+              <li>You keep ownership of your recordings and notes. You give us a limited license to store, process, transmit to the providers listed in the privacy notice, and display them, solely to provide the service to you. We do not use them to train AI models.</li>
               <li>You are responsible for your content, for having the right to record and process it, and for the consent of the people in it. You must not upload content you have no right to use.</li>
-              <li>Do not use the service to break the law or anyone&apos;s rights, to record people unlawfully, to process regulated sensitive data described in the privacy notice, to attack, overload, scrape or reverse engineer the hosted service, to get around plan limits, to resell access, or to try to access another workspace&apos;s data.</li>
+              <li>Do not use the service to break the law or anyone&apos;s rights, to record people unlawfully, to process regulated sensitive data described in the privacy notice, to attack, overload, scrape or reverse engineer the service, to get around plan limits, to resell access, or to try to access another workspace&apos;s data.</li>
               <li>If your use of the service, including a recording made without a required consent, results in a claim against us, you agree to cover our reasonable losses from that claim to the extent the law allows.</li>
             </ul>
 
             <h2>Plans and billing</h2>
             <ul>
-              <li>Hosted Pro and Hosted Team are monthly subscriptions billed in US dollars through Stripe. Each includes the monthly meeting, meeting-hours and Ask-your-notes question allowances shown on the pricing page.</li>
-              <li>Your first {LIMITS.trial} hosted meetings are a free one-time allowance, and Ask your notes is not included in it. When an allowance is used up, that feature stops until the next period or a plan change.</li>
-              <li>Ask your notes answers are generated by AI from your notes and can be incomplete or wrong. Check the linked notes before you rely on an answer.</li>
+              <li>The desktop app and a free account cost nothing. Pro (cloud sync) and Team (team sync) are monthly subscriptions billed in US dollars through Stripe, as shown on the pricing page.</li>
+              <li>Without an active subscription, cloud sync is off. Your notes stay on your device and keep working, and nothing is deleted when a plan ends.</li>
               <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for, and it does not renew.</li>
               <li>
                 Fees for a billing period that has started are not refunded, except where the law requires it or we
                 could not provide the service. If you were charged by mistake or twice, contact us within 14 days and
                 we will review it and refund what was charged in error.
               </li>
-              <li>If a payment fails, access continues for a short grace period while Stripe retries, and then processing stops.</li>
-              <li>Allowances are fair-use limits that exist to keep the service affordable. We may rate-limit requests or the number of simultaneous questions to protect it. We may change prices, plans and allowances for future billing periods, and will tell subscribers in advance; a change does not affect a period you have already paid for.</li>
+              <li>If a payment fails, access continues for a short grace period while Stripe retries, and then sync stops.</li>
+              <li>We may rate-limit requests to protect the service. We may change prices and plans for future billing periods, and will tell subscribers in advance; a change does not affect a period you have already paid for.</li>
             </ul>
 
             <h2>Your data, export and deletion</h2>
@@ -844,12 +830,12 @@ export function TermsView() {
 
             <h2>Liability</h2>
             <p>
-              The Hosted AI service is provided &ldquo;as is&rdquo; and &ldquo;as available&rdquo;. To the extent the law
+              The account and sync service is provided &ldquo;as is&rdquo; and &ldquo;as available&rdquo;. To the extent the law
               allows, we give no warranty that it will be uninterrupted, error-free or that its output will be accurate,
               and we disclaim implied warranties such as merchantability and fitness for a particular purpose. To the same
               extent, we are not liable for indirect, incidental, special or consequential losses, lost profits, lost
-              data, or losses from a recording made without a required consent or from your reliance on AI output, and
-              our total liability for the Hosted AI service is limited to the amount you paid for it in the 12 months
+              data, or losses from a recording made without a required consent or from your reliance on AI output from your own providers, and
+              our total liability for the account and sync service is limited to the amount you paid for it in the 12 months
               before the claim. This does not limit liability that the law does not allow to be limited.
             </p>
             {law && (

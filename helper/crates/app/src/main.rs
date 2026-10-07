@@ -1579,6 +1579,7 @@ async fn desktop_test_webapp(url: String, token: String) -> Result<WebappConnect
         let status = response.status();
         let message = match status.as_u16() {
             401 => "Token is invalid, expired, or revoked. Create a new desktop sync token.",
+            402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
             403 => "Token does not have desktop note sync access to a workspace.",
             404 => "This web-app version does not support desktop note sync yet.",
             _ => "The web app could not validate this token.",

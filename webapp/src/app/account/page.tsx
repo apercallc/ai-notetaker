@@ -186,7 +186,7 @@ export default async function AccountPage({
                 <h2>Privacy</h2>
                 <ul className="muted-copy settings-list">
                   <li>Workspace members can see your notes. Shared links work until you revoke them or they expire.</li>
-                  <li>Hosted AI uses your audio only to transcribe it. It is deleted once processing finishes, or after 24 hours if processing fails. Audio never appears in your library.</li>
+                  <li>We never receive your audio. Recordings stay on your device and never appear in your library.</li>
                   <li>
                     Notes and transcripts are{" "}
                     {workspace.retentionDays === null
