@@ -854,7 +854,7 @@
     const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device unless Hosted AI is making your notes." : "Your notes stay on this device. Sign in only if you want them on the web app and your other devices."}</p>`;
     const processingBody = cloudLine + (account
       ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(account.plan)} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep using hosted AI.</p>'}
-        <div class="inline-actions">${hostedOn ? '<button type="button" class="secondary-button" id="use-own-keys">Use my own keys instead</button>' : `<button type="button" class="primary-button" id="use-hosted" ${s.hasHostedSession ? "" : "disabled"}>Use hosted AI</button>`}<button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button></div></div>
+        <div class="inline-actions">${hostedOn ? '<button type="button" class="secondary-button" id="use-own-keys">Use my own keys instead</button>' : `<button type="button" class="primary-button" id="use-hosted" ${s.hasHostedSession ? "" : "disabled"}>Use hosted AI</button>`}<button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button><button type="button" class="secondary-button" id="hosted-manage-web">Manage account, devices &amp; data on the web</button></div></div>
         ${s.hasHostedSession ? "" : hostedForm(account.email)}`
       : hostedForm(""));
     const syncState = state.snapshot.webappSync;
@@ -934,6 +934,7 @@
       }
     }
     for (const link of document.querySelectorAll("[data-about]")) link.addEventListener("click", async () => { try { await invoke("desktop_open_about_link", { page: link.dataset.about }); } catch (error) { notify(String(error), "error"); } });
+    $("#hosted-manage-web")?.addEventListener("click", async () => { try { await invoke("desktop_open_web_page", { page: "account" }); } catch (error) { notify(String(error), "error"); } });
     $("#hosted-open-connect")?.addEventListener("click", async () => { try { await invoke("desktop_open_connect_page"); } catch (error) { notify(String(error), "error"); } });
     const codeField = $("#hosted-code");
     if (codeField) {
@@ -1131,7 +1132,7 @@
   }
 
   $("#open-notes-folder").addEventListener("click", async () => { try { await invoke("desktop_open_notes_folder"); } catch (error) { notify(String(error), "error"); } });
-  $("#open-webapp").addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
+  $("#open-webapp").addEventListener("click", async () => { try { await invoke("desktop_open_web_page", { page: "library" }); } catch (error) { notify(String(error), "error"); } });
 
   if (!invoke) {
     $("#content").innerHTML = '<div class="empty-state"><strong>Desktop bridge unavailable</strong>Open AI Notetaker from its installed desktop app.</div>';
