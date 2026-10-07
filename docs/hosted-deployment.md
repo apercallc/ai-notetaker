@@ -1,4 +1,4 @@
-# Hosted AI deployment runbook
+# Account and sync service deployment runbook
 
 This runbook is for the optional project-operated managed service. Free local
 BYOK remains the default and does not require an account or this deployment.
@@ -92,13 +92,12 @@ processing or expires within 24 hours; the provider processes the audio under
 its own account terms and retention settings. Summarization receives transcript
 text, not audio.
 
-The filesystem object backend remains available for local or self-hosted
-deployments when no bucket is configured. Managed production requires a shared
+The filesystem object backend remains available for local development
+when no bucket is configured. Managed production requires a shared
 private R2 or S3 bucket and does not fall back to local disk. Bucket contents
 are processing staging, never hosted recordings: successful jobs purge audio
 immediately, and the worker expires failed/abandoned audio within 24 hours.
-The filesystem backend is suitable for a single-node self-hosted or Docker
-deployment with the `ai-notetaker-objects` volume; it is not a substitute for
+The filesystem backend is suitable for local development only; it is not a substitute for
 a shared bucket in a multi-instance hosted deployment.
 
 ## Notes platform release: deploy notes
@@ -147,7 +146,7 @@ permissions for its configured prefix. Do not back up or replicate temporary
 recording objects.
 
 The managed API uses the per-user session returned by `/api/v1/auth/login`.
-The legacy `/api/*` sync API remains `AUTH_TOKEN`-protected for self-hosted
+The legacy `/api/*` sync API remains `AUTH_TOKEN`-protected for installed-extension
 compatibility. `/api/health` is the only unauthenticated health route;
 Stripe webhooks are admitted only after signature verification. Failed login
 budgets are stored in Postgres, so the same address throttle applies across

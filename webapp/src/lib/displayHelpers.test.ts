@@ -94,7 +94,7 @@ describe("plan and route error copy", () => {
   it("keeps known plans and billing statuses human-readable while handling future values", () => {
     expect(isManagedPlan("hosted_pro")).toBe(true);
     expect(isManagedPlan("unexpected_plan")).toBe(false);
-    expect(planLabel("hosted_trial")).toBe("Hosted Free Trial");
+    expect(planLabel("hosted_trial")).toBe("Free trial");
     expect(planLabel("future_plan")).toBe("Future Plan");
     expect(statusLabel("active")).toBe("Active");
     expect(statusLabel("trialing")).toBe("Trial");
@@ -109,7 +109,7 @@ describe("plan and route error copy", () => {
   });
 
   it("shows route-specific recovery guidance without saying billing notes are safe", () => {
-    expect(errorCopyForPath("/billing").title).toContain("Plans & usage");
+    expect(errorCopyForPath("/billing").title).toContain("your plan");
     expect(errorCopyForPath("/team/members").title).toContain("team");
     expect(errorCopyForPath("/account/security").title).toContain("account");
     expect(errorCopyForPath("/login").backHref).toBe("/login");

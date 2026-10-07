@@ -50,7 +50,7 @@ export function MarketingShell({
             ) : (
               <>
                 <Link className="mk-btn mk-btn--quiet" href="/login">Sign in</Link>
-                {context.signupOpen && <Link className="mk-btn mk-btn--solid" href="/login?tab=signup" aria-label="Try Hosted AI free"><span className="mk-label-full">Try Hosted AI free</span><span className="mk-label-short">Try free</span></Link>}
+                {context.signupOpen && <Link className="mk-btn mk-btn--solid" href="/login?tab=signup" aria-label="Create an account"><span className="mk-label-full">Create an account</span><span className="mk-label-short">Try free</span></Link>}
               </>
             )}
           </div>

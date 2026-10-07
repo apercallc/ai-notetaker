@@ -78,21 +78,21 @@ export function softwareNode(origin: string): Node {
       "Keeps your microphone and the meeting's audio as separate channels",
       "Transcript, summary, decisions and action items for every meeting",
       "Local use with your own AI provider keys and no required account",
-      "Optional workspace sync uploads finished desktop note text and imports workspace notes into the desktop library",
+      "A subscription adds cloud sync of finished desktop note text and imports workspace notes into the desktop library",
       "Open source under the MIT license",
     ],
     offers: [
       {
         "@type": "Offer",
-        name: "Own keys",
+        name: "Free",
         description: "Free software. You bring your own AI provider keys and pay those providers directly.",
         price: "0.00",
         priceCurrency: "USD",
         url: url(origin, "/how-it-works"),
         availability: "https://schema.org/InStock",
       },
-      monthlyOffer(origin, "Hosted Pro", FALLBACK_PRICE_AMOUNTS.hosted_pro, `Hosted AI for one person: up to ${LIMITS.pro} meetings or ${LIMITS.proHours} meeting hours a month, plus ${LIMITS.proQuestions} Ask-your-notes questions a month.`),
-      monthlyOffer(origin, "Hosted Team", FALLBACK_PRICE_AMOUNTS.hosted_team, `Hosted AI for a shared workspace: up to ${LIMITS.team} meetings or ${LIMITS.teamHours} meeting hours a month, plus ${LIMITS.teamQuestions} Ask-your-notes questions a month.`),
+      monthlyOffer(origin, "Pro", FALLBACK_PRICE_AMOUNTS.hosted_pro, "Cloud sync of notes across your devices for one person."),
+      monthlyOffer(origin, "Team", FALLBACK_PRICE_AMOUNTS.hosted_team, "Team sync: a shared workspace and library for your teammates."),
     ],
   };
 }

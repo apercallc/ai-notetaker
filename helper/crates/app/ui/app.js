@@ -17,10 +17,9 @@
   };
   const DEFAULT_WEBAPP_URL = "https://ai-notetaker.apercallc.com";
   const providerName = (id) => ({ deepgram: "Deepgram", groq: "Groq", claude: "Claude", gemini: "Gemini", deepseek: "DeepSeek" })[id] || id;
-  const hostedSelected = (settings) => settings.preferences.processing === "hosted";
-  const processingReady = (settings) => hostedSelected(settings)
-    ? Boolean(settings.hasHostedSession)
-    : providerKeySaved(settings, settings.preferences.transcriptionProvider) && providerKeySaved(settings, settings.preferences.summarizationProvider);
+  // Notes are always made with the user's own provider keys; the account is for sign-in and sync.
+  const hostedSelected = () => false;
+  const processingReady = (settings) => providerKeySaved(settings, settings.preferences.transcriptionProvider) && providerKeySaved(settings, settings.preferences.summarizationProvider);
   const providerKeySaved = (settings, id) => settings[{ deepgram: "hasDeepgramKey", groq: "hasGroqKey", claude: "hasClaudeKey", gemini: "hasGeminiKey", deepseek: "hasDeepseekKey" }[id]];
   const meetingModeName = (id) => ({ general: "General", standup: "Stand-up", sales: "Sales", one_on_one: "1:1", interview: "Interview", lecture: "Lecture", custom: "Custom" })[id] || id;
   const platformName = (id) => ({ macos: "macOS", windows: "Windows", linux: "Linux" })[id] || id;
@@ -114,8 +113,8 @@
   };
 
   // Same names, order and icons as the web app's navigation. Record is the one desktop-only item;
-  // Ask, Team and Plans & usage appear once you are signed in to a hosted account (as on the web).
-  const ACCOUNT_PAGES = ["actions", "ask", "team", "plans"];
+  // Team and Plan appear once you are signed in to an account (as on the web).
+  const ACCOUNT_PAGES = ["actions", "team", "plans"];
   const isAccountPage = () => ACCOUNT_PAGES.includes(state.page);
   function navItems() {
     const signedIn = hostedSignedIn();
@@ -124,9 +123,8 @@
       ["record", "Record"],
       ["notes", "Library"],
       ["actions", "Actions"],
-      ...(signedIn ? [["ask", "Ask"]] : []),
       ...(signedIn && owner ? [["team", "Team"]] : []),
-      ...(signedIn ? [["plans", "Plans & usage"]] : []),
+      ...(signedIn ? [["plans", "Plan"]] : []),
       ["settings", "Settings"],
     ];
   }
@@ -639,8 +637,8 @@
   }
 
 
-  // ---- Account: usage and plan, Ask your notes, action items, team (same data as the web app) ----
-  const accountState = { overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionFilter: "open", billingBusy: false };
+  // ---- Account: plan, action items, team (same data as the web app) ----
+  const accountState = { overview: null, loading: false, error: "", team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionFilter: "open", billingBusy: false };
   const hostedSignedIn = () => Boolean(state.snapshot?.settings.hasHostedSession);
   const formatHours = (seconds) => { const hours = (seconds || 0) / 3600; return hours >= 10 ? String(Math.round(hours)) : String(Math.round(hours * 10) / 10); };
   const longDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
@@ -671,7 +669,7 @@
   }
 
   function signInPrompt(what) {
-    return `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Sign in to use ${esc(what)}</strong><span>Your AI Notetaker account shows the same plan, usage, questions and team as the web app. Recording and your local notes work without an account.</span><button class="small-button" id="account-sign-in">Sign in</button></div></div>`;
+    return `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Sign in to use ${esc(what)}</strong><span>Your AI Notetaker account shows the same plan and team as the web app. Recording and your local notes work without an account.</span><button class="small-button" id="account-sign-in">Sign in</button></div></div>`;
   }
 
   function usagePanel() {
@@ -680,15 +678,12 @@
     const data = accountState.overview;
     if (!data) { void loadOverview(); return '<div class="loading-state"><span class="spinner"></span><span>Loading your plan…</span></div>'; }
     const e = data.entitlements;
-    const chat = data.chat;
     const owner = data.account.role === "owner";
     const reset = e.period?.end ? longDate(e.period.end) : "";
     const notices = [];
-    if (e.inPaymentGrace) notices.push(`Your last payment failed. Processing continues until ${longDate(e.graceEndsAt)} while we retry. Update your payment method to keep it.`);
-    if (e.warning === "exhausted") notices.push("You have used all of this period's allowance, so new recordings cannot be processed until it resets or you change plan. Your audio is still saved on this device.");
-    else if (e.warning === "low") notices.push("You are close to this period's limit.");
+    if (e.inPaymentGrace) notices.push(`Your last payment failed. Sync continues until ${longDate(e.graceEndsAt)} while we retry. Update your payment method to keep it.`);
+    if (!e.canSync) notices.push("Cloud sync is off. Your notes stay on this device. Choose a plan to sync them across your devices.");
     if (data.subscription.cancelsAt) notices.push(`Your plan is set to end on ${longDate(data.subscription.cancelsAt)}.`);
-    const chatLine = chat.limit > 0 ? meter("Ask your notes", chat.used, chat.limit, `${chat.used} of ${chat.limit} questions`) : `<div class="meter-row"><div class="meter-head"><strong>Ask your notes</strong><span>Not included in this plan</span></div></div>`;
     const current = e.plan;
     const offers = (data.offers || []).filter((offer) => offer.id !== current && offer.priceId);
     const billing = !owner
@@ -696,21 +691,7 @@
       : `<div class="inline-actions">${offers.map((offer) => `<button class="${data.subscription.live ? "secondary-button" : "primary-button"}" data-upgrade="${esc(offer.priceId)}" ${accountState.billingBusy ? "disabled" : ""}>${data.subscription.live ? "Change to" : "Upgrade to"} ${esc(offer.name)}${offer.priceLabel ? ` · ${esc(offer.priceLabel)}` : ""}</button>`).join("")}${data.subscription.live || data.subscription.hasBillingAccount ? `<button class="secondary-button" id="manage-plan" ${accountState.billingBusy ? "disabled" : ""}>${data.subscription.live ? "Manage or cancel plan" : "Manage billing"}</button>` : ""}</div><p class="fine-print">Plan changes, payment details and cancellation open in your browser, on our payment provider’s secure page.</p>`;
     return `<section class="card account-card"><div class="account-head"><div><h2>${esc(e.planLabel)} plan</h2><p class="fine-print">${esc(data.workspace.name)} · ${esc(data.account.email)} · ${esc(data.statusLabel || e.status)}</p></div><button class="small-button" id="account-reload">Refresh</button></div>
       ${notices.map((text) => `<p class="setup-note">${esc(text)}</p>`).join("")}
-      ${meter("Meetings", e.used, e.limit, `${e.used} of ${e.limit} meetings`)}
-      ${meter("Meeting hours", e.audio.usedSeconds, e.audio.limitSeconds, `${formatHours(e.audio.usedSeconds)} of ${formatHours(e.audio.limitSeconds)} hours`)}
-      ${chatLine}
-      <p class="fine-print">${e.isTrial ? "This is your free allowance; it does not reset." : reset ? `Usage resets on ${esc(reset)}.` : ""}</p>${billing}</section>`;
-  }
-
-  function askPanel() {
-    if (!hostedSignedIn()) return signInPrompt("Ask your notes");
-    const ask = accountState.ask;
-    const chat = accountState.overview?.chat;
-    const left = chat ? (chat.limit > 0 ? `${chat.remaining} of ${chat.limit} questions left this period.` : "Ask your notes is not included in your plan.") : "";
-    const history = ask.history.map((entry) => `<article class="card ask-entry"><p class="ask-q">${esc(entry.question)}</p>${entry.error ? `<p class="key-status warn">${esc(entry.error)}</p>` : `<div class="ask-a">${esc(entry.answer).replace(/\n/g, "<br>")}</div>${entry.sources?.length ? `<p class="fine-print">From: ${entry.sources.map((source) => `${esc(source.title)} (${esc(longDate(source.startedAt))})`).join(" · ")}</p>` : ""}`}</article>`).join("");
-    return `<section class="card account-card"><p class="fine-print">Search everything in your workspace, including notes made on the web. Answers are written by AI from your notes; check the sources. ${esc(left)}</p>
-      <textarea class="text-area" id="ask-question" maxlength="2000" placeholder="What did we decide about pricing?" ${ask.busy ? "disabled" : ""}>${esc(ask.draft)}</textarea>
-      <div class="inline-actions"><button class="primary-button" id="ask-send" ${ask.busy ? "disabled" : ""}>${ask.busy ? "Thinking…" : "Ask"}</button></div></section>${history}`;
+      <p class="fine-print">${e.canSync ? "Cloud sync is on for this workspace." : "Cloud sync is off."}</p>${billing}</section>`;
   }
 
   function actionItemsPanel() {
@@ -746,9 +727,8 @@
 
   const ACCOUNT_SCREENS = {
     actions: ["Action items", "Everything you agreed to do, across all of your notes.", () => actionItemsPanel()],
-    ask: ["Ask your notes", "Ask a question and get an answer from your own notes.", () => askPanel()],
     team: ["Team", "Invite teammates and manage who can use this workspace.", () => teamPanel()],
-    plans: ["Hosted AI", "Your plan, what you have used this period, and billing.", () => usagePanel()],
+    plans: ["Plan", "Your plan and billing. A subscription adds cloud sync and team sync.", () => usagePanel()],
   };
 
   function renderAccount() {
@@ -768,23 +748,6 @@
     $("#team-reload")?.addEventListener("click", () => { accountState.team.error = ""; accountState.team.roster = null; renderAccount(); });
     for (const button of document.querySelectorAll("[data-upgrade]")) button.addEventListener("click", () => accountAction(async () => { accountState.billingBusy = true; renderAccount(); try { await invoke("desktop_account_billing", { priceId: button.dataset.upgrade, manage: false }); notify("Opening the secure checkout in your browser. Come back and press Refresh when you finish."); } finally { accountState.billingBusy = false; renderAccount(); } }));
     $("#manage-plan")?.addEventListener("click", () => accountAction(async () => { accountState.billingBusy = true; renderAccount(); try { await invoke("desktop_account_billing", { priceId: null, manage: true }); notify("Opening billing in your browser. Come back and press Refresh when you finish."); } finally { accountState.billingBusy = false; renderAccount(); } }));
-    const question = $("#ask-question");
-    if (question) {
-      question.addEventListener("input", () => { accountState.ask.draft = question.value; });
-      question.addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); $("#ask-send").click(); } });
-      $("#ask-send").addEventListener("click", async () => {
-        const text = question.value.trim();
-        if (!text) return;
-        const ask = accountState.ask;
-        ask.busy = true; renderAccount();
-        try {
-          const reply = await invoke("desktop_account_ask", { question: text });
-          ask.history.unshift(reply.ok ? { question: text, answer: reply.answer, sources: reply.sources } : { question: text, error: reply.error });
-          if (reply.ok) { ask.draft = ""; accountState.overview = null; void loadOverview(true); }
-        } catch (error) { ask.history.unshift({ question: text, error: String(error) }); }
-        finally { ask.busy = false; renderAccount(); }
-      });
-    }
     $("#action-search")?.addEventListener("input", (event) => { accountState.actionQuery = event.target.value; const pos = event.target.selectionStart; renderAccount(); const box = $("#action-search"); box.focus(); box.setSelectionRange(pos, pos); });
     for (const chip of document.querySelectorAll("[data-action-filter]")) chip.addEventListener("click", () => { accountState.actionFilter = chip.dataset.actionFilter; renderAccount(); });
     for (const box of document.querySelectorAll("[data-action-meeting]")) box.addEventListener("change", async () => {
@@ -848,13 +811,13 @@
     const hostedOn = hostedSelected(s);
     const account = p.hostedAccount;
     const processingBadge = hostedOn
-      ? (s.hasHostedSession ? ["Hosted AI", "ok"] : ["Sign in again", "warn"])
+      ? (s.hasHostedSession ? ["Own keys", "ok"] : ["Sign in again", "warn"])
       : (providersReady ? ["Own keys", "ok"] : ["Setup needed", "warn"]);
     const syncOn = state.snapshot.webappSync.configured;
-    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device unless Hosted AI is making your notes." : "Your notes stay on this device. Sign in only if you want them on the web app and your other devices."}</p>`;
+    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device." : "Your notes stay on this device. Sign in only if you want them on the web app and your other devices."}</p>`;
     const processingBody = cloudLine + (account
-      ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(account.plan)} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep using hosted AI.</p>'}
-        <div class="inline-actions">${hostedOn ? '<button type="button" class="secondary-button" id="use-own-keys">Use my own keys instead</button>' : `<button type="button" class="primary-button" id="use-hosted" ${s.hasHostedSession ? "" : "disabled"}>Use hosted AI</button>`}<button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button><button type="button" class="secondary-button" id="hosted-manage-web">Manage account, devices &amp; data on the web</button></div></div>
+      ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(account.plan)} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep your notes syncing.</p>'}
+        <div class="inline-actions"><button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button><button type="button" class="secondary-button" id="hosted-manage-web">Manage account, devices &amp; data on the web</button></div></div>
         ${s.hasHostedSession ? "" : hostedForm(account.email)}`
       : hostedForm(""));
     const syncState = state.snapshot.webappSync;
@@ -866,10 +829,10 @@
     const sync_status = state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : "";
     const sync_controls = state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : "";
     const section = (id, title, badge, intro, body) => `<details class="card settings-card" id="settings-${id}" ${isOpen(id) ? "open" : ""}><summary><h2 tabindex="-1">${title}</h2><span class="section-badge ${badge[1]}">${esc(badge[0])}</span></summary><div class="settings-body"><p>${intro}</p>${body}</div></details>`;
-    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Processing${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="providers">Own API keys</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
+    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Account &amp; sync${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="providers">Own API keys</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
       ${state.snapshot.credentialStoreError ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Secure storage is unavailable</strong><span>${esc(state.snapshot.credentialStoreError)}</span></div></div>` : ""}
-      ${section("processing", "Processing", processingBadge,
-        "Audio is always saved on this device first. Stay offline with your own keys and nothing is stored in the cloud. Sign in to your AI Notetaker account and your notes sync with the web app and every device you are signed in on.",
+      ${section("processing", "Account &amp; sync", processingBadge,
+        "Audio is always saved on this device first, and notes are made with your own keys. A free account lets you sign in and manage your devices. A subscription adds cloud sync across your devices and your team.",
         processingBody)}
       ${section("providers", "Own API keys", providersReady ? ["Ready", "ok"] : hostedOn ? ["Optional", ""] : ["Keys needed", "warn"],
         "With your own API keys, recordings go directly to the providers you pick and nothing passes through us. Keys are stored in your operating system’s credential store. You need one transcription key and one summary key.",
@@ -924,7 +887,7 @@
     if (signIn) {
       const email = $("#hosted-email");
       const password = $("#hosted-password");
-      const submit = () => hostedAction(signIn, "desktop_hosted_sign_in", { email: email.value, password: password.value, baseUrl: p.hostedAccount?.baseUrl || null }, "Signed in. Hosted AI will make your notes.");
+      const submit = () => hostedAction(signIn, "desktop_hosted_sign_in", { email: email.value, password: password.value, baseUrl: p.hostedAccount?.baseUrl || null }, "Signed in.");
       signIn.addEventListener("click", submit);
       for (const field of [email, password]) {
         // Sign-in is its own action: Enter must not submit the settings form, and typing here is not a settings change.
@@ -945,8 +908,6 @@
     }
     $("#hosted-create-account")?.addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
     $("#hosted-sign-out")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_hosted_sign_out", {}, "Signed out. Notes will use your own keys."));
-    $("#use-own-keys")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_set_processing", { hosted: false }, "Notes will use your own keys."));
-    $("#use-hosted")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_set_processing", { hosted: true }, "Hosted AI will make your notes."));
     const markDirty = () => { state.settingsDirty = true; const hint = $("#settings-hint"); if (hint) { hint.textContent = "Unsaved changes"; hint.classList.add("dirty"); } };
     $("#settings-form").addEventListener("input", markDirty);
     $("#settings-form").addEventListener("change", markDirty);

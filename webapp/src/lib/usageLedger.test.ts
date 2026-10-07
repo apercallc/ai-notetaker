@@ -85,7 +85,7 @@ describe("hosted trial", () => {
       const entitlements = await getEntitlements(workspaceId);
       expect(entitlements).toMatchObject({
         plan: "hosted_trial",
-        planLabel: "Hosted Free Trial",
+        planLabel: "Free trial",
         status: "trialing",
         used: 0,
         limit: HOSTED_TRIAL_MEETINGS,

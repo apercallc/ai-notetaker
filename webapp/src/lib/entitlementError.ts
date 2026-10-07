@@ -11,6 +11,14 @@ export class EntitlementError extends Error {
   }
 }
 
+/** Hosted processing is switched off for the whole service (see hostedAiEnabled). */
+export class HostedAiDisabledError extends EntitlementError {
+  constructor() {
+    super("hosted AI processing is not offered");
+    this.name = "HostedAiDisabledError";
+  }
+}
+
 /** The workspace's monthly audio hours cannot cover this recording. Same 402 as any entitlement failure. */
 export class AudioBudgetError extends EntitlementError {
   constructor() {

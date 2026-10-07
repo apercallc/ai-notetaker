@@ -14,9 +14,5 @@
     "version": 3,
     "minimumSupported": 3
   },
-  "artifacts": [],
-  "docker": {
-    "composeFile": "webapp/docker-compose.yml",
-    "scope": "history-webapp-only"
-  }
+  "artifacts": []
 }

@@ -61,7 +61,7 @@ describe("testWebappHealth", () => {
     }) as unknown as typeof fetch;
     await expect(testWebappHealth("https://notes.example.com", fetchImpl)).resolves.toEqual({
       healthy: true,
-      message: "Connected to your self-hosted webapp.",
+      message: "Connected to your web app.",
     });
   });
 });

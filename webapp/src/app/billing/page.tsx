@@ -3,9 +3,9 @@ import { requireSession } from "@/lib/currentUser";
 import { prisma } from "@/lib/db";
 import { getEntitlements } from "@/lib/usageLedger";
 import { getChatEntitlement } from "@/lib/chatQuota";
-import { PLAN_AUDIO_HOUR_LIMITS, PLAN_CHAT_QUESTION_LIMITS } from "@/lib/plans";
 import { getPlanCatalog, hasLiveSubscription } from "@/lib/billing";
 import { planLabel, statusLabel } from "@/lib/plans";
+import { hostedAiEnabled } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { openBillingPortal, startCheckout } from "./actions";
 import { BillingActionForm } from "./BillingActionForm";
@@ -15,8 +15,8 @@ import { CheckoutRefresh } from "./CheckoutRefresh";
 export const dynamic = "force-dynamic";
 
 const ERROR_MESSAGES: Record<string, string> = {
-  "billing-not-configured": "Hosted billing is not configured on this server yet.",
-  "managed-disabled": "Hosted AI billing is disabled on this self-hosted instance.",
+  "billing-not-configured": "Billing is not configured on this server yet.",
+  "managed-disabled": "Billing is not available on this deployment.",
   "owner-only": "Only the workspace owner can manage billing.",
 };
 
@@ -33,13 +33,14 @@ function formatDate(iso: string | null | undefined): string | null {
 export default async function BillingPage({ searchParams }: { searchParams: Promise<{ error?: string; checkout?: string }> }) {
   const session = await requireSession();
   const managedHosting = managedHostingEnabled();
+  const hostedAi = hostedAiEnabled();
   const params = await searchParams;
   if (!managedHosting) {
     return (
       <div className="container">
         <Link href="/meetings" className="back-link">← Meetings</Link>
-        <div className="page-header"><h1>Hosted AI</h1></div>
-        <p className="muted-copy">Hosted AI billing is available only on the project-operated managed service. This self-hosted instance remains free local BYOK history storage.</p>
+        <div className="page-header"><h1>Plan</h1></div>
+        <p className="muted-copy">Billing is available only on the project-operated service.</p>
       </div>
     );
   }
@@ -62,9 +63,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
     <div className="container">
       <Link href="/meetings" className="back-link">← Meetings</Link>
       <div className="page-header">
-        <h1>Hosted AI</h1>
+        <h1>Plan</h1>
       </div>
-      <p className="muted-copy">Use the free local mode with your own provider keys, or let the hosted service process meetings for you.</p>
+      <p className="muted-copy">Recording and notes on your device are always free, with your own provider keys. A subscription adds cloud sync and team sync.</p>
 
       {params.error && ERROR_MESSAGES[params.error] && <p className="error-text" role="alert">{ERROR_MESSAGES[params.error]}</p>}
       {params.checkout === "success" && (
@@ -88,6 +89,14 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           </p>
         )}
 
+        <p className="muted-copy">
+          {entitlements.canSync
+            ? "Cloud sync is on for this workspace."
+            : "Cloud sync is off. Your notes stay on your device. Choose a plan below to sync them."}
+        </p>
+
+        {hostedAi && (
+          <>
         {entitlements.limit > 0 ? (
           <div>
             <p>
@@ -136,17 +145,19 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
             {isOwner ? " Upgrade to avoid interruptions." : ""}
           </p>
         )}
+          </>
+        )}
         {entitlements.inPaymentGrace && (
           <p className="error-text" role="alert">
-            Your last payment failed. Processing continues until {graceDate ?? "the grace period ends"}; update your payment method to keep your plan.
+            Your last payment failed. Sync continues until {graceDate ?? "the grace period ends"}; update your payment method to keep your plan.
           </p>
         )}
         {(entitlements.status === "past_due" && !entitlements.inPaymentGrace) || entitlements.status === "unpaid" ? (
-          <p className="error-text" role="alert">Processing is paused because payment could not be collected. Update your payment method to resume.</p>
+          <p className="error-text" role="alert">Sync is paused because payment could not be collected. Update your payment method to resume.</p>
         ) : null}
         {entitlements.status === "canceled" && <p className="muted-copy">Your subscription has ended.</p>}
 
-        <p className="muted-copy">Hosted processing keeps provider credentials on the service and never puts them in the extension.</p>
+        <p className="muted-copy">Your provider keys never leave your device.</p>
         {isOwner && hasStripeCustomer && <BillingActionForm action={openBillingPortal} label="Manage billing" secondary />}
       </section>
 
@@ -158,12 +169,12 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               <section className="billing-card" key={offer.id} aria-current={isCurrent ? "true" : undefined}>
                 <h2>{offer.name}{isCurrent && <> <small className="muted-copy">(current plan)</small></>}</h2>
                 <p><strong>{offer.priceLabel ?? "Price shown at checkout"}</strong></p>
-                <p>{offer.id === "hosted_pro" ? "For individual users who want hosted transcription and summaries." : "For shared workspaces with higher volume and team history."}</p>
+                <p>{offer.id === "hosted_pro" ? "Cloud sync of your notes across your devices." : "Cloud sync for a shared team workspace."}</p>
                 <ul>
-                  <li>Up to {offer.meetingLimit.toLocaleString("en-US")} meetings or {PLAN_AUDIO_HOUR_LIMITS[offer.id]} meeting hours per month</li>
-                  <li>Ask your notes: {PLAN_CHAT_QUESTION_LIMITS[offer.id].toLocaleString("en-US")} questions per month</li>
-                  <li>{offer.id === "hosted_pro" ? "Encrypted upload and durable job retries" : "Workspace members and shared history"}</li>
-                  <li>{offer.id === "hosted_pro" ? "Searchable workspace history" : "Stripe-managed invoices and cancellation"}</li>
+                  <li>{offer.id === "hosted_pro" ? "Sync finished notes to every device you sign in on" : "Everything in Pro, for every member of the workspace"}</li>
+                  <li>{offer.id === "hosted_pro" ? "Searchable library of your notes on the web" : "Invite teammates to one shared library"}</li>
+                  <li>{offer.id === "hosted_pro" ? "Your own provider keys, always" : "Activity log and retention controls for owners"}</li>
+                  <li>Stripe-managed invoices and cancellation</li>
                 </ul>
                 {isCurrent ? (
                   <button type="button" disabled>Current plan</button>

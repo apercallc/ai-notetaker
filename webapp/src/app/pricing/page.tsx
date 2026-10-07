@@ -6,9 +6,9 @@ import { PricingView } from "@/marketing/Views";
 
 export const dynamic = "force-dynamic";
 
-const TITLE = "AI Notetaker pricing: free with your keys, or hosted from $12 a month";
+const TITLE = "AI Notetaker pricing: free with your keys, sync from $12 a month";
 const DESCRIPTION =
-  "Free with your own AI keys. Hosted AI starts with 3 free meetings, then Pro at $12 a month or Team at $39 a month. Cancel any time.";
+  "Free with your own AI keys. Cloud sync is Pro at $12 a month, and team sync is Team at $39 a month. Cancel any time.";
 
 export const metadata = pageMetadata({ path: "/pricing", title: TITLE, description: DESCRIPTION });
 

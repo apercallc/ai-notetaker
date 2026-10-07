@@ -2,9 +2,9 @@
 
 This document covers two additive contracts:
 
-- `/api/meetings` is the existing self-hosted BYOK ingestion API.
+- `/api/meetings` is the legacy ingestion API, kept only for already-installed extensions.
 - `/api/v1/*` is the authenticated managed-service API used by the extension
-  and helper when the user selects hosted AI.
+  and helper for account sign-in, plan and sync.
 - `/api/v1/desktop-sync/*` is optional text-only sync from the Tauri desktop
   app, authenticated by a revocable user token bound to one workspace.
 
@@ -13,7 +13,7 @@ Local BYOK recording does not require an account or either API.
 Every private API request (reads included — see the architecture spec §3.5
 and root `CLAUDE.md`) must authenticate its caller. Browser pages use their
 session cookie; managed APIs retain their established client/session auth;
-legacy self-hosted ingestion uses its `AUTH_TOKEN`.
+legacy extension ingestion uses its `AUTH_TOKEN`.
 Desktop sync uses a hashed, revocable `desktop_notes_sync` token created in
 the signed-in web app at Settings → Integrations. The token is bound to that
 user's active workspace; the route rechecks membership on each request. Keep
@@ -48,7 +48,7 @@ last acknowledged `updatedAt` value for later uploads. Stale versions return
 HTTP 409 and leave the local outbox item queued for review/retry. Clients that
 omit this header retain the legacy upsert behavior during the migration window.
 The route ignores browser CORS handling and authenticates the desktop token
-itself. It is available on managed and self-hosted hosting.
+itself. It is available on the managed service.
 
 `GET /api/v1/desktop-sync/meetings` returns up to 50 notes ordered by
 `updatedAt` and ID. Pass both `updatedAt` and `id` from `nextCursor` to fetch
@@ -59,7 +59,7 @@ cursor only after it has safely imported that page.
 
 ### `GET /api/health`
 
-The self-hosted/BYOK response remains backwards-compatible:
+The legacy BYOK response remains backwards-compatible:
 
 ```json
 { "ok": true }
@@ -79,8 +79,8 @@ readiness diagnostics:
 
 `managedReady: false` means one or more required worker, provider, Stripe,
 application URL, or shared private R2/S3 staging settings are missing. It never
-includes secret values. The filesystem object backend is valid for local or
-single-node self-hosted deployments; managed production must report `r2` or
+includes secret values. The filesystem object backend is valid for local
+development; managed production must report `r2` or
 `s3`. Audio objects are deleted after successful processing or expire within
 24 hours; hosted meeting APIs expose text notes, not recordings.
 
@@ -226,13 +226,12 @@ Full detail for one meeting (transcript, summary, action items).
 
 The browser UI also exposes `/actions`, an authenticated cross-meeting inbox
 where the user can filter open/completed items, mark them done, and set due
-dates. Those edits remain in the self-hosted webapp and are reflected on the
+dates. Those edits remain in the webapp and are reflected on the
 meeting detail page.
 
 ### `DELETE /api/meetings/:id`
 
-Delete a meeting. No soft-delete requirement for v1 — self-hosted, single
-user, the user owns their own deletion decisions.
+Delete a meeting. No soft-delete requirement for v1 — the user owns their own deletion decisions.
 
 ## Data model note
 

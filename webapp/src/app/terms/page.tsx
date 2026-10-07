@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 const TITLE = "Terms of use | AI Notetaker";
 const DESCRIPTION =
-  "Terms for the AI Notetaker website, open-source software and Hosted AI service: recording consent, accounts, plans and billing, AI output, downloads and availability.";
+  "Terms for the AI Notetaker website, open-source software and account and sync service: recording consent, accounts, plans and billing, AI output, downloads and availability.";
 
 export const metadata = pageMetadata({ path: "/terms", title: TITLE, description: DESCRIPTION });
 

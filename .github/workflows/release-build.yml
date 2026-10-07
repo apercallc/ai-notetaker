@@ -216,66 +216,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Log in to GitHub Container Registry
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        id: metadata
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/ai-notetaker-webapp
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: webapp
           file: webapp/Dockerfile
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          tags: ${{ steps.metadata.outputs.tags || format('ai-notetaker-webapp:{0}', github.sha) }}
-          labels: ${{ steps.metadata.outputs.labels }}
-
-  dockerhub-image:
-    name: Mirror webapp image to Docker Hub
-    if: startsWith(github.ref, 'refs/tags/v') && vars.DOCKERHUB_NAMESPACE != ''
-    needs: metadata
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        id: metadata
-        with:
-          images: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/ai-notetaker-webapp
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: webapp
-          file: webapp/Dockerfile
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
+          push: false
+          tags: ai-notetaker-webapp:${{ github.sha }}
 
   chrome-web-store:
     name: Upload to Chrome Web Store
@@ -363,9 +315,7 @@ jobs:
           node scripts/validate-release-manifest.mjs release-assets/release-manifest.json
           find release-assets -mindepth 2 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name '*.json' \) -exec cp {} release-assets/ \;
           cp release-assets/release-manifest.json release-assets/manifest.json
-          cp webapp/docker-compose.registry.yml release-assets/
-          cp webapp/.env.docker.example release-assets/env.docker.example
-          (cd release-assets && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name 'AI.Notetaker_*.app.tar.gz' -o -name 'manifest.json' -o -name 'docker-compose.registry.yml' -o -name 'env.docker.example' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd release-assets && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name 'AI.Notetaker_*.app.tar.gz' -o -name 'manifest.json' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
       - name: Check manifest and checksums match the files being uploaded
         run: |
           node --input-type=module <<'NODE'
@@ -395,8 +345,7 @@ jobs:
           assets=(release-assets/SHA256SUMS release-assets/manifest.json \
             release-assets/*.dmg release-assets/*.pkg release-assets/*.msi \
             release-assets/*.exe release-assets/*.deb release-assets/*.AppImage \
-            release-assets/*.zip release-assets/AI.Notetaker_*.app.tar.gz release-assets/latest.json \
-            release-assets/docker-compose.registry.yml release-assets/env.docker.example)
+            release-assets/*.zip release-assets/AI.Notetaker_*.app.tar.gz release-assets/latest.json)
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${assets[@]}"
           else

@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { listMeetings } from "@/lib/meetings";
 import { MAX_SEARCH_LENGTH } from "@/lib/meetingConstants";
 import { requireSession } from "@/lib/currentUser";
+import { hostedAiEnabled } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { getEntitlements } from "@/lib/usageLedger";
 import { getRequestContext } from "@/lib/requestContext";
@@ -155,7 +156,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         <p className="total-count" role="status" aria-live="polite">{countText}</p>
       </div>
 
-      <LibraryToolbar folderId={currentFolder?.id ?? null} canImport={managed} canCreateFolder={browsing} showHint={browsing && (folderRows.length > 0 || meetings.length > 0)} />
+      <LibraryToolbar folderId={currentFolder?.id ?? null} canImport={managed && hostedAiEnabled()} canCreateFolder={browsing} showHint={browsing && (folderRows.length > 0 || meetings.length > 0)} />
 
       {(currentFolder || folderMissing) && (
         <nav className="breadcrumbs" aria-label="Folder path">

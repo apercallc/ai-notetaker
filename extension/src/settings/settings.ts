@@ -212,7 +212,7 @@ function render(options: RenderOptions = {}): void {
       <div class="field checkbox-field">
         <label for="auto-share-notes">
           <input type="checkbox" id="auto-share-notes" ${settings.autoShareNotesWithAttendees ? "checked" : ""} />
-          Create a share link for the notes when a meeting ends (Hosted AI)
+          Create a share link for the notes when a meeting ends (connected web app)
         </label>
         <p class="field-hint text-secondary">
           After notes are written, an expiring attendee link is created automatically and shown
@@ -234,12 +234,12 @@ function render(options: RenderOptions = {}): void {
 
     <details class="integrations" id="integrations" ${integrationsOpen ? "open" : ""}>
       <summary>Connections &amp; history (optional)</summary>
-      <p class="text-secondary field-hint">Connect your own history webapp for optional cross-device history. Meetings are always saved on this device first.</p>
+      <p class="text-secondary field-hint">Connect a web app for optional cross-device history. Meetings are always saved on this device first.</p>
 
       <section class="integration" aria-labelledby="webapp-heading">
-        <h2 id="webapp-heading">Your self-hosted history</h2>
+        <h2 id="webapp-heading">Your web app history</h2>
         <p class="text-secondary field-hint">
-          Optional cross-device history that you deploy and control. Enter its URL and access token together.
+          Optional cross-device history. Enter its URL and access token together.
         </p>
         <div class="field">
           <label for="webapp-url">Web app URL</label>

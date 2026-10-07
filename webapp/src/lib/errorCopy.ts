@@ -13,7 +13,7 @@ export function errorCopyForPath(pathname: string | null): ErrorCopy {
   const path = pathname ?? "";
   if (path.startsWith("/billing")) {
     return {
-      title: "We couldn't load Plans & usage",
+      title: "We couldn't load your plan",
       body: "Your plan and any payment in progress are unchanged. Try again, or come back in a minute.",
       backHref: "/meetings",
       backLabel: "Back to meetings",

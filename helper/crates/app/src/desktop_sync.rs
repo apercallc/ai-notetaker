@@ -428,6 +428,7 @@ impl DesktopSync {
             let status = identity_response.status();
             let message = match status.as_u16() {
                 401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
+                402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
                 403 => "The desktop sync token no longer has access to its workspace.",
                 404 => "This web-app version does not support desktop note sync yet.",
                 429 => "The web app is receiving too many requests. Sync will retry later.",
@@ -539,6 +540,7 @@ impl DesktopSync {
                         409 => "A web-app note conflicts with this desktop copy. Review the conflict in Settings → Web app sync.",
                         400 | 413 | 422 => "The web app rejected a saved note. Update the web app, then retry sync.",
                         401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
+                        402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
                         403 => "The desktop sync token no longer has access to its workspace. Create a token for the correct workspace.",
                         404 => "This web-app version does not support desktop note sync yet.",
                         429 => "The web app is receiving too many requests. Sync will retry later.",
@@ -623,6 +625,7 @@ impl DesktopSync {
                 let status = response.status();
                 let message = match status.as_u16() {
                     401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
+                    402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
                     403 => "The desktop sync token no longer has access to its workspace.",
                     404 => "This web-app version does not support workspace note sync yet.",
                     429 => "The web app is receiving too many requests. Sync will retry later.",

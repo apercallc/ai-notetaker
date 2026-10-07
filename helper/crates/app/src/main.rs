@@ -1579,6 +1579,7 @@ async fn desktop_test_webapp(url: String, token: String) -> Result<WebappConnect
         let status = response.status();
         let message = match status.as_u16() {
             401 => "Token is invalid, expired, or revoked. Create a new desktop sync token.",
+            402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
             403 => "Token does not have desktop note sync access to a workspace.",
             404 => "This web-app version does not support desktop note sync yet.",
             _ => "The web app could not validate this token.",
@@ -1780,9 +1781,11 @@ async fn desktop_hosted_sign_in(
             .and_then(|body| body.error);
         return Err(match status.as_u16() {
             401 => "That email and password did not match. Check them and try again.".to_string(),
-            404 => "Hosted AI is not available at this address. Use your own provider keys, or check the web-app URL.".to_string(),
+            404 => "Account sign-in is not available at this address. Check the web-app URL."
+                .to_string(),
             429 => "Too many sign-in attempts. Wait a few minutes and try again.".to_string(),
-            _ => detail.unwrap_or_else(|| format!("Sign-in failed ({status}). Try again in a moment.")),
+            _ => detail
+                .unwrap_or_else(|| format!("Sign-in failed ({status}). Try again in a moment.")),
         });
     }
     let reply: HostedLoginReply = response.json().await.map_err(|_| {
@@ -1852,7 +1855,7 @@ async fn desktop_hosted_sign_in_code(
         return Err(match status.as_u16() {
             401 => "That code is not valid or has expired. Create a new one in the web app."
                 .to_string(),
-            404 => "Hosted AI is not available at this address.".to_string(),
+            404 => "Account sign-in is not available at this address.".to_string(),
             _ => format!("Sign-in failed ({status}). Try again in a moment."),
         });
     }
@@ -1883,7 +1886,8 @@ async fn finish_hosted_sign_in(
     let previous_token = desktop_settings::get_hosted_token().ok().flatten();
     desktop_settings::set_hosted_token(Some(&reply.access_token))?;
     let preferences = desktop_settings::DesktopPreferences {
-        processing: desktop_settings::ProcessingChoice::Hosted,
+        // Signing in is for sync and plan management; notes keep using the user's own keys.
+        processing: desktop_settings::ProcessingChoice::Local,
         hosted_account: Some(desktop_settings::HostedAccount {
             email,
             base_url,

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 const TITLE = "Privacy notice | AI Notetaker";
 const DESCRIPTION =
-  "What AI Notetaker collects, where your audio and notes go in local mode and in Hosted AI, which providers process data, and how to delete or export it.";
+  "What AI Notetaker collects, where your audio and notes go in local mode and with sync, which providers process data, and how to delete or export it.";
 
 export const metadata = pageMetadata({ path: "/privacy", title: TITLE, description: DESCRIPTION });
 

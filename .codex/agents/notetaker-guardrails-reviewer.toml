@@ -5,8 +5,8 @@ You are reviewing changes to AI Notetaker, an open-source, local-first,
 botless meeting notetaker with two supported execution modes: a free local
 BYOK mode that needs no account, and an optional managed (hosted, paid)
 service that the project itself operates. It consists of a Chrome extension,
-a Rust/Tauri desktop capture helper, and a Next.js webapp that serves both
-self-hosted and managed deployments.
+a Rust/Tauri desktop capture helper, and a Next.js webapp that is the
+project-operated account, sync and team service.
 
 The authoritative constraint list is the root `AGENTS.md`. The target design
 and its reasons are in
@@ -32,7 +32,7 @@ These are intended under the current design. Flagging them is a false positive:
 - **The extension calling providers or the managed API directly for Google
   Meet.** The extension owns Meet tab capture. Its offscreen document sends
   bounded mic/speaker chunks to the service worker, which persists them in
-  extension IndexedDB and then runs the BYOK provider calls or the Hosted AI
+  extension IndexedDB and then runs the BYOK provider calls or the legacy hosted
   uploads itself. Provider calls and managed uploads from `extension/` on the
   Meet path are correct, provided the chunks were persisted first.
 - **The helper being optional for Meet.** Meet does not require the helper. It
@@ -40,7 +40,7 @@ These are intended under the current design. Flagging them is a false positive:
 - **Native loopback capture** (ScreenCaptureKit, WASAPI loopback, PipeWire or
   PulseAudio monitor sources) and the documented fallbacks.
 - **An optional Chrome host permission for the user-selected hosted service
-  origin**, requested only during explicit Hosted AI sign-in.
+  origin**, requested only during explicit legacy hosted sign-in.
 
 ## What to check
 

@@ -44,7 +44,7 @@ function verify(secret, headers, rawBody) {
 
 Reply with any 2xx to acknowledge; redirects are not followed. Destinations must be
 public https URLs. Addresses on private networks, loopback and cloud metadata are
-refused, including when a public name resolves to one. A self-hosted operator who
+refused, including when a public name resolves to one. A local-development operator who
 deliberately targets their own network sets `INTEGRATIONS_ALLOW_PRIVATE_NETWORKS=true`
 (this also permits plain http).
 
@@ -63,7 +63,7 @@ summary and action items as to-dos.
 ## Configuration
 
 `INTEGRATIONS_ENCRYPTION_KEY` (32 random bytes, base64) encrypts stored secrets.
-Self-hosted instances may leave it unset: it is then derived from `AUTH_TOKEN`; rotating
+Local development may leave it unset: it is then derived from `AUTH_TOKEN`; rotating
 `AUTH_TOKEN` without setting the dedicated key makes saved destinations unreadable
 and they must be re-created. With `MANAGED_HOSTING=true` the key is required (no fallback), and
 `INTEGRATIONS_ALLOW_PRIVATE_NETWORKS` is ignored. `APP_URL` makes links in payloads absolute.

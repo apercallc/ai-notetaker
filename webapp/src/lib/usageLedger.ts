@@ -1,6 +1,8 @@
-import { AudioBudgetError, EntitlementError } from "./entitlementError";
+import { hostedAiEnabled } from "./deploymentConfig";
+import { AudioBudgetError, EntitlementError, HostedAiDisabledError } from "./entitlementError";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { hasSyncAccess } from "./syncAccess";
 import { HOSTED_TRIAL_MEETINGS, PLAN_AUDIO_HOUR_LIMITS, PLAN_MEETING_LIMITS, audioSecondsForBytes, isManagedPlan, planLabel, type ManagedPlan } from "./plans";
 
 export type { ManagedPlan } from "./plans";
@@ -118,6 +120,7 @@ export async function getEntitlements(workspaceId: string) {
       remainingSeconds: Math.max(0, audioLimitSeconds - audioUsedSeconds),
       warning: audioWarning,
     },
+    canSync: hasSyncAccess(subscription, now),
     canProcess: hasProcessingAccess(subscription, now) && limit > used && audioLimitSeconds > audioUsedSeconds,
     period: {
       source: window.source,
@@ -177,6 +180,7 @@ export interface ReserveOptions {
 }
 
 export async function reserveMeetingProcessing(workspaceId: string, idempotencyKey: string, audioBytes = 0, options: ReserveOptions = {}): Promise<{ alreadyReserved: boolean }> {
+  if (!hostedAiEnabled()) throw new HostedAiDisabledError();
   const audioSeconds = options.audioSeconds ?? audioSecondsForBytes(audioBytes);
   // The entitlement check and ledger insert must share a serializable
   // transaction. A check-then-insert sequence lets two simultaneous uploads

@@ -83,6 +83,6 @@ it("keeps legacy extension downloads collapsed, including desktop query links", 
   expect(defaultHtml).toContain("Capture meeting audio playing in the current secure Chrome tab");
   expect(defaultHtml).toContain("previous extension and helper setup");
   expect(defaultHtml).toContain("Use my own API keys");
-  expect(defaultHtml).toContain("does not require an AI Notetaker account or Hosted AI sign-in");
+  expect(defaultHtml).toContain("does not require an AI Notetaker account");
   expect(defaultHtml).not.toContain("choose <strong>Hosted AI</strong> and sign in");
 });

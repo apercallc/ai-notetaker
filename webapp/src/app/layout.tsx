@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import "./globals.css";
 import { AppHeader } from "@/components/AppHeader";
 import { getAppUrl } from "@/lib/deploymentConfig";
+import { hostedAiEnabled } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { SESSION_COOKIE } from "@/lib/sessionCookie";
 import { getSessionContextForRequest, resolveWorkspaceForRequest } from "@/lib/currentUser";
@@ -59,7 +60,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en">
       <body>
         <a href="#main" className="skip-link">Skip to content</a>
-        {role && <AppHeader role={role} managed={managedHostingEnabled()} />}
+        {role && <AppHeader role={role} managed={managedHostingEnabled()} hostedAi={hostedAiEnabled()} />}
         <main id="main" tabIndex={-1}>{children}</main>
       </body>
     </html>

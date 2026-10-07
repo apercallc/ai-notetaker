@@ -265,6 +265,6 @@ describe("template-aware processing and regeneration", () => {
     await prisma.workspaceSubscription.update({ where: { workspaceId }, data: { status: "canceled" } });
     expect(await regenerateNotes({ workspaceId, userId }, meetingId, "sales")).toMatchObject({ ok: false, error: expect.stringContaining("Plans & usage") });
     process.env.MANAGED_HOSTING = "false";
-    expect(await regenerateNotes({ workspaceId, userId }, meetingId, "sales")).toMatchObject({ ok: false, error: expect.stringContaining("aren't enabled") });
+    expect(await regenerateNotes({ workspaceId, userId }, meetingId, "sales")).toMatchObject({ ok: false, error: expect.stringContaining("isn't offered") });
   });
 });

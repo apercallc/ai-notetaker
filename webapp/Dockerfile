@@ -1,4 +1,4 @@
-# Production image for the optional self-hosted history webapp.
+# Production image for the project-operated account, sync and team webapp.
 # The desktop helper is intentionally not part of this image.
 FROM node:22-bookworm-slim AS dependencies
 WORKDIR /app

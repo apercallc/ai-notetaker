@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "./db";
+import { hostedAiEnabled } from "./deploymentConfig";
 import { PLAN_CHAT_QUESTION_LIMITS, isManagedPlan } from "./plans";
 import { hasProcessingAccess, isSerializationConflict, usageWindow } from "./usageLedger";
 
@@ -8,7 +9,7 @@ const RESERVATION_ATTEMPTS = 8;
 
 export class ChatUnavailableError extends Error {
   constructor(readonly reason: "plan" | "limit") {
-    super(reason === "plan" ? "Ask your notes is part of Hosted Pro and Hosted Team." : "You have used every question included in this period.");
+    super(reason === "plan" ? "Ask your notes is not available on your plan." : "You have used every question included in this period.");
     this.name = "ChatUnavailableError";
   }
 }
@@ -47,6 +48,7 @@ export async function getChatEntitlement(workspaceId: string): Promise<ChatEntit
  * the cap. Returns the key to release if the provider call fails.
  */
 export async function reserveChatQuestion(workspaceId: string): Promise<string> {
+  if (!hostedAiEnabled()) throw new ChatUnavailableError("plan");
   const idempotencyKey = `chat:${randomUUID()}`;
   for (let attempt = 0; attempt < RESERVATION_ATTEMPTS; attempt += 1) {
     try {
