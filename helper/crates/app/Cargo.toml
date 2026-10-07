@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 build = "build.rs"
 default-run = "notetaker-helper"
-description = "Local-first AI meeting notetaker desktop app and legacy Native Messaging relay"
+description = "AI Notetaker: local-first meeting recording and notes for macOS, Windows, and Linux"
 
 [[bin]]
 name = "notetaker-helper"

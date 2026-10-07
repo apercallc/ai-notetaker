@@ -17,6 +17,10 @@
   };
   const DEFAULT_WEBAPP_URL = "https://ai-notetaker.apercallc.com";
   const providerName = (id) => ({ deepgram: "Deepgram", groq: "Groq", claude: "Claude", gemini: "Gemini", deepseek: "DeepSeek" })[id] || id;
+  const hostedSelected = (settings) => settings.preferences.processing === "hosted";
+  const processingReady = (settings) => hostedSelected(settings)
+    ? Boolean(settings.hasHostedSession)
+    : providerKeySaved(settings, settings.preferences.transcriptionProvider) && providerKeySaved(settings, settings.preferences.summarizationProvider);
   const providerKeySaved = (settings, id) => settings[{ deepgram: "hasDeepgramKey", groq: "hasGroqKey", claude: "hasClaudeKey", gemini: "hasGeminiKey", deepseek: "hasDeepseekKey" }[id]];
   const meetingModeName = (id) => ({ general: "General", standup: "Stand-up", sales: "Sales", one_on_one: "1:1", interview: "Interview", lecture: "Lecture", custom: "Custom" })[id] || id;
   const platformName = (id) => ({ macos: "macOS", windows: "Windows", linux: "Linux" })[id] || id;
@@ -115,8 +119,7 @@
     $("#app-version").textContent = `Version ${snapshot.version}`;
     const recording = Boolean(snapshot.activeMeetingId);
     const preferences = snapshot.settings.preferences;
-    const providersReady = providerKeySaved(snapshot.settings, preferences.transcriptionProvider)
-      && providerKeySaved(snapshot.settings, preferences.summarizationProvider);
+    const providersReady = processingReady(snapshot.settings);
     const appReady = !snapshot.credentialStoreError && providersReady;
     const processing = snapshot.meetings.some((meeting) => meeting.status === "processing");
     const finalizing = snapshot.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
@@ -145,10 +148,13 @@
     const s = state.snapshot;
     const active = s.activeMeetingId;
     const audio = s.audio;
-    const keyReady = providerKeySaved(s.settings, s.settings.preferences.transcriptionProvider)
-      && providerKeySaved(s.settings, s.settings.preferences.summarizationProvider);
+    const keyReady = processingReady(s.settings);
+    const hosted = hostedSelected(s.settings);
     const setup = s.credentialStoreError || !keyReady;
-    const setupMessage = s.credentialStoreError || `${s.webappSync.configured ? "Web app sync is connected, but it only syncs notes. " : ""}Recording runs on this device with your own provider keys. Add a ${providerName(s.settings.preferences.transcriptionProvider)} key (transcription) and a ${providerName(s.settings.preferences.summarizationProvider)} key (summaries) in Settings → AI providers. You can switch providers there to use ones you already have.`;
+    const ownKeysMessage = `${s.webappSync.configured ? "Web app sync is connected, but it only syncs notes. " : ""}Add a ${providerName(s.settings.preferences.transcriptionProvider)} key (transcription) and a ${providerName(s.settings.preferences.summarizationProvider)} key (summaries) in Settings → Processing, or sign in to AI Notetaker hosted AI instead. Recording and audio stay on this device either way.`;
+    const setupMessage = s.credentialStoreError || (hosted
+      ? "Your hosted session has ended. Sign in again in Settings → Processing to record."
+      : ownKeysMessage);
     const startHint = recordingStartHint({
       credentialStoreError: s.credentialStoreError,
       keyReady,
@@ -173,7 +179,7 @@
     const processing = s.meetings.filter((meeting) => meeting.status === "processing").length;
     const finalizing = s.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
     $("#content").innerHTML = `
-      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError ? "" : " Your provider keys stay in this device’s credential store."}</span>${s.credentialStoreError ? "" : '<button class="small-button" id="goto-providers">Add provider keys</button>'}</div></div>` : ""}
+      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError || hosted ? "" : " Your provider keys stay in this device’s credential store."}</span>${s.credentialStoreError ? "" : `<button class="small-button" id="goto-providers">${hosted ? "Sign in again" : "Set up processing"}</button>`}</div></div>` : ""}
       ${recoverable ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Saved audio needs recovery</strong><span>${esc(recoverable.title)} was interrupted. Its audio is still on this device.</span><button class="small-button" id="open-recoverable">Open recording</button></div></div>` : ""}
       ${processing ? `<p class="process-status" role="status">Preparing notes from ${processing} saved recording${processing === 1 ? "" : "s"}. You can keep using the app.</p>` : ""}
       ${finalizing ? '<p class="process-status">Finishing saved audio. It stays on this device while notes are prepared.</p>' : ""}
@@ -231,7 +237,7 @@
       catch (error) { notify(String(error), "error"); }
     });
     $("#all-notes")?.addEventListener("click", () => setPage("notes"));
-    $("#goto-providers")?.addEventListener("click", () => { state.settingsOpen.providers = true; setPage("settings"); requestAnimationFrame(() => $("#settings-providers h2")?.focus({ preventScroll: false })); });
+    $("#goto-providers")?.addEventListener("click", () => { state.settingsOpen.processing = true; setPage("settings"); requestAnimationFrame(() => $("#settings-processing h2")?.focus({ preventScroll: false })); });
     for (const button of document.querySelectorAll("[data-meeting-id]")) button.addEventListener("click", () => openMeeting(button.dataset.meetingId));
   }
 
@@ -244,7 +250,7 @@
     if (busy) return "Starting recording…";
     const nextSteps = [];
     if (credentialStoreError) nextSteps.push("Follow the secure storage instructions above, then retry saving your keys in Settings.");
-    else if (!keyReady) nextSteps.push("Complete provider setup.");
+    else if (!keyReady) nextSteps.push("Finish processing setup in Settings.");
     if (!audio.ready) {
       nextSteps.push(audioChecking
         ? audioTimedOut ? "The audio check is taking longer; follow the Audio setup guidance."
@@ -560,6 +566,27 @@
     { id: "deepseek", label: "DeepSeek", description: "Summaries", saved: "hasDeepseekKey" },
   ];
 
+  function hostedForm(email) {
+    return `<div class="form-grid hosted-form"><div class="form-field"><label class="field-label" for="hosted-email">Email</label><input class="text-input" id="hosted-email" type="email" autocomplete="username" value="${esc(email)}" /></div><div class="form-field"><label class="field-label" for="hosted-password">Password</label><input class="text-input" id="hosted-password" type="password" autocomplete="current-password" /></div></div>
+      <div class="inline-actions"><button type="button" class="primary-button" id="hosted-sign-in">Sign in</button><button type="button" class="secondary-button" id="hosted-create-account">Create an account</button></div>
+      <p class="key-status" id="hosted-status" role="status" aria-live="polite"></p>`;
+  }
+
+  async function hostedAction(button, command, args, success) {
+    button.disabled = true;
+    try {
+      await invoke(command, args);
+      notify(success);
+      await refresh();
+    } catch (error) {
+      const status = $("#hosted-status");
+      if (status) status.textContent = String(error);
+      notify(String(error), "error");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function renderSettings() {
     setHeader("Settings", "LOCAL APP SETTINGS");
     const s = state.snapshot.settings;
@@ -595,15 +622,32 @@
       }).join("")}</div></details>`
       : "";
     const providersReady = providerKeySaved(s, p.transcriptionProvider) && providerKeySaved(s, p.summarizationProvider);
+    const hostedOn = hostedSelected(s);
+    const account = p.hostedAccount;
+    const processingBadge = hostedOn
+      ? (s.hasHostedSession ? ["Hosted AI", "ok"] : ["Sign in again", "warn"])
+      : (providersReady ? ["Own keys", "ok"] : ["Setup needed", "warn"]);
+    const processingBody = account
+      ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(account.plan)} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep using hosted AI.</p>'}
+        <div class="inline-actions">${hostedOn ? '<button type="button" class="secondary-button" id="use-own-keys">Use my own keys instead</button>' : `<button type="button" class="primary-button" id="use-hosted" ${s.hasHostedSession ? "" : "disabled"}>Use hosted AI</button>`}<button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button></div></div>
+        ${s.hasHostedSession ? "" : hostedForm(account.email)}`
+      : hostedForm("");
     const syncState = state.snapshot.webappSync;
     const syncBadge = conflicts.length ? ["Needs review", "warn"] : syncState.configured ? ["Connected", "ok"] : s.hasWebappToken ? ["Check connection", "warn"] : ["Optional", ""];
-    const defaultOpen = { providers: !providersReady, "note-style": false, sync: Boolean(conflicts.length || syncState.lastError), import: false };
+    const defaultOpen = { processing: !processingReady(s), providers: !hostedOn && !providersReady, "note-style": false, sync: Boolean(conflicts.length || syncState.lastError), import: false, about: false };
     const isOpen = (id) => (id in state.settingsOpen ? state.settingsOpen[id] : defaultOpen[id]);
+    const url_field = `<div class="form-field wide"><label class="field-label" for="webapp-url">Web-app URL</label><input class="text-input" id="webapp-url" type="url" value="${esc(p.webappUrl)}" placeholder="https://ai-notetaker.apercallc.com" autocomplete="url" /></div>`;
+    const token_field = `<div class="form-field wide"><label class="field-label" for="webapp-token">Desktop sync token</label><div class="key-row"><input class="text-input" id="webapp-token" type="password" autocomplete="new-password" placeholder="${s.hasWebappToken ? "Saved securely · blank keeps current token" : "Paste desktop sync token"}" /><button type="button" class="secondary-button" id="test-webapp">Test connection</button></div><label class="key-status" id="webapp-status">${s.hasWebappToken ? (state.snapshot.webappSync.configured ? `Sync enabled · ${state.snapshot.webappSync.pending} note(s) pending` : "Token saved. Check the URL and connection.") : "No sync token saved."}</label><label class="fine-print"><input type="checkbox" id="clear-webapp-token" /> Remove saved token</label></div>`;
+    const sync_status = state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : "";
+    const sync_controls = state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : "";
     const section = (id, title, badge, intro, body) => `<details class="card settings-card" id="settings-${id}" ${isOpen(id) ? "open" : ""}><summary><h2 tabindex="-1">${title}</h2><span class="section-badge ${badge[1]}">${esc(badge[0])}</span></summary><div class="settings-body"><p>${intro}</p>${body}</div></details>`;
-    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="providers" aria-current="true">AI providers${providersReady ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
+    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Processing${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="providers">Own API keys</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
       ${state.snapshot.credentialStoreError ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Secure storage is unavailable</strong><span>${esc(state.snapshot.credentialStoreError)}</span></div></div>` : ""}
-      ${section("providers", "AI providers", providersReady ? ["Ready", "ok"] : ["Keys needed", "warn"],
-        "Recording runs on this device with your own API keys, stored in your operating system’s credential store. You only need one transcription key and one summary key.",
+      ${section("processing", "Processing", processingBadge,
+        "Choose who turns your recordings into notes. Audio is always saved on this device first. Hosted AI uses your AI Notetaker account, so you need no provider keys. Or use your own keys below and keep everything account-free.",
+        processingBody)}
+      ${section("providers", "Own API keys", providersReady ? ["Ready", "ok"] : hostedOn ? ["Optional", ""] : ["Keys needed", "warn"],
+        "With your own API keys, recordings go directly to the providers you pick and nothing passes through us. Keys are stored in your operating system’s credential store. You need one transcription key and one summary key.",
         `<div class="form-grid"><div class="form-field"><label class="field-label" for="transcription-provider">Transcription provider</label><select class="select-input" id="transcription-provider">${transcription}</select></div><div class="form-field"><label class="field-label" for="summarization-provider">Summary provider</label><select class="select-input" id="summarization-provider">${summarization}</select></div></div>
         <h3 class="subhead">Keys you need</h3><div class="form-grid" id="keys-active"></div>
         <details class="other-keys" id="other-keys-details"><summary>Other providers <span class="fine-print">optional · switch providers above to use them</span></summary><div class="form-grid" id="keys-other"></div></details>
@@ -627,6 +671,9 @@
         <p class="key-status" id="desktop-audio-transfer-status" role="status" aria-live="polite"></p>
         <input id="desktop-transfer-file" type="file" accept=".json,application/json" hidden />
         <p class="key-status" id="desktop-transfer-status" role="status" aria-live="polite"></p>`)}
+      ${section("about", "About &amp; legal", [`v${esc(state.snapshot.version)}`, ""], "AI Notetaker is open-source software under the MIT License. You decide when to record and must tell the people on the call, as the law and your workplace require.",
+        `<div class="inline-actions">${[["privacy", "Privacy notice"], ["terms", "Terms"], ["license", "License"], ["third-party", "Third-party licenses"], ["source", "Source code"], ["issues", "Report a problem"]].map(([id, label]) => `<button type="button" class="secondary-button" data-about="${id}">${label}</button>`).join("")}</div>
+        <p class="fine-print">Once a day the app can check GitHub for a newer release (turn this off in the tray menu). It never installs updates by itself.</p>`)}
       <div class="settings-footer"><span class="settings-hint" id="settings-hint">Blank credential fields keep saved values.</span><button type="submit" class="primary-button" id="save-settings">Save settings</button></div>
     </form></div>`;
     const arrangeProviderKeys = () => {
@@ -648,6 +695,24 @@
     $("#collapse-all").addEventListener("click", () => setAll(false));
     $("#open-webapp-account")?.addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
     $("#settings-form").addEventListener("submit", saveSettings);
+    const signIn = $("#hosted-sign-in");
+    if (signIn) {
+      const email = $("#hosted-email");
+      const password = $("#hosted-password");
+      const submit = () => hostedAction(signIn, "desktop_hosted_sign_in", { email: email.value, password: password.value, baseUrl: p.hostedAccount?.baseUrl || null }, "Signed in. Hosted AI will make your notes.");
+      signIn.addEventListener("click", submit);
+      for (const field of [email, password]) {
+        // Sign-in is its own action: Enter must not submit the settings form, and typing here is not a settings change.
+        field.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); submit(); } });
+        field.addEventListener("input", (event) => event.stopPropagation());
+        field.addEventListener("change", (event) => event.stopPropagation());
+      }
+    }
+    for (const link of document.querySelectorAll("[data-about]")) link.addEventListener("click", async () => { try { await invoke("desktop_open_about_link", { page: link.dataset.about }); } catch (error) { notify(String(error), "error"); } });
+    $("#hosted-create-account")?.addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
+    $("#hosted-sign-out")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_hosted_sign_out", {}, "Signed out. Notes will use your own keys."));
+    $("#use-own-keys")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_set_processing", { hosted: false }, "Notes will use your own keys."));
+    $("#use-hosted")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_set_processing", { hosted: true }, "Hosted AI will make your notes."));
     const markDirty = () => { state.settingsDirty = true; const hint = $("#settings-hint"); if (hint) { hint.textContent = "Unsaved changes"; hint.classList.add("dirty"); } };
     $("#settings-form").addEventListener("input", markDirty);
     $("#settings-form").addEventListener("change", markDirty);

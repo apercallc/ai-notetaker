@@ -50,17 +50,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .brand-lockup { display: flex; align-items: center; gap: 11px; padding: 0 5px; }
 .brand-lockup strong { display: block; font-size: 14px; letter-spacing: -.2px; }
 .brand-lockup span { display: block; margin-top: 4px; color: #b5c9bd; font-size: 11px; }
-.brand-mark {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 12px;
-  background: #f7fbf7;
-}
-.brand-mark svg { width: 27px; height: 27px; fill: var(--green); }
-.brand-mark .brand-fold { fill: none; stroke: #ccebd9; stroke-width: 1.5; }
-.brand-mark .brand-wave { fill: none; stroke: white; stroke-width: 1.7; stroke-linecap: round; }
+.brand-mark { display: grid; flex: none; width: 34px; height: 34px; }
+.brand-mark svg { width: 34px; height: 34px; }
+.brand-mark .brand-tile { fill: #176c4b; }
+.brand-mark .brand-page { fill: #fff; }
+.brand-mark .brand-fold { fill: #ccebd9; }
+.brand-mark .brand-wave { fill: #176c4b; }
 .nav-list { display: grid; gap: 6px; margin-top: 54px; }
 .nav-button {
   display: flex;
@@ -341,3 +336,7 @@ p { line-height: 1.55; }
 .inline-link { padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
 @media (prefers-color-scheme: dark) { .section-badge.warn { color: #f1d489; background: #332d1e; } }
 @media (prefers-reduced-motion: reduce) { .settings-card > summary::after, .audio-card > summary::after { transition: none; } }
+.hosted-account { margin-bottom: 12px; }
+.hosted-account p { margin: 0 0 8px; font-size: 12px; }
+.hosted-form { margin-top: 4px; }
+.brand-mark svg { border-radius: 10px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .28); }
