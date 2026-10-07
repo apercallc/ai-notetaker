@@ -4,12 +4,12 @@
 //! this module keeps the menu small and platform-native: status first, recent
 //! notes next, a launch-at-login toggle (on by default), and quit last.
 //!
-//! The icon is the recording consent cue: a red dot while capturing, a
-//! neutral ring when idle, and an amber attention icon while recordings from
-//! an interrupted session wait to be finished or discarded. macOS uses
-//! template images for the non-recording states so they match the menu bar;
-//! the recording dot deliberately stays a colored — not template — image so
-//! it remains red everywhere.
+//! The icon is the desktop app's brand mark and doubles as the recording
+//! consent cue: a red badge while capturing, no badge when idle, and an amber
+//! badge while recordings from an interrupted session wait to be finished or
+//! discarded. macOS uses template images for the idle and attention states so
+//! they match the menu bar; the recording icon deliberately stays a colored —
+//! not template — image so it remains red everywhere.
 //!
 //! The tray is also optional. On a desktop where tray creation fails (no
 //! system tray, a locked-down session), the helper keeps running headless
