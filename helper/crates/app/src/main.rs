@@ -1106,6 +1106,8 @@ fn main() {
         }
     };
     logging::init(&root);
+    // Expanded once: the macro embeds the macOS Info.plist symbol, so a second use fails to link.
+    let context = tauri::generate_context!();
     let _instance = match single_instance::acquire(&root) {
         Ok(single_instance::Acquired::Yes(lock)) => lock,
         Ok(single_instance::Acquired::AlreadyRunning) => {
@@ -1125,7 +1127,7 @@ fn main() {
                     app.handle().exit(0);
                     Ok(())
                 })
-                .run(tauri::generate_context!());
+                .run(context);
             return;
         }
         Err(error) => {
@@ -1342,7 +1344,7 @@ fn main() {
             tracing::info!("notetaker-helper starting");
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .unwrap_or_else(|error| {
             tracing::error!(%error, "AI Notetaker helper stopped during startup");
             std::process::exit(1);
