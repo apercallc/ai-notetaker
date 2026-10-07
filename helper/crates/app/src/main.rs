@@ -334,14 +334,12 @@ struct DesktopSettingsInput {
     default_meeting_mode: MeetingMode,
     custom_vocabulary: Vec<String>,
     custom_summary_instructions: String,
-    webapp_url: String,
     /// `None` keeps the current credential; an empty string removes it.
     deepgram_key: Option<String>,
     groq_key: Option<String>,
     claude_key: Option<String>,
     gemini_key: Option<String>,
     deepseek_key: Option<String>,
-    webapp_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -349,14 +347,6 @@ struct DesktopSettingsInput {
 struct ProviderKeyCheck {
     valid: bool,
     message: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WebappConnectionCheck {
-    valid: bool,
-    message: String,
-    workspace_name: Option<String>,
 }
 
 struct RetryWorker {
@@ -1158,7 +1148,6 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_snapshot,
             desktop_test_provider_key,
-            desktop_test_webapp,
             desktop_save_settings,
             desktop_hosted_sign_in,
             desktop_hosted_sign_in_code,
@@ -1565,73 +1554,6 @@ async fn desktop_test_provider_key(
 }
 
 #[tauri::command]
-async fn desktop_test_webapp(url: String, token: String) -> Result<WebappConnectionCheck, String> {
-    let url = desktop_settings::normalize_webapp_url(&url)?
-        .ok_or_else(|| "Enter your web-app URL first.".to_string())?;
-    let token = match validate_secret(Some(token))? {
-        Some(token) => token,
-        None => desktop_settings::get_webapp_token()?
-            .filter(|token| !token.trim().is_empty())
-            .ok_or_else(|| "Enter a desktop sync token first.".to_string())?,
-    };
-    let client = notetaker_core::providers::http_client_builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| "Web-app connection could not be configured.".to_string())?;
-    let response = client
-        .get(format!("{}/api/v1/desktop-sync", url.trim_end_matches('/')))
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(|_| {
-            "Could not reach the web app. Check the URL and network connection.".to_string()
-        })?;
-    if !response.status().is_success() {
-        let status = response.status();
-        if status.as_u16() == 402 {
-            // The token is genuine; the workspace just has no plan, so say that instead of
-            // blaming the token.
-            return Ok(WebappConnectionCheck {
-                valid: true,
-                message: "Connected, but cloud sync needs an active Pro or Team plan.".to_string(),
-                workspace_name: None,
-            });
-        }
-        let message = match status.as_u16() {
-            401 => "Token is invalid, expired, or revoked. Create a new desktop sync token.",
-            402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
-            403 => "Token does not have desktop note sync access to a workspace.",
-            404 => "This web-app version does not support desktop note sync yet.",
-            _ => "The web app could not validate this token.",
-        };
-        return Ok(WebappConnectionCheck {
-            valid: false,
-            message: format!("{message} (HTTP {status})"),
-            workspace_name: None,
-        });
-    }
-    #[derive(Deserialize)]
-    struct Workspace {
-        name: String,
-    }
-    #[derive(Deserialize)]
-    struct Response {
-        workspace: Workspace,
-    }
-    let result = response
-        .json::<Response>()
-        .await
-        .map_err(|_| "Web app returned an invalid connection response.".to_string())?;
-    Ok(WebappConnectionCheck {
-        valid: true,
-        message: format!("Connected to {}.", result.workspace.name),
-        workspace_name: Some(result.workspace.name),
-    })
-}
-
-#[tauri::command]
 async fn desktop_save_settings(
     context: tauri::State<'_, DesktopCommandContext>,
     input: DesktopSettingsInput,
@@ -1647,10 +1569,6 @@ async fn desktop_save_settings(
     if input.custom_summary_instructions.chars().count() > 4_000 {
         return Err("Custom summary instructions must be 4,000 characters or fewer.".into());
     }
-    if input.webapp_url.chars().count() > 2_000 {
-        return Err("Web-app URL is too long.".into());
-    }
-    let normalized_url = desktop_settings::normalize_webapp_url(&input.webapp_url)?;
     let mut keys = desktop_settings::load_api_keys()?;
     let previous_keys = keys.clone();
     apply_secret_update(&mut keys.deepgram, input.deepgram_key)?;
@@ -1664,11 +1582,7 @@ async fn desktop_save_settings(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let previous_token = desktop_settings::get_webapp_token()?;
-    let new_token = match input.webapp_token {
-        Some(token) => validate_secret(Some(token))?,
-        None => previous_token.clone(),
-    };
+    let sync_token = desktop_settings::get_webapp_token()?;
     let preferences = desktop_settings::DesktopPreferences {
         transcription_provider: input.transcription_provider,
         summarization_provider: input.summarization_provider,
@@ -1680,24 +1594,18 @@ async fn desktop_save_settings(
             .filter(|term| !term.is_empty())
             .collect(),
         custom_summary_instructions: input.custom_summary_instructions.trim().to_string(),
-        webapp_url: normalized_url.unwrap_or_default(),
+        webapp_url: current_preferences.webapp_url.clone(),
         processing: current_preferences.processing,
         hosted_account: current_preferences.hosted_account.clone(),
-        sync_from_sign_in: current_preferences.sync_from_sign_in && new_token.is_some(),
+        sync_from_sign_in: current_preferences.sync_from_sign_in,
     };
 
     if let Err(error) = desktop_settings::save_api_keys(&keys) {
         let _ = desktop_settings::save_api_keys(&previous_keys);
         return Err(error);
     }
-    if let Err(error) = desktop_settings::set_webapp_token(new_token.as_deref()) {
-        let _ = desktop_settings::save_api_keys(&previous_keys);
-        let _ = desktop_settings::set_webapp_token(previous_token.as_deref());
-        return Err(error);
-    }
     if let Err(error) = preferences.save(&context.app.data_dir) {
         let _ = desktop_settings::save_api_keys(&previous_keys);
-        let _ = desktop_settings::set_webapp_token(previous_token.as_deref());
         return Err(error);
     }
 
@@ -1719,7 +1627,7 @@ async fn desktop_save_settings(
     )
     .await;
 
-    let has_webapp_token = new_token
+    let has_webapp_token = sync_token
         .as_ref()
         .is_some_and(|token| !token.trim().is_empty());
     if has_webapp_token && !preferences.webapp_url.is_empty() {

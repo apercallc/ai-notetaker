@@ -824,21 +824,20 @@
       : !s.hasHostedSession ? ["Sign in again", "warn"] : needsPlan ? ["Needs plan", "warn"] : ["Signed in", "ok"];
     const syncOn = state.snapshot.webappSync.configured && !needsPlan;
     const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : needsPlan ? "Cloud sync is off." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device." : needsPlan ? "Your notes stay on this device, and anything you make now uploads when a plan is active. Notes already in your account stay readable on the web, and still download here. Choose a Pro or Team plan to sync again." : "Your notes stay on this device. Sign in if you want an account; a subscription adds cloud sync."}</p>${needsPlan ? '<div class="inline-actions"><button type="button" class="primary-button" id="upgrade-plan">See plans</button></div>' : ""}`;
-    const processingBody = cloudLine + (account
+    const syncState = state.snapshot.webappSync;
+    const defaultOpen = { processing: Boolean(conflicts.length || syncState.lastError) || (!account && providersReady), providers: !providersReady, "note-style": false, import: false, about: false };
+    const isOpen = (id) => (id in state.settingsOpen ? state.settingsOpen[id] : defaultOpen[id]);
+    const sync_status = state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : "";
+    const sync_controls = state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : "";
+    const syncDetails = `<details class="other-keys"><summary>What gets synced</summary><div class="privacy-note"><p>Finished desktop notes upload to your workspace. Notes created in the web app are copied here and updated on the next sync. Web edits do not change recordings made on this desktop. Note deletions and settings do not sync between the desktop and web app.</p><p>Sync sends notes only; it does not send raw audio or provider keys.</p></div></details>`;
+    const syncBlock = state.snapshot.webappSync.configured || conflicts.length ? `${conflictMarkup}${sync_status}${sync_controls}${syncDetails}` : "";
+    const processingBody = cloudLine + syncBlock + (account
       ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(planName(accountState.overview?.entitlements?.plan || account.plan))} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep your notes syncing.</p>'}
         <div class="inline-actions"><button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button><button type="button" class="secondary-button" id="hosted-manage-web">Manage account, devices &amp; data on the web</button></div></div>
         ${s.hasHostedSession ? "" : hostedForm(account.email)}`
       : hostedForm(""));
-    const syncState = state.snapshot.webappSync;
-    const syncBadge = conflicts.length ? ["Needs review", "warn"] : needsPlan ? ["Needs plan", "warn"] : syncState.configured ? ["Connected", "ok"] : s.hasWebappToken ? ["Check connection", "warn"] : ["Optional", ""];
-    const defaultOpen = { processing: !account && providersReady, providers: !providersReady, "note-style": false, sync: Boolean(conflicts.length || syncState.lastError), import: false, about: false };
-    const isOpen = (id) => (id in state.settingsOpen ? state.settingsOpen[id] : defaultOpen[id]);
-    const url_field = `<div class="form-field wide"><label class="field-label" for="webapp-url">Web-app URL</label><input class="text-input" id="webapp-url" type="url" value="${esc(p.webappUrl)}" placeholder="https://ai-notetaker.apercallc.com" autocomplete="url" /></div>`;
-    const token_field = `<div class="form-field wide"><label class="field-label" for="webapp-token">Desktop sync token</label><div class="key-row"><input class="text-input" id="webapp-token" type="password" autocomplete="new-password" placeholder="${s.hasWebappToken ? "Saved securely · blank keeps current token" : "Paste desktop sync token"}" /><button type="button" class="secondary-button" id="test-webapp">Test connection</button></div><label class="key-status" id="webapp-status">${s.hasWebappToken ? (state.snapshot.webappSync.configured ? `Sync enabled · ${state.snapshot.webappSync.pending} note(s) pending` : "Token saved. Check the URL and connection.") : "No sync token saved."}</label><label class="fine-print"><input type="checkbox" id="clear-webapp-token" /> Remove saved token</label></div>`;
-    const sync_status = state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : "";
-    const sync_controls = state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : "";
     const section = (id, title, badge, intro, body) => `<details class="card settings-card" id="settings-${id}" ${isOpen(id) ? "open" : ""}><summary><h2 tabindex="-1">${title}</h2><span class="section-badge ${badge[1]}">${esc(badge[0])}</span></summary><div class="settings-body"><p>${intro}</p>${body}</div></details>`;
-    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Account &amp; sync</button><button type="button" data-settings-section="providers">Own API keys${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
+    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Account &amp; sync</button><button type="button" data-settings-section="providers">Own API keys${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
       ${state.snapshot.credentialStoreError ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Secure storage is unavailable</strong><span>${esc(state.snapshot.credentialStoreError)}</span></div></div>` : ""}
       ${section("processing", "Account &amp; sync", processingBadge,
         "Audio is always saved on this device first, and notes are made with your own keys. A free account lets you sign in and manage your devices. A subscription adds cloud sync across your devices and your team.",
@@ -854,14 +853,6 @@
         <div class="form-field wide"><label class="field-label" for="meeting-mode">Default meeting style</label><select class="select-input" id="meeting-mode">${modes}</select></div>
         <div class="form-field wide"><label class="field-label" for="vocabulary">Custom vocabulary <span class="fine-print">one term per line</span></label><textarea class="text-area" id="vocabulary" placeholder="Product names, acronyms, and people">${esc(vocabulary)}</textarea></div>
         <div class="form-field wide"><label class="field-label" for="instructions">Summary instructions <span class="fine-print">optional</span></label><textarea class="text-area" id="instructions" maxlength="4000" placeholder="What should summaries focus on?">${esc(p.customSummaryInstructions)}</textarea></div></div>`)}
-      ${section("sync", "Web app sync", syncBadge, "Optional. Local recording works without an account. Upload finished desktop notes to a workspace and bring web app notes into this library.",
-        `<div class="form-grid">${url_field}
-        ${token_field}</div>
-        <p class="fine-print">Get a token: sign in at <button type="button" class="inline-link" id="open-webapp-account">the web app</button>, then Settings → Integrations → create a “Desktop note sync” token and copy it here.</p>
-        ${conflictMarkup}
-        ${sync_status}
-        ${sync_controls}
-        <details class="other-keys"><summary>What gets synced</summary><div class="privacy-note"><p>Finished desktop notes upload to the selected workspace. Notes created in the web app are copied here and updated on the next sync. Web edits do not change recordings made on this desktop. Note deletions and settings do not sync between the desktop and web app.</p><p>This workspace sync sends notes only; it does not send raw audio or provider keys.</p></div></details>`)}
       ${section("import", "Import from the extension", ["Optional", ""], "Bring over browser meeting recordings and older notes. Import copies data; it never removes the extension source.",
         `<details class="other-keys"><summary>What is included</summary><p class="fine-print">A full archive brings new browser meeting recordings, older notes, partial transcripts, and any raw audio still saved by the extension. Older completed-call audio may already have been removed after notes were saved. API keys, web-app credentials, and Google connections stay separate.</p></details>
         <div class="inline-actions"><button type="button" class="secondary-button" id="import-desktop-audio-transfer">Choose full archive</button><button type="button" class="secondary-button" id="choose-desktop-transfer">Import notes-only file</button></div>
@@ -890,7 +881,6 @@
     const setAll = (open) => { for (const details of document.querySelectorAll(".settings-card")) details.open = open; };
     $("#expand-all").addEventListener("click", () => setAll(true));
     $("#collapse-all").addEventListener("click", () => setAll(false));
-    $("#open-webapp-account")?.addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
     $("#settings-form").addEventListener("submit", saveSettings);
     const signIn = $("#hosted-sign-in");
     if (signIn) {
@@ -922,7 +912,6 @@
     $("#settings-form").addEventListener("input", markDirty);
     $("#settings-form").addEventListener("change", markDirty);
     for (const button of document.querySelectorAll(".test-key")) button.addEventListener("click", () => testKey(button.dataset.provider));
-    $("#test-webapp")?.addEventListener("click", testWebapp);
     $("#sync-existing")?.addEventListener("click", syncExisting);
     $("#retry-sync")?.addEventListener("click", retrySync);
     for (const button of document.querySelectorAll("[data-sync-open]")) button.addEventListener("click", async () => {
@@ -1032,19 +1021,6 @@
     } catch (error) { status.textContent = String(error); status.className = "key-status error"; }
   }
 
-  async function testWebapp() {
-    const status = $("#webapp-status");
-    const token = $("#webapp-token").value.trim();
-    if (!token && !state.snapshot.settings.hasWebappToken) { status.textContent = "Paste a desktop sync token first."; status.className = "key-status error"; return; }
-    status.textContent = "Checking connection…";
-    status.className = "key-status";
-    try {
-      const result = await invoke("desktop_test_webapp", { url: $("#webapp-url").value.trim(), token });
-      status.textContent = result.message;
-      status.className = `key-status ${result.valid ? "ok" : "error"}`;
-    } catch (error) { status.textContent = String(error); status.className = "key-status error"; }
-  }
-
   async function syncExisting() {
     state.syncInProgress = true;
     state.syncAnnouncement = "";
@@ -1089,8 +1065,6 @@
       defaultMeetingMode: $("#meeting-mode").value,
       customVocabulary: $("#vocabulary").value.split("\n"),
       customSummaryInstructions: $("#instructions").value,
-      webappUrl: $("#webapp-url").value.trim(),
-      webappToken: $("#clear-webapp-token").checked ? "" : $("#webapp-token").value || null,
     };
     for (const key of keyFields) payload[`${key.id}Key`] = $(`#clear-${key.id}`).checked ? "" : $(`#key-${key.id}`).value || null;
     try {
