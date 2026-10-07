@@ -129,8 +129,8 @@ Chrome or Native Messaging.
 3. Select an imported browser recording and choose **Create notes from saved audio**.
    That sends audio through the desktop transcription flow. Check the resulting transcript and summary. Matching meeting IDs are skipped,
    so importing the same file again is safe.
-4. Re-enter provider API keys in desktop Settings. Create a separate desktop
-   sync token only if you want to connect a web-app workspace.
+4. Re-enter provider API keys in desktop Settings. Sign in under Settings →
+   Account & sync only if you want cloud sync with a web-app workspace.
 
 The archive streams saved raw browser audio in chunks, so long recordings do not
 need to fit in memory. It also includes meeting text, partial transcripts, and
@@ -379,7 +379,7 @@ Then, in the extension:
 - Click a meeting in **Recent meetings** to open its notes page.
 - Use **Action inbox** for action items across meetings.
 - Open Settings to change providers, keys, Notes style, vocabulary, summary
-  instructions, or the optional webapp connection.
+  instructions, or your account and cloud sync.
 
 ## Optional cloud sync (Pro or Team)
 
