@@ -2,34 +2,38 @@
 
 Private, botless meeting notes: no bot joins your call.
 
-Use the Chrome extension to capture a browser meeting tab, or the cross-platform
-desktop app to capture browser and desktop meetings and create local notes. The
-extension saves tab and microphone audio in Chrome; export its archive and
-import it in desktop for transcription. Add your own transcription and summary
-API keys in desktop Settings. Optional workspace sync sends finished desktop
-notes to the web app and copies workspace notes into the desktop library.
-Web edits refresh workspace copies on sync; deletions and settings do not sync
-back. Extension recordings still need archive export and import. Audio and
-provider keys stay on this device.
+AI Notetaker is one desktop app for macOS, Windows, and Linux. It records your
+microphone and the meeting audio (Google Meet, Teams, Zoom, Discord, Slack, or any
+app) on your device, saves the audio first, then turns it into a transcript, summary,
+and action items. Everything works the same on all three systems, and no browser
+extension is required.
+
+Choose how notes are made when you first open the app:
+
+- **Hosted AI** — sign in to your AI Notetaker account. No provider keys to manage.
+- **Your own keys** — paste your own transcription and summary API keys. Free,
+  account-free, and audio goes straight from your device to the providers you pick.
+
+Optional workspace sync copies finished notes to the web app and brings workspace
+notes into the desktop library. Provider keys never leave your device.
 
 > **Status:** Preview installers are published for macOS, Windows, and
-> Debian/Ubuntu Linux. They are unsigned, and real-call capture and
-> fresh-install acceptance are still in progress across platforms. The Chrome
-> extension captures browser meeting audio while new recordings are processed
-> in desktop. See the
-> [desktop-first migration plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md).
+> Debian/Ubuntu Linux. They are unsigned, so your operating system will warn you on
+> first open ([how to open an unsigned app](docs/unsigned-install.md)). Real-call
+> capture acceptance is still in progress on every platform; see the
+> [release checklist](docs/launch/release-candidate-checklist.md).
 
 ## Quickstart
 
-For browser-tab capture, start the extension from the Chrome meeting tab, then
-export and import the archive in the desktop app to create notes. For direct
-browser or desktop system-audio capture, use the desktop app. Preview installers
-are available from the [release page](https://github.com/apercallc/ai-notetaker/releases/latest);
-review the [release and production acceptance checklist](docs/launch/release-candidate-checklist.md)
-before relying on cross-platform capture. See the [desktop-first migration
-plan](docs/superpowers/plans/2026-10-03-desktop-first-product-migration.md)
-and [recorder guide](docs/getting-started.md#browser-meeting-recorder-extension)
-for status.
+1. Download the installer for your system from the
+   [latest release](https://github.com/apercallc/ai-notetaker/releases/latest).
+2. Open **AI Notetaker**. It starts at login so recovery and the tray are always
+   available; closing the window keeps it running in the tray (relaunching brings
+   the window back).
+3. In **Settings → Processing**, sign in to Hosted AI or add your own keys.
+4. Allow microphone and system-audio access when your system asks.
+5. In **Record**, confirm everyone knows recording is starting, then start and stop.
+   Notes appear under **Notes**.
 
 ## What you get
 
@@ -46,16 +50,16 @@ for status.
 
 | You want to record | You need |
 | --- | --- |
-| **A meeting playing in a Chrome tab** | The AI Notetaker extension to save tab and microphone audio, then the desktop app and provider keys to import and create notes. |
-| **A browser call in any browser or a desktop call** | The AI Notetaker desktop app, transcription and summary API keys, and operating-system audio permission. Native loopback is supported on macOS 13+, Windows, and Linux; see the [audio setup guide](docs/helper-packaging.md) for fallbacks. |
+| **Any meeting, in a browser or a desktop app** | The AI Notetaker desktop app, a Hosted AI account or your own transcription and summary API keys, and operating-system audio permission. Native loopback is supported on macOS 13+, Windows, and Linux; see the [audio setup guide](docs/helper-packaging.md) for fallbacks. |
+| **A Chrome tab, optionally** | The optional AI Notetaker Chrome extension saves tab and microphone audio; export its archive and import it in the desktop app. |
 
 Get permission from the people you record where local law requires it. AI
 Notetaker does not bundle a custom audio driver; see the
 [audio setup guide](docs/helper-packaging.md) for the fallbacks.
 
-## Browser meeting recorder extension
+## Optional: browser meeting recorder extension
 
-The Chrome extension records microphone and meeting-tab audio separately
+The desktop app does not need this. The Chrome extension records microphone and meeting-tab audio separately
 in local browser storage. Export a full `.ntarchive` from extension Settings,
 import it in the desktop app, then create notes from the saved audio. The
 desktop app handles AI processing and desktop call sources. Meet, Teams, Zoom web meetings, Discord channels, and Slack workspaces

@@ -78,7 +78,7 @@ async fn check<R: Runtime>(app: &AppHandle<R>, data_dir: &Path, force: bool) {
         return;
     }
 
-    let client = match reqwest::Client::builder()
+    let client = match notetaker_core::providers::http_client_builder()
         .user_agent(concat!("AI-Notetaker/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(12))
         .build()

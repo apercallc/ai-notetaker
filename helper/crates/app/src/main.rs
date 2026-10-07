@@ -623,7 +623,7 @@ async fn upload_managed_recording(
                     }
                     // Separate client has no account headers/cookies. Never
                     // follow a storage redirect with a signed upload capability.
-                    let storage_client = reqwest::Client::builder()
+                    let storage_client = notetaker_core::providers::http_client_builder()
                         .redirect(reqwest::redirect::Policy::none())
                         .timeout(std::time::Duration::from_secs(180))
                         .build()
@@ -710,6 +710,11 @@ async fn ensure_managed_success(
         .json::<serde_json::Value>()
         .await
         .unwrap_or_else(|_| serde_json::json!({}));
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(format!(
+            "{operation}: your hosted session ended. Sign in again in Settings → Processing; the recording is saved on this device and will resume."
+        ));
+    }
     if !status.is_success() {
         let message = body
             .get("error")
@@ -1104,11 +1109,23 @@ fn main() {
     let _instance = match single_instance::acquire(&root) {
         Ok(single_instance::Acquired::Yes(lock)) => lock,
         Ok(single_instance::Acquired::AlreadyRunning) => {
-            notify::Notifier::default().notify_deduped(
-                "already-running",
-                "AI Notetaker",
-                "The helper is already running.",
-            );
+            // Launching the app again (launcher, dock, Start menu) must raise the running
+            // window. The plugin tells the first instance and exits this process; the setup
+            // hook is only reached when the first instance could not be contacted.
+            let _ = tauri::Builder::default()
+                .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                    show_main_window(app);
+                }))
+                .setup(|app| {
+                    notify::Notifier::default().notify_deduped(
+                        "already-running",
+                        "AI Notetaker",
+                        "AI Notetaker is already running. Open it from the tray menu.",
+                    );
+                    app.handle().exit(0);
+                    Ok(())
+                })
+                .run(tauri::generate_context!());
             return;
         }
         Err(error) => {
@@ -1117,13 +1134,31 @@ fn main() {
         }
     };
 
-    tauri::Builder::default()
+    let start_hidden = std::env::args().any(|arg| arg == BACKGROUND_FLAG);
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            // Closing the window must not end a recording or the recovery tray. Where no tray
+            // exists (GNOME without an indicator extension) a closed window quits unless a
+            // capture is live; relaunching always raises the running window.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if tray::keeps_running_when_window_closes() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             desktop_snapshot,
             desktop_test_provider_key,
             desktop_test_webapp,
             desktop_save_settings,
+            desktop_hosted_sign_in,
+            desktop_hosted_sign_out,
+            desktop_set_processing,
             desktop_import_transfer,
             desktop_import_audio_transfer,
             desktop_sync_existing_notes,
@@ -1144,6 +1179,7 @@ fn main() {
             desktop_open_blackhole_download,
             desktop_open_notes_folder,
             desktop_open_webapp,
+            desktop_open_about_link,
             desktop_open_webapp_conflict,
             desktop_resolve_webapp_conflict,
         ])
@@ -1151,7 +1187,7 @@ fn main() {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-                None,
+                Some(vec![BACKGROUND_FLAG]),
             ))?;
 
             let root = root.clone();
@@ -1300,14 +1336,38 @@ fn main() {
                 }
             });
 
+            if !start_hidden {
+                show_main_window(app.handle());
+            }
             tracing::info!("notetaker-helper starting");
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .unwrap_or_else(|error| {
             tracing::error!(%error, "AI Notetaker helper stopped during startup");
             std::process::exit(1);
         });
+    app.run(|app, event| {
+        // Clicking the dock icon of a running app raises its window.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            show_main_window(app);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app, event);
+    });
+}
+
+/// Passed by the launch-at-login entry so a login start stays in the tray.
+const BACKGROUND_FLAG: &str = "--background";
+
+pub(crate) fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 #[tauri::command]
@@ -1545,6 +1605,11 @@ async fn desktop_save_settings(
     apply_secret_update(&mut keys.gemini, input.gemini_key)?;
     apply_secret_update(&mut keys.deepseek, input.deepseek_key)?;
 
+    let current_preferences = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
     let previous_token = desktop_settings::get_webapp_token()?;
     let new_token = match input.webapp_token {
         Some(token) => validate_secret(Some(token))?,
@@ -1562,6 +1627,8 @@ async fn desktop_save_settings(
             .collect(),
         custom_summary_instructions: input.custom_summary_instructions.trim().to_string(),
         webapp_url: normalized_url.unwrap_or_default(),
+        processing: current_preferences.processing,
+        hosted_account: current_preferences.hosted_account.clone(),
     };
 
     if let Err(error) = desktop_settings::save_api_keys(&keys) {
@@ -1609,6 +1676,195 @@ async fn desktop_save_settings(
         );
     }
 
+    Ok(desktop_settings::settings_view(
+        preferences,
+        &keys,
+        has_webapp_token,
+    ))
+}
+
+#[derive(Deserialize)]
+struct HostedLoginReply {
+    #[serde(rename = "accessToken")]
+    access_token: String,
+    #[serde(rename = "expiresAt", default)]
+    expires_at: String,
+    #[serde(rename = "accountId")]
+    account_id: String,
+    #[serde(rename = "workspaceId")]
+    workspace_id: String,
+    #[serde(default)]
+    plan: String,
+}
+
+#[derive(Deserialize)]
+struct HostedLoginError {
+    error: Option<String>,
+}
+
+/// Signs in to the hosted service. The password is sent once and never stored; only the
+/// revocable session token it returns is kept, in the OS credential store.
+#[tauri::command]
+async fn desktop_hosted_sign_in(
+    context: tauri::State<'_, DesktopCommandContext>,
+    email: String,
+    password: String,
+    base_url: Option<String>,
+) -> Result<desktop_settings::DesktopSettingsView, String> {
+    let email = email.trim().to_string();
+    if email.is_empty()
+        || email.chars().count() > 320
+        || password.is_empty()
+        || password.chars().count() > 1_000
+    {
+        return Err("Enter the email and password for your AI Notetaker account.".into());
+    }
+    let base_url = desktop_settings::normalize_webapp_url(
+        base_url
+            .as_deref()
+            .unwrap_or(desktop_settings::DEFAULT_WEBAPP_URL),
+    )?
+    .unwrap_or_else(|| desktop_settings::DEFAULT_WEBAPP_URL.to_string());
+    let client = notetaker_core::providers::http_client_builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("Sign-in could not start: {error}"))?;
+    let response = client
+        .post(format!("{base_url}/api/v1/auth/login"))
+        .json(&serde_json::json!({ "email": email, "password": password }))
+        .send()
+        .await
+        .map_err(|_| "Could not reach the AI Notetaker service. Check your internet connection and try again.".to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        let detail = response
+            .json::<HostedLoginError>()
+            .await
+            .ok()
+            .and_then(|body| body.error);
+        return Err(match status.as_u16() {
+            401 => "That email and password did not match. Check them and try again.".to_string(),
+            404 => "Hosted AI is not available at this address. Use your own provider keys, or check the web-app URL.".to_string(),
+            429 => "Too many sign-in attempts. Wait a few minutes and try again.".to_string(),
+            _ => detail.unwrap_or_else(|| format!("Sign-in failed ({status}). Try again in a moment.")),
+        });
+    }
+    let reply: HostedLoginReply = response.json().await.map_err(|_| {
+        "The service sent an unexpected sign-in reply. Update AI Notetaker and try again."
+            .to_string()
+    })?;
+    if reply.access_token.is_empty() || reply.account_id.is_empty() || reply.workspace_id.is_empty()
+    {
+        return Err("The service sent an incomplete sign-in reply. Try again.".into());
+    }
+
+    let previous = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let previous_token = desktop_settings::get_hosted_token().ok().flatten();
+    desktop_settings::set_hosted_token(Some(&reply.access_token))?;
+    let preferences = desktop_settings::DesktopPreferences {
+        processing: desktop_settings::ProcessingChoice::Hosted,
+        hosted_account: Some(desktop_settings::HostedAccount {
+            email,
+            base_url,
+            account_id: reply.account_id,
+            workspace_id: reply.workspace_id,
+            plan: if reply.plan.is_empty() {
+                "free".into()
+            } else {
+                reply.plan
+            },
+            expires_at: reply.expires_at,
+        }),
+        ..previous
+    };
+    if let Err(error) = preferences.save(&context.app.data_dir) {
+        let _ = desktop_settings::set_hosted_token(previous_token.as_deref());
+        return Err(error);
+    }
+    apply_preferences(context.inner(), preferences).await
+}
+
+#[tauri::command]
+async fn desktop_hosted_sign_out(
+    context: tauri::State<'_, DesktopCommandContext>,
+) -> Result<desktop_settings::DesktopSettingsView, String> {
+    let previous = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    desktop_settings::set_hosted_token(None)?;
+    let preferences = desktop_settings::DesktopPreferences {
+        processing: desktop_settings::ProcessingChoice::Local,
+        hosted_account: None,
+        ..previous
+    };
+    preferences.save(&context.app.data_dir)?;
+    apply_preferences(context.inner(), preferences).await
+}
+
+/// Switches between hosted processing and the user's own keys without signing out.
+#[tauri::command]
+async fn desktop_set_processing(
+    context: tauri::State<'_, DesktopCommandContext>,
+    hosted: bool,
+) -> Result<desktop_settings::DesktopSettingsView, String> {
+    let previous = context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let choice = if hosted {
+        desktop_settings::ProcessingChoice::Hosted
+    } else {
+        desktop_settings::ProcessingChoice::Local
+    };
+    if context
+        .app
+        .active
+        .lock()
+        .await
+        .values()
+        .any(|active| active.audio.is_some())
+    {
+        return Err("Stop the current recording before changing how notes are processed.".into());
+    }
+    let preferences = desktop_settings::DesktopPreferences {
+        processing: choice,
+        ..previous
+    };
+    if hosted && desktop_settings::hosted_service(&preferences).is_none() {
+        return Err("Sign in to your AI Notetaker account first.".into());
+    }
+    preferences.save(&context.app.data_dir)?;
+    apply_preferences(context.inner(), preferences).await
+}
+
+async fn apply_preferences(
+    context: &DesktopCommandContext,
+    preferences: desktop_settings::DesktopPreferences,
+) -> Result<desktop_settings::DesktopSettingsView, String> {
+    *context
+        .preferences
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = preferences.clone();
+    let keys = desktop_settings::load_api_keys()?;
+    let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)?;
+    handle_message(
+        context.app.clone(),
+        context.tray.clone(),
+        make_settings_message(&preferences, keys.clone(), webapp),
+        context.output.clone(),
+    )
+    .await;
+    let has_webapp_token =
+        desktop_settings::get_webapp_token()?.is_some_and(|token| !token.trim().is_empty());
     Ok(desktop_settings::settings_view(
         preferences,
         &keys,
@@ -1690,6 +1946,8 @@ async fn apply_imported_desktop_preferences(
             .to_string(),
         // The archive deliberately contains no web-app URL or token.
         webapp_url: current.webapp_url,
+        processing: current.processing,
+        hosted_account: current.hosted_account,
     };
     preferences.save(&context.app.data_dir)?;
     *context
@@ -1727,11 +1985,15 @@ async fn desktop_start_recording(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
     let keys = desktop_settings::load_api_keys()?;
-    resolve_keys(
-        preferences.transcription_provider,
-        preferences.summarization_provider,
-        &keys,
-    )?;
+    processing_ready(&preferences, &keys)?;
+    let processing_mode = match desktop_settings::hosted_service(&preferences) {
+        Some(service) => ProcessingMode::Managed {
+            account_id: service.account_id,
+            workspace_id: service.workspace_id,
+            plan: service.plan,
+        },
+        None => ProcessingMode::LocalByok,
+    };
 
     let meeting_id = Uuid::new_v4();
     handle_message(
@@ -1742,7 +2004,7 @@ async fn desktop_start_recording(
             title: (!title.is_empty()).then(|| title.to_string()),
             meeting_mode: preferences.default_meeting_mode,
             capture_source: CaptureSource::DesktopLoopback,
-            processing_mode: ProcessingMode::LocalByok,
+            processing_mode,
         },
         context.output.clone(),
     )
@@ -1865,11 +2127,21 @@ async fn start_desktop_recovery(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
     let keys = desktop_settings::load_api_keys()?;
-    resolve_keys(
-        preferences.transcription_provider,
-        preferences.summarization_provider,
-        &keys,
-    )?;
+    if meta.managed_pending {
+        processing_ready(
+            &desktop_settings::DesktopPreferences {
+                processing: desktop_settings::ProcessingChoice::Hosted,
+                ..preferences.clone()
+            },
+            &keys,
+        )?;
+    } else {
+        resolve_keys(
+            preferences.transcription_provider,
+            preferences.summarization_provider,
+            &keys,
+        )?;
+    }
     let mut recovering = context.app.recovering.lock().await;
     if !recovering.insert(meeting_id) {
         return Err("Recovery is already running for this recording.".into());
@@ -2137,6 +2409,8 @@ async fn desktop_test_audio(
     Ok(())
 }
 
+/// Opens the operating system's own page for fixing audio access: Screen Recording on
+/// macOS, microphone privacy on Windows, and the sound settings on Linux.
 #[tauri::command]
 fn desktop_open_screen_recording_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -2145,10 +2419,49 @@ fn desktop_open_screen_recording_settings() -> Result<(), String> {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
         )
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        Err("Open your operating system's privacy settings to grant audio access.".into())
+        open_external("ms-settings:privacy-microphone")
     }
+    #[cfg(target_os = "linux")]
+    {
+        for (program, args) in [
+            ("gnome-control-center", &["sound"][..]),
+            ("systemsettings", &["kcm_pulseaudio"][..]),
+            ("pavucontrol", &[][..]),
+        ] {
+            if std::process::Command::new(program)
+                .args(args)
+                .spawn()
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+        Err("Open your system's sound settings to choose a microphone and output.".into())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err("Open your operating system's sound settings.".into())
+    }
+}
+
+#[tauri::command]
+fn desktop_open_about_link(page: String) -> Result<(), String> {
+    let site = desktop_settings::DEFAULT_WEBAPP_URL;
+    let url = match page.as_str() {
+        "privacy" => format!("{site}/privacy"),
+        "terms" => format!("{site}/terms"),
+        "license" => "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE".to_string(),
+        "third-party" => {
+            "https://github.com/apercallc/ai-notetaker/blob/main/docs/third-party-licenses.md"
+                .to_string()
+        }
+        "source" => "https://github.com/apercallc/ai-notetaker".to_string(),
+        "issues" => "https://github.com/apercallc/ai-notetaker/issues".to_string(),
+        _ => return Err("Unknown link.".into()),
+    };
+    open_external(&url)
 }
 
 #[tauri::command]
@@ -2205,7 +2518,7 @@ fn desktop_open_webapp(context: tauri::State<'_, DesktopCommandContext>) -> Resu
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let url = desktop_settings::normalize_webapp_url(&preferences.webapp_url)?
-        .ok_or_else(|| "Add your web-app URL in Settings first.".to_string())?;
+        .unwrap_or_else(|| desktop_settings::DEFAULT_WEBAPP_URL.to_string());
     open_external(&url)
 }
 
@@ -2294,6 +2607,7 @@ fn make_settings_message(
     api_keys: ApiKeys,
     webapp: Option<native_messaging::WebappConfig>,
 ) -> ExtensionToHelper {
+    let hosted = desktop_settings::hosted_service(preferences);
     ExtensionToHelper::Settings {
         transcription_provider: preferences.transcription_provider,
         summarization_provider: preferences.summarization_provider,
@@ -2303,8 +2617,15 @@ fn make_settings_message(
         custom_vocabulary: preferences.custom_vocabulary.clone(),
         custom_summary_instructions: (!preferences.custom_summary_instructions.is_empty())
             .then(|| preferences.custom_summary_instructions.clone()),
-        processing_mode: ProcessingMode::LocalByok,
-        managed_service: None,
+        processing_mode: match &hosted {
+            Some(service) => ProcessingMode::Managed {
+                account_id: service.account_id.clone(),
+                workspace_id: service.workspace_id.clone(),
+                plan: service.plan.clone(),
+            },
+            None => ProcessingMode::LocalByok,
+        },
+        managed_service: hosted,
     }
 }
 
@@ -3810,6 +4131,26 @@ fn summary_options(
             .map(|value| value.chars().take(4_000).collect()),
         flagged_moments: vec![],
     }
+}
+
+/// Hosted processing needs a live session instead of provider keys.
+fn processing_ready(
+    preferences: &desktop_settings::DesktopPreferences,
+    keys: &native_messaging::ApiKeys,
+) -> Result<(), String> {
+    if preferences.processing == desktop_settings::ProcessingChoice::Hosted {
+        return desktop_settings::hosted_service(preferences)
+            .map(|_| ())
+            .ok_or_else(|| {
+                "Your hosted session ended. Sign in again in Settings → Processing.".to_string()
+            });
+    }
+    resolve_keys(
+        preferences.transcription_provider,
+        preferences.summarization_provider,
+        keys,
+    )
+    .map(|_| ())
 }
 
 fn resolve_keys(

@@ -2,7 +2,8 @@
 //! this JSON file contains only provider choices and non-secret preferences.
 
 use notetaker_core::native_messaging::{
-    ApiKeys, MeetingMode, SummarizationProviderId, TranscriptionProviderId, WebappConfig,
+    ApiKeys, ManagedServiceConfig, MeetingMode, SummarizationProviderId, TranscriptionProviderId,
+    WebappConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -13,6 +14,38 @@ const SETTINGS_FILE: &str = "desktop-settings.json";
 
 pub const DEFAULT_WEBAPP_URL: &str = "https://ai-notetaker.apercallc.com";
 
+/// Who runs transcription and summaries: the user's own provider keys on this device (the
+/// account-free default), or the hosted service the user signed in to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessingChoice {
+    #[default]
+    Local,
+    Hosted,
+}
+
+/// Non-secret details of the signed-in hosted account. The session token itself lives in
+/// the operating system credential store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedAccount {
+    pub email: String,
+    pub base_url: String,
+    pub account_id: String,
+    pub workspace_id: String,
+    pub plan: String,
+    pub expires_at: String,
+}
+
+impl HostedAccount {
+    /// An unparseable expiry is treated as live; the server still rejects a dead session.
+    pub fn is_expired(&self) -> bool {
+        chrono::DateTime::parse_from_rfc3339(&self.expires_at)
+            .map(|expires| expires <= chrono::Utc::now())
+            .unwrap_or(false)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopPreferences {
@@ -22,6 +55,10 @@ pub struct DesktopPreferences {
     pub custom_vocabulary: Vec<String>,
     pub custom_summary_instructions: String,
     pub webapp_url: String,
+    #[serde(default)]
+    pub processing: ProcessingChoice,
+    #[serde(default)]
+    pub hosted_account: Option<HostedAccount>,
 }
 
 impl Default for DesktopPreferences {
@@ -33,6 +70,8 @@ impl Default for DesktopPreferences {
             custom_vocabulary: Vec::new(),
             custom_summary_instructions: String::new(),
             webapp_url: DEFAULT_WEBAPP_URL.to_string(),
+            processing: ProcessingChoice::Local,
+            hosted_account: None,
         }
     }
 }
@@ -47,6 +86,8 @@ pub struct DesktopSettingsView {
     pub has_gemini_key: bool,
     pub has_deepseek_key: bool,
     pub has_webapp_token: bool,
+    /// A hosted session exists in the credential store and has not expired.
+    pub has_hosted_session: bool,
 }
 
 impl DesktopPreferences {
@@ -119,11 +160,47 @@ pub fn set_webapp_token(token: Option<&str>) -> Result<(), String> {
     set_secret("webapp-sync-token", token)
 }
 
+pub fn get_hosted_token() -> Result<Option<String>, String> {
+    get_secret("hosted-session-token")
+}
+
+pub fn set_hosted_token(token: Option<&str>) -> Result<(), String> {
+    set_secret("hosted-session-token", token)
+}
+
+/// The hosted service connection to hand the pipeline, present only while hosted processing is
+/// selected and the saved session is still usable.
+pub fn hosted_service(preferences: &DesktopPreferences) -> Option<ManagedServiceConfig> {
+    if preferences.processing != ProcessingChoice::Hosted {
+        return None;
+    }
+    let account = preferences
+        .hosted_account
+        .as_ref()
+        .filter(|account| !account.is_expired())?;
+    let token = get_hosted_token()
+        .ok()
+        .flatten()
+        .filter(|token| !token.trim().is_empty())?;
+    Some(ManagedServiceConfig {
+        base_url: account.base_url.clone(),
+        access_token: token,
+        account_id: account.account_id.clone(),
+        workspace_id: account.workspace_id.clone(),
+        plan: account.plan.clone(),
+    })
+}
+
 pub fn settings_view(
     preferences: DesktopPreferences,
     keys: &ApiKeys,
     has_webapp_token: bool,
 ) -> DesktopSettingsView {
+    let has_hosted_session = preferences
+        .hosted_account
+        .as_ref()
+        .is_some_and(|account| !account.is_expired())
+        && get_hosted_token().ok().flatten().is_some();
     DesktopSettingsView {
         preferences,
         has_deepgram_key: keys.deepgram.is_some(),
@@ -132,6 +209,7 @@ pub fn settings_view(
         has_gemini_key: keys.gemini.is_some(),
         has_deepseek_key: keys.deepseek.is_some(),
         has_webapp_token,
+        has_hosted_session,
     }
 }
 
@@ -192,5 +270,45 @@ fn set_secret(account: &str, secret: Option<&str>) -> Result<(), String> {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err("The operating system could not remove this saved credential.".into()),
         },
+    }
+}
+
+#[cfg(test)]
+mod hosted_tests {
+    use super::*;
+
+    fn account(expires_at: &str) -> HostedAccount {
+        HostedAccount {
+            email: "a@b.co".into(),
+            base_url: "https://notes.test".into(),
+            account_id: "acct".into(),
+            workspace_id: "ws".into(),
+            plan: "pro".into(),
+            expires_at: expires_at.into(),
+        }
+    }
+
+    #[test]
+    fn settings_saved_before_hosted_sign_in_still_load_as_local() {
+        let old = r#"{"transcriptionProvider":"deepgram","summarizationProvider":"claude","defaultMeetingMode":"general","customVocabulary":[],"customSummaryInstructions":"","webappUrl":""}"#;
+        let loaded: DesktopPreferences = serde_json::from_str(old).unwrap();
+        assert_eq!(loaded.processing, ProcessingChoice::Local);
+        assert!(loaded.hosted_account.is_none());
+    }
+
+    #[test]
+    fn a_past_expiry_ends_the_session_and_a_bad_one_does_not() {
+        assert!(account("2020-01-01T00:00:00Z").is_expired());
+        assert!(!account("2999-01-01T00:00:00Z").is_expired());
+        assert!(!account("").is_expired());
+    }
+
+    #[test]
+    fn local_processing_never_hands_out_a_hosted_connection() {
+        let preferences = DesktopPreferences {
+            hosted_account: Some(account("2999-01-01T00:00:00Z")),
+            ..DesktopPreferences::default()
+        };
+        assert!(hosted_service(&preferences).is_none());
     }
 }

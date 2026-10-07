@@ -229,6 +229,8 @@ impl AudioCapture for WindowsAudioCapture {
                 "Windows WASAPI output loopback is available. The helper captures the default output while keeping your normal speakers or headphones active.".to_string()
             } else if ready {
                 format!("VB-CABLE is available. Confirm Listen to this device is enabled so you can hear the meeting, then run the test. {}", VB_CABLE_ATTRIBUTION_TEXT)
+            } else if driver_installed {
+                "No microphone is available to AI Notetaker. Connect a microphone, then open Settings > Privacy & security > Microphone and allow desktop apps to access it, and check again.".to_string()
             } else {
                 format!("Windows audio loopback is not ready. Install the base VB-CABLE package, enable Listen to this device, and try again. {}", VB_CABLE_ATTRIBUTION_TEXT)
             },

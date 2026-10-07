@@ -15,7 +15,7 @@ it("keeps a real release destination when GitHub links cannot be loaded", () => 
   expect(html).toContain("Record browser or desktop meetings.");
   expect(html).toContain("Release links could not be loaded.");
   expect(html).toContain("View all releases");
-  expect(html).toContain("Chrome extension for browser meetings");
+  expect(html).toContain("Optional Chrome extension");
   expect(html).toContain("Already use the previous extension and helper setup?");
   expect(html).not.toContain("Not published yet");
   expect(html).not.toContain("Add to Chrome");

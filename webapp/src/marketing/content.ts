@@ -10,7 +10,7 @@ export const SITE = {
   name: "AI Notetaker",
   tagline: "Meeting notes without the meeting bot.",
   description:
-    "Capture browser meetings with the Chrome extension or desktop app, and capture native desktop meetings with the macOS, Windows, or Linux app. Optional workspace sync sends finished desktop note text to the web app and copies workspace notes into the desktop library. Raw audio and provider keys stay on the device.",
+    "One desktop app for macOS, Windows, and Linux records browser and desktop meetings, saves the audio on your device, and makes your notes with Hosted AI or your own keys. An optional Chrome extension can record a browser tab. Optional workspace sync sends finished desktop note text to the web app and copies workspace notes into the desktop library. Raw audio and provider keys stay on the device.",
   repoUrl: "https://github.com/apercallc/ai-notetaker",
   releasesUrl: "https://github.com/apercallc/ai-notetaker/releases/latest",
   licenseUrl: "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE",
@@ -57,13 +57,13 @@ export const FAQS: Faq[] = [
   {
     question: "Does AI Notetaker join my meeting as a bot?",
     answer:
-      "No. The Chrome extension captures browser-tab audio, and the desktop app captures browser or desktop audio from your device. Nothing joins the participant list. You are still responsible for telling participants and following the recording-consent rules that apply to you.",
+      "No. The desktop app captures browser or desktop audio from your device (the optional Chrome extension can record a browser tab). Nothing joins the participant list. You are still responsible for telling participants and following the recording-consent rules that apply to you.",
   },
   {
     question: "What is the difference between Hosted AI and using my own keys?",
     topics: ["setup", "pricing"],
     answer:
-      "The desktop app uses your own transcription and summary API keys, which you enter in its Settings. The software is free and does not require an AI Notetaker login. You can separately sign in to a web-app workspace and create a revocable desktop sync token. Sync sends finished desktop notes to the web app and copies workspace notes into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back, and extension recordings still need archive export and import.",
+      "Both work in the same desktop app, in Settings → Processing. With Hosted AI you sign in to your AI Notetaker account and we run transcription and summaries within your plan. With your own keys you enter your own transcription and summary API keys; the software is free and needs no AI Notetaker login. You can also separately sign in to a web-app workspace and create a revocable desktop sync token. Sync sends finished desktop notes to the web app and copies workspace notes into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back, and extension recordings still need archive export and import.",
   },
   {
     question: "How much does AI Notetaker cost?",
@@ -139,7 +139,7 @@ export const FAQS: Faq[] = [
   {
     question: "When should I use the extension or desktop app?",
     topics: ["setup"],
-    answer: "Use the Chrome extension for a meeting playing in a Chrome tab. It saves the tab and microphone audio in Chrome; export the archive and import it in the desktop app to transcribe and create notes. Use the desktop app for browser meetings in any browser and for meetings in desktop apps. The desktop app stores and processes its recordings locally, and can optionally sync finished notes to a web-app workspace.",
+    answer: "Use the desktop app: it records browser meetings in any browser and meetings in desktop apps, with no extension needed. The optional Chrome extension can also save a meeting tab's audio; export the archive and import it in the desktop app to transcribe and create notes. The desktop app stores and processes its recordings locally, and can optionally sync finished notes to a web-app workspace.",
   },
   {
     question: "Is AI Notetaker open source?",

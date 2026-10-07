@@ -16,7 +16,8 @@
         "height": 760,
         "minWidth": 780,
         "minHeight": 620,
-        "resizable": true
+        "resizable": true,
+        "visible": false
       }
     ],
     "security": {
@@ -33,8 +34,7 @@
       "icons/icon.icns"
     ],
     "resources": {
-      "../../native-messaging-host-manifest/com.ainotetaker.helper.json.template": "native-messaging-host-template.json",
-      "resources/windows": "windows"
+      "../../native-messaging-host-manifest/com.ainotetaker.helper.json.template": "native-messaging-host-template.json"
     },
     "linux": {
       "deb": {
@@ -43,6 +43,7 @@
           "librsvg2-2",
           "pulseaudio-utils"
         ],
+        "desktopTemplate": "scripts/debian/main.desktop",
         "postInstallScript": "scripts/debian/postinst",
         "postRemoveScript": "scripts/debian/postrm"
       }

@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../../native-messaging-host-manifest/com.ainotetaker.helper.json.template": "native-messaging-host-template.json",
+      "resources/windows": "windows"
+    }
+  }
+}

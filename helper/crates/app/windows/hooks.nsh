@@ -8,7 +8,8 @@
   ${EndIf}
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$1\install-native-messaging.ps1" -InstallDir "$INSTDIR"' $0
   ${If} $0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "AI Notetaker could not register Chrome Native Messaging. The extension will continue to show the helper as unavailable until registration is repaired."
+    ; Browser-extension registration is optional; the desktop app works without it.
+    DetailPrint "Optional browser extension link was not registered (exit code $0). AI Notetaker works without it."
   ${EndIf}
 !macroend
 
@@ -20,6 +21,6 @@
   ${EndIf}
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$1\uninstall-native-messaging.ps1" -InstallDir "$INSTDIR"' $0
   ${If} $0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "AI Notetaker could not remove its Chrome Native Messaging registration. If Chrome still lists the helper after uninstall, remove the per-user registration documented in the uninstall guide."
+    DetailPrint "Optional browser extension link could not be removed (exit code $0)."
   ${EndIf}
 !macroend

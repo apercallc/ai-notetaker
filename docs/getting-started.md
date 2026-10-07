@@ -1,22 +1,20 @@
 # Getting started
 
-Use the Chrome extension to capture browser-tab audio, or the Tauri desktop app
-to capture browser and desktop meetings and create local notes. Extension
-recordings must be exported and imported into desktop for transcription.
-Optional workspace sync sends finished desktop notes to the web app and copies
-workspace notes into the desktop library. Later web edits, deletions, and
-settings do not sync back yet. Extension recordings still need archive export
-and import.
+AI Notetaker is one desktop app for macOS, Windows, and Linux. It records your
+microphone and the meeting audio, saves the audio on your device first, and creates
+notes, all without a browser extension. Choose **Hosted AI** (sign in; no provider
+keys) or **your own keys** (account-free) in **Settings → Processing**. Optional
+workspace sync sends finished notes to the web app and copies workspace notes into
+the desktop library. The Chrome extension is an optional extra for recording a
+browser tab.
 
 For the release and installation model, including direct platform downloads,
 first-open warnings, checksums, and the Docker-only webapp option, see the
 [current distribution decision](superpowers/specs/2026-09-28-direct-download-distribution.md).
 
-> **Release status.** v0.18.2 preview installers are published for macOS,
-> Windows, and Debian/Ubuntu Linux. They are unsigned, and fresh-install and
-> real-call capture acceptance is still in progress across platforms. Browser
-> tab capture is available in the Chrome extension; the desktop app processes
-> those recordings and handles direct system-audio capture. See the
+> **Release status.** Preview installers are published for macOS, Windows, and
+> Debian/Ubuntu Linux. They are unsigned, and fresh-install and real-call capture
+> acceptance is still in progress across platforms. See the
 > [release acceptance checklist](launch/release-candidate-checklist.md) before
 > relying on a platform capture path.
 
@@ -30,7 +28,8 @@ you are contributing, keep user-facing copy consistent with each surface.
 | **Start recording / Stop recording** | Begin or end saving the active Chrome tab and microphone audio in the extension. |
 | **Create notes from saved audio** | Use desktop provider keys to transcribe and summarize imported audio. |
 | **Notes style** | The summary template for a meeting: General, Standup, Sales call, 1:1, Interview, or your own. |
-| **Provider API keys** | You provide transcription and summarization keys and pay those providers directly. No AI Notetaker account or sign-in is needed. |
+| **Hosted AI** | Sign in to your AI Notetaker account and we run transcription and summaries for you, within your plan. No provider keys needed. |
+| **Your own keys** | You provide transcription and summarization keys and pay those providers directly. No AI Notetaker account or sign-in is needed. |
 
 "Managed" and "BYOK" are internal engineering terms. They appear in code,
 specs, and the contributor documentation, but not in the product UI or in
@@ -41,9 +40,9 @@ so "this is being recorded" always looks the same.
 
 ## Quickstart: install the desktop preview
 
-Download the v0.18.2 [desktop installer for your platform](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.2).
+Download the [desktop installer for your platform](https://github.com/apercallc/ai-notetaker/releases/latest).
 The installers are unsigned, and fresh-install and real-call capture checks
-are incomplete outside the tested macOS Apple silicon first-run flow. Review
+are still in progress. Review
 the [release checklist](launch/release-candidate-checklist.md) before relying
 on a platform capture path.
 
@@ -60,8 +59,8 @@ Building from source is optional; it is not the end-user install path.
    cargo run -p notetaker-app
    ```
 
-3. In **Settings**, choose transcription and summary providers, enter and test
-   their API keys, then save.
+3. In **Settings → Processing**, sign in to Hosted AI, or choose providers and
+   enter and test your own API keys, then save.
 4. Allow microphone and system-audio access when the OS asks.
 5. In **Record**, enter an optional title, confirm recording consent, then
    start and stop the meeting. Find the finished notes under **Notes**.

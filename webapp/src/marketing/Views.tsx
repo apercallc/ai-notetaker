@@ -33,7 +33,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
     <>
       <PageHead
         title="Local notes, with optional web access."
-        lede="Use the Chrome extension to capture a browser tab, or the desktop app to capture browser and desktop meetings on macOS, Windows, or Linux. No bot joins the call."
+        lede="One desktop app records browser and desktop meetings on macOS, Windows, and Linux, and makes your notes with Hosted AI or your own keys. An optional Chrome extension can record a browser tab. No bot joins the call."
       />
 
       <section className="mk-section mk-section--flush" aria-labelledby="choose-title">
@@ -278,7 +278,7 @@ export function DownloadView({
     <>
       <PageHead
         title="Record browser or desktop meetings."
-        lede="Use the desktop app for system-audio capture on macOS, Windows, or Linux, or use the Chrome extension to capture a browser tab and import it into desktop for notes."
+        lede="Download the desktop app for macOS, Windows, or Linux. It records browser and desktop meetings on its own; the Chrome extension below is optional."
       />
       <section className="mk-section mk-section--flush" aria-labelledby="desktop-app-availability">
         <div className="mk-wrap">
@@ -362,7 +362,7 @@ export function DownloadView({
       <section id="browser-extension" className="mk-section mk-section--flush" aria-labelledby="browser-extension-title">
         <div className="mk-wrap">
           <div className="mk-download">
-            <h2 className="mk-h2" id="browser-extension-title"><Icon as={Puzzle} size={24} />Chrome extension for browser meetings</h2>
+            <h2 className="mk-h2" id="browser-extension-title"><Icon as={Puzzle} size={24} />Optional Chrome extension</h2>
             <p>Capture meeting audio playing in the current secure Chrome tab and your microphone as separate local tracks. This includes web versions of Google Meet, Zoom, Teams, Slack, Discord, and other sites; behavior can vary by site and browser. Export the archive, then import it in desktop to transcribe and create notes.</p>
             <div className="mk-cta-row">
               {store && <a className="mk-btn mk-btn--solid" href={store}>Add to Chrome</a>}
@@ -607,12 +607,13 @@ export function PrivacyView() {
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
               <li>If you connect a web-app workspace, finished desktop note text syncs there and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
+              <li>Once a day, unless you turn it off in the tray menu, the desktop app asks GitHub&apos;s public releases page whether a newer version exists. GitHub, not us, receives your IP address and the app version. The app never installs anything by itself.</li>
               <li>Google Drive export and a self-hosted history server are optional. Their operators receive what you send them.</li>
             </ul>
 
             <h2>Hosted AI: what we collect</h2>
             <ul>
-              <li><strong>Account:</strong> your email address, a salted and hashed password, and your workspace and membership details.</li>
+              <li><strong>Account:</strong> your email address, a salted and hashed password, and your workspace and membership details. You can sign in from the website, the desktop app or the extension. The desktop app sends your password once, never stores it, and keeps only a revocable session token in your operating-system credential store; signing out deletes it.</li>
               <li><strong>Notes:</strong> the transcripts, summaries, decisions and action items generated from your meetings, stored in your workspace.</li>
               <li><strong>Usage and billing:</strong> how many meetings, meeting hours and Ask-your-notes questions you have used this period, and your plan status. Stripe holds your payment details, not us.</li>
               <li><strong>Ask your notes:</strong> when you ask a question, the service searches only your workspace and sends your question with the matching excerpts of your notes to the summary provider to write the answer. Questions and answers are not saved; we keep only a count for your allowance.</li>
@@ -845,7 +846,7 @@ export function TermsView() {
             <p>
               Download software from the linked project releases and check each release&apos;s notes and checksums.
               Current desktop installers are not code-signed and may show operating-system warnings. A checksum helps
-              detect a changed or damaged file, but it does not establish who published it.
+              detect a changed or damaged file, but it does not establish who published it. The desktop app can tell you when a newer release exists, but you choose whether to download and install it.
             </p>
 
             <h2>Liability</h2>
