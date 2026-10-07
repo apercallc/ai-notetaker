@@ -70,7 +70,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       {params.error && ERROR_MESSAGES[params.error] && <p className="error-text" role="alert">{ERROR_MESSAGES[params.error]}</p>}
       {params.checkout === "success" && (
         <p className={live ? "success-text" : "muted-copy"} role="status">
-          {live ? `Your ${planLabel(entitlements.plan)} plan is active.` : "Payment received. Activating your plan — this usually takes a few seconds."}
+          {entitlements.canSync ? `Your ${planLabel(entitlements.plan)} plan is active. Your desktop app syncs within a minute.` : live ? `Your ${planLabel(entitlements.plan)} subscription needs attention below before sync can run.` : "Payment received. Activating your plan — this usually takes a few seconds."}
         </p>
       )}
       {params.checkout === "cancelled" && <p className="muted-copy" role="status">Checkout was cancelled; your current plan is unchanged.</p>}
@@ -92,7 +92,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         <p className="muted-copy">
           {entitlements.canSync
             ? "Cloud sync is on for this workspace."
-            : "Cloud sync is off. Your notes stay on your device. Choose a plan below to sync them."}
+            : isOwner
+              ? "Cloud sync is off. Your notes stay on your device. Choose a plan below to sync them."
+              : "Cloud sync is off. Your notes stay on your device. Ask a workspace owner to choose a plan."}
         </p>
 
         {hostedAi && (
@@ -115,7 +117,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
             </div>
           </div>
         ) : (
-          <p className="muted-copy">Meetings are processed with your own provider keys. Choose a hosted plan below to have the service transcribe and summarize for you.</p>
+          <p className="muted-copy">Meetings are processed on your device with your own provider keys.</p>
         )}
 
         {entitlements.limit > 0 && (
@@ -156,6 +158,11 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           <p className="error-text" role="alert">Sync is paused because payment could not be collected. Update your payment method to resume.</p>
         ) : null}
         {entitlements.status === "canceled" && <p className="muted-copy">Your subscription has ended.</p>}
+        {(entitlements.status === "paused" || entitlements.status === "incomplete") && (
+          <p className="error-text" role="alert">
+            {entitlements.status === "paused" ? "Your subscription is paused, so cloud sync is off." : "Your payment is not complete, so cloud sync is not on yet."}{isOwner ? " Use Manage billing to resolve it." : " Ask a workspace owner to resolve it."}
+          </p>
+        )}
 
         <p className="muted-copy">Your provider keys never leave your device.</p>
         {isOwner && hasStripeCustomer && <BillingActionForm action={openBillingPortal} label="Manage billing" secondary />}

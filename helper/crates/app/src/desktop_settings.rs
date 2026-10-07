@@ -335,6 +335,21 @@ mod hosted_tests {
     }
 
     #[test]
+    fn settings_saved_with_hosted_processing_load_as_own_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        DesktopPreferences {
+            processing: ProcessingChoice::Hosted,
+            ..DesktopPreferences::default()
+        }
+        .save(directory.path())
+        .unwrap();
+
+        let loaded = DesktopPreferences::load(directory.path()).unwrap();
+
+        assert_eq!(loaded.processing, ProcessingChoice::Local);
+    }
+
+    #[test]
     fn account_calls_need_a_session_not_hosted_processing() {
         // No token is stored in the test keyring, so both are None; the point is that choosing
         // own keys never changes which of them is consulted for account pages.

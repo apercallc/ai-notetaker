@@ -73,7 +73,7 @@ async function render(focus?: FocusHint): Promise<void> {
     ),
   );
 
-  const emptyText = filter === "done" ? "No completed action items yet." : filter === "open" ? "Nothing open. You are all caught up." : "No action items yet. They appear here after a meeting is summarized.";
+  const emptyText = filter === "done" ? "No completed action items yet." : filter === "open" ? "Nothing open. You are all caught up." : "No action items yet. Notes are made in the desktop app, and its Actions tab lists them.";
 
   app.innerHTML = `
     <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><a href="../popup/popup.html">AI Notetaker</a></div>
@@ -118,7 +118,7 @@ async function render(focus?: FocusHint): Promise<void> {
         await render({ meetingId: input.dataset.meetingId!, actionId: input.dataset.actionId!, position });
       } catch {
         input.checked = !input.checked;
-        showActionError("Could not update this action item. Check the helper/webapp connection and try again.");
+        showActionError("Could not update this action item. Check the web app connection and try again.");
       }
     });
   }
@@ -139,7 +139,7 @@ async function render(focus?: FocusHint): Promise<void> {
         if (slot) slot.innerHTML = dueBadgeHtml(state);
       } catch {
         input.value = input.dataset.savedValue ?? "";
-        showActionError("Could not save the due date. Check the helper/webapp connection and try again.");
+        showActionError("Could not save the due date. Check the web app connection and try again.");
       }
     });
   }

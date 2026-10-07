@@ -1571,6 +1571,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_workspace_without_a_plan_keeps_the_note_queued_and_says_why() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::new(directory.path()).unwrap());
+        let id = Uuid::new_v4();
+        let started = Utc::now();
+        store.create_meeting(id, started).unwrap();
+        store
+            .mark_stopped(id, started + chrono::Duration::minutes(5))
+            .unwrap();
+        store
+            .write_summary(
+                id,
+                &Summary {
+                    summary: "Ready".into(),
+                    action_items: vec![],
+                },
+            )
+            .unwrap();
+        store.mark_processed(id).unwrap();
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(id).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(stream);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            let body = r#"{"error":"Cloud sync needs an active AI Notetaker subscription."}"#;
+            let response = format!(
+                "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            reader
+                .into_inner()
+                .write_all(response.as_bytes())
+                .await
+                .unwrap();
+        });
+
+        let error = sync
+            .sync_pending(store, &format!("http://{address}"), "sync-token")
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert!(
+            error.contains("needs an active AI Notetaker subscription"),
+            "{error}"
+        );
+        assert!(error.contains("HTTP 402"), "{error}");
+        // Nothing is lost: the note stays queued for when a plan is added.
+        assert_eq!(sync.status(true).pending, 1);
+    }
+
+    #[tokio::test]
     async fn a_note_deleted_on_this_device_is_not_brought_back_by_sync() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
