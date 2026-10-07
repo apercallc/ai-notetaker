@@ -1086,11 +1086,6 @@
       if (message.meetingId) state.recoveringIds.delete(message.meetingId);
       notify(message.message || "The helper reported an error.", "error");
       refresh();
-    } else if (message?.type === "managed_job_status") {
-      // Hosted processing: tell the user when an upload or job fails (their audio is still safe
-      // on this device and is retried), and keep the library status current otherwise.
-      if (message.status === "error" || message.status === "failed") notify(`${message.message || "Processing did not finish."} Your recording is saved on this device and will be retried.`, "warn");
-      refresh();
     } else if (["recording_started", "recording_stopped", "summary_ready", "recovered_recording", "audio_status", "audio_probe_result"].includes(message?.type)) {
       if (message?.type === "summary_ready" && message.meetingId) state.recoveringIds.delete(message.meetingId);
       refresh();
