@@ -46,6 +46,16 @@ are still in progress. Review
 the [release checklist](launch/release-candidate-checklist.md) before relying
 on a platform capture path.
 
+## Your account in the desktop app
+
+Sign in under **Settings → Processing** and the desktop app shows the same things as the
+web app: **Plans & usage** (meetings, meeting hours and Ask-your-notes questions used, with
+upgrade and cancel through the secure billing page), **Ask**, **Actions** (action items
+across all notes), **Team** (owners invite, change roles and remove members), and a
+**Library** that matches the web library because signing in also connects notes sync.
+Recording is the one thing only the desktop app does. Signing out ends the session on the
+server and the app goes back to your own keys.
+
 ## Developer quickstart: run from source
 
 Building from source is optional; it is not the end-user install path.
