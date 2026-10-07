@@ -176,6 +176,24 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx --yes @tauri-apps/cli@2.11.5 build --no-sign ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundle }}
+      - name: Sign the in-place update archives
+        # `--no-sign` above skips the Tauri updater signature too, so sign the update archives
+        # (macOS .app.tar.gz, Windows setup.exe) explicitly with the updater key.
+        if: runner.os != 'Linux'
+        working-directory: helper
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          shopt -s globstar nullglob
+          signed=0
+          for archive in target/**/bundle/macos/*.app.tar.gz target/**/bundle/nsis/*-setup.exe; do
+            npx --yes @tauri-apps/cli@2.11.5 signer sign "$archive"
+            test -s "$archive.sig"
+            signed=$((signed + 1))
+          done
+          test "$signed" -ge 1 || { echo "::error::no update archive found to sign"; exit 1; }
       - name: Test Mac installer and package guided DMG
         if: runner.os == 'macOS'
         env:
