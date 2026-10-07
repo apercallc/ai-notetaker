@@ -710,6 +710,11 @@ async fn ensure_managed_success(
         .json::<serde_json::Value>()
         .await
         .unwrap_or_else(|_| serde_json::json!({}));
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(format!(
+            "{operation}: your hosted session ended. Sign in again in Settings → Processing; the recording is saved on this device and will resume."
+        ));
+    }
     if !status.is_success() {
         let message = body
             .get("error")
