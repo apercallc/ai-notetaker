@@ -2,30 +2,47 @@
 
 All notable changes to AI Notetaker are documented here.
 
-## Unreleased
+## 0.21.0 - 2026-10-07
 
-- Multi-device sync you can trust. Notes processed by Hosted AI now follow the workspace on
-  the device that recorded them (web edits and edits from your other devices arrive there, with
-  no false "conflict"); a note you delete on a device stays deleted there instead of coming back;
-  action items you tick on the desktop update the web app and your other devices (and the other
-  way round); and notes whose summary names no owner now sync (the server used to reject them).
-- Staying offline is a real boundary: with no account nothing is stored in the cloud, and signing
-  out disconnects the sync that signing in turned on and revokes its token.
-- Sign in to the desktop app with any account, including Google-only ones, using a one-time code
-  from the web app's new "Connect the desktop app" page.
-- Export notes from the desktop Library (copy Markdown, save Markdown or text), like the web app.
-- Desktop app ↔ web app parity for hosted accounts. A new **Account** screen shows
-  plan and usage (meetings, meeting hours, Ask-your-notes questions), upgrades and
-  cancels through the secure billing page, lets you ask questions of your notes,
-  lists action items across all notes, and lets workspace owners invite, change
-  roles, reset passwords and remove teammates. Signing in on the desktop also
-  connects notes sync, so the desktop library and the web library match.
-- New hosted API routes for the desktop: `/api/v1/account/overview`, `/api/v1/ask`,
-  `/api/v1/team`, `/api/v1/account/desktop-sync-token`. The web pages and the
-  desktop now share one implementation of team management and Ask your notes.
-- Desktop app: hosted sign-in. Settings → Processing lets you sign in to Hosted AI
-  (no provider keys) or keep your own keys, the same on macOS, Windows, and Linux.
-  The session token lives in the OS credential store; the password is never stored.
+### Product
+- **New plans.** The desktop app is free with your own AI provider keys and needs no account. A
+  free account lets you sign in and manage your devices and data. **Pro** adds cloud sync of your
+  notes across devices; **Team** adds a shared workspace (invitations, activity log, retention).
+  There is no self-hosted backend: "self-hosted" means bring your own keys.
+- **Your notes are never held hostage.** When a plan ends, a payment fails or a workspace is
+  downgraded, nothing is deleted or locked. Notes already in the account stay readable, searchable,
+  exportable and deletable (the library is read-only), downloads to the desktop app keep working,
+  and notes made on your computer wait and upload when a plan returns. Automatic deletion
+  policies only run while a Team plan is active.
+- Hosted AI (project-run transcription, summaries, import, Ask your notes) is off by default
+  (`HOSTED_AI_ENABLED`). Notes are made on your device with your own keys.
+
+### Desktop app
+- Updates install in place on macOS and Windows (signed with the project's update key); the
+  Linux `.deb` opens the release page.
+- Signing in with a free account no longer claims sync is on: the app shows "Needs plan" with a
+  plans button, keeps your notes queued, and backs off instead of retrying every minute.
+- Sign in with any account, including Google-only ones, using the one-time code from the web
+  app's "Connect the desktop app" page (this was blocked by the server before this release).
+- New tray icons use the app's brand mark, with a red badge while recording and an amber badge
+  when a recovered recording needs attention. A missing tray host on GNOME no longer hides the
+  app with no way back.
+- Recordings left waiting on hosted processing are recovered with your own keys.
+- Fixed "Open account / web library" buttons that did nothing; first-run now opens the API keys
+  section; billing pages open only on Stripe or the service itself.
+- Fixed a startup crash ("No rustls crypto provider") that left a hidden process running so the
+  app never appeared; relaunching now always raises the window.
+
+### Web app
+- Pricing, FAQ, privacy, terms and onboarding rewritten for the plans above.
+- Team features (invitations, retention, activity log) need the Team plan; read-only notice and
+  "your notes are safe" panel when a plan has ended.
+- A paid Stripe subscription whose price is not a configured plan now alerts an operator.
+
+### Extension
+- Clearer recorder-only wording, and a "Get the desktop app" link in the popup and onboarding.
+
+### Earlier in this cycle
 - Fixed the Settings page failing to render since v0.20.0 (sync field templates
   were undefined).
 - Fixed a helper crash ("No rustls crypto provider is configured") from the
