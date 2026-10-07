@@ -47,11 +47,14 @@ audio setup/probing and `parec` for monitor capture. AppImage remains a CI
 bundle, but is not currently a published primary download; the desktop app
 does not require a stable Chrome Native Messaging path.
 
-The desktop app checks for a newer stable GitHub release daily and asks before
-opening the official release page. It never downloads or installs an update
-automatically. Users can also choose **Check for Updates…** from the tray
-menu. This keeps updates available without requiring a Tauri updater signing
-key or endpoint.
+The desktop app keeps itself up to date. macOS and Windows builds (and Linux AppImage)
+download a minisign-signed update from the latest GitHub release (`latest.json`), verify it
+against the public key in `tauri.conf.json`, and apply it silently when the app was started at
+login and nothing is recording, or after the user taps **Restart now**. A Linux `.deb` cannot
+replace itself, so it asks before opening the release page. **Automatic Updates** in the tray
+turns the checks off; **Check for Updates…** always works. The signing key is the
+`TAURI_SIGNING_PRIVATE_KEY` (and `_PASSWORD`) repository secret; losing it means installed apps
+can no longer be updated, so keep a backup.
 
 The release workflow uploads native installers, the Chrome extension ZIP,
 manifest, and `SHA256SUMS`; it does not publish Homebrew, WinGet, or Chocolatey

@@ -1,8 +1,12 @@
-//! Daily release checks (off until the user enables them in the tray) for the unsigned direct-download channel.
+//! Keeps the app up to date.
 //!
-//! This module never downloads or installs an update. It compares the latest
-//! stable GitHub release with this build, asks once per version, and opens the
-//! fixed official Releases page only when the user accepts.
+//! Automatic updates are on by default (the tray can turn them off). Where the platform supports
+//! in-place updates (macOS, Windows, Linux AppImage) the signed update is downloaded in the
+//! background and applied silently when the app was started at login and nothing is recording,
+//! or after the user taps "Restart now". Updates are verified against the project's updater key
+//! before they are installed. Where in-place update is impossible (a Linux .deb), or no signed
+//! update manifest exists yet, the app falls back to comparing the latest stable GitHub release
+//! and asking before it opens the official Releases page.
 
 use chrono::{DateTime, Duration, Utc};
 use semver::Version;
@@ -34,22 +38,30 @@ struct ReleaseResponse {
 
 /// Marker file: the daily background check runs only after the user turned it
 /// on from the tray. Manual "Check for Updates…" always works.
-const BACKGROUND_CHECK_MARKER: &str = "update-check-enabled";
+const BACKGROUND_CHECK_DISABLED_MARKER: &str = "auto-update-disabled";
 
-pub fn background_checks_enabled(data_dir: &Path) -> bool {
-    data_dir.join(BACKGROUND_CHECK_MARKER).exists()
+/// Set when the app was started hidden at login, the one moment an update can apply with nothing to interrupt.
+static STARTED_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_started_hidden(hidden: bool) {
+    STARTED_HIDDEN.store(hidden, std::sync::atomic::Ordering::Release);
 }
 
-/// Turns the daily background check on or off. Returns whether the setting now matches `enabled`.
+/// Automatic updates are on unless the user turned them off in the tray.
+pub fn background_checks_enabled(data_dir: &Path) -> bool {
+    !data_dir.join(BACKGROUND_CHECK_DISABLED_MARKER).exists()
+}
+
+/// Turns automatic updates on or off. Returns whether the setting now matches `enabled`.
 pub fn set_background_checks(data_dir: &Path, enabled: bool) -> bool {
-    let marker = data_dir.join(BACKGROUND_CHECK_MARKER);
+    let marker = data_dir.join(BACKGROUND_CHECK_DISABLED_MARKER);
     let result = if enabled {
-        std::fs::write(&marker, b"enabled")
-    } else {
         match std::fs::remove_file(&marker) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
             _ => Ok(()),
         }
+    } else {
+        std::fs::write(&marker, b"disabled")
     };
     result.is_ok()
 }
@@ -65,8 +77,114 @@ pub async fn check_now<R: Runtime>(app: &AppHandle<R>, data_dir: &Path) {
     check(app, data_dir, true).await;
 }
 
+/// Result of trying the signed in-place updater.
+enum Native {
+    /// The updater answered (installed, declined, up to date); nothing more to do.
+    Handled,
+    /// In-place update is not possible here or no signed manifest exists; use the release-page flow.
+    Unavailable,
+}
+
+async fn try_native<R: Runtime>(app: &AppHandle<R>, force: bool) -> Native {
+    // A Linux .deb cannot replace itself; only an AppImage can.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_none() {
+        return Native::Unavailable;
+    }
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(error) => {
+            tracing::debug!(%error, "in-place updater is not available");
+            return Native::Unavailable;
+        }
+    };
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            if force {
+                show_manual_notice(
+                    app,
+                    "AI Notetaker is up to date",
+                    "You have the latest version.".into(),
+                );
+            }
+            return Native::Handled;
+        }
+        Err(error) => {
+            tracing::debug!(%error, "signed update manifest unavailable");
+            return Native::Unavailable;
+        }
+    };
+    // Never interrupt a recording: Windows' installer closes the app. Try again at the next check.
+    if crate::tray::recording_active() {
+        return Native::Handled;
+    }
+    let version = update.version.clone();
+    let bytes = match update.download(|_, _| {}, || {}).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::warn!(%error, %version, "update download failed");
+            if force {
+                show_manual_notice(
+                    app,
+                    "Could not download the update",
+                    "Check your internet connection and try again.".into(),
+                );
+            }
+            return Native::Handled;
+        }
+    };
+    let silent = STARTED_HIDDEN.load(std::sync::atomic::Ordering::Acquire) && !force;
+    if silent && !crate::tray::recording_active() {
+        tracing::info!(%version, "applying update at login");
+        install_and_restart(app, update, bytes);
+        return Native::Handled;
+    }
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "AI Notetaker {version} is ready. Restart now to finish updating? Your notes and settings are kept."
+        ))
+        .title("AI Notetaker update ready")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Restart now".into(),
+            "Later".into(),
+        ))
+        .show(move |accepted| {
+            if accepted {
+                if crate::tray::recording_active() {
+                    show_manual_notice(
+                        &handle,
+                        "A recording is in progress",
+                        "Finish the recording, then choose Check for Updates… to restart.".into(),
+                    );
+                    return;
+                }
+                install_and_restart(&handle, update, bytes);
+            }
+        });
+    Native::Handled
+}
+
+fn install_and_restart<R: Runtime>(
+    app: &AppHandle<R>,
+    update: tauri_plugin_updater::Update,
+    bytes: Vec<u8>,
+) {
+    let handle = app.clone();
+    std::thread::spawn(move || match update.install(bytes) {
+        // On Windows the installer ends this process itself.
+        Ok(()) => handle.restart(),
+        Err(error) => tracing::warn!(%error, "update install failed"),
+    });
+}
+
 async fn check<R: Runtime>(app: &AppHandle<R>, data_dir: &Path, force: bool) {
     let _guard = CHECK_LOCK.lock().await;
+    if matches!(try_native(app, force).await, Native::Handled) {
+        return;
+    }
     let state_path = data_dir.join(CHECK_STATE_FILE);
     let mut state = read_state(&state_path);
     let now = Utc::now();

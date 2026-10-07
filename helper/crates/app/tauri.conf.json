@@ -26,7 +26,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage", "dmg", "nsis"],
+    "targets": [
+      "deb",
+      "appimage",
+      "dmg",
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -63,6 +68,17 @@
         "installerHooks": "windows/hooks.nsh"
       }
     },
-    "createUpdaterArtifacts": false
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk0QTEyRDdCMjE2NzI5NUYKUldSZktXY2hleTJobEprem9QTFl6b0JlOG1xTXU3dUZaYUJsK1Q2UmRSOEJkQ1hydFJOWFVuZ1gK",
+      "endpoints": [
+        "https://github.com/apercallc/ai-notetaker/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

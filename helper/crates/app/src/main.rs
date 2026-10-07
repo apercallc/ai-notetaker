@@ -1137,11 +1137,13 @@ fn main() {
     };
 
     let start_hidden = std::env::args().any(|arg| arg == BACKGROUND_FLAG);
+    update_check::set_started_hidden(start_hidden);
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
             // Closing the window must not end a recording or the recovery tray. Where no tray
             // exists (GNOME without an indicator extension) a closed window quits unless a

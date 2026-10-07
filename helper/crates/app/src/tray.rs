@@ -36,6 +36,11 @@ static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 /// Closing the window hides it (instead of quitting) when a tray icon can bring it back or a
 /// capture is live.
+/// True while a recording is being captured.
+pub fn recording_active() -> bool {
+    RECORDING_ACTIVE.load(Ordering::Acquire)
+}
+
 pub fn keeps_running_when_window_closes() -> bool {
     TRAY_AVAILABLE.load(Ordering::Acquire) || RECORDING_ACTIVE.load(Ordering::Acquire)
 }
@@ -197,9 +202,9 @@ fn try_initialize<R: Runtime>(
         app,
         "daily-update-check",
         if crate::update_check::background_checks_enabled(&data_dir) {
-            "Daily Update Check (On)"
+            "Automatic Updates (On)"
         } else {
-            "Daily Update Check (Off)"
+            "Automatic Updates (Off)"
         },
         true,
         None::<&str>,
@@ -281,9 +286,9 @@ fn try_initialize<R: Runtime>(
                 let enable = !crate::update_check::background_checks_enabled(&data_dir);
                 if crate::update_check::set_background_checks(&data_dir, enable) {
                     let _ = daily_updates.set_text(if enable {
-                        "Daily Update Check (On)"
+                        "Automatic Updates (On)"
                     } else {
-                        "Daily Update Check (Off)"
+                        "Automatic Updates (Off)"
                     });
                 }
             }

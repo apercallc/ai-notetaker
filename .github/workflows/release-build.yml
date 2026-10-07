@@ -172,7 +172,28 @@ jobs:
           # reject their LINKEDIT string-pool alignment before app bundling.
           # Other OSes retain Tauri's existing debuginfo stripping behavior.
           CARGO_PROFILE_RELEASE_STRIP: ${{ runner.os == 'macOS' && 'none' || 'debuginfo' }}
+          # Signs the in-place update archives. The matching public key is in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx --yes @tauri-apps/cli@2.11.5 build --no-sign ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundle }}
+      - name: Sign the in-place update archives
+        # `--no-sign` above skips the Tauri updater signature too, so sign the update archives
+        # (macOS .app.tar.gz, Windows setup.exe) explicitly with the updater key.
+        if: runner.os != 'Linux'
+        working-directory: helper
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # find, not globstar: the macOS runner's bash 3.2 has no globstar.
+          signed=0
+          while IFS= read -r archive; do
+            npx --yes @tauri-apps/cli@2.11.5 signer sign "$archive"
+            test -s "$archive.sig"
+            signed=$((signed + 1))
+          done < <(find target -type f \( -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/nsis/*-setup.exe' \))
+          test "$signed" -ge 1 || { echo "::error::no update archive found to sign"; exit 1; }
       - name: Test Mac installer and package guided DMG
         if: runner.os == 'macOS'
         env:
@@ -329,6 +350,10 @@ jobs:
           find release-assets -type f -name '* *' -print0 | while IFS= read -r -d '' file; do
             mv "$file" "$(dirname "$file")/$(basename "$file" | tr ' ' '.')"
           done
+      - name: Generate the signed-update manifest (latest.json)
+        # The desktop app's in-place updater reads this. It fails the release if any platform's
+        # update archive or signature is missing.
+        run: node scripts/generate-updater-manifest.mjs release-assets "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}"
       - name: Generate release manifest and checksums
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -340,7 +365,7 @@ jobs:
           cp release-assets/release-manifest.json release-assets/manifest.json
           cp webapp/docker-compose.registry.yml release-assets/
           cp webapp/.env.docker.example release-assets/env.docker.example
-          (cd release-assets && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name 'manifest.json' -o -name 'docker-compose.registry.yml' -o -name 'env.docker.example' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd release-assets && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.zip' -o -name 'AI.Notetaker_*.app.tar.gz' -o -name 'manifest.json' -o -name 'docker-compose.registry.yml' -o -name 'env.docker.example' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
       - name: Check manifest and checksums match the files being uploaded
         run: |
           node --input-type=module <<'NODE'
@@ -370,7 +395,7 @@ jobs:
           assets=(release-assets/SHA256SUMS release-assets/manifest.json \
             release-assets/*.dmg release-assets/*.pkg release-assets/*.msi \
             release-assets/*.exe release-assets/*.deb release-assets/*.AppImage \
-            release-assets/*.zip \
+            release-assets/*.zip release-assets/AI.Notetaker_*.app.tar.gz release-assets/latest.json \
             release-assets/docker-compose.registry.yml release-assets/env.docker.example)
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${assets[@]}"
