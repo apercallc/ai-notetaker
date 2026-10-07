@@ -186,13 +186,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          shopt -s globstar nullglob
+          # find, not globstar: the macOS runner's bash 3.2 has no globstar.
           signed=0
-          for archive in target/**/bundle/macos/*.app.tar.gz target/**/bundle/nsis/*-setup.exe; do
+          while IFS= read -r archive; do
             npx --yes @tauri-apps/cli@2.11.5 signer sign "$archive"
             test -s "$archive.sig"
             signed=$((signed + 1))
-          done
+          done < <(find target -type f \( -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/nsis/*-setup.exe' \))
           test "$signed" -ge 1 || { echo "::error::no update archive found to sign"; exit 1; }
       - name: Test Mac installer and package guided DMG
         if: runner.os == 'macOS'
