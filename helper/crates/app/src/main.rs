@@ -2425,7 +2425,11 @@ fn desktop_open_screen_recording_settings() -> Result<(), String> {
             ("systemsettings", &["kcm_pulseaudio"][..]),
             ("pavucontrol", &[][..]),
         ] {
-            if std::process::Command::new(program).args(args).spawn().is_ok() {
+            if std::process::Command::new(program)
+                .args(args)
+                .spawn()
+                .is_ok()
+            {
                 return Ok(());
             }
         }

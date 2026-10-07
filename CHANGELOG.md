@@ -4,6 +4,24 @@ All notable changes to AI Notetaker are documented here.
 
 ## Unreleased
 
+- Desktop app: hosted sign-in. Settings → Processing lets you sign in to Hosted AI
+  (no provider keys) or keep your own keys, the same on macOS, Windows, and Linux.
+  The session token lives in the OS credential store; the password is never stored.
+- Fixed the Settings page failing to render since v0.20.0 (sync field templates
+  were undefined).
+- Fixed a helper crash ("No rustls crypto provider is configured") from the
+  update check and managed-audio upload bypassing the shared HTTP client.
+- Window lifecycle now matches on every OS: relaunching raises the running
+  window, closing hides it to the tray (quits only when no tray exists and nothing
+  is recording), launch-at-login starts hidden, and the tray has "Open AI Notetaker".
+- Linux launcher entry now has categories and a description; Windows-only
+  resources are no longer packaged on other systems; the Windows installer no
+  longer shows blocking errors for the optional browser-extension link.
+- Audio setup: a platform-appropriate "open settings" button on every OS and
+  accurate Windows guidance when only the microphone is missing.
+- Desktop UI uses the exact brand mark; added About & legal links.
+- README, getting started, the website and the privacy/terms text now describe a
+  desktop-first product, the daily GitHub update check, and desktop sign-in.
 - Removed hosted Google Calendar access. The hosted service now requests only
   non-sensitive Google scopes (`openid`, `email`, `drive.file`), so it needs no
   sensitive-scope review. The extension's optional local-mode calendar
