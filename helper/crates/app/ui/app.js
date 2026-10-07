@@ -17,8 +17,6 @@
   };
   const DEFAULT_WEBAPP_URL = "https://ai-notetaker.apercallc.com";
   const providerName = (id) => ({ deepgram: "Deepgram", groq: "Groq", claude: "Claude", gemini: "Gemini", deepseek: "DeepSeek" })[id] || id;
-  // Notes are always made with the user's own provider keys; the account is for sign-in and sync.
-  const hostedSelected = () => false;
   const PLAN_NAMES = { free: "Free", local: "Free", hosted_trial: "Free", pro: "Pro", hosted_pro: "Pro", team: "Team", hosted_team: "Team" };
   const planName = (id) => PLAN_NAMES[id] || "Free";
   // Sync is a Pro/Team feature. Prefer the live answer from the plan overview, then what the
@@ -648,7 +646,6 @@
   // ---- Account: plan, action items, team (same data as the web app) ----
   const accountState = { overview: null, loading: false, error: "", team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionFilter: "open", billingBusy: false };
   const hostedSignedIn = () => Boolean(state.snapshot?.settings.hasHostedSession);
-  const formatHours = (seconds) => { const hours = (seconds || 0) / 3600; return hours >= 10 ? String(Math.round(hours)) : String(Math.round(hours * 10) / 10); };
   const longDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
 
   function meter(label, used, limit, text) {
@@ -896,7 +893,7 @@
       }
     }
     for (const link of document.querySelectorAll("[data-about]")) link.addEventListener("click", async () => { try { await invoke("desktop_open_about_link", { page: link.dataset.about }); } catch (error) { notify(String(error), "error"); } });
-    $("#upgrade-plan")?.addEventListener("click", async () => { try { await invoke("desktop_open_web_page", { page: "billing" }); } catch (error) { notify(String(error), "error"); } });
+    $("#upgrade-plan")?.addEventListener("click", () => setPage("plans"));
     $("#hosted-manage-web")?.addEventListener("click", async () => { try { await invoke("desktop_open_web_page", { page: "account" }); } catch (error) { notify(String(error), "error"); } });
     $("#hosted-open-connect")?.addEventListener("click", async () => { try { await invoke("desktop_open_connect_page"); } catch (error) { notify(String(error), "error"); } });
     const codeField = $("#hosted-code");
@@ -907,7 +904,7 @@
       codeField.addEventListener("input", (event) => event.stopPropagation());
     }
     $("#hosted-create-account")?.addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
-    $("#hosted-sign-out")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_hosted_sign_out", {}, "Signed out. Notes will use your own keys."));
+    $("#hosted-sign-out")?.addEventListener("click", (event) => hostedAction(event.currentTarget, "desktop_hosted_sign_out", {}, "Signed out. Your notes stay on this device."));
     const markDirty = () => { state.settingsDirty = true; const hint = $("#settings-hint"); if (hint) { hint.textContent = "Unsaved changes"; hint.classList.add("dirty"); } };
     $("#settings-form").addEventListener("input", markDirty);
     $("#settings-form").addEventListener("change", markDirty);

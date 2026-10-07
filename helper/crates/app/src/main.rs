@@ -1153,7 +1153,6 @@ fn main() {
             desktop_hosted_sign_in_code,
             desktop_open_connect_page,
             desktop_hosted_sign_out,
-            desktop_set_processing,
             desktop_account_overview,
             desktop_team_roster,
             desktop_team_action,
@@ -2172,49 +2171,6 @@ async fn desktop_hosted_sign_out(
         sync_from_sign_in: previous.sync_from_sign_in && !disconnect_sync,
         ..previous
     };
-    preferences.save(&context.app.data_dir)?;
-    apply_preferences(context.inner(), preferences).await
-}
-
-/// Hosted processing is not offered: notes are made with the user's own keys. Kept so an older
-/// UI asking to go back to own keys still works; asking for hosted is refused.
-#[tauri::command]
-async fn desktop_set_processing(
-    context: tauri::State<'_, DesktopCommandContext>,
-    hosted: bool,
-) -> Result<desktop_settings::DesktopSettingsView, String> {
-    if hosted {
-        return Err(
-            "Hosted processing isn't offered. AI Notetaker uses your own provider keys.".into(),
-        );
-    }
-    let previous = context
-        .preferences
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    let choice = if hosted {
-        desktop_settings::ProcessingChoice::Hosted
-    } else {
-        desktop_settings::ProcessingChoice::Local
-    };
-    if context
-        .app
-        .active
-        .lock()
-        .await
-        .values()
-        .any(|active| active.audio.is_some())
-    {
-        return Err("Stop the current recording before changing how notes are processed.".into());
-    }
-    let preferences = desktop_settings::DesktopPreferences {
-        processing: choice,
-        ..previous
-    };
-    if hosted && desktop_settings::hosted_service(&preferences).is_none() {
-        return Err("Sign in to your AI Notetaker account first.".into());
-    }
     preferences.save(&context.app.data_dir)?;
     apply_preferences(context.inner(), preferences).await
 }

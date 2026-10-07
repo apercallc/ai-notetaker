@@ -347,9 +347,6 @@ h3 { font-size: 15px; font-weight: 650; }
 .meter span { display: block; height: 100%; border-radius: 4px; background: var(--green); }
 .meter.high span { background: #c98a1c; }
 .meter.full span { background: var(--red); }
-.ask-entry { display: grid; gap: 10px; padding: 20px 22px; }
-.ask-q { margin: 0; font-size: 14px; font-weight: 700; }
-.ask-a { font-size: 14px; line-height: 1.65; }
 .action-board, .team-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .action-board li, .team-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .action-board li:last-child, .team-row:last-child { border-bottom: 0; }
