@@ -620,7 +620,7 @@
 
 
   // ---- Account: usage and plan, Ask your notes, action items, team (same data as the web app) ----
-  const accountState = { overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionDone: new Set(), billingBusy: false };
+  const accountState = { overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionFilter: "open", billingBusy: false };
   const hostedSignedIn = () => Boolean(state.snapshot?.settings.hasHostedSession);
   const formatHours = (seconds) => { const hours = (seconds || 0) / 3600; return hours >= 10 ? String(Math.round(hours)) : String(Math.round(hours * 10) / 10); };
   const longDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
@@ -695,15 +695,19 @@
 
   function actionItemsPanel() {
     const query = accountState.actionQuery.trim().toLowerCase();
+    const filter = accountState.actionFilter;
     const rows = [];
     for (const meeting of state.snapshot.meetings) {
-      for (const [index, item] of (meeting.actionItems || []).entries()) rows.push({ meeting, item, key: `${meeting.id}:${index}` });
+      for (const [index, item] of (meeting.actionItems || []).entries()) rows.push({ meeting, item, index });
     }
-    const shown = rows.filter((row) => !query || `${row.item.text} ${row.item.owner || ""} ${row.meeting.title}`.toLowerCase().includes(query));
+    const isDone = (item) => item.status === "done";
+    const counts = { open: rows.filter((row) => !isDone(row.item)).length, done: rows.filter((row) => isDone(row.item)).length, all: rows.length };
+    const shown = rows.filter((row) => (filter === "all" || (filter === "done") === isDone(row.item)) && (!query || `${row.item.text} ${row.item.owner || ""} ${row.meeting.title}`.toLowerCase().includes(query)));
     const list = shown.length
-      ? `<ul class="action-board">${shown.map(({ meeting, item, key }) => `<li><label><input type="checkbox" data-action-key="${esc(key)}" ${accountState.actionDone.has(key) ? "checked" : ""} /><span class="${accountState.actionDone.has(key) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
-      : `<div class="empty-state"><strong>${rows.length ? "No matches" : "No action items yet"}</strong>${rows.length ? "Try a different search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
-    return `<section class="card account-card"><div class="account-head"><div><p class="fine-print">${rows.length} across your notes. Ticking one marks it done on this screen only.</p></div></div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}</section>`;
+      ? `<ul class="action-board">${shown.map(({ meeting, item, index }) => `<li><label><input type="checkbox" data-action-meeting="${esc(meeting.id)}" data-action-index="${index}" ${isDone(item) ? "checked" : ""} /><span class="${isDone(item) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
+      : `<div class="empty-state"><strong>${rows.length ? "Nothing here" : "No action items yet"}</strong>${rows.length ? "Try a different filter or search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
+    const chips = [["open", "Open"], ["done", "Done"], ["all", "All"]].map(([id, label]) => `<button class="filter-chip ${filter === id ? "active" : ""}" data-action-filter="${id}" aria-pressed="${filter === id}">${label} <span>${counts[id]}</span></button>`).join("");
+    return `<section class="card account-card"><div class="filter-row">${chips}</div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}<p class="fine-print">Checking an item here updates it everywhere you are signed in. Offline, it stays on this device.</p></section>`;
   }
 
   function teamPanel() {
@@ -762,7 +766,13 @@
       });
     }
     $("#action-search")?.addEventListener("input", (event) => { accountState.actionQuery = event.target.value; const pos = event.target.selectionStart; renderAccount(); const box = $("#action-search"); box.focus(); box.setSelectionRange(pos, pos); });
-    for (const box of document.querySelectorAll("[data-action-key]")) box.addEventListener("change", () => { box.checked ? accountState.actionDone.add(box.dataset.actionKey) : accountState.actionDone.delete(box.dataset.actionKey); box.nextElementSibling.classList.toggle("done", box.checked); });
+    for (const chip of document.querySelectorAll("[data-action-filter]")) chip.addEventListener("click", () => { accountState.actionFilter = chip.dataset.actionFilter; renderAccount(); });
+    for (const box of document.querySelectorAll("[data-action-meeting]")) box.addEventListener("change", async () => {
+      box.disabled = true;
+      try { await invoke("desktop_set_action_item", { meetingId: box.dataset.actionMeeting, index: Number(box.dataset.actionIndex), done: box.checked }); }
+      catch (error) { notify(String(error), "error"); }
+      finally { await refresh(); }
+    });
     for (const link of document.querySelectorAll("[data-open-note]")) link.addEventListener("click", () => { state.selectedId = link.dataset.openNote; setPage("notes"); });
     const team = accountState.team;
     const act = (args, done) => accountAction(async () => {

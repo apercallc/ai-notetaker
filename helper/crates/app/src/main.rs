@@ -1170,6 +1170,7 @@ fn main() {
             desktop_import_audio_transfer,
             desktop_sync_existing_notes,
             desktop_retry_webapp_sync,
+            desktop_set_action_item,
             desktop_start_recording,
             desktop_stop_recording,
             desktop_recover_meeting,
@@ -2514,6 +2515,9 @@ async fn desktop_delete_meeting(
         .await
         .map_err(|error| format!("Recording could not be deleted: {error}"))?;
     let _ = context.sync.remove(meeting_id);
+    if let Err(error) = context.sync.dismiss(meeting_id) {
+        tracing::warn!(%error, "could not remember a deleted note for sync");
+    }
     Ok(())
 }
 
@@ -2632,6 +2636,106 @@ async fn desktop_sync_existing_notes(
         context.ui_app.clone(),
     );
     Ok(count)
+}
+
+/// Marks one action item done or open in `summary` and returns the item's workspace id, if it has one.
+fn set_action_status(
+    summary: &mut notetaker_core::providers::Summary,
+    index: usize,
+    done: bool,
+) -> Result<Option<String>, String> {
+    let item = summary
+        .action_items
+        .get_mut(index)
+        .ok_or_else(|| "That action item is no longer in this note.".to_string())?;
+    item.status = Some(if done { "done" } else { "open" }.to_string());
+    item.completed_at = done.then(|| chrono::Utc::now().to_rfc3339());
+    Ok(item.id.clone())
+}
+
+/// Ticks an action item on or off, the same as on the web Actions page. Notes that live in the
+/// workspace (hosted, or copied from it) are updated there first so every device agrees; notes
+/// that only exist on this device change locally and sync like any other edit once signed in.
+#[tauri::command]
+async fn desktop_set_action_item(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+    index: usize,
+    done: bool,
+) -> Result<(), String> {
+    let id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid note id.".to_string())?;
+    let store = context.app.store.clone();
+    let (meta, mut summary) = {
+        let store = store.clone();
+        tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let meta = store
+                .load_meta(id)
+                .map_err(|_| "This note is no longer available.".to_string())?;
+            let summary = store
+                .load_summary(id)
+                .map_err(|_| "This note's action items could not be read.".to_string())?
+                .ok_or_else(|| "This note has no action items yet.".to_string())?;
+            Ok((meta, summary))
+        })
+        .await
+        .map_err(|_| "Action items could not be read.".to_string())??
+    };
+    let item_id = set_action_status(&mut summary, index, done)?;
+    let preferences = current_preferences(&context);
+    let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)?;
+    let workspace_owned = meta.workspace_import || meta.managed_workspace_id.is_some();
+    if workspace_owned {
+        let webapp = webapp.as_ref().ok_or_else(|| {
+            "Sign in to update action items on a note that lives in your workspace.".to_string()
+        })?;
+        let item_id = item_id.ok_or_else(|| {
+            "This action item has not reached your workspace yet. Sync, then try again.".to_string()
+        })?;
+        let client = notetaker_core::providers::http_client_builder()
+            .connect_timeout(std::time::Duration::from_secs(8))
+            .timeout(std::time::Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| "Could not start the request.".to_string())?;
+        let response = client
+            .patch(format!(
+                "{}/api/v1/desktop-sync/action-items/{}",
+                webapp.url.trim_end_matches('/'),
+                item_id
+            ))
+            .bearer_auth(&webapp.token)
+            .json(&serde_json::json!({ "status": if done { "done" } else { "open" } }))
+            .send()
+            .await
+            .map_err(|_| "Could not reach your workspace. Connect to the internet to change this action item.".to_string())?;
+        match response.status().as_u16() {
+            200..=299 => {}
+            401 | 403 => return Err(
+                "Your sign-in no longer has access to this workspace. Sign in again in Settings."
+                    .into(),
+            ),
+            404 => return Err("That action item is no longer in your workspace.".into()),
+            status => {
+                return Err(format!(
+                    "Your workspace could not update the action item ({status}). Try again."
+                ))
+            }
+        }
+    }
+    tokio::task::spawn_blocking(move || store.write_summary(id, &summary))
+        .await
+        .map_err(|_| "The action item could not be saved.".to_string())?
+        .map_err(|_| "The action item could not be saved on this device.".to_string())?;
+    if !workspace_owned && webapp.is_some() {
+        context.sync.enqueue(id)?;
+        spawn_desktop_sync(
+            context.app.clone(),
+            context.preferences.clone(),
+            context.sync.clone(),
+            context.ui_app.clone(),
+        );
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -4473,6 +4577,40 @@ fn apply_default_autostart<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ticking_an_action_item_records_status_and_time_and_reports_its_workspace_id() {
+        let mut summary = notetaker_core::providers::Summary {
+            summary: "s".into(),
+            action_items: vec![
+                notetaker_core::native_messaging::ActionItem {
+                    text: "a".into(),
+                    id: Some("item-1".into()),
+                    ..Default::default()
+                },
+                notetaker_core::native_messaging::ActionItem {
+                    text: "b".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+        assert_eq!(
+            super::set_action_status(&mut summary, 0, true)
+                .unwrap()
+                .as_deref(),
+            Some("item-1")
+        );
+        assert_eq!(summary.action_items[0].status.as_deref(), Some("done"));
+        assert!(summary.action_items[0].completed_at.is_some());
+        assert_eq!(
+            super::set_action_status(&mut summary, 1, true).unwrap(),
+            None
+        );
+        super::set_action_status(&mut summary, 0, false).unwrap();
+        assert_eq!(summary.action_items[0].status.as_deref(), Some("open"));
+        assert!(summary.action_items[0].completed_at.is_none());
+        assert!(super::set_action_status(&mut summary, 9, true).is_err());
+    }
+
     #[test]
     fn hosted_responses_show_refusals_and_report_an_ended_session() {
         use super::interpret_hosted_response as interpret;

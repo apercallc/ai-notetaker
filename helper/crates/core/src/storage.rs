@@ -356,11 +356,35 @@ impl MeetingStore {
         let lock = meeting_lock(note.id);
         let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut meta = self.load_meta(note.id)?;
-        if !meta.workspace_import || !meta.text_only_import {
-            return Ok(WorkspaceImportOutcome::PreservedLocalNote);
-        }
-        if meta.workspace_source_id != note.workspace_source_id {
-            return Ok(WorkspaceImportOutcome::PreservedLocalNote);
+        // A note this device had processed by the hosted service lives in the workspace too, and
+        // the workspace copy is the authoritative one: web edits and edits from the user's other
+        // devices must reach this device, and it must never be reported as a conflict. The local
+        // copy keeps its audio; only the text follows the workspace.
+        let hosted_owner = !meta.workspace_import
+            && meta
+                .managed_workspace_id
+                .as_deref()
+                .is_some_and(|workspace_id| {
+                    note.workspace_source_id.as_deref().is_some_and(|source| {
+                        source.ends_with(&format!("/workspace/{workspace_id}"))
+                    })
+                });
+        if hosted_owner {
+            // Still uploading or processing: the job result will arrive on its own.
+            // An empty workspace copy (job not finished) must never blank finished local text.
+            if meta.managed_pending
+                || meta.state != MeetingState::Processed
+                || (note.transcript.is_empty() && note.summary.is_none())
+            {
+                return Ok(WorkspaceImportOutcome::Unchanged);
+            }
+        } else {
+            if !meta.workspace_import || !meta.text_only_import {
+                return Ok(WorkspaceImportOutcome::PreservedLocalNote);
+            }
+            if meta.workspace_source_id != note.workspace_source_id {
+                return Ok(WorkspaceImportOutcome::PreservedLocalNote);
+            }
         }
         if meta
             .workspace_source_updated_at
@@ -1589,6 +1613,113 @@ mod tests {
             WorkspaceImportOutcome::PreservedLocalNote
         );
         assert_eq!(store.load_transcript(id).unwrap()[0].text, "Updated text");
+    }
+
+    #[test]
+    fn hosted_notes_follow_the_workspace_without_being_reported_as_conflicts() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        let started_at = Utc::now();
+        store.create_meeting(id, started_at).unwrap();
+        store
+            .update_meta(id, |meta| {
+                meta.state = MeetingState::Processed;
+                meta.managed_workspace_id = Some("ws-1".into());
+                meta.managed_account_id = Some("acct-1".into());
+                Ok(())
+            })
+            .unwrap();
+        let note = |updated_at, title: &str, text: &str, source: &str| ImportedMeetingNote {
+            id,
+            workspace_import: true,
+            workspace_source_updated_at: Some(updated_at),
+            workspace_source_id: Some(source.into()),
+            title: title.into(),
+            started_at,
+            ended_at: Some(started_at + Duration::minutes(5)),
+            extension_source_status: "complete".into(),
+            mode: MeetingMode::General,
+            transcript: vec![TranscriptSegment {
+                speaker: "you".into(),
+                text: text.into(),
+                is_final: true,
+                timestamp: None,
+            }],
+            summary: Some(Summary {
+                summary: text.into(),
+                action_items: vec![],
+            }),
+        };
+        let source = "https://notes.example.test/workspace/ws-1";
+        let v1 = started_at + Duration::seconds(10);
+
+        // First sight of the workspace copy applies it without calling it a conflict.
+        assert_eq!(
+            store
+                .refresh_workspace_import(note(v1, "Edited on the web", "Web text", source))
+                .unwrap(),
+            WorkspaceImportOutcome::Updated
+        );
+        assert_eq!(store.load_transcript(id).unwrap()[0].text, "Web text");
+        let meta = store.load_meta(id).unwrap();
+        assert!(
+            !meta.workspace_import,
+            "audio-owning notes stay desktop-owned"
+        );
+        assert_eq!(meta.workspace_source_updated_at, Some(v1));
+
+        // Same or older versions change nothing; newer ones apply.
+        assert_eq!(
+            store
+                .refresh_workspace_import(note(v1, "Edited on the web", "Web text", source))
+                .unwrap(),
+            WorkspaceImportOutcome::Unchanged
+        );
+        assert_eq!(
+            store
+                .refresh_workspace_import(note(
+                    v1 + Duration::seconds(5),
+                    "Again",
+                    "Newer text",
+                    source
+                ))
+                .unwrap(),
+            WorkspaceImportOutcome::Updated
+        );
+
+        // A different workspace can never overwrite it.
+        assert_eq!(
+            store
+                .refresh_workspace_import(note(
+                    v1 + Duration::seconds(30),
+                    "Other",
+                    "Other text",
+                    "https://notes.example.test/workspace/ws-2"
+                ))
+                .unwrap(),
+            WorkspaceImportOutcome::PreservedLocalNote
+        );
+        assert_eq!(store.load_transcript(id).unwrap()[0].text, "Newer text");
+
+        // Still processing: leave the local note alone and do not flag a conflict.
+        store
+            .update_meta(id, |meta| {
+                meta.managed_pending = true;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .refresh_workspace_import(note(
+                    v1 + Duration::seconds(60),
+                    "Mid-job",
+                    "Mid text",
+                    source
+                ))
+                .unwrap(),
+            WorkspaceImportOutcome::Unchanged
+        );
+        assert_eq!(store.load_transcript(id).unwrap()[0].text, "Newer text");
     }
 
     #[test]

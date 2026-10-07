@@ -10,7 +10,7 @@ export interface TranscriptSegmentInput {
 export interface ActionItemInput {
   id?: string;
   text: string;
-  owner?: string;
+  owner?: string | null;
   status?: "open" | "done";
   dueAt?: string | null;
   completedAt?: string | null;

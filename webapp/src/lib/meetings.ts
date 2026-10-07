@@ -165,6 +165,7 @@ function assertValid(input: unknown): CreateMeetingRequest {
       ((item as Record<string, unknown>).status !== undefined &&
         !["open", "done"].includes((item as Record<string, unknown>).status as string)) ||
       ((item as Record<string, unknown>).owner !== undefined &&
+        (item as Record<string, unknown>).owner !== null &&
         (typeof (item as Record<string, unknown>).owner !== "string" ||
           (item as Record<string, string>).owner.length > MAX_OWNER_LENGTH)) ||
       ((item as Record<string, unknown>).dueAt !== undefined &&
