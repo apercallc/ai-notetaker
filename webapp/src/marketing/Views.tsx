@@ -33,7 +33,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
     <>
       <PageHead
         title="Local notes, with optional web access."
-        lede="Use the Chrome extension to capture a browser tab, or the desktop app to capture browser and desktop meetings on macOS, Windows, or Linux. No bot joins the call."
+        lede="One desktop app records browser and desktop meetings on macOS, Windows, and Linux, and makes your notes with Hosted AI or your own keys. An optional Chrome extension can record a browser tab. No bot joins the call."
       />
 
       <section className="mk-section mk-section--flush" aria-labelledby="choose-title">
@@ -278,7 +278,7 @@ export function DownloadView({
     <>
       <PageHead
         title="Record browser or desktop meetings."
-        lede="Use the desktop app for system-audio capture on macOS, Windows, or Linux, or use the Chrome extension to capture a browser tab and import it into desktop for notes."
+        lede="Download the desktop app for macOS, Windows, or Linux. It records browser and desktop meetings on its own; the Chrome extension below is optional."
       />
       <section className="mk-section mk-section--flush" aria-labelledby="desktop-app-availability">
         <div className="mk-wrap">
@@ -362,7 +362,7 @@ export function DownloadView({
       <section id="browser-extension" className="mk-section mk-section--flush" aria-labelledby="browser-extension-title">
         <div className="mk-wrap">
           <div className="mk-download">
-            <h2 className="mk-h2" id="browser-extension-title"><Icon as={Puzzle} size={24} />Chrome extension for browser meetings</h2>
+            <h2 className="mk-h2" id="browser-extension-title"><Icon as={Puzzle} size={24} />Optional Chrome extension</h2>
             <p>Capture meeting audio playing in the current secure Chrome tab and your microphone as separate local tracks. This includes web versions of Google Meet, Zoom, Teams, Slack, Discord, and other sites; behavior can vary by site and browser. Export the archive, then import it in desktop to transcribe and create notes.</p>
             <div className="mk-cta-row">
               {store && <a className="mk-btn mk-btn--solid" href={store}>Add to Chrome</a>}

@@ -34,9 +34,9 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           <div>
             <h1 className="mk-h1" id="hero-title">{SITE.tagline}</h1>
             <p className="mk-lede">
-              Record Google Meet, Microsoft Teams, Zoom, Discord calls, and Slack huddles. Use the Chrome extension for a meeting tab, or the desktop app for browser and
-              desktop calls on macOS, Windows, or Linux. The desktop app creates local notes; optionally sync finished
-              notes to your web workspace. Nobody joins your call.
+              Record Google Meet, Microsoft Teams, Zoom, Discord calls, and Slack huddles, in a browser or a desktop app. One app for
+              macOS, Windows, and Linux saves the audio on your device and creates your notes, using Hosted AI or your own
+              keys. Optionally sync finished notes to your web workspace. Nobody joins your call.
             </p>
             <div className="mk-cta-row">
               <Link className="mk-btn mk-btn--solid" href={start}>{startLabel}</Link>
@@ -55,28 +55,29 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
       <section className="mk-section mk-section--deep" id="setup" aria-labelledby="setup-title">
         <div className="mk-wrap">
           <div className="mk-section-head">
-            <h2 className="mk-h2" id="setup-title">Choose how you capture the meeting.</h2>
+            <h2 className="mk-h2" id="setup-title">Choose how your notes are made.</h2>
             <p className="mk-lede">
-              Use the extension for a Chrome meeting tab, or the desktop app for calls in any browser and for
-              native desktop meeting apps. Desktop notes can optionally sync to a web workspace.
+              The desktop app records calls in any browser and any meeting app, the same way on every system.
+              Sign in for Hosted AI, or bring your own keys.
             </p>
           </div>
           <div className="mk-choice">
             <article className="mk-panel mk-panel--lead" aria-labelledby="choice-hosted">
-              <h3 className="mk-h3" id="choice-hosted">Desktop app · macOS, Windows, Linux</h3>
-              <p className="mk-panel-price"><strong>Free with your API keys</strong></p>
+              <h3 className="mk-h3" id="choice-hosted">Desktop app · Hosted AI or your own keys</h3>
+              <p className="mk-panel-price"><strong>Free with your API keys, or sign in for Hosted AI</strong></p>
               <p className="mk-panel-copy">
-                Record browser or desktop meetings, choose transcription and summary providers, then review notes in
-                the app. Keys stay in the operating-system credential store; audio is saved locally before processing.
+                Record browser or desktop meetings on macOS, Windows, or Linux, then review notes in the app. Sign in and
+                we make the notes within your plan, or add your own provider keys and stay account-free. Keys stay in the
+                operating-system credential store; audio is saved locally before processing.
               </p>
               <Link className="mk-btn mk-btn--light" href={start}>{startLabel}</Link>
             </article>
             <article className="mk-panel" aria-labelledby="choice-keys">
-              <h3 className="mk-h3" id="choice-keys">Chrome extension · browser meetings</h3>
-              <p className="mk-panel-price"><strong>Capture the current Chrome tab</strong></p>
+              <h3 className="mk-h3" id="choice-keys">Optional Chrome extension</h3>
+              <p className="mk-panel-price"><strong>Not needed to use the desktop app</strong></p>
               <p className="mk-panel-copy">
                 Use the floating recording control in Meet, Teams, Zoom web meetings, Discord, or Slack. Chrome may require a toolbar click or shortcut to start. Save tab audio and your microphone separately, then export the archive and import it in the
-                desktop app to transcribe and create notes. For direct system-audio capture, use the desktop app.
+                desktop app to transcribe and create notes. The desktop app records browser and desktop calls on its own.
               </p>
               <Link className="mk-btn mk-btn--ghost-on-deep" href="/download#browser-extension">Get the Chrome extension</Link>
             </article>
@@ -95,13 +96,13 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
           </div>
           <ol className="mk-steps">
             <li className="mk-step">
-              <h3 className="mk-h3">Choose a capture path</h3>
-              <p>Use the Chrome extension for a browser tab, or the desktop app for browser and desktop calls. The downloads page shows available installers.</p>
+              <h3 className="mk-h3">Install the desktop app</h3>
+              <p>Download AI Notetaker for macOS, Windows, or Linux, then sign in for Hosted AI or add your own keys.</p>
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Record</h3>
               <p>
-                In the desktop app, add and test provider keys, grant audio access, and record. Extension recordings are imported for processing.
+                Grant audio access, confirm everyone knows, and record. The audio is saved on your device before anything is processed.
               </p>
             </li>
             <li className="mk-step">

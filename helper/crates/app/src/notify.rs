@@ -33,6 +33,8 @@ pub fn linux_command(title: &str, body: &str) -> NotificationCommand {
         args: vec![
             "--app-name".into(),
             APP_NAME.into(),
+            "--icon".into(),
+            "notetaker-helper".into(),
             "--".into(),
             title.into(),
             body.into(),

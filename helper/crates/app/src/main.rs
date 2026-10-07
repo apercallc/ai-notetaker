@@ -2404,6 +2404,8 @@ async fn desktop_test_audio(
     Ok(())
 }
 
+/// Opens the operating system's own page for fixing audio access: Screen Recording on
+/// macOS, microphone privacy on Windows, and the sound settings on Linux.
 #[tauri::command]
 fn desktop_open_screen_recording_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -2412,13 +2414,29 @@ fn desktop_open_screen_recording_settings() -> Result<(), String> {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
         )
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        Err("Open your operating system's privacy settings to grant audio access.".into())
+        open_external("ms-settings:privacy-microphone")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for (program, args) in [
+            ("gnome-control-center", &["sound"][..]),
+            ("systemsettings", &["kcm_pulseaudio"][..]),
+            ("pavucontrol", &[][..]),
+        ] {
+            if std::process::Command::new(program).args(args).spawn().is_ok() {
+                return Ok(());
+            }
+        }
+        Err("Open your system's sound settings to choose a microphone and output.".into())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err("Open your operating system's sound settings.".into())
     }
 }
 
-/// Opens one of a fixed set of project pages. The page name is matched, never interpolated.
 #[tauri::command]
 fn desktop_open_about_link(page: String) -> Result<(), String> {
     let site = desktop_settings::DEFAULT_WEBAPP_URL;

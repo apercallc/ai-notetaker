@@ -167,8 +167,8 @@
       audioTimedOut: audio.timedOut,
     });
     if (!active) announceRecordingReadiness(startHint);
-    const openAudioSettings = audio.platform === "macos" && audio.driver === "Unavailable"
-      ? '<button class="small-button" id="open-screen-recording-settings">Open macOS audio permissions</button>'
+    const openAudioSettings = !audio.ready && !audio.checking
+      ? `<button class="small-button" id="open-screen-recording-settings">${audio.platform === "macos" ? "Open macOS audio permissions" : audio.platform === "windows" ? "Open Windows microphone settings" : "Open sound settings"}</button>`
       : "";
     const macAudioUnavailable = audio.platform === "macos" && audio.driver === "Unavailable";
     const audioGuidance = macAudioUnavailable
