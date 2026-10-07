@@ -99,13 +99,41 @@
     state.page = page;
     state.detail = null;
     state.detailError = null;
-    for (const button of document.querySelectorAll(".nav-button")) {
-      const active = button.dataset.page === page;
-      button.classList.toggle("active", active);
-      active ? button.setAttribute("aria-current", "page") : button.removeAttribute("aria-current");
-    }
     render();
     if (page === "notes" && state.selectedId) void loadDetail(state.selectedId);
+  }
+
+  const ICONS = {
+    "record": "<path d=\"M12 19v3\"/><path d=\"M19 10v2a7 7 0 0 1-14 0v-2\"/><rect x=\"9\" y=\"2\" width=\"6\" height=\"13\" rx=\"3\"/>",
+    "notes": "<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\"/>",
+    "actions": "<path d=\"M21 10.656V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12.344\"/><path d=\"m9 11 3 3L22 4\"/>",
+    "ask": "<path d=\"M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z\"/>",
+    "team": "<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/><path d=\"M16 3.128a4 4 0 0 1 0 7.744\"/><path d=\"M22 21v-2a4 4 0 0 0-3-3.87\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/>",
+    "plans": "<rect width=\"20\" height=\"14\" x=\"2\" y=\"5\" rx=\"2\"/><line x1=\"2\" x2=\"22\" y1=\"10\" y2=\"10\"/><path d=\"M6 14h2\"/>",
+    "settings": "<path d=\"M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>"
+  };
+
+  // Same names, order and icons as the web app's navigation. Record is the one desktop-only item;
+  // Ask, Team and Plans & usage appear once you are signed in to a hosted account (as on the web).
+  const ACCOUNT_PAGES = ["actions", "ask", "team", "plans"];
+  const isAccountPage = () => ACCOUNT_PAGES.includes(state.page);
+  function navItems() {
+    const signedIn = hostedSignedIn();
+    const owner = accountState.overview?.account.role === "owner";
+    return [
+      ["record", "Record"],
+      ["notes", "Library"],
+      ["actions", "Actions"],
+      ...(signedIn ? [["ask", "Ask"]] : []),
+      ...(signedIn && owner ? [["team", "Team"]] : []),
+      ...(signedIn ? [["plans", "Plans & usage"]] : []),
+      ["settings", "Settings"],
+    ];
+  }
+  function renderNav(setupNeeded) {
+    const items = navItems();
+    $("#nav-list").innerHTML = items.map(([id, label]) => `<button class="nav-button ${state.page === id ? "active" : ""}" data-page="${id}" aria-label="${label}" ${state.page === id ? 'aria-current="page"' : ""}><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${ICONS[id]}</svg></span><span>${label}</span>${id === "settings" ? `<span class="nav-dot" id="settings-nav-dot" role="img" aria-label="Setup needed" ${setupNeeded ? "" : "hidden"}></span>` : ""}</button>`).join("");
+    for (const button of document.querySelectorAll(".nav-button")) button.addEventListener("click", () => setPage(button.dataset.page));
   }
 
   function setHeader(title, eyebrow) {
@@ -130,13 +158,15 @@
       recording ? "recording" : needsAttention ? "needs-attention" : "",
     );
     $("#open-webapp").hidden = !snapshot.settings.preferences.webappUrl;
-    $("#settings-nav-dot").hidden = appReady;
+    if (hostedSignedIn() && !accountState.overview && !accountState.loading && !accountState.error) void loadOverview();
+    state.setupNeeded = !appReady;
+    renderNav(state.setupNeeded);
     if (snapshot.credentialStoreError) notify(snapshot.credentialStoreError, "error");
     else if (snapshot.unreadableRecordings) notify(`${snapshot.unreadableRecordings} recording${snapshot.unreadableRecordings === 1 ? "" : "s"} could not be read. Other notes remain available.`, "warn");
     try {
       if (state.page === "record") renderRecord();
       else if (state.page === "notes") renderNotes();
-      else if (state.page === "account") renderAccount();
+      else if (isAccountPage()) renderAccount();
       else renderSettings();
     } catch (error) {
       console.error("Page render failed", state.page, error);
@@ -145,7 +175,7 @@
   }
 
   function renderRecord() {
-    setHeader("Record a meeting", "YOUR DESKTOP NOTETAKER");
+    setHeader("Record a meeting", "Capture your microphone and the meeting audio on this device.");
     const s = state.snapshot;
     const active = s.activeMeetingId;
     const audio = s.audio;
@@ -327,7 +357,7 @@
   }
 
   function renderNotes() {
-    setHeader("Library", "LOCAL RECORDING LIBRARY");
+    setHeader("Library", "Your notes, saved on this device.");
     const meetings = state.snapshot.meetings;
     const folders = state.snapshot.folders || [];
     const noteCounts = new Map();
@@ -590,7 +620,7 @@
 
 
   // ---- Account: usage and plan, Ask your notes, action items, team (same data as the web app) ----
-  const accountState = { tab: "usage", overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionDone: new Set(), billingBusy: false };
+  const accountState = { overview: null, loading: false, error: "", ask: { draft: "", busy: false, history: [] }, team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionDone: new Set(), billingBusy: false };
   const hostedSignedIn = () => Boolean(state.snapshot?.settings.hasHostedSession);
   const formatHours = (seconds) => { const hours = (seconds || 0) / 3600; return hours >= 10 ? String(Math.round(hours)) : String(Math.round(hours * 10) / 10); };
   const longDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
@@ -607,7 +637,7 @@
     accountState.error = "";
     try { accountState.overview = await invoke("desktop_account_overview"); }
     catch (error) { accountState.error = String(error); }
-    finally { accountState.loading = false; if (state.page === "account") renderAccount(); }
+    finally { accountState.loading = false; renderNav(state.setupNeeded); if (isAccountPage()) renderAccount(); }
   }
 
   async function loadRoster(force = false) {
@@ -617,7 +647,7 @@
     team.error = "";
     try { team.roster = await invoke("desktop_team_roster"); }
     catch (error) { team.error = String(error); }
-    finally { team.loading = false; if (state.page === "account") renderAccount(); }
+    finally { team.loading = false; if (isAccountPage()) renderAccount(); }
   }
 
   function signInPrompt(what) {
@@ -658,7 +688,7 @@
     const chat = accountState.overview?.chat;
     const left = chat ? (chat.limit > 0 ? `${chat.remaining} of ${chat.limit} questions left this period.` : "Ask your notes is not included in your plan.") : "";
     const history = ask.history.map((entry) => `<article class="card ask-entry"><p class="ask-q">${esc(entry.question)}</p>${entry.error ? `<p class="key-status warn">${esc(entry.error)}</p>` : `<div class="ask-a">${esc(entry.answer).replace(/\n/g, "<br>")}</div>${entry.sources?.length ? `<p class="fine-print">From: ${entry.sources.map((source) => `${esc(source.title)} (${esc(longDate(source.startedAt))})`).join(" · ")}</p>` : ""}`}</article>`).join("");
-    return `<section class="card account-card"><h2>Ask your notes</h2><p class="fine-print">Search everything in your workspace, including notes made on the web. Answers are written by AI from your notes; check the sources. ${esc(left)}</p>
+    return `<section class="card account-card"><p class="fine-print">Search everything in your workspace, including notes made on the web. Answers are written by AI from your notes; check the sources. ${esc(left)}</p>
       <textarea class="text-area" id="ask-question" maxlength="2000" placeholder="What did we decide about pricing?" ${ask.busy ? "disabled" : ""}>${esc(ask.draft)}</textarea>
       <div class="inline-actions"><button class="primary-button" id="ask-send" ${ask.busy ? "disabled" : ""}>${ask.busy ? "Thinking…" : "Ask"}</button></div></section>${history}`;
   }
@@ -673,7 +703,7 @@
     const list = shown.length
       ? `<ul class="action-board">${shown.map(({ meeting, item, key }) => `<li><label><input type="checkbox" data-action-key="${esc(key)}" ${accountState.actionDone.has(key) ? "checked" : ""} /><span class="${accountState.actionDone.has(key) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
       : `<div class="empty-state"><strong>${rows.length ? "No matches" : "No action items yet"}</strong>${rows.length ? "Try a different search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
-    return `<section class="card account-card"><div class="account-head"><div><h2>Action items</h2><p class="fine-print">${rows.length} across your notes. Ticking one marks it done on this screen only.</p></div></div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}</section>`;
+    return `<section class="card account-card"><div class="account-head"><div><p class="fine-print">${rows.length} across your notes. Ticking one marks it done on this screen only.</p></div></div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}</section>`;
   }
 
   function teamPanel() {
@@ -684,17 +714,23 @@
     const you = accountState.overview?.account.email;
     const members = team.roster.members.map((member) => `<li class="team-row"><div><strong>${esc(member.email)}</strong><span class="fine-print"> ${member.email === you ? "(you) " : ""}· joined ${esc(longDate(member.joinedAt))}</span></div><div class="inline-actions"><select class="select-input" data-role-for="${esc(member.id)}" aria-label="Role for ${esc(member.email)}"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="owner" ${member.role === "owner" ? "selected" : ""}>Owner</option></select><button class="small-button" data-team-reset="${esc(member.id)}">Send password reset</button><button class="small-button danger" data-team-remove="${esc(member.id)}" data-email="${esc(member.email)}">Remove</button></div></li>`).join("");
     const invites = team.roster.invites.length ? `<h3 class="subhead">Pending invitations</h3><ul class="team-list">${team.roster.invites.map((invite) => `<li class="team-row"><span>${esc(invite.email)}</span><button class="small-button" data-team-revoke="${esc(invite.id)}">Revoke</button></li>`).join("")}</ul>` : "";
-    return `<section class="card account-card"><h2>Team</h2><p class="fine-print">${team.roster.members.length} member${team.roster.members.length === 1 ? "" : "s"}. Members share this workspace’s notes, plan and usage.</p>
+    return `<section class="card account-card"><p class="fine-print">${team.roster.members.length} member${team.roster.members.length === 1 ? "" : "s"}. Members share this workspace’s notes, plan and usage.</p>
       <div class="key-row"><input class="text-input" id="team-invite-email" type="email" placeholder="teammate@company.com" autocomplete="off" /><button class="primary-button" id="team-invite" ${team.busy ? "disabled" : ""}>Send invite</button></div>
       ${team.message ? `<p class="key-status" role="status">${esc(team.message)}${team.link ? ` <br><code>${esc(team.link)}</code>` : ""}</p>` : ""}
       <h3 class="subhead">Members</h3><ul class="team-list">${members}</ul>${invites}</section>`;
   }
 
+  const ACCOUNT_SCREENS = {
+    actions: ["Action items", "Everything you agreed to do, across all of your notes.", () => actionItemsPanel()],
+    ask: ["Ask your notes", "Ask a question and get an answer from your own notes.", () => askPanel()],
+    team: ["Team", "Invite teammates and manage who can use this workspace.", () => teamPanel()],
+    plans: ["Hosted AI", "Your plan, what you have used this period, and billing.", () => usagePanel()],
+  };
+
   function renderAccount() {
-    setHeader("Account", "PLAN, QUESTIONS, ACTION ITEMS AND TEAM");
-    const tabs = [["usage", "Usage & plan"], ["ask", "Ask your notes"], ["actions", "Action items"], ["team", "Team"]];
-    const body = { usage: usagePanel, ask: askPanel, actions: actionItemsPanel, team: teamPanel }[accountState.tab]();
-    $("#content").innerHTML = `<div class="account-layout"><div class="tab-row" role="tablist">${tabs.map(([id, label]) => `<button role="tab" class="tab-button ${accountState.tab === id ? "active" : ""}" aria-selected="${accountState.tab === id}" data-account-tab="${id}">${label}</button>`).join("")}</div>${body}</div>`;
+    const [title, lede, panel] = ACCOUNT_SCREENS[state.page];
+    setHeader(title, lede);
+    $("#content").innerHTML = `<div class="account-layout">${panel()}</div>`;
     wireAccount();
   }
 
@@ -703,7 +739,6 @@
   }
 
   function wireAccount() {
-    for (const tab of document.querySelectorAll("[data-account-tab]")) tab.addEventListener("click", () => { accountState.tab = tab.dataset.accountTab; renderAccount(); });
     $("#account-sign-in")?.addEventListener("click", () => { state.settingsOpen.processing = true; setPage("settings"); });
     $("#account-reload")?.addEventListener("click", () => { accountState.overview = null; accountState.error = ""; renderAccount(); void loadOverview(true); });
     $("#team-reload")?.addEventListener("click", () => { accountState.team.error = ""; accountState.team.roster = null; renderAccount(); });
@@ -746,7 +781,7 @@
   }
 
   function renderSettings() {
-    setHeader("Settings", "LOCAL APP SETTINGS");
+    setHeader("Settings", "Choose how notes are made and manage this app.");
     const s = state.snapshot.settings;
     const p = s.preferences;
     const vocabulary = Array.isArray(p.customVocabulary) ? p.customVocabulary.join("\n") : "";
@@ -1055,7 +1090,6 @@
     finally { button.disabled = false; }
   }
 
-  document.querySelectorAll(".nav-button").forEach((button) => button.addEventListener("click", () => setPage(button.dataset.page)));
   $("#open-notes-folder").addEventListener("click", async () => { try { await invoke("desktop_open_notes_folder"); } catch (error) { notify(String(error), "error"); } });
   $("#open-webapp").addEventListener("click", async () => { try { await invoke("desktop_open_webapp"); } catch (error) { notify(String(error), "error"); } });
 
@@ -1092,7 +1126,7 @@
   function startRefreshPolling() {
     if (refreshInterval !== null || document.visibilityState !== "visible") return;
     refreshInterval = window.setInterval(() => {
-      if (refreshTask === null && !state.busy && state.page !== "settings" && state.page !== "account") void refresh();
+      if (refreshTask === null && !state.busy && state.page !== "settings" && !isAccountPage()) void refresh();
     }, REFRESH_INTERVAL_MS);
   }
   document.addEventListener("visibilitychange", () => {

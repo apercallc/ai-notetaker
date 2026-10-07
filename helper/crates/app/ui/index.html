@@ -19,23 +19,10 @@
               <path class="brand-wave" d="M18 25h2v8h-2zm5-4h2v16h-2zm5 3h2v10h-2z" />
             </svg>
           </div>
-          <div><strong>AI Notetaker</strong><span>Local-first meeting notes</span></div>
+          <strong>AI Notetaker</strong>
         </div>
 
-        <nav class="nav-list" aria-label="Sections">
-          <button class="nav-button active" data-page="record" aria-label="Record" aria-current="page">
-            <span class="nav-icon" aria-hidden="true">●</span><span>Record</span>
-          </button>
-          <button class="nav-button" data-page="notes" aria-label="Notes">
-            <span class="nav-icon" aria-hidden="true">▤</span><span>Notes</span>
-          </button>
-          <button class="nav-button" data-page="account" aria-label="Account">
-            <span class="nav-icon" aria-hidden="true">◎</span><span>Account</span>
-          </button>
-          <button class="nav-button" data-page="settings" aria-label="Settings">
-            <span class="nav-icon" aria-hidden="true">⚙</span><span>Settings</span><span class="nav-dot" id="settings-nav-dot" role="img" aria-label="Setup needed" hidden></span>
-          </button>
-        </nav>
+        <nav class="nav-list" id="nav-list" aria-label="Sections"></nav>
 
         <div class="sidebar-footer">
           <div class="local-badge"><span class="status-dot"></span> Saved on this device</div>
@@ -48,8 +35,9 @@
       <main class="main-area">
         <header class="topbar">
           <div>
-            <p class="eyebrow" id="page-eyebrow">YOUR DESKTOP NOTETAKER</p>
+            
             <h1 id="page-title">Record a meeting</h1>
+            <p class="eyebrow" id="page-eyebrow">YOUR DESKTOP NOTETAKER</p>
           </div>
           <div class="topbar-status" id="topbar-status" role="status" aria-live="polite">
             <span class="status-dot"></span><span>Checking audio</span>
