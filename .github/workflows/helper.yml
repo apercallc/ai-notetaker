@@ -105,7 +105,8 @@ jobs:
           # Keep release dylibs intact on macOS; other OSes retain Tauri's
           # existing debuginfo stripping behavior.
           CARGO_PROFILE_RELEASE_STRIP: ${{ runner.os == 'macOS' && 'none' || 'debuginfo' }}
-        run: npx --yes @tauri-apps/cli@2.11.5 build --bundles ${{ matrix.bundle }}
+        # Update archives are signed only by the release workflow, so pull requests skip them.
+        run: npx --yes @tauri-apps/cli@2.11.5 build --config '{"bundle":{"createUpdaterArtifacts":false}}' --bundles ${{ matrix.bundle }}
 
       - name: Test Mac installer and package guided DMG
         if: runner.os == 'macOS'

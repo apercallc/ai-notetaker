@@ -898,7 +898,7 @@
         <p class="key-status" id="desktop-transfer-status" role="status" aria-live="polite"></p>`)}
       ${section("about", "About &amp; legal", [`v${esc(state.snapshot.version)}`, ""], "AI Notetaker is open-source software under the MIT License. You decide when to record and must tell the people on the call, as the law and your workplace require.",
         `<div class="inline-actions">${[["privacy", "Privacy notice"], ["terms", "Terms"], ["license", "License"], ["third-party", "Third-party licenses"], ["source", "Source code"], ["issues", "Report a problem"]].map(([id, label]) => `<button type="button" class="secondary-button" data-about="${id}">${label}</button>`).join("")}</div>
-        <p class="fine-print">Once a day the app can check GitHub for a newer release (turn this off in the tray menu). It never installs updates by itself.</p>`)}
+        <p class="fine-print">AI Notetaker keeps itself up to date: it checks GitHub for signed releases and installs them, restarting only when nothing is recording. Turn this off with Automatic Updates in the tray menu.</p>`)}
       <div class="settings-footer"><span class="settings-hint" id="settings-hint">Blank credential fields keep saved values.</span><button type="submit" class="primary-button" id="save-settings">Save settings</button></div>
     </form></div>`;
     const arrangeProviderKeys = () => {

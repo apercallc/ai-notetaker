@@ -607,7 +607,7 @@ export function PrivacyView() {
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
               <li>If you connect a web-app workspace, finished desktop note text syncs there and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
-              <li>Once a day, unless you turn it off in the tray menu, the desktop app asks GitHub&apos;s public releases page whether a newer version exists. GitHub, not us, receives your IP address and the app version. The app never installs anything by itself.</li>
+              <li>The desktop app keeps itself up to date. It checks for a newer signed release on GitHub (about every six hours, and at startup) and installs it for you, restarting only when nothing is recording. GitHub, not us, receives your IP address and the app version. Turn automatic updates off in the tray menu and the app only checks when you ask.</li>
               <li>Google Drive export and a self-hosted history server are optional. Their operators receive what you send them.</li>
             </ul>
 
@@ -846,7 +846,7 @@ export function TermsView() {
             <p>
               Download software from the linked project releases and check each release&apos;s notes and checksums.
               Current desktop installers are not code-signed and may show operating-system warnings. A checksum helps
-              detect a changed or damaged file, but it does not establish who published it. The desktop app can tell you when a newer release exists, but you choose whether to download and install it.
+              detect a changed or damaged file, but it does not establish who published it. The desktop app updates itself with signed updates by default; you can turn automatic updates off in its tray menu and install releases yourself.
             </p>
 
             <h2>Liability</h2>
