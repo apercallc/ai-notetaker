@@ -41,6 +41,59 @@ pub fn recording_active() -> bool {
     RECORDING_ACTIVE.load(Ordering::Acquire)
 }
 
+/// True when a tray icon was created and something on this desktop will actually show it.
+pub fn tray_available() -> bool {
+    TRAY_AVAILABLE.load(Ordering::Acquire)
+}
+
+/// On Linux the tray icon builds fine even when no desktop shell displays it (stock GNOME has no
+/// StatusNotifier host without an extension). Then hiding the window would leave no way back, so
+/// the app must treat the tray as absent. Elsewhere the system tray always exists.
+#[cfg(target_os = "linux")]
+fn tray_is_displayed() -> bool {
+    let probes: [(&str, &[&str]); 2] = [
+        (
+            "gdbus",
+            &[
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.DBus",
+                "--object-path",
+                "/org/freedesktop/DBus",
+                "--method",
+                "org.freedesktop.DBus.NameHasOwner",
+                "org.kde.StatusNotifierWatcher",
+            ],
+        ),
+        (
+            "busctl",
+            &["--user", "status", "org.kde.StatusNotifierWatcher"],
+        ),
+    ];
+    for (program, args) in probes {
+        if let Ok(output) = std::process::Command::new(program).args(args).output() {
+            return watcher_probe_says_present(program, output.status.success(), &output.stdout);
+        }
+    }
+    // Neither tool exists: assume no tray rather than risk an unreachable hidden window.
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+fn tray_is_displayed() -> bool {
+    true
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn watcher_probe_says_present(program: &str, succeeded: bool, stdout: &[u8]) -> bool {
+    match program {
+        "gdbus" => succeeded && String::from_utf8_lossy(stdout).contains("true"),
+        // busctl exits non-zero when the name has no owner.
+        _ => succeeded,
+    }
+}
+
 pub fn keeps_running_when_window_closes() -> bool {
     TRAY_AVAILABLE.load(Ordering::Acquire) || RECORDING_ACTIVE.load(Ordering::Acquire)
 }
@@ -323,7 +376,11 @@ fn try_initialize<R: Runtime>(
         })
         .build(app)?;
 
-    TRAY_AVAILABLE.store(true, Ordering::Release);
+    let displayed = tray_is_displayed();
+    if !displayed {
+        tracing::warn!("no system tray host found; closing the window will quit the app");
+    }
+    TRAY_AVAILABLE.store(displayed, Ordering::Release);
     Ok(Arc::new(TrayController {
         status: Some(status),
         tray: Some(tray),
@@ -431,5 +488,19 @@ pub fn open_release_page() {
     const RELEASES_URL: &str = "https://github.com/apercallc/ai-notetaker/releases/latest";
     if let Err(error) = open_with_default_app(Path::new(RELEASES_URL)) {
         tracing::warn!(%error, "could not open the official release page");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::watcher_probe_says_present;
+
+    #[test]
+    fn a_status_notifier_watcher_is_detected_from_either_probe() {
+        assert!(watcher_probe_says_present("gdbus", true, b"(true,)\n"));
+        assert!(!watcher_probe_says_present("gdbus", true, b"(false,)\n"));
+        assert!(!watcher_probe_says_present("gdbus", false, b""));
+        assert!(watcher_probe_says_present("busctl", true, b"Name=..."));
+        assert!(!watcher_probe_says_present("busctl", false, b""));
     }
 }

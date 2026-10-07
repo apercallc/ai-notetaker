@@ -20,7 +20,7 @@ From `helper/crates/app/`:
 npx --yes @tauri-apps/cli@2.11.5 build --bundles deb,appimage
 ```
 
-The Tauri configuration also declares macOS `dmg` and Windows `msi`/`nsis`
+The Tauri configuration also declares macOS `dmg` and Windows `nsis`
 bundles. A Debian package can also be produced from the checked-in
 `package.metadata.deb` after installing `cargo-deb`:
 
@@ -43,11 +43,10 @@ Older helper-only releases still require the browser extension and are not the
 new-user install path.
 
 The Debian package depends on `pulseaudio-utils`, which supplies `pactl` for
-audio setup/probing and `parec` for monitor capture. AppImage remains a CI
-bundle, but is not currently a published primary download; the desktop app
-does not require a stable Chrome Native Messaging path.
+audio setup/probing and `parec` for monitor capture. The release does not publish an
+AppImage, and the desktop app does not require a stable Chrome Native Messaging path.
 
-The desktop app keeps itself up to date. macOS and Windows builds (and Linux AppImage)
+The desktop app keeps itself up to date. macOS and Windows builds
 download a minisign-signed update from the latest GitHub release (`latest.json`), verify it
 against the public key in `tauri.conf.json`, and apply it silently when the app was started at
 login and nothing is recording, or after the user taps **Restart now**. A Linux `.deb` cannot
@@ -116,18 +115,18 @@ unchanged:
 
 The Debian package is the primary Linux download because it installs the
 required `pulseaudio-utils` tools and can register the legacy browser bridge.
-The desktop app itself does not depend on that registration. AppImage remains
-available as a CI bundle, but is not currently a published primary download.
+The desktop app itself does not depend on that registration. No AppImage is published.
 
 ## Update behavior
 
-The helper fetches the latest stable release metadata from GitHub at most once
-per 24 hours. If the release is newer than the installed version, a native
-yes/no prompt offers to open the fixed official GitHub Releases page. Accepting
-opens the page; declining is remembered for that version. No executable,
-installer, or update metadata is downloaded by the helper, and nothing is
-installed in the background. **Check for Updates…** in the tray menu performs
-an immediate check.
+The desktop app checks the latest stable GitHub release at startup and about every six
+hours. On macOS and Windows it downloads the minisign-signed update, verifies it against the
+public key in `tauri.conf.json`, and installs it: silently when the app was started at login
+and nothing is recording, otherwise after the user taps **Restart now**. A Linux `.deb`
+cannot replace itself, so it asks before opening the official GitHub Releases page; declining
+is remembered for that version. Installers themselves are not operating-system code-signed;
+only the update packages are signed with the project's update key. **Automatic Updates** in
+the tray turns the checks off, and **Check for Updates…** always checks immediately.
 
 ## Uninstall
 
@@ -139,9 +138,9 @@ must be kept.
 
 ### Linux
 
-Remove the `.deb` package (the exact package name may be shown by `dpkg -l`)
-or remove the AppImage. The Debian maintainer script removes the two
-system-wide manifests it owns. For an AppImage/manual install, remove
+Remove the `.deb` package (`sudo apt remove ai-notetaker`; the exact package name
+is shown by `dpkg -l | grep -i notetaker`). The Debian maintainer script removes the
+system-wide browser manifests it owns. For a manual install, remove
 `~/.config/google-chrome/NativeMessagingHosts/com.ainotetaker.helper.json`
 (and the Chromium-equivalent directory) and `~/.local/share/ai-notetaker`.
 

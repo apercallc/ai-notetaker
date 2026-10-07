@@ -33,7 +33,7 @@ jobs:
           - os: macos-latest
             bundle: app
           - os: windows-latest
-            bundle: msi,nsis
+            bundle: nsis
     defaults:
       run:
         working-directory: helper

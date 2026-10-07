@@ -19,6 +19,16 @@
   const providerName = (id) => ({ deepgram: "Deepgram", groq: "Groq", claude: "Claude", gemini: "Gemini", deepseek: "DeepSeek" })[id] || id;
   // Notes are always made with the user's own provider keys; the account is for sign-in and sync.
   const hostedSelected = () => false;
+  const PLAN_NAMES = { free: "Free", local: "Free", hosted_trial: "Free", pro: "Pro", hosted_pro: "Pro", team: "Team", hosted_team: "Team" };
+  const planName = (id) => PLAN_NAMES[id] || "Free";
+  // Sync is a Pro/Team feature. Prefer the live answer from the plan overview, then what the
+  // service said at sign-in, then a 402 the sync worker recorded.
+  const syncNeedsPlan = (settings, sync) => {
+    const live = accountState.overview?.entitlements;
+    if (live && typeof live.canSync === "boolean") return !live.canSync;
+    if (settings.preferences.hostedAccount?.syncAllowed === false) return true;
+    return /HTTP 402/.test(sync?.lastError || "");
+  };
   const processingReady = (settings) => providerKeySaved(settings, settings.preferences.transcriptionProvider) && providerKeySaved(settings, settings.preferences.summarizationProvider);
   const providerKeySaved = (settings, id) => settings[{ deepgram: "hasDeepgramKey", groq: "hasGroqKey", claude: "hasClaudeKey", gemini: "hasGeminiKey", deepseek: "hasDeepseekKey" }[id]];
   const meetingModeName = (id) => ({ general: "General", standup: "Stand-up", sales: "Sales", one_on_one: "1:1", interview: "Interview", lecture: "Lecture", custom: "Custom" })[id] || id;
@@ -178,12 +188,9 @@
     const active = s.activeMeetingId;
     const audio = s.audio;
     const keyReady = processingReady(s.settings);
-    const hosted = hostedSelected(s.settings);
     const setup = s.credentialStoreError || !keyReady;
-    const ownKeysMessage = `Choose how to use AI Notetaker. Stay offline: add your own ${providerName(s.settings.preferences.transcriptionProvider)} (transcription) and ${providerName(s.settings.preferences.summarizationProvider)} (summaries) keys, and your notes never leave this device except for calls to those providers. Or sign in: we make the notes, and your notes stay in sync with the web app and your other devices.`;
-    const setupMessage = s.credentialStoreError || (hosted
-      ? "Your hosted session has ended. Sign in again in Settings → Processing to record."
-      : ownKeysMessage);
+    const ownKeysMessage = `Add your own ${providerName(s.settings.preferences.transcriptionProvider)} (transcription) and ${providerName(s.settings.preferences.summarizationProvider)} (summaries) keys. Your notes never leave this device except for calls to those providers. An account is optional, and a subscription adds cloud sync.`;
+    const setupMessage = s.credentialStoreError || ownKeysMessage;
     const startHint = recordingStartHint({
       credentialStoreError: s.credentialStoreError,
       keyReady,
@@ -208,7 +215,7 @@
     const processing = s.meetings.filter((meeting) => meeting.status === "processing").length;
     const finalizing = s.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
     $("#content").innerHTML = `
-      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError || hosted ? "" : " Your provider keys stay in this device’s credential store."}</span>${s.credentialStoreError ? "" : `<button class="small-button" id="goto-providers">${hosted ? "Sign in again" : "Set up processing"}</button>`}</div></div>` : ""}
+      ${setup ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}${s.credentialStoreError ? "" : " Your provider keys stay in this device’s credential store."}</span>${s.credentialStoreError ? `<button class="small-button" id="retry-credential-store">Try again</button>` : `<button class="small-button" id="goto-providers">Add your keys</button>`}</div></div>` : ""}
       ${recoverable ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Saved audio needs recovery</strong><span>${esc(recoverable.title)} was interrupted. Its audio is still on this device.</span><button class="small-button" id="open-recoverable">Open recording</button></div></div>` : ""}
       ${processing ? `<p class="process-status" role="status">Preparing notes from ${processing} saved recording${processing === 1 ? "" : "s"}. You can keep using the app.</p>` : ""}
       ${finalizing ? '<p class="process-status">Finishing saved audio. It stays on this device while notes are prepared.</p>' : ""}
@@ -266,7 +273,8 @@
       catch (error) { notify(String(error), "error"); }
     });
     $("#all-notes")?.addEventListener("click", () => setPage("notes"));
-    $("#goto-providers")?.addEventListener("click", () => { state.settingsOpen.processing = true; setPage("settings"); requestAnimationFrame(() => $("#settings-processing h2")?.focus({ preventScroll: false })); });
+    $("#retry-credential-store")?.addEventListener("click", () => void refresh());
+    $("#goto-providers")?.addEventListener("click", () => { state.settingsOpen.providers = true; setPage("settings"); requestAnimationFrame(() => $("#settings-providers h2")?.focus({ preventScroll: false })); });
     for (const button of document.querySelectorAll("[data-meeting-id]")) button.addEventListener("click", () => openMeeting(button.dataset.meetingId));
   }
 
@@ -808,33 +816,34 @@
       }).join("")}</div></details>`
       : "";
     const providersReady = providerKeySaved(s, p.transcriptionProvider) && providerKeySaved(s, p.summarizationProvider);
-    const hostedOn = hostedSelected(s);
     const account = p.hostedAccount;
-    const processingBadge = hostedOn
-      ? (s.hasHostedSession ? ["Own keys", "ok"] : ["Sign in again", "warn"])
-      : (providersReady ? ["Own keys", "ok"] : ["Setup needed", "warn"]);
-    const syncOn = state.snapshot.webappSync.configured;
-    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device." : "Your notes stay on this device. Sign in only if you want them on the web app and your other devices."}</p>`;
+    if (account && s.hasHostedSession && !accountState.overview && !accountState.loading && !accountState.error) void loadOverview();
+    const needsPlan = Boolean(account) && syncNeedsPlan(s, state.snapshot.webappSync);
+    const processingBadge = !account
+      ? ["Offline", ""]
+      : !s.hasHostedSession ? ["Sign in again", "warn"] : needsPlan ? ["Needs plan", "warn"] : ["Signed in", "ok"];
+    const syncOn = state.snapshot.webappSync.configured && !needsPlan;
+    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : needsPlan ? "Cloud sync is off." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device." : needsPlan ? "Your notes stay on this device. Choose a Pro or Team plan to sync them across your devices and your team." : "Your notes stay on this device. Sign in if you want an account; a subscription adds cloud sync."}</p>${needsPlan ? '<div class="inline-actions"><button type="button" class="primary-button" id="upgrade-plan">See plans</button></div>' : ""}`;
     const processingBody = cloudLine + (account
-      ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(account.plan)} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep your notes syncing.</p>'}
+      ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(planName(accountState.overview?.entitlements?.plan || account.plan))} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep your notes syncing.</p>'}
         <div class="inline-actions"><button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button><button type="button" class="secondary-button" id="hosted-manage-web">Manage account, devices &amp; data on the web</button></div></div>
         ${s.hasHostedSession ? "" : hostedForm(account.email)}`
       : hostedForm(""));
     const syncState = state.snapshot.webappSync;
-    const syncBadge = conflicts.length ? ["Needs review", "warn"] : syncState.configured ? ["Connected", "ok"] : s.hasWebappToken ? ["Check connection", "warn"] : ["Optional", ""];
-    const defaultOpen = { processing: !processingReady(s), providers: !hostedOn && !providersReady, "note-style": false, sync: Boolean(conflicts.length || syncState.lastError), import: false, about: false };
+    const syncBadge = conflicts.length ? ["Needs review", "warn"] : needsPlan ? ["Needs plan", "warn"] : syncState.configured ? ["Connected", "ok"] : s.hasWebappToken ? ["Check connection", "warn"] : ["Optional", ""];
+    const defaultOpen = { processing: !account && providersReady, providers: !providersReady, "note-style": false, sync: Boolean(conflicts.length || syncState.lastError), import: false, about: false };
     const isOpen = (id) => (id in state.settingsOpen ? state.settingsOpen[id] : defaultOpen[id]);
     const url_field = `<div class="form-field wide"><label class="field-label" for="webapp-url">Web-app URL</label><input class="text-input" id="webapp-url" type="url" value="${esc(p.webappUrl)}" placeholder="https://ai-notetaker.apercallc.com" autocomplete="url" /></div>`;
     const token_field = `<div class="form-field wide"><label class="field-label" for="webapp-token">Desktop sync token</label><div class="key-row"><input class="text-input" id="webapp-token" type="password" autocomplete="new-password" placeholder="${s.hasWebappToken ? "Saved securely · blank keeps current token" : "Paste desktop sync token"}" /><button type="button" class="secondary-button" id="test-webapp">Test connection</button></div><label class="key-status" id="webapp-status">${s.hasWebappToken ? (state.snapshot.webappSync.configured ? `Sync enabled · ${state.snapshot.webappSync.pending} note(s) pending` : "Token saved. Check the URL and connection.") : "No sync token saved."}</label><label class="fine-print"><input type="checkbox" id="clear-webapp-token" /> Remove saved token</label></div>`;
     const sync_status = state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : "";
     const sync_controls = state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : "";
     const section = (id, title, badge, intro, body) => `<details class="card settings-card" id="settings-${id}" ${isOpen(id) ? "open" : ""}><summary><h2 tabindex="-1">${title}</h2><span class="section-badge ${badge[1]}">${esc(badge[0])}</span></summary><div class="settings-body"><p>${intro}</p>${body}</div></details>`;
-    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Account &amp; sync${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="providers">Own API keys</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
+    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Account &amp; sync</button><button type="button" data-settings-section="providers">Own API keys${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="sync">Web app sync</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
       ${state.snapshot.credentialStoreError ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Secure storage is unavailable</strong><span>${esc(state.snapshot.credentialStoreError)}</span></div></div>` : ""}
       ${section("processing", "Account &amp; sync", processingBadge,
         "Audio is always saved on this device first, and notes are made with your own keys. A free account lets you sign in and manage your devices. A subscription adds cloud sync across your devices and your team.",
         processingBody)}
-      ${section("providers", "Own API keys", providersReady ? ["Ready", "ok"] : hostedOn ? ["Optional", ""] : ["Keys needed", "warn"],
+      ${section("providers", "Own API keys", providersReady ? ["Ready", "ok"] : ["Keys needed", "warn"],
         "With your own API keys, recordings go directly to the providers you pick and nothing passes through us. Keys are stored in your operating system’s credential store. You need one transcription key and one summary key.",
         `<div class="form-grid"><div class="form-field"><label class="field-label" for="transcription-provider">Transcription provider</label><select class="select-input" id="transcription-provider">${transcription}</select></div><div class="form-field"><label class="field-label" for="summarization-provider">Summary provider</label><select class="select-input" id="summarization-provider">${summarization}</select></div></div>
         <h3 class="subhead">Keys you need</h3><div class="form-grid" id="keys-active"></div>
@@ -897,6 +906,7 @@
       }
     }
     for (const link of document.querySelectorAll("[data-about]")) link.addEventListener("click", async () => { try { await invoke("desktop_open_about_link", { page: link.dataset.about }); } catch (error) { notify(String(error), "error"); } });
+    $("#upgrade-plan")?.addEventListener("click", async () => { try { await invoke("desktop_open_web_page", { page: "billing" }); } catch (error) { notify(String(error), "error"); } });
     $("#hosted-manage-web")?.addEventListener("click", async () => { try { await invoke("desktop_open_web_page", { page: "account" }); } catch (error) { notify(String(error), "error"); } });
     $("#hosted-open-connect")?.addEventListener("click", async () => { try { await invoke("desktop_open_connect_page"); } catch (error) { notify(String(error), "error"); } });
     const codeField = $("#hosted-code");
@@ -1108,7 +1118,7 @@
     } else if (message?.type === "managed_job_status") {
       // Hosted processing: tell the user when an upload or job fails (their audio is still safe
       // on this device and is retried), and keep the library status current otherwise.
-      if (message.status === "error" || message.status === "failed") notify(`${message.message || "Hosted processing did not finish."} Your recording is saved on this device and will be retried.`, "warn");
+      if (message.status === "error" || message.status === "failed") notify(`${message.message || "Processing did not finish."} Your recording is saved on this device and will be retried.`, "warn");
       refresh();
     } else if (["recording_started", "recording_stopped", "summary_ready", "recovered_recording", "audio_status", "audio_probe_result"].includes(message?.type)) {
       if (message?.type === "summary_ready" && message.meetingId) state.recoveringIds.delete(message.meetingId);

@@ -932,6 +932,19 @@ impl MeetingStore {
         })
     }
 
+    /// Hands a recording that was waiting on hosted processing back to the local pipeline. Hosted
+    /// processing is no longer offered, so the saved audio is kept and can be turned into notes
+    /// with the user's own provider keys instead of waiting for a service that will not run it.
+    pub fn release_managed_to_local(&self, id: Uuid) -> Result<(), StorageError> {
+        self.update_meta(id, |meta| {
+            meta.managed_pending = false;
+            meta.managed_job_id = None;
+            meta.managed_upload_id = None;
+            meta.managed_next_chunk = 0;
+            Ok(())
+        })
+    }
+
     pub fn mark_managed_complete(&self, id: Uuid) -> Result<(), StorageError> {
         self.update_meta(id, |meta| {
             meta.managed_pending = false;
@@ -1998,6 +2011,26 @@ mod tests {
         assert_eq!(store.audio_len(id, MIC_FILE).unwrap(), 4);
         assert_eq!(store.audio_len(id, SPEAKER_FILE).unwrap(), 0);
         assert!(store.audio_len(id, "meta.json").is_err());
+    }
+
+    #[test]
+    fn a_hosted_pending_recording_can_be_released_to_the_local_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store.set_managed_job_id(id, "job-1").unwrap();
+        store
+            .set_managed_upload_progress(id, "upload-1", 3)
+            .unwrap();
+
+        store.release_managed_to_local(id).unwrap();
+
+        let meta = store.load_meta(id).unwrap();
+        assert!(!meta.managed_pending);
+        assert_eq!(meta.managed_job_id, None);
+        assert_eq!(meta.managed_upload_id, None);
+        assert_eq!(meta.managed_next_chunk, 0);
     }
 
     #[test]

@@ -165,6 +165,17 @@ jobs:
         run: |
           ./packaging/windows/fetch-vb-cable.ps1 `
             -OutputDirectory "$env:GITHUB_WORKSPACE/helper/crates/app/resources/windows/vb-cable"
+      - name: Require the updater signing key
+        # A tagged release signs its update archives; fail now rather than after the full build.
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set; update archives cannot be signed."
+            exit 1
+          fi
       - name: Build native bundles
         working-directory: helper/crates/app
         env:

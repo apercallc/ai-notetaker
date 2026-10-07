@@ -712,7 +712,7 @@ async fn ensure_managed_success(
         .unwrap_or_else(|_| serde_json::json!({}));
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return Err(format!(
-            "{operation}: your hosted session ended. Sign in again in Settings → Processing; the recording is saved on this device and will resume."
+            "{operation}: your session ended. Sign in again in Settings → Account & sync; the recording is saved on this device and will resume."
         ));
     }
     if !status.is_success() {
@@ -1166,7 +1166,6 @@ fn main() {
             desktop_hosted_sign_out,
             desktop_set_processing,
             desktop_account_overview,
-            desktop_account_ask,
             desktop_team_roster,
             desktop_team_action,
             desktop_account_billing,
@@ -1192,6 +1191,7 @@ fn main() {
             desktop_open_blackhole_download,
             desktop_open_notes_folder,
             desktop_open_webapp,
+            desktop_open_web_page,
             desktop_open_about_link,
             desktop_open_webapp_conflict,
             desktop_resolve_webapp_conflict,
@@ -1330,13 +1330,17 @@ fn main() {
                         )
                         .await;
                     }
-                    let _ = run_desktop_sync(
+                    let outcome = run_desktop_sync(
                         retry_state.clone(),
                         retry_preferences.clone(),
                         retry_queue.clone(),
                         retry_app.clone(),
                     ).await;
-                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    // A workspace without a plan answers 402 to every request; asking again every
+                    // minute only repeats the same refusal. A manual "Sync now" still tries at once.
+                    let plan_blocked = outcome.err().is_some_and(|error| error.contains("HTTP 402"));
+                    let wait = if plan_blocked { 15 * 60 } else { 60 };
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                 }
             });
             if let Ok(interrupted) = state
@@ -1367,7 +1371,16 @@ fn main() {
                 }
             });
 
-            if !start_hidden {
+            // Recordings that were waiting on hosted processing (made before it was retired) are
+            // handed back to the local pipeline so their audio can be recovered with the user's keys.
+            let released = release_stranded_managed_recordings(&state.data_dir, &state.store);
+            if released > 0 {
+                tracing::info!(released, "released hosted-pending recordings to the local pipeline");
+            }
+
+            // A login start stays in the tray only when something will show the tray icon;
+            // otherwise the window is the only way to reach the app.
+            if !start_hidden || !tray::tray_available() {
                 show_main_window(app.handle());
             }
             tracing::info!("notetaker-helper starting");
@@ -1577,6 +1590,15 @@ async fn desktop_test_webapp(url: String, token: String) -> Result<WebappConnect
         })?;
     if !response.status().is_success() {
         let status = response.status();
+        if status.as_u16() == 402 {
+            // The token is genuine; the workspace just has no plan, so say that instead of
+            // blaming the token.
+            return Ok(WebappConnectionCheck {
+                valid: true,
+                message: "Connected, but cloud sync needs an active Pro or Team plan.".to_string(),
+                workspace_name: None,
+            });
+        }
         let message = match status.as_u16() {
             401 => "Token is invalid, expired, or revoked. Create a new desktop sync token.",
             402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
@@ -1899,6 +1921,7 @@ async fn finish_hosted_sign_in(
                 reply.plan
             },
             expires_at: reply.expires_at,
+            sync_allowed: None,
         }),
         ..previous
     };
@@ -1912,13 +1935,18 @@ async fn finish_hosted_sign_in(
         .is_none()
     {
         match fetch_desktop_sync_token(&preferences).await {
-            Ok(token) => match desktop_settings::set_webapp_token(Some(&token)) {
+            Ok((token, can_sync)) => match desktop_settings::set_webapp_token(Some(&token)) {
                 Ok(()) => {
+                    if let Some(account) = &mut preferences.hosted_account {
+                        account.sync_allowed = Some(can_sync);
+                    }
                     if let Some(account) = &preferences.hosted_account {
                         preferences.webapp_url = account.base_url.clone();
                     }
                     preferences.sync_from_sign_in = true;
-                    connected_sync = true;
+                    // The token is kept either way so sync starts the moment a plan is added;
+                    // without one the service would answer every request with 402.
+                    connected_sync = can_sync;
                 }
                 Err(error) => tracing::warn!(%error, "could not store the notes-sync token"),
             },
@@ -1966,7 +1994,7 @@ async fn revoke_token(base_url: &str, token: &str) {
 
 async fn fetch_desktop_sync_token(
     preferences: &desktop_settings::DesktopPreferences,
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     let body = hosted_call(
         preferences,
         reqwest::Method::POST,
@@ -1975,10 +2003,15 @@ async fn fetch_desktop_sync_token(
         std::time::Duration::from_secs(20),
     )
     .await?;
+    // An older service omits the flag; treat that as "sync allowed" like it always was.
+    let can_sync = body
+        .get("canSync")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
     body.get("token")
         .and_then(serde_json::Value::as_str)
         .filter(|token| !token.is_empty())
-        .map(str::to_string)
+        .map(|token| (token.to_string(), can_sync))
         .ok_or_else(|| "The service sent no sync token.".to_string())
 }
 
@@ -1992,7 +2025,7 @@ async fn hosted_call(
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
     let service = desktop_settings::hosted_session(preferences).ok_or_else(|| {
-        "Sign in to your AI Notetaker account in Settings → Processing.".to_string()
+        "Sign in to your AI Notetaker account in Settings → Account & sync.".to_string()
     })?;
     if !hosted_url_is_allowed(&service.base_url) {
         return Err("The hosted service address must use https.".into());
@@ -2029,7 +2062,7 @@ fn interpret_hosted_response(
     body: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     if status == 401 {
-        return Err("Your hosted session ended. Sign in again in Settings → Processing.".into());
+        return Err("Your session ended. Sign in again in Settings → Account & sync.".into());
     }
     if (200..300).contains(&status)
         || body.get("ok").is_some()
@@ -2063,24 +2096,6 @@ async fn desktop_account_overview(
         "account/overview",
         None,
         std::time::Duration::from_secs(20),
-    )
-    .await
-}
-
-#[tauri::command]
-async fn desktop_account_ask(
-    context: tauri::State<'_, DesktopCommandContext>,
-    question: String,
-) -> Result<serde_json::Value, String> {
-    if question.trim().is_empty() || question.chars().count() > 2_000 {
-        return Err("Ask a question of up to 2,000 characters.".into());
-    }
-    hosted_call(
-        &current_preferences(&context),
-        reqwest::Method::POST,
-        "ask",
-        Some(serde_json::json!({ "question": question })),
-        std::time::Duration::from_secs(120),
     )
     .await
 }
@@ -2139,7 +2154,7 @@ async fn desktop_account_billing(
     let preferences = current_preferences(&context);
     let base = desktop_settings::hosted_session(&preferences)
         .ok_or_else(|| {
-            "Sign in to your AI Notetaker account in Settings → Processing.".to_string()
+            "Sign in to your AI Notetaker account in Settings → Account & sync.".to_string()
         })?
         .base_url;
     let timeout = std::time::Duration::from_secs(30);
@@ -2180,11 +2195,33 @@ async fn desktop_account_billing(
     let url = reply
         .get("url")
         .and_then(serde_json::Value::as_str)
-        .filter(|url| url.starts_with("https://"))
+        .filter(|url| billing_url_is_allowed(url, &base))
         .ok_or_else(|| {
             "The billing page could not be opened. Try again, or use the web app.".to_string()
         })?;
     open_external(url)
+}
+
+/// Only Stripe's checkout and billing-portal pages, or a page on the signed-in service itself,
+/// are opened from a billing reply, so a compromised or mistyped service cannot send the user
+/// to an arbitrary site from a trusted-looking button.
+fn billing_url_is_allowed(url: &str, service_base: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" || !parsed.username().is_empty() || parsed.password().is_some() {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    if host == "checkout.stripe.com" || host == "billing.stripe.com" {
+        return true;
+    }
+    reqwest::Url::parse(service_base)
+        .ok()
+        .and_then(|base| base.host_str().map(|base_host| base_host == host))
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -2231,12 +2268,18 @@ async fn desktop_hosted_sign_out(
     apply_preferences(context.inner(), preferences).await
 }
 
-/// Switches between hosted processing and the user's own keys without signing out.
+/// Hosted processing is not offered: notes are made with the user's own keys. Kept so an older
+/// UI asking to go back to own keys still works; asking for hosted is refused.
 #[tauri::command]
 async fn desktop_set_processing(
     context: tauri::State<'_, DesktopCommandContext>,
     hosted: bool,
 ) -> Result<desktop_settings::DesktopSettingsView, String> {
+    if hosted {
+        return Err(
+            "Hosted processing isn't offered. AI Notetaker uses your own provider keys.".into(),
+        );
+    }
     let previous = context
         .preferences
         .lock()
@@ -2550,20 +2593,19 @@ async fn start_desktop_recovery(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
     let keys = desktop_settings::load_api_keys()?;
+    resolve_keys(
+        preferences.transcription_provider,
+        preferences.summarization_provider,
+        &keys,
+    )?;
     if meta.managed_pending {
-        processing_ready(
-            &desktop_settings::DesktopPreferences {
-                processing: desktop_settings::ProcessingChoice::Hosted,
-                ..preferences.clone()
-            },
-            &keys,
-        )?;
-    } else {
-        resolve_keys(
-            preferences.transcription_provider,
-            preferences.summarization_provider,
-            &keys,
-        )?;
+        // Hosted processing is not offered any more; the saved audio is processed with the
+        // user's own keys instead of waiting for a service that will not run it.
+        context
+            .app
+            .store
+            .release_managed_to_local(meeting_id)
+            .map_err(|error| error.to_string())?;
     }
     let mut recovering = context.app.recovering.lock().await;
     if !recovering.insert(meeting_id) {
@@ -3106,6 +3148,39 @@ fn desktop_open_webapp(context: tauri::State<'_, DesktopCommandContext>) -> Resu
     let url = desktop_settings::normalize_webapp_url(&preferences.webapp_url)?
         .unwrap_or_else(|| desktop_settings::DEFAULT_WEBAPP_URL.to_string());
     open_external(&url)
+}
+
+/// The web page, relative to the web app, for a named place in the desktop app. The UI only ever
+/// names the place; the path is chosen here so it can never point somewhere else.
+fn web_page_path(page: &str) -> Option<&'static str> {
+    match page {
+        "library" => Some("/meetings"),
+        "account" | "devices" | "data" => Some("/account"),
+        "billing" | "plan" => Some("/billing"),
+        "team" => Some("/team"),
+        _ => None,
+    }
+}
+
+/// Opens the matching page of the web app the user is signed in to (or the default service).
+#[tauri::command]
+fn desktop_open_web_page(
+    context: tauri::State<'_, DesktopCommandContext>,
+    page: String,
+) -> Result<(), String> {
+    let path = web_page_path(&page).ok_or_else(|| "Unknown web page.".to_string())?;
+    let preferences = current_preferences(&context);
+    let base = preferences
+        .hosted_account
+        .as_ref()
+        .map(|account| account.base_url.clone())
+        .or_else(|| {
+            desktop_settings::normalize_webapp_url(&preferences.webapp_url)
+                .ok()
+                .flatten()
+        })
+        .unwrap_or_else(|| desktop_settings::DEFAULT_WEBAPP_URL.to_string());
+    open_external(&format!("{}{path}", base.trim_end_matches('/')))
 }
 
 #[tauri::command]
@@ -4617,6 +4692,33 @@ fn pending_processing_meeting_ids(root: &Path) -> Vec<Uuid> {
     ids.into_iter().collect()
 }
 
+/// Hands every recording that was waiting on hosted processing back to the local pipeline,
+/// whatever state it was left in, and returns how many were released.
+fn release_stranded_managed_recordings(root: &Path, store: &MeetingStore) -> usize {
+    let Ok(entries) = std::fs::read_dir(root.join("meetings")) else {
+        return 0;
+    };
+    let mut released = 0;
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(bytes) = std::fs::read(entry.path().join("meta.json")) else {
+            continue;
+        };
+        let Ok(meta) = serde_json::from_slice::<notetaker_core::storage::MeetingMeta>(&bytes)
+        else {
+            continue;
+        };
+        if meta.managed_pending {
+            match store.release_managed_to_local(meta.id) {
+                Ok(()) => released += 1,
+                Err(error) => {
+                    tracing::warn!(%meta.id, %error, "could not release a hosted-pending recording");
+                }
+            }
+        }
+    }
+    released
+}
+
 fn pending_managed_meetings(root: &Path) -> Vec<notetaker_core::storage::MeetingMeta> {
     let mut meetings = Vec::new();
     let Ok(entries) = std::fs::read_dir(root.join("meetings")) else {
@@ -4719,18 +4821,11 @@ fn summary_options(
     }
 }
 
-/// Hosted processing needs a live session instead of provider keys.
+/// Notes are made with the user's own provider keys.
 fn processing_ready(
     preferences: &desktop_settings::DesktopPreferences,
     keys: &native_messaging::ApiKeys,
 ) -> Result<(), String> {
-    if preferences.processing == desktop_settings::ProcessingChoice::Hosted {
-        return desktop_settings::hosted_service(preferences)
-            .map(|_| ())
-            .ok_or_else(|| {
-                "Your hosted session ended. Sign in again in Settings → Processing.".to_string()
-            });
-    }
     resolve_keys(
         preferences.transcription_provider,
         preferences.summarization_provider,
@@ -5170,6 +5265,69 @@ mod tests {
     fn pending_processing_on_a_fresh_data_dir_is_empty() {
         let dir = tempfile::tempdir().unwrap();
         assert!(pending_processing_meeting_ids(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn web_pages_map_to_fixed_paths_and_unknown_names_are_refused() {
+        assert_eq!(web_page_path("library"), Some("/meetings"));
+        assert_eq!(web_page_path("account"), Some("/account"));
+        assert_eq!(web_page_path("billing"), Some("/billing"));
+        assert_eq!(web_page_path("team"), Some("/team"));
+        assert_eq!(web_page_path("https://evil.example"), None);
+        assert_eq!(web_page_path("../login"), None);
+    }
+
+    #[test]
+    fn billing_pages_open_only_on_stripe_or_the_service() {
+        assert!(billing_url_is_allowed(
+            "https://checkout.stripe.com/c/pay/abc",
+            "https://notes.example.com"
+        ));
+        assert!(billing_url_is_allowed(
+            "https://billing.stripe.com/p/session/x",
+            "https://notes.example.com"
+        ));
+        assert!(billing_url_is_allowed(
+            "https://notes.example.com/billing",
+            "https://notes.example.com"
+        ));
+        assert!(!billing_url_is_allowed(
+            "https://evil.example/billing",
+            "https://notes.example.com"
+        ));
+        assert!(!billing_url_is_allowed(
+            "http://checkout.stripe.com/c",
+            "https://notes.example.com"
+        ));
+        assert!(!billing_url_is_allowed(
+            "https://checkout.stripe.com.evil.example/c",
+            "https://notes.example.com"
+        ));
+        assert!(!billing_url_is_allowed(
+            "https://user:pw@checkout.stripe.com/c",
+            "https://notes.example.com"
+        ));
+    }
+
+    #[test]
+    fn stranded_hosted_recordings_are_released_in_every_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let stopped = Uuid::new_v4();
+        store.create_meeting(stopped, chrono::Utc::now()).unwrap();
+        store.mark_stopped(stopped, chrono::Utc::now()).unwrap();
+        store.mark_managed_pending(stopped).unwrap();
+        let recording = Uuid::new_v4();
+        store.create_meeting(recording, chrono::Utc::now()).unwrap();
+        store.mark_managed_pending(recording).unwrap();
+        let local = Uuid::new_v4();
+        store.create_meeting(local, chrono::Utc::now()).unwrap();
+
+        assert_eq!(release_stranded_managed_recordings(dir.path(), &store), 2);
+
+        assert!(!store.load_meta(stopped).unwrap().managed_pending);
+        assert!(!store.load_meta(recording).unwrap().managed_pending);
+        assert_eq!(release_stranded_managed_recordings(dir.path(), &store), 0);
     }
 
     #[test]

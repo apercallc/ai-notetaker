@@ -164,7 +164,6 @@ fn installed_cable_name() -> Option<String> {
 fn bundled_driver_path() -> Option<PathBuf> {
     let relative_path = PathBuf::from(BUNDLED_DRIVER_RELATIVE_PATH);
     let file_name = relative_path.file_name()?;
-    let resource_suffix = relative_path.parent()?;
     let mut candidates = Vec::new();
 
     if let Ok(executable) = std::env::current_exe() {
@@ -173,10 +172,8 @@ fn bundled_driver_path() -> Option<PathBuf> {
             candidates.push(parent.join("windows").join("vb-cable").join(file_name));
         }
     }
-    if let Ok(current_dir) = std::env::current_dir() {
-        candidates.push(current_dir.join(&relative_path));
-        candidates.push(current_dir.join(resource_suffix).join(file_name));
-    }
+    // Only locations next to the installed executable are searched: a working directory is
+    // wherever the user happened to launch from (often Downloads) and could hold a planted installer.
 
     candidates.into_iter().find(|path| path.is_file())
 }
