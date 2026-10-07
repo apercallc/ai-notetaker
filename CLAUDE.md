@@ -42,9 +42,9 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
 - **Local BYOK keys live in OS credential storage.** Never put them in synced
   storage or web-app requests.
 - **The desktop app is built on Tauri (Rust)**, not Electron — smaller install, one
-  shared codebase across OSes. Updates are an update-check tray item that opens
-  the signed-release page (`docs/helper-packaging.md`); an in-place Tauri
-  updater waits on release-signing keys.
+  shared codebase across OSes. macOS and Windows install signed updates in place with the
+  Tauri updater; the Linux `.deb` opens the signed-release page
+  (`docs/helper-packaging.md`).
 - **Preserve extension compatibility during migration.** Do not change the
   committed manifest key, remove the Native Messaging relay, or delete
   extension data until the desktop app and migration path pass acceptance.
@@ -59,21 +59,6 @@ These were deliberate resolutions to specific gaps — don't reintroduce them:
 - **Helper checks for and offers to resume an in-progress recording on
   startup** — an unclean shutdown must not silently orphan raw audio
   that's already on disk.
-
-## Product tiers (decided 2026-10-07)
-
-- **Free:** the local desktop app with BYOK. No account needed, ever.
-- **Account (Pro):** creating an account adds cloud sync of notes across
-  devices on the managed web app. Paid subscription.
-- **Team:** shared workspaces, roster and admin controls on the managed
-  service, billed per workspace.
-- **Self-hosted:** free, open-source. Basic sync never requires a
-  subscription or license check; the legacy `AUTH_TOKEN` contract stays.
-  Revenue here, if any, is optional paid support. Do not add license-key
-  gating to the self-hosted web app without a new decision.
-
-Copy, billing code, and UI must use these tier names and must not imply that
-local recording or self-hosted sync is paid.
 
 ## Product tiers (decided 2026-10-07)
 

@@ -1,73 +1,53 @@
-import { CopyButton } from "./CopyButton";
+import Link from "next/link";
 
-const RELEASES_URL = "https://github.com/apercallc/ai-notetaker/releases/latest";
+const DOWNLOAD_PATH = "/download";
 
 export interface OnboardingPlan {
   label: string;
-  isTrial: boolean;
-  used: number;
-  limit: number;
+  canSync: boolean;
 }
 
 /**
- * Shown instead of a bare "no meetings" line. It answers the only question a
- * new account has — what do I do now? — and it never prints a password.
+ * Shown instead of a bare "no meetings" line. The library fills from the desktop app once the
+ * workspace has a subscription and sync is on, so say exactly that instead of promising notes
+ * that only a recording on the desktop can produce.
  */
-export function OnboardingCard({
-  email,
-  origin,
-  managed,
-  plan,
-}: {
-  email: string;
-  origin: string;
-  managed: boolean;
-  plan: OnboardingPlan | null;
-}) {
+export function OnboardingCard({ email, managed, plan }: { email: string; managed: boolean; plan: OnboardingPlan | null }) {
   return (
     <section className="onboarding" aria-labelledby="onboarding-heading">
-      <h2 id="onboarding-heading">Record your first meeting</h2>
-      <p className="muted-copy">Your notes show up here a minute or two after a call ends.</p>
+      <h2 id="onboarding-heading">Your library is empty</h2>
+      <p className="muted-copy">
+        Notes are made in the AI Notetaker desktop app, on your device. With a subscription, finished notes sync here.
+      </p>
       <ol className="onboarding-steps">
         <li>
-          <strong>Install the extension.</strong>{" "}
-          <a href={RELEASES_URL} target="_blank" rel="noreferrer">Get AI Notetaker for Chrome</a>
-          <span className="muted-copy"> (until the Chrome Web Store listing is live, load the release download unpacked).</span>
+          <strong>Install the desktop app.</strong> <Link href={DOWNLOAD_PATH}>Download it for macOS, Windows or Linux</Link>, then add your own
+          provider keys in Settings.
         </li>
         <li>
-          <strong>Sign in from the extension.</strong>{" "}
+          <strong>Record a short test.</strong> Start a recording in the app, talk for about half a minute, then stop. Your notes appear in the
+          app first.
+        </li>
+        <li>
+          <strong>Turn on sync.</strong>{" "}
           {managed ? (
             <>
-              Open it and sign in as <code>{email}</code> to manage your devices and, with a subscription, sync your notes. Your own AI keys stay on your device:{" "}
-              <a href="/how-it-works#own-keys">see how to set them up</a>.
+              Sign in to the app as <code>{email}</code> (<Link href="/account/connect-desktop">connect the desktop app</Link>). Sync needs a Pro or
+              Team plan: <Link href="/billing">see plans</Link>.
             </>
           ) : (
-            <>Open its settings and connect this server with the <code>AUTH_TOKEN</code> you deployed it with.</>
+            <>Open the app&apos;s Account &amp; sync settings and connect it to this service.</>
           )}
-          <div className="onboarding-address">
-            <span className="muted-copy">Service address</span>
-            <code>{origin}</code>
-            <CopyButton text={origin} label="Copy address" className="button button-secondary button-small" />
-          </div>
-        </li>
-        <li>
-          <strong>Record a 30-second test.</strong> Start notes on any Meet call or a video playing in a tab, talk for about
-          half a minute, then stop.
         </li>
       </ol>
       <p className="onboarding-plan">
         {plan ? (
           <>
-            <strong>{plan.label}.</strong>{" "}
-            {plan.isTrial
-              ? `${Math.max(0, plan.limit - plan.used)} of ${plan.limit} free meetings left.`
-              : plan.limit > 0
-                ? `${plan.used} of ${plan.limit} meetings used this period.`
-                : "Hosted processing isn't part of this plan."}
+            <strong>{plan.label}.</strong> {plan.canSync ? "Cloud sync is on for this workspace." : "Cloud sync is off until you choose a plan."}
           </>
         ) : (
           <>
-            <strong>Free local mode.</strong> Bring your own provider keys; nothing here is billed.
+            <strong>Free.</strong> Nothing here is billed. Your own provider keys stay on your device.
           </>
         )}
       </p>

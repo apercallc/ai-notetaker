@@ -94,6 +94,12 @@ export const FAQS: Faq[] = [
       "Yes. Cancel from the billing page. Your plan stays active until the end of the period you already paid for, and your recordings on your own device are never affected.",
   },
   {
+    question: "What happens to my notes if I cancel or my payment fails?",
+    topics: ["pricing"],
+    answer:
+      "Nothing is deleted, and notes on your computer are never touched. If a payment fails you keep full access for a short grace period while it is retried. After a plan ends, the notes already in your account stay there, read-only: you can still read, search, export and delete them, and download them to the desktop app. Editing, sharing, integrations, inviting people and uploading new notes need a plan. Notes you make on your computer in the meantime stay there and upload when you subscribe again. We do not delete notes because a plan ended.",
+  },
+  {
     question: "Do you store my card details?",
     topics: ["pricing"],
     answer: "No. Payments are handled by Stripe, which collects and holds your payment details. We only see your plan and its status.",

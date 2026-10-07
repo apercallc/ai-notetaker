@@ -52,7 +52,7 @@ export async function retryMeetingProcessing(workspaceId: string, meetingId: str
   } catch (error) {
     if (error instanceof ValidationError) return { ok: false, error: error.message };
     if (error instanceof Error && error.message.includes("entitlement is unavailable")) {
-      return { ok: false, error: "Your plan has no hosted processing left. See Plans & usage." };
+      return { ok: false, error: "Hosted processing isn't offered. Your audio stays on your desktop." };
     }
     console.error("managed job retry could not be queued", {
       meetingId,

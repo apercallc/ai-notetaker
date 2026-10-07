@@ -169,9 +169,9 @@ function renderError(ctx: TemplateContext): string {
         : ctx.ui.errorRecovery === "update_helper"
           ? "Install the matching desktop helper version, then check again."
           : ctx.ui.errorRecovery === "check_billing"
-            ? "Open Hosted AI billing in Settings to choose a plan or resolve payment."
+            ? "Export the saved audio from Settings and make your notes in the desktop app."
           : ctx.ui.errorRecovery === "sign_in"
-            ? "Sign in to Hosted AI again before retrying."
+            ? "Export the saved audio from Settings and make your notes in the desktop app."
             : "";
   return `
           <div class="stack">

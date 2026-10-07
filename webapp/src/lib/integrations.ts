@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { prisma } from "./db";
+import { getWorkspaceAccess } from "./workspaceAccess";
 import { recordAudit } from "./audit";
 import { decryptSecret, encryptSecret } from "./secretBox";
 import { SafeFetchError, safeRequest, validateOutboundUrl, privateNetworksAllowed } from "./safeFetch";
@@ -404,6 +405,8 @@ export const defaultSender: Sender = async (kind, config, event, deliveryId, not
 export async function notifyNoteReady(workspaceId: string, meetingId: string, send: Sender = defaultSender): Promise<number> {
   const integrations = await prisma.integration.findMany({ where: { workspaceId, enabled: true }, select: { id: true } });
   if (integrations.length === 0) return 0;
+  // Integrations are a paid feature: nothing is sent from a read-only workspace.
+  if (!(await getWorkspaceAccess(workspaceId)).writable) return 0;
   const claimed = await prisma.meeting.updateMany({ where: { id: meetingId, workspaceId, readyNotifiedAt: null, deletedAt: null }, data: { readyNotifiedAt: new Date() } });
   if (claimed.count !== 1) return 0;
   await prisma.integrationDelivery.createMany({

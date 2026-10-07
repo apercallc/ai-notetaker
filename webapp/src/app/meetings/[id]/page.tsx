@@ -27,6 +27,7 @@ import { NoteBody } from "./NoteBody";
 import { NotesTemplate } from "./NotesTemplate";
 import { SpeakerName } from "./SpeakerName";
 import { ShareMeeting } from "./ShareMeeting";
+import { hostedAiEnabled } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { TitleEditor } from "./TitleEditor";
 
@@ -59,7 +60,7 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
   const mode = modeLabel(meeting.mode);
   const processing = meeting.processing;
   const inFlight = processing?.status === "processing";
-  const canRegenerate = managedHostingEnabled() && meeting.processingMode === "managed" && meeting.transcript.length > 0 && !inFlight && processing?.status !== "error";
+  const canRegenerate = managedHostingEnabled() && hostedAiEnabled() && meeting.processingMode === "managed" && meeting.transcript.length > 0 && !inFlight && processing?.status !== "error";
 
   return (
     <div className="container">
@@ -83,7 +84,7 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
       {processing?.status === "error" && (
         <div className="callout callout-danger" role="alert">
           <p><strong>Processing failed.</strong> {failureReason(processing.errorMessage)}</p>
-          <RetryProcessing meetingId={meeting.id} className="button button-secondary" />
+          {hostedAiEnabled() && <RetryProcessing meetingId={meeting.id} className="button button-secondary" />}
         </div>
       )}
 

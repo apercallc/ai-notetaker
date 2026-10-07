@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
 import { createApiToken, DESKTOP_NOTES_SCOPE } from "@/lib/apiTokens";
+import { prisma } from "@/lib/db";
+import { hasSyncAccess } from "@/lib/syncAccess";
 import { contextFromRequest } from "@/lib/requestContext";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
 
@@ -21,7 +23,14 @@ export async function POST(request: Request) {
       label: "Desktop note sync (sign-in)",
       userAgent: context.userAgent,
     });
-    return NextResponse.json({ token: token.token, expiresAt: token.expiresAt.toISOString() }, { headers: { "x-request-id": requestId } });
+    // Sync is a subscription feature on the managed service. The token is still issued so the
+    // desktop is ready the moment the workspace subscribes; the flag lets it say so honestly.
+    const subscription = await prisma.workspaceSubscription.findUnique({
+      where: { workspaceId: session.workspaceId },
+      select: { plan: true, status: true, graceEndsAt: true },
+    });
+    const canSync = process.env.MANAGED_HOSTING !== "true" || hasSyncAccess(subscription);
+    return NextResponse.json({ token: token.token, expiresAt: token.expiresAt.toISOString(), canSync }, { headers: { "x-request-id": requestId } });
   } catch (error) {
     return apiErrorResponse(error, { requestId });
   }

@@ -135,7 +135,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       }
       // Password and Google OAuth exchanges must be reachable before a
       // managed token exists. Each route verifies its own credentials/code.
-      if (pathname === "/api/v1/auth/login" || pathname === "/api/v1/auth/google/exchange") return NextResponse.next();
+      if (pathname === "/api/v1/auth/login" || pathname === "/api/v1/auth/google/exchange" || pathname === "/api/v1/auth/desktop-code") return NextResponse.next();
       if ((WORKER_RUN_PATH.test(pathname) || pathname === "/api/v1/jobs/next") && isValidWorkerToken(request.headers.get("x-worker-token"))) {
         return NextResponse.next();
       }

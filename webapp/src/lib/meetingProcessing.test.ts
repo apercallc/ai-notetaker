@@ -73,7 +73,7 @@ describe("retry failed hosted meeting processing", () => {
     expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({ ok: false, error: "recording is incomplete" });
 
     enqueueManagedJob.mockRejectedValueOnce(new Error("workspace entitlement is unavailable"));
-    expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({ ok: false, error: "Your plan has no hosted processing left. See Plans & usage." });
+    expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({ ok: false, error: "Hosted processing isn't offered. Your audio stays on your desktop." });
 
     const error = new Error("internal provider details");
     enqueueManagedJob.mockRejectedValueOnce(error);

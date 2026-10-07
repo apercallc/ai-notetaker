@@ -266,7 +266,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         {tab === "signup" && managedHosting && availability.allowed && (
           <form action={signup} style={formStyle}>
             <input type="hidden" name="next" value={next} />
-            <p className="muted-copy">Start a separate workspace for your team. Your meetings and billing stay isolated from every other customer.</p>
+            <p className="muted-copy">Create your free account. Your notes and billing stay isolated from every other customer; a subscription adds cloud sync and team sync.</p>
             <label htmlFor="signupWorkspaceName">Workspace name</label>
             <input id="signupWorkspaceName" name="workspaceName" type="text" className="text-input" required minLength={2} maxLength={100} autoComplete="organization" autoFocus />
             <label htmlFor="signupEmail">Work email</label>

@@ -5,6 +5,7 @@ import { TeamForm } from "./TeamForm";
 import { listPendingInvites } from "@/lib/authTokens";
 import { RetentionPolicyForm } from "./RetentionPolicyForm";
 import { managedHostingEnabled } from "@/lib/managedAuth";
+import { TEAM_PLAN_REQUIRED_MESSAGE, teamPlanActive } from "@/lib/teamAccess";
 
 function formatDate(date: Date): string {
   return date.toLocaleDateString(undefined, { dateStyle: "medium" });
@@ -26,7 +27,8 @@ export default async function TeamPage() {
     );
   }
 
-  const [members, workspace, invites] = await Promise.all([
+  const [teamPlan, members, workspace, invites] = await Promise.all([
+    teamPlanActive(session.workspaceId),
     prisma.workspaceMembership.findMany({
       where: { workspaceId: session.workspaceId },
       include: { user: { select: { email: true, createdAt: true } } },
@@ -45,8 +47,8 @@ export default async function TeamPage() {
 
       <section className="settings-card team-invite" aria-labelledby="invite-title">
         <h2 id="invite-title">Invite a teammate</h2>
-        <p className="muted-copy">They can create an account or join with their existing one.</p>
-        <TeamForm operation="invite"><label>Email <input name="email" type="email" className="text-input" required autoComplete="off" /></label><button className="button button-primary" type="submit">Send invite</button></TeamForm>
+        {teamPlan ? <p className="muted-copy">They can create an account or join with their existing one.</p> : <p className="muted-copy">{TEAM_PLAN_REQUIRED_MESSAGE} <Link href="/billing">See plans</Link>.</p>}
+        {teamPlan && <TeamForm operation="invite"><label>Email <input name="email" type="email" className="text-input" required autoComplete="off" /></label><button className="button button-primary" type="submit">Send invite</button></TeamForm>}
       </section>
 
       <h2 className="section-title">Members</h2>
@@ -95,11 +97,11 @@ export default async function TeamPage() {
         <Link className="button button-secondary button-small" href="/team/audit">Open activity log</Link>
       </section>
 
-      {managedHostingEnabled() && (
+      {managedHostingEnabled() && teamPlan && (
         <section className="settings-card">
           <h2>Retention</h2>
           <p className="muted-copy">
-            Set how long hosted meeting notes and transcripts remain. Uploaded audio is temporary processing data and is deleted after success or at its 24-hour expiry.
+            Set how long synced notes and transcripts remain in this workspace.
           </p>
           <RetentionPolicyForm retentionDays={workspace.retentionDays} />
         </section>

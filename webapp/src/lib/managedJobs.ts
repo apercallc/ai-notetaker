@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { teamPlanActive } from "./teamAccess";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
 import { audioSecondsForBytes, estimateImportSeconds, isManagedPlan, PLAN_IMPORT_MAX_SECONDS } from "./plans";
 import { IMPORT_EXTENSIONS } from "./importFormats";
@@ -461,6 +462,10 @@ export async function expireManagedMeetings(now = new Date()): Promise<number> {
   let removed = 0;
   for (const workspace of workspaces) {
     if (!workspace.retentionDays) continue;
+    // Retention is a Team control. An owner-set deletion policy must never silently destroy notes
+    // after the Team plan ends (cancelled, or downgraded to Pro, which cannot edit it): the notes
+    // are kept until the owner resubscribes or deletes them.
+    if (!(await teamPlanActive(workspace.id))) continue;
     const cutoff = new Date(now.getTime() - workspace.retentionDays * 24 * 60 * 60 * 1_000);
     const meetings = await prisma.meeting.findMany({
       where: {

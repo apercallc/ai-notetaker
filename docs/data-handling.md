@@ -64,3 +64,15 @@ database.
 
 This is product documentation, not legal advice. Recording and provider data
 retention obligations vary by jurisdiction and provider terms.
+
+## When a plan ends
+
+Cancelling, a failed payment or a downgrade never deletes or locks notes.
+
+- **Notes on a computer** are never touched by billing.
+- **Notes already in the account** stay there, read-only. Anyone in the workspace can read, search and delete them, and download them to the desktop app. The workspace owner can export every note from Account.
+- **Paid features stop**: uploading and syncing new notes, editing, new shares, new integrations, inviting people, and the activity log and retention controls (Team).
+- **Notes made meanwhile** wait on the computer and upload when a plan is active again; resubscribing restores everything.
+- **Automatic deletion is suspended.** A retention policy set while a Team plan was active only runs while that plan is active.
+- **A failed payment** keeps full access for a grace period before the workspace becomes read-only.
+- The server answers uploads with HTTP 402 and downloads always succeed; the desktop app keeps its upload queue and tries again later.

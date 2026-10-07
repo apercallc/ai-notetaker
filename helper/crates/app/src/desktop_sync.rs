@@ -428,7 +428,7 @@ impl DesktopSync {
             let status = identity_response.status();
             let message = match status.as_u16() {
                 401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
-                402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
+                402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
                 403 => "The desktop sync token no longer has access to its workspace.",
                 404 => "This web-app version does not support desktop note sync yet.",
                 429 => "The web app is receiving too many requests. Sync will retry later.",
@@ -540,7 +540,7 @@ impl DesktopSync {
                         409 => "A web-app note conflicts with this desktop copy. Review the conflict in Settings → Web app sync.",
                         400 | 413 | 422 => "The web app rejected a saved note. Update the web app, then retry sync.",
                         401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
-                        402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
+                        402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
                         403 => "The desktop sync token no longer has access to its workspace. Create a token for the correct workspace.",
                         404 => "This web-app version does not support desktop note sync yet.",
                         429 => "The web app is receiving too many requests. Sync will retry later.",
@@ -625,7 +625,7 @@ impl DesktopSync {
                 let status = response.status();
                 let message = match status.as_u16() {
                     401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
-                    402 => "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.",
+                    402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
                     403 => "The desktop sync token no longer has access to its workspace.",
                     404 => "This web-app version does not support workspace note sync yet.",
                     429 => "The web app is receiving too many requests. Sync will retry later.",
@@ -1568,6 +1568,67 @@ mod tests {
                 .get(&remote_version_key(id, &source_id)),
             Some(&newer_at)
         );
+    }
+
+    #[tokio::test]
+    async fn a_workspace_without_a_plan_keeps_the_note_queued_and_says_why() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::new(directory.path()).unwrap());
+        let id = Uuid::new_v4();
+        let started = Utc::now();
+        store.create_meeting(id, started).unwrap();
+        store
+            .mark_stopped(id, started + chrono::Duration::minutes(5))
+            .unwrap();
+        store
+            .write_summary(
+                id,
+                &Summary {
+                    summary: "Ready".into(),
+                    action_items: vec![],
+                },
+            )
+            .unwrap();
+        store.mark_processed(id).unwrap();
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(id).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(stream);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).await.unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            let body = r#"{"error":"Cloud sync needs an active AI Notetaker subscription."}"#;
+            let response = format!(
+                "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            reader
+                .into_inner()
+                .write_all(response.as_bytes())
+                .await
+                .unwrap();
+        });
+
+        let error = sync
+            .sync_pending(store, &format!("http://{address}"), "sync-token")
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert!(error.contains("Cloud sync needs an active plan"), "{error}");
+        assert!(error.contains("HTTP 402"), "{error}");
+        // Nothing is lost: the note stays queued for when a plan is added.
+        assert_eq!(sync.status(true).pending, 1);
     }
 
     #[tokio::test]

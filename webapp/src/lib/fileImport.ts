@@ -89,7 +89,7 @@ export async function startImport(session: ManagedSession, input: StartImportInp
   // Check the plan before registering anything, so a refused import leaves no empty meeting behind.
   const capability = await getImportCapability(session.workspaceId);
   if (!capability.canProcess || capability.maxSeconds <= 0) {
-    throw new ManagedValidationError("Your plan has no hosted processing left. See Plans & usage.");
+    throw new ManagedValidationError("Hosted processing isn't offered. Your audio stays on your desktop.");
   }
 
   const existed = Boolean(await prisma.meeting.findFirst({ where: { id: input.meetingId, workspaceId: session.workspaceId, deletedAt: null }, select: { id: true } }));

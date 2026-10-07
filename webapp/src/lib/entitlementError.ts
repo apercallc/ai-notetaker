@@ -27,6 +27,8 @@ export class AudioBudgetError extends EntitlementError {
   }
 }
 
-export const AUDIO_BUDGET_PUBLIC_MESSAGE = "This recording is longer than the hosted meeting hours left in your plan. Upgrade under Plans & usage, or wait for the next period.";
+export const AUDIO_BUDGET_PUBLIC_MESSAGE = "This recording is longer than the hosted meeting hours left in your plan. Upgrade under Plan, or wait for the next period.";
 
-export const ENTITLEMENT_PUBLIC_MESSAGE = "Your plan has no hosted processing left. Upgrade under Plans & usage to keep processing meetings.";
+export const HOSTED_AI_DISABLED_PUBLIC_MESSAGE = "Hosted processing isn't offered. Your recording stays on this device. Use the desktop app with your own provider keys.";
+
+export const ENTITLEMENT_PUBLIC_MESSAGE = "Your plan has no hosted processing left. Upgrade under Plan to keep processing meetings.";

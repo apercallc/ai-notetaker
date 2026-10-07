@@ -1,5 +1,10 @@
 # Account and sync service deployment runbook
 
+> **Hosted AI is off by default.** Transcription, summaries, file import and Ask your notes
+> run on project provider keys only when `HOSTED_AI_ENABLED=true`. The standard service sells
+> cloud sync and team sync (Pro and Team) and runs accounts, sync and billing only; the worker,
+> provider and object-storage sections below apply only if you opt in.
+
 This runbook is for the optional project-operated managed service. Free local
 BYOK remains the default and does not require an account or this deployment.
 The hosted service owns provider credentials, usage limits, meeting notes,

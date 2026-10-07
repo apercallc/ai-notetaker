@@ -52,43 +52,43 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
             <div className="mk-guide">
               <h3 className="mk-h3">Sync notes only if you want</h3>
               <ul className="mk-bullets">
-                <li>create a workspace token from web-app Settings → Integrations</li>
-                <li>connect that workspace in the desktop app</li>
-                <li>sync completed desktop notes to the web app and import workspace notes into desktop</li>
-                <li>keep raw audio and provider keys on this device</li>
+                <li>sign in from the desktop app and choose a Pro or Team plan</li>
+                <li>finished desktop notes sync to the web app and your other devices</li>
+                <li>workspace notes are copied into the desktop library</li>
+                <li>raw audio and provider keys stay on this device</li>
               </ul>
             </div>
           </div>
           <p className="mk-small mk-mt-m">
-            Sync sends finished desktop notes to the workspace and copies workspace notes into the desktop library. Web edits refresh workspace copies on the next sync. Desktop-origin notes are protected from automatic overwrites; deletions and settings do not sync back. Browser extension recordings still need archive export and import.
+            Sync (Pro or Team) sends finished desktop notes to the workspace and copies workspace notes into the desktop library. Web edits refresh workspace copies on the next sync. Desktop-origin notes are protected from automatic overwrites; deletions and settings do not sync back. Browser extension recordings still need archive export and import.
           </p>
         </div>
       </section>
 
-      <section className="mk-section mk-section--tint" id="hosted" aria-labelledby="hosted-title">
+      <section className="mk-section mk-section--tint" id="sync" aria-labelledby="sync-title">
         <div className="mk-wrap">
           <div className="mk-section-head">
-            <h2 className="mk-h2" id="hosted-title">Connect the web app (optional)</h2>
-            <p className="mk-lede">Send finished desktop notes to a workspace so you can read them in the web app. Local recording stays account-free.</p>
+            <h2 className="mk-h2" id="sync-title">Sync your notes (optional, subscription)</h2>
+            <p className="mk-lede">Cloud sync is part of the Pro and Team plans. It sends finished desktop notes to your workspace so you can read them on the web and on your other devices. Local recording stays account-free.</p>
           </div>
           <ol className="mk-steps">
             <li className="mk-step">
-              <h3 className="mk-h3">Sign in to your web app</h3>
-              <p>Create or use an account on your web-app workspace. This account is only needed for optional note sync.</p>
+              <h3 className="mk-h3">Create your account</h3>
+              <p>A free account lets you sign in and manage your devices. Sync starts when the workspace has a Pro or Team plan.</p>
               <ul>
-                <li>{context.signupOpen ? <Link href="/login?tab=signup">Open web-app sign in</Link> : "Web-app sign-up is temporarily closed"}</li>
+                <li>{context.signupOpen ? <Link href="/login?tab=signup">Create an account</Link> : "Sign-up is temporarily closed"}</li>
               </ul>
             </li>
             <li className="mk-step">
-              <h3 className="mk-h3">Create a desktop sync token</h3>
-              <p>Open Settings → Integrations and create a token for the workspace where your notes should appear.</p>
+              <h3 className="mk-h3">Choose a plan</h3>
+              <p>Pick Pro for your own devices or Team to share a workspace.</p>
               <ul>
-                <li><Link href="/download">Go to downloads</Link></li>
+                <li><Link href="/pricing">See plans</Link></li>
               </ul>
             </li>
             <li className="mk-step">
-              <h3 className="mk-h3">Connect it in the desktop app</h3>
-              <p>Paste the web-app address and token into desktop Settings, test the connection, then save. Finished desktop notes sync to the web app; raw audio and provider keys stay local.</p>
+              <h3 className="mk-h3">Sign in from the desktop app</h3>
+              <p>Open Settings → Account &amp; sync and sign in, or use the one-time code from your account page. Finished desktop notes then sync; raw audio and provider keys stay local.</p>
             </li>
           </ol>
         </div>
@@ -372,8 +372,8 @@ export function DownloadView({
         <div className="mk-wrap">
           <div className="mk-downloads">
             <article className="mk-download" aria-labelledby="dl-helper">
-              <h2 className="mk-h3" id="dl-helper"><Icon as={Laptop} size={22} />Desktop helper</h2>
-              <p>For Zoom, Teams, Slack and other desktop calls. Captures your microphone and system audio.</p>
+              <h2 className="mk-h3" id="dl-helper"><Icon as={Laptop} size={22} />Desktop app</h2>
+              <p>Records browser and desktop meetings in any app. Captures your microphone and system audio.</p>
               <p className="mk-notice">
                 The installers are not code-signed yet, so macOS and Windows may warn you the first time. The{" "}
                 <a href={UNSIGNED_DOC}>install guide</a> shows what to expect.
@@ -595,7 +595,7 @@ export function PrivacyView() {
               <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
               <li>If you subscribe and turn on sync, finished desktop note text syncs to your workspace and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
-              <li>The desktop app keeps itself up to date. It checks for a newer signed release on GitHub (about every six hours, and at startup) and installs it for you, restarting only when nothing is recording. GitHub, not us, receives your IP address and the app version. Turn automatic updates off in the tray menu and the app only checks when you ask.</li>
+              <li>The desktop app keeps itself up to date. It checks for a newer release on GitHub (about every six hours, and at startup). On macOS and Windows it installs update packages signed with the project&apos;s update key and restarts only when nothing is recording; on Linux it opens the release page for you to download the new .deb. GitHub, not us, receives your IP address and the app version. Turn automatic updates off in the tray menu and the app only checks when you ask.</li>
               <li>Google Drive export is optional. Google receives what you send it.</li>
             </ul>
 
@@ -782,7 +782,7 @@ export function TermsView() {
             <h2>Plans and billing</h2>
             <ul>
               <li>The desktop app and a free account cost nothing. Pro (cloud sync) and Team (team sync) are monthly subscriptions billed in US dollars through Stripe, as shown on the pricing page.</li>
-              <li>Without an active subscription, cloud sync is off. Your notes stay on your device and keep working, and nothing is deleted when a plan ends.</li>
+              <li>Without an active subscription, cloud sync is off. Your notes stay on your device and keep working. Notes already in your account stay there, read-only: you can read, search, export and delete them, and download them to the desktop app. We do not delete notes because a plan ended; editing, sharing, integrations, invitations and new uploads need a plan.</li>
               <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for, and it does not renew.</li>
               <li>
                 Fees for a billing period that has started are not refunded, except where the law requires it or we
@@ -825,7 +825,7 @@ export function TermsView() {
             <p>
               Download software from the linked project releases and check each release&apos;s notes and checksums.
               Current desktop installers are not code-signed and may show operating-system warnings. A checksum helps
-              detect a changed or damaged file, but it does not establish who published it. The desktop app updates itself with signed updates by default; you can turn automatic updates off in its tray menu and install releases yourself.
+              detect a changed or damaged file, but it does not establish who published it. On macOS and Windows the desktop app installs updates signed with the project&apos;s update key by default (the installers themselves are not operating-system code-signed); on Linux it opens the release page. You can turn automatic updates off in the tray menu and install releases yourself.
             </p>
 
             <h2>Liability</h2>

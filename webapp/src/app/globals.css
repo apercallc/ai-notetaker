@@ -3187,3 +3187,13 @@ a.meeting-card:hover,
     flex: 1;
   }
 }
+
+.notice-bar {
+  margin: 0;
+  padding: 10px 16px;
+  text-align: center;
+  font-size: 0.9rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}

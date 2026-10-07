@@ -14,7 +14,7 @@ export type DesktopSyncAuthResult =
   | { ok: false; status: 401 | 402 | 403; message: string };
 
 /** Resolves a revocable notes-only token and rechecks its bound workspace membership on every call. */
-export async function authenticateDesktopSync(request: Request): Promise<DesktopSyncAuthResult> {
+export async function authenticateDesktopSync(request: Request, options: { write?: boolean } = {}): Promise<DesktopSyncAuthResult> {
   const authorization = request.headers.get("authorization") ?? "";
   const secret = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
   const token = secret ? await resolveApiToken(secret, Date.now(), DESKTOP_NOTES_SCOPE) : null;
@@ -35,9 +35,10 @@ export async function authenticateDesktopSync(request: Request): Promise<Desktop
     select: { name: true },
   });
   if (!workspace) return { ok: false, status: 403, message: "This token's workspace is unavailable." };
-  // Sync is the paid feature on the managed service; a deployment without managed
-  // hosting has no billing, so local development keeps working.
-  if (process.env.MANAGED_HOSTING === "true") {
+  // Uploading is the paid feature on the managed service. Reading is never gated: someone whose
+  // plan ended can still download every note in their workspace to this device. A deployment
+  // without managed hosting has no billing, so local development keeps working.
+  if (options.write && process.env.MANAGED_HOSTING === "true") {
     const subscription = await prisma.workspaceSubscription.findUnique({
       where: { workspaceId: token.workspaceId },
       select: { plan: true, status: true, graceEndsAt: true },

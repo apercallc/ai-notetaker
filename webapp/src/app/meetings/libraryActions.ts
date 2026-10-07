@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/currentUser";
+import { writeBlock } from "@/lib/workspaceAccess";
 import { createFolder, moveFolder, moveNotes, renameFolder, restoreFromTrash, trashFolder, trashNote } from "@/lib/library";
 import { ValidationError, renameMeeting } from "@/lib/meetings";
 import { MAX_NOTE_UPLOAD_BYTES, createNote, isNoteUploadName, titleFromFileName } from "@/lib/noteEditing";
@@ -23,6 +24,8 @@ function refresh(): void {
 
 export async function createFolderAction(formData: FormData): Promise<LibraryResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const result = await createFolder(session, optionalId(formData, "parentId"), text(formData, "name"));
   if (!result.ok) return result;
   refresh();
@@ -31,6 +34,8 @@ export async function createFolderAction(formData: FormData): Promise<LibraryRes
 
 export async function renameFolderAction(formData: FormData): Promise<LibraryResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const result = await renameFolder(session, text(formData, "id"), text(formData, "name"));
   if (!result.ok) return result;
   refresh();
@@ -39,6 +44,8 @@ export async function renameFolderAction(formData: FormData): Promise<LibraryRes
 
 export async function moveFolderAction(formData: FormData): Promise<LibraryResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const result = await moveFolder(session, text(formData, "id"), optionalId(formData, "parentId"));
   if (!result.ok) return result;
   refresh();
@@ -47,6 +54,8 @@ export async function moveFolderAction(formData: FormData): Promise<LibraryResul
 
 export async function moveNotesAction(formData: FormData): Promise<LibraryResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const result = await moveNotes(session, formData.getAll("id").map(String), optionalId(formData, "folderId"));
   if (!result.ok) return result;
   refresh();
@@ -74,6 +83,7 @@ export async function trashNoteAction(formData: FormData): Promise<LibraryResult
 /** Creates an empty note and opens it for typing. */
 export async function createNoteAction(formData: FormData): Promise<void> {
   const session = await requireSession();
+  if (await writeBlock(session.workspaceId)) redirect("/meetings?error=note-create-failed");
   const folderId = optionalId(formData, "folderId");
   const result = await createNote(session, { folderId, source: "manual" });
   if (!result.ok) redirect(`/meetings?${folderId ? `folder=${encodeURIComponent(folderId)}&` : ""}error=note-create-failed`);
@@ -84,6 +94,8 @@ export async function createNoteAction(formData: FormData): Promise<void> {
 /** The browser reads a small .md/.txt file and sends its text; nothing binary reaches the server. */
 export async function uploadNoteAction(formData: FormData): Promise<LibraryResult & { id?: string }> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const fileName = text(formData, "fileName");
   const body = text(formData, "body");
   if (!isNoteUploadName(fileName)) return { ok: false, error: "Upload a .md, .markdown or .txt file." };
@@ -97,6 +109,8 @@ export async function uploadNoteAction(formData: FormData): Promise<LibraryResul
 /** Renames a note from the library list (the same title rules as the note page). */
 export async function renameNoteAction(formData: FormData): Promise<LibraryResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   try {
     const renamed = await renameMeeting(session.workspaceId, text(formData, "id"), text(formData, "title"));
     if (!renamed) return { ok: false, error: "This note no longer exists." };
@@ -131,6 +145,8 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 /** Moves any mix of notes and folders to one destination (`destination` empty = top level). */
 export async function moveItemsAction(formData: FormData): Promise<BulkResult> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const ids = bulkIds(formData);
   if (!ids) return { ok: false, error: "Choose between 1 and 200 items." };
   const destination = optionalId(formData, "destination");

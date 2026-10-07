@@ -10,7 +10,7 @@ import { updateActionItem } from "@/lib/meetings";
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const requestId = requestIdFrom(request);
   try {
-    const auth = await authenticateDesktopSync(request);
+    const auth = await authenticateDesktopSync(request, { write: true });
     if (!auth.ok) {
       return NextResponse.json({ error: auth.message, requestId }, { status: auth.status, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
     }

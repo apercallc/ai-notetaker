@@ -98,7 +98,7 @@ migration.
 | Piece | What it does |
 | --- | --- |
 | Desktop app | Owns setup, provider keys, microphone/system-audio capture, local notes, retries, and recovery. |
-| Web app (optional) | Shows finished desktop note text synced to one authenticated workspace. Workspace notes are also copied to desktop; web edits refresh those copies on sync. |
+| Web app (optional, Pro or Team) | Shows finished desktop note text synced to one authenticated workspace. Workspace notes are also copied to desktop; web edits refresh those copies on sync. Sync needs a subscription. |
 | Chrome extension | Records secure Chrome meeting-tab audio locally and exports it to the desktop app for transcription and notes. Settings are separate. |
 
 The desktop window controls Rust through Tauri IPC; it does not open a
@@ -127,15 +127,14 @@ finished note text only. See
 [`docs/data-handling.md`](docs/data-handling.md) for storage and deletion
 details.
 
-## Optional: history on your own server
+## Optional: cloud sync (Pro or Team)
 
-The desktop app keeps local meeting history. For authenticated cross-device
-history, create a workspace-scoped desktop sync token in web-app Settings →
-Integrations, then save the web-app URL and token in desktop Settings.
+The desktop app keeps local meeting history. For cross-device history, sign in
+under **Settings → Account & sync** and choose a Pro or Team plan; finished notes
+then sync to your workspace.
 
-This is not required for recording, and the webapp never needs your AI
-provider keys. See [`webapp/README.md`](webapp/README.md) for local and
-Railway deployment instructions.
+This is not required for recording, and the service never receives your AI
+provider keys or recordings.
 
 ## If something is not working
 

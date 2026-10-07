@@ -35,6 +35,10 @@ pub struct HostedAccount {
     pub workspace_id: String,
     pub plan: String,
     pub expires_at: String,
+    /// Whether the workspace had cloud sync (a Pro or Team plan) when the app last asked. `None`
+    /// for accounts saved before the app tracked it.
+    #[serde(default)]
+    pub sync_allowed: Option<bool>,
 }
 
 impl HostedAccount {
@@ -302,6 +306,7 @@ mod hosted_tests {
             workspace_id: "ws".into(),
             plan: "pro".into(),
             expires_at: expires_at.into(),
+            sync_allowed: None,
         }
     }
 
@@ -327,6 +332,21 @@ mod hosted_tests {
             ..DesktopPreferences::default()
         };
         assert!(hosted_service(&preferences).is_none());
+    }
+
+    #[test]
+    fn settings_saved_with_hosted_processing_load_as_own_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        DesktopPreferences {
+            processing: ProcessingChoice::Hosted,
+            ..DesktopPreferences::default()
+        }
+        .save(directory.path())
+        .unwrap();
+
+        let loaded = DesktopPreferences::load(directory.path()).unwrap();
+
+        assert_eq!(loaded.processing, ProcessingChoice::Local);
     }
 
     #[test]

@@ -331,7 +331,7 @@ export async function getManagedEntitlements(
   const body = await requestJson(config, "/api/v1/entitlements", { method: "GET" }, fetchImpl);
   const numberField = (name: string): number => (typeof body[name] === "number" && Number.isFinite(body[name]) ? body[name] as number : 0);
   return {
-    planLabel: typeof body.planLabel === "string" ? body.planLabel : "Hosted AI plan",
+    planLabel: typeof body.planLabel === "string" ? body.planLabel : "Free (your own keys)",
     plan: typeof body.plan === "string" ? body.plan : "local",
     status: typeof body.status === "string" ? body.status : "inactive",
     used: numberField("used"),

@@ -1,6 +1,7 @@
 import { getMeeting, getSettings, listMeetings } from "../lib/storage";
 import { sendToBackground } from "../lib/sendToBackground";
 import { escapeHtml } from "../lib/html";
+import { getInstallPageUrl } from "../lib/install";
 import { browserTitleForTab, isRecordableTabUrl } from "../meet/meetContext";
 import { takePendingMeetStart } from "../meet/pendingStart";
 import type { BackgroundState } from "../lib/internalMessages";
@@ -53,10 +54,12 @@ async function render(): Promise<void> {
           : '<p class="text-secondary">No browser recordings yet.</p>'}
         <p class="text-secondary">Export saved audio from Settings, then import it in the desktop app to transcribe and make notes.</p>
         <button class="secondary" id="export-recordings">Open export settings</button>
+        <button class="text-link" id="get-desktop">Get the desktop app</button>
       </section>`;
 
     document.getElementById("open-settings")?.addEventListener("click", () => void chrome.runtime.openOptionsPage());
     document.getElementById("export-recordings")?.addEventListener("click", () => void chrome.runtime.openOptionsPage());
+    document.getElementById("get-desktop")?.addEventListener("click", () => void chrome.tabs.create({ url: getInstallPageUrl("popup") }));
     document.getElementById("open-setup")?.addEventListener("click", () => void chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") }));
     document.getElementById("start-recording")?.addEventListener("click", () => void run(async () => {
       if (typeof tab?.id !== "number") throw new Error("Open a secure browser meeting tab first.");

@@ -7,7 +7,7 @@
 export const SYNC_PLANS: ReadonlySet<string> = new Set(["hosted_pro", "hosted_team"]);
 
 export const SYNC_SUBSCRIPTION_REQUIRED_MESSAGE =
-  "Cloud sync needs an active AI Notetaker subscription. Your notes stay safe on this device.";
+  "Cloud sync needs an active AI Notetaker plan. Your notes stay safe on this device and in your account, and sync resumes when a plan is active.";
 
 export type SyncSubscriptionLike = {
   plan: string;

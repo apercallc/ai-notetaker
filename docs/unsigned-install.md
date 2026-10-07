@@ -9,12 +9,11 @@ steps.
 
 ## Linux
 
-Build the helper from a checkout, then install the generated Debian package:
+Download the `.deb` from the [latest release](https://github.com/apercallc/ai-notetaker/releases/latest)
+and install it with apt:
 
 ```sh
-cd helper
-cargo deb --manifest-path crates/app/Cargo.toml
-sudo apt install ./target/debian/notetaker-app_0.1.0-1_amd64.deb
+sudo apt install ./AI.Notetaker_<version>_amd64.deb
 ```
 
 The package declares `pulseaudio-utils` for `pactl`/`parec`. It also retains

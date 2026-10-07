@@ -7,6 +7,7 @@ import { trashNote } from "@/lib/library";
 import { restorePreviousBody, updateNoteBody } from "@/lib/noteEditing";
 import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
+import { writeBlock } from "@/lib/workspaceAccess";
 import { prisma } from "@/lib/db";
 import { createMeetingShare, revokeMeetingShare, SharingValidationError } from "@/lib/sharing";
 import { retryMeetingProcessing } from "@/lib/meetingProcessing";
@@ -21,6 +22,8 @@ export type ShareActionResult =
 
 export async function createMeetingShareAction(formData: FormData): Promise<ShareActionResult> {
   const { workspaceId, userId, role } = await requireSession();
+  const blocked = await writeBlock(workspaceId);
+  if (blocked) return { ok: false, error: blocked };
   const meetingId = String(formData.get("meetingId") ?? "").slice(0, 128);
   const rawExpiry = String(formData.get("expiresInDays") ?? "7");
   const expiresInDays = rawExpiry === "never" ? null : Number(rawExpiry);
@@ -79,6 +82,8 @@ export type RenameState = { status: "saved"; title: string } | { status: "error"
 
 export async function renameMeetingAction(formData: FormData): Promise<RenameState> {
   const { workspaceId } = await requireSession();
+  const blocked = await writeBlock(workspaceId);
+  if (blocked) return { status: "error", message: blocked };
   const id = String(formData.get("id") ?? "");
   const title = String(formData.get("title") ?? "");
   try {
@@ -102,6 +107,8 @@ export type ActionUpdateState = { status: "saved" } | { status: "error"; message
  */
 export async function updateActionItemAction(formData: FormData): Promise<ActionUpdateState> {
   const { workspaceId } = await requireSession();
+  const blocked = await writeBlock(workspaceId);
+  if (blocked) return { status: "error", message: blocked };
   const id = String(formData.get("id") ?? "");
   const meetingId = String(formData.get("meetingId") ?? "");
   const surface = String(formData.get("surface") ?? "");
@@ -187,6 +194,8 @@ export type SpeakerRenameState = { status: "saved"; label: string } | { status: 
 
 export async function renameSpeakerAction(formData: FormData): Promise<SpeakerRenameState> {
   const { workspaceId } = await requireSession();
+  const blocked = await writeBlock(workspaceId);
+  if (blocked) return { status: "error", message: blocked };
   const meetingId = String(formData.get("meetingId") ?? "");
   let result;
   try {
@@ -206,6 +215,8 @@ export type SaveBodyState = { status: "saved"; version: string } | { status: "co
 
 export async function saveNoteBodyAction(formData: FormData): Promise<SaveBodyState> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { status: "error", message: blocked };
   const meetingId = String(formData.get("meetingId") ?? "");
   const result = await failSoft(
     "saving note body failed",
@@ -222,6 +233,8 @@ export async function saveNoteBodyAction(formData: FormData): Promise<SaveBodySt
 
 export async function restorePreviousBodyAction(formData: FormData): Promise<SaveBodyState> {
   const session = await requireSession();
+  const blocked = await writeBlock(session.workspaceId);
+  if (blocked) return { status: "error", message: blocked };
   const meetingId = String(formData.get("meetingId") ?? "");
   const result = await failSoft("restoring previous body failed", meetingId, () => restorePreviousBody(session, meetingId), "Couldn't restore the previous version. Try again.");
   if ("status" in result) return result;

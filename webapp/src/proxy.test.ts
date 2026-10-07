@@ -29,6 +29,12 @@ describe("managed API proxy boundaries", () => {
     expect(response.status).toBe(200);
   });
 
+  it("lets desktop browser sign-in codes be exchanged before any session exists", async () => {
+    const response = await proxy(request("/api/v1/auth/desktop-code", { method: "POST" }));
+    expect(response.status).toBe(200);
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
   it("still requires a managed session for protected v1 routes", async () => {
     const response = await proxy(request("/api/v1/meetings", { method: "POST", headers: { "x-request-id": "proxy-managed-auth-test" } }));
     expect(response.status).toBe(401);

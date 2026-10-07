@@ -2,6 +2,7 @@ import { getSettings } from "../lib/storage";
 import { sendToBackground } from "../lib/sendToBackground";
 import { microphoneAlreadyAllowed, requestMicrophone } from "../meet/micPermission";
 import { escapeHtml } from "../lib/html";
+import { getInstallPageUrl } from "../lib/install";
 
 const app = document.getElementById("app")!;
 let microphoneReady = false;
@@ -45,8 +46,9 @@ function render(): void {
     try {
       const settings = await getSettings();
       await sendToBackground({ type: "SAVE_SETTINGS", settings: { ...settings, onboardingComplete: true, consentDisclosureAcknowledged: true, processingMode: { kind: "local_byok" } } });
-      app.innerHTML = '<div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div><h1>Ready to record</h1><p>Open a meeting in Chrome, tell everyone, then choose Start recording in the extension popup or use the shortcut. Meet, Zoom, Teams, Slack, Discord web, and other meeting tabs are supported. Use the floating control on supported meeting sites. If Chrome asks, click the extension toolbar icon to allow this tab’s audio.</p><p>After the call, export the saved audio from extension Settings and import it in the desktop app to make notes.</p><div class="setup-actions"><button class="primary" id="done-setup">Done</button><button class="secondary" id="open-meet">Open Google Meet</button></div>';
+      app.innerHTML = '<div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div><h1>Ready to record</h1><p>Open a meeting in Chrome, tell everyone, then choose Start recording in the extension popup or use the shortcut. Meet, Zoom, Teams, Slack, Discord web, and other meeting tabs are supported. Use the floating control on supported meeting sites. If Chrome asks, click the extension toolbar icon to allow this tab’s audio.</p><p>After the call, export the saved audio from extension Settings and import it in the desktop app to make notes.</p><div class="setup-actions"><button class="primary" id="done-setup">Done</button><button class="secondary" id="open-meet">Open Google Meet</button><button class="secondary" id="get-desktop">Get the desktop app</button></div>';
       document.getElementById("done-setup")?.addEventListener("click", () => void chrome.tabs.getCurrent().then((tab) => tab?.id !== undefined ? chrome.tabs.remove(tab.id) : undefined));
+      document.getElementById("get-desktop")?.addEventListener("click", () => void chrome.tabs.create({ url: getInstallPageUrl("onboarding") }));
       document.getElementById("open-meet")?.addEventListener("click", () => void chrome.tabs.create({ url: "https://meet.google.com/" }));
     } catch (error) {
       message = `Setup could not be saved: ${String(error)}`;

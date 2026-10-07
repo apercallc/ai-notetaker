@@ -142,9 +142,9 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       managed ? getEntitlements(workspaceId) : Promise.resolve(null),
     ]);
     const plan: OnboardingPlan | null = entitlements
-      ? { label: entitlements.planLabel, isTrial: entitlements.isTrial, used: entitlements.used, limit: entitlements.limit }
+      ? { label: entitlements.planLabel, canSync: entitlements.canSync }
       : null;
-    onboarding = <OnboardingCard email={user?.email ?? "your account email"} origin={await serviceOrigin()} managed={managed} plan={plan} />;
+    onboarding = <OnboardingCard email={user?.email ?? "your account email"} managed={managed} plan={plan} />;
   }
 
   return (
@@ -246,7 +246,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
               ) : meeting.summaryPreview ? (
                 <div className="preview">{meeting.summaryPreview}</div>
               ) : null}
-              {meeting.processing?.status === "error" && <div className="row-retry"><RetryProcessing meetingId={meeting.id} /></div>}
+              {hostedAiEnabled() && meeting.processing?.status === "error" && <div className="row-retry"><RetryProcessing meetingId={meeting.id} /></div>}
             </NoteRow>
           ))}
         </ul>

@@ -5,6 +5,7 @@ import { MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, updateWorkspaceRetentionDays } 
 import { revalidatePath } from "next/cache";
 import { getRequestContext } from "@/lib/requestContext";
 import { recordAudit } from "@/lib/audit";
+import { teamPlanActive } from "@/lib/teamAccess";
 import { addMemberAs, manageTeamAs, type AddMemberResult, type TeamActionResult } from "@/lib/teamAdmin";
 
 export type { AddMemberResult, TeamActionResult };
@@ -40,6 +41,7 @@ export type RetentionPolicyResult =
 export async function updateRetentionPolicy(formData: FormData): Promise<RetentionPolicyResult> {
   const session = await requireSession();
   if (session.role !== "owner") return { ok: false, error: "Only the workspace owner can change retention." };
+  if (!(await teamPlanActive(session.workspaceId))) return { ok: false, error: "Retention controls need the Team plan." };
 
   const value = String(formData.get("retentionDays") ?? "").trim();
   const retentionDays = value === "never" ? null : Number(value);
