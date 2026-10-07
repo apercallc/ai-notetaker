@@ -1304,8 +1304,26 @@ fn main() {
             let retry_preferences = preferences.clone();
             let retry_queue = sync.clone();
             let retry_app = app.handle().clone();
+            let retry_output = ui_output.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
+                    // Hosted recordings whose upload failed (offline, session expired and renewed)
+                    // are retried here; a worker that is already running is left alone.
+                    let hosted = {
+                        let preferences = retry_preferences
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .clone();
+                        desktop_settings::hosted_service(&preferences)
+                    };
+                    if let Some(service) = hosted {
+                        start_pending_managed_workers(
+                            retry_state.clone(),
+                            service,
+                            retry_output.clone(),
+                        )
+                        .await;
+                    }
                     let _ = run_desktop_sync(
                         retry_state.clone(),
                         retry_preferences.clone(),
@@ -1858,7 +1876,7 @@ async fn hosted_call(
     body: Option<serde_json::Value>,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
-    let service = desktop_settings::hosted_service(preferences).ok_or_else(|| {
+    let service = desktop_settings::hosted_session(preferences).ok_or_else(|| {
         "Sign in to your AI Notetaker account in Settings → Processing.".to_string()
     })?;
     if !hosted_url_is_allowed(&service.base_url) {
@@ -2004,7 +2022,7 @@ async fn desktop_account_billing(
     manage: bool,
 ) -> Result<(), String> {
     let preferences = current_preferences(&context);
-    let base = desktop_settings::hosted_service(&preferences)
+    let base = desktop_settings::hosted_session(&preferences)
         .ok_or_else(|| {
             "Sign in to your AI Notetaker account in Settings → Processing.".to_string()
         })?
@@ -2063,6 +2081,19 @@ async fn desktop_hosted_sign_out(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
+    // End the session on the server too, so a copied token stops working at once. Best effort:
+    // offline sign-out must still work, and the token expires on its own regardless.
+    if let Err(error) = hosted_call(
+        &previous,
+        reqwest::Method::POST,
+        "auth/logout",
+        Some(serde_json::json!({})),
+        std::time::Duration::from_secs(8),
+    )
+    .await
+    {
+        tracing::debug!(%error, "server-side sign-out did not complete");
+    }
     desktop_settings::set_hosted_token(None)?;
     let preferences = desktop_settings::DesktopPreferences {
         processing: desktop_settings::ProcessingChoice::Local,

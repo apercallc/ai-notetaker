@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GET as overview } from "./account/overview/route";
 import { POST as syncToken } from "./account/desktop-sync-token/route";
 import { POST as ask } from "./ask/route";
+import { POST as logout } from "./auth/logout/route";
+import { createApiToken } from "@/lib/apiTokens";
 import { GET as teamRoster, POST as teamAction } from "./team/route";
 import { resolveApiToken, DESKTOP_NOTES_SCOPE } from "@/lib/apiTokens";
 import { prisma } from "@/lib/db";
@@ -102,5 +104,14 @@ describe("desktop account API", () => {
     expect(resolved?.workspaceId).toBe(WORKSPACE_ID);
     // It must not work as a hosted session.
     expect((await overview(new Request("http://localhost/api/v1/account/overview", { headers: { authorization: `Bearer ${token}` } }))).status).toBe(401);
+  });
+
+  it("signing out revokes the token on the server", async () => {
+    const created = await createApiToken(OWNER_ID, { label: "Desktop sign-in" });
+    const headers = { authorization: `Bearer ${created.token}`, "content-type": "application/json" };
+    expect((await overview(new Request("http://localhost/api/v1/account/overview", { headers }))).status).toBe(200);
+    expect((await logout(new Request("http://localhost/api/v1/auth/logout", { method: "POST", headers }))).status).toBe(204);
+    expect((await overview(new Request("http://localhost/api/v1/account/overview", { headers }))).status).toBe(401);
+    expect((await logout(new Request("http://localhost/api/v1/auth/logout", { method: "POST" }))).status).toBe(401);
   });
 });

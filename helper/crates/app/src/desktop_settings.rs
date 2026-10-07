@@ -168,12 +168,9 @@ pub fn set_hosted_token(token: Option<&str>) -> Result<(), String> {
     set_secret("hosted-session-token", token)
 }
 
-/// The hosted service connection to hand the pipeline, present only while hosted processing is
-/// selected and the saved session is still usable.
-pub fn hosted_service(preferences: &DesktopPreferences) -> Option<ManagedServiceConfig> {
-    if preferences.processing != ProcessingChoice::Hosted {
-        return None;
-    }
+/// The signed-in hosted account's connection, whether or not hosted processing is selected.
+/// Used for account calls (usage, Ask, Team, billing), which only need a live session.
+pub fn hosted_session(preferences: &DesktopPreferences) -> Option<ManagedServiceConfig> {
     let account = preferences
         .hosted_account
         .as_ref()
@@ -189,6 +186,15 @@ pub fn hosted_service(preferences: &DesktopPreferences) -> Option<ManagedService
         workspace_id: account.workspace_id.clone(),
         plan: account.plan.clone(),
     })
+}
+
+/// The hosted service connection to hand the pipeline, present only while hosted processing is
+/// selected and the saved session is still usable.
+pub fn hosted_service(preferences: &DesktopPreferences) -> Option<ManagedServiceConfig> {
+    if preferences.processing != ProcessingChoice::Hosted {
+        return None;
+    }
+    hosted_session(preferences)
 }
 
 pub fn settings_view(
@@ -310,5 +316,23 @@ mod hosted_tests {
             ..DesktopPreferences::default()
         };
         assert!(hosted_service(&preferences).is_none());
+    }
+
+    #[test]
+    fn account_calls_need_a_session_not_hosted_processing() {
+        // No token is stored in the test keyring, so both are None; the point is that choosing
+        // own keys never changes which of them is consulted for account pages.
+        let preferences = DesktopPreferences {
+            processing: ProcessingChoice::Local,
+            hosted_account: Some(account("2999-01-01T00:00:00Z")),
+            ..DesktopPreferences::default()
+        };
+        assert!(hosted_service(&preferences).is_none());
+        let expired = DesktopPreferences {
+            processing: ProcessingChoice::Hosted,
+            hosted_account: Some(account("2020-01-01T00:00:00Z")),
+            ..DesktopPreferences::default()
+        };
+        assert!(hosted_session(&expired).is_none());
     }
 }
