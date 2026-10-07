@@ -699,7 +699,7 @@
       : `<div class="inline-actions">${offers.map((offer) => `<button class="${data.subscription.live ? "secondary-button" : "primary-button"}" data-upgrade="${esc(offer.priceId)}" ${accountState.billingBusy ? "disabled" : ""}>${data.subscription.live ? "Change to" : "Upgrade to"} ${esc(offer.name)}${offer.priceLabel ? ` · ${esc(offer.priceLabel)}` : ""}</button>`).join("")}${data.subscription.live || data.subscription.hasBillingAccount ? `<button class="secondary-button" id="manage-plan" ${accountState.billingBusy ? "disabled" : ""}>${data.subscription.live ? "Manage or cancel plan" : "Manage billing"}</button>` : ""}</div><p class="fine-print">Plan changes, payment details and cancellation open in your browser, on our payment provider’s secure page.</p>`;
     return `<section class="card account-card"><div class="account-head"><div><h2>${esc(e.planLabel)} plan</h2><p class="fine-print">${esc(data.workspace.name)} · ${esc(data.account.email)} · ${esc(data.statusLabel || e.status)}</p></div><button class="small-button" id="account-reload">Refresh</button></div>
       ${notices.map((text) => `<p class="setup-note">${esc(text)}</p>`).join("")}
-      <p class="fine-print">${e.canSync ? "Cloud sync is on for this workspace." : "Cloud sync is off."}</p>${billing}</section>`;
+      ${e.canSync ? '<p class="fine-print">Cloud sync is on for this workspace.</p>' : ""}${billing}</section>`;
   }
 
   function actionItemsPanel() {
