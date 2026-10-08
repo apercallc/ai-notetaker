@@ -50,7 +50,9 @@ export default async function SharedMeetingPage({ params }: { params: Promise<{ 
   const { token } = await params;
   const store = await headers();
   const ip = clientIpFromHeaders((name) => store.get(name));
-  const lookup = shareLookupLimiter.hit(ip ?? "unknown");
+  // With no client IP a shared "unknown" bucket would let one caller throttle every other
+  // unattributed reader, so unattributed requests skip the limiter (tokens are 256-bit random).
+  const lookup = ip ? shareLookupLimiter.hit(ip) : { allowed: true, retryAfterMs: 0 };
   // A throttled reader used to see "expired or revoked", which sent real readers off to ask for a new link.
   // The limit is about the caller's volume, so naming it reveals nothing about whether the link is valid.
   if (!lookup.allowed) return <TooManyRequests />;

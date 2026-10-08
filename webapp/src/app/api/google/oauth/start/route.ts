@@ -3,6 +3,8 @@ import { publicUrl } from "@/lib/publicUrl";
 import { safeNextPath } from "@/lib/navigation";
 import { createSignInState, googleOAuthConfigured, sealOAuthState } from "@/lib/googleIntegration";
 import { loginUrl } from "@/app/login/url";
+import { contextFromRequest } from "@/lib/requestContext";
+import { shouldUseSecureCookies } from "@/lib/sessionCookie";
 import { OAUTH_STATE_COOKIE } from "../stateCookie";
 import { managedExtensionOrigin } from "@/lib/cors";
 
@@ -61,7 +63,7 @@ export async function GET(request: Request) {
     const response = NextResponse.redirect(authorizationUrl);
     response.cookies.set(OAUTH_STATE_COOKIE, sealOAuthState(state), {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: shouldUseSecureCookies(contextFromRequest(request)),
       sameSite: "lax",
       path: "/api/google/oauth",
       maxAge: 10 * 60,

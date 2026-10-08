@@ -43,7 +43,15 @@ describe("managed API token lifecycle", () => {
     findMany.mockResolvedValueOnce(newest);
     await createApiToken("user-1", { now: 5_000 });
     const prune = deleteMany.mock.calls.map((call) => call[0]?.where).find((where) => where?.id?.notIn);
-    expect(prune).toMatchObject({ userId: "user-1", id: { notIn: newest.map((row) => row.id) } });
+    expect(prune).toMatchObject({ userId: "user-1", scope: "managed", id: { notIn: newest.map((row) => row.id) } });
+    // The cap counts only tokens of the scope being created.
+    expect(findMany.mock.calls[0]?.[0]?.where).toMatchObject({ userId: "user-1", scope: "managed" });
+
+    findMany.mockResolvedValueOnce(newest);
+    deleteMany.mockClear();
+    await createApiToken("user-1", { now: 5_500, scope: DESKTOP_NOTES_SCOPE, workspaceId: "w1" });
+    const desktopPrune = deleteMany.mock.calls.map((call) => call[0]?.where).find((where) => where?.id?.notIn);
+    expect(desktopPrune).toMatchObject({ userId: "user-1", scope: DESKTOP_NOTES_SCOPE });
 
     findMany.mockResolvedValueOnce([{ id: "only-one" }]);
     deleteMany.mockClear();

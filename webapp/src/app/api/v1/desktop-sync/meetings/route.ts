@@ -183,9 +183,12 @@ export async function POST(request: Request) {
 
     const versionHeader = request.headers.get("x-desktop-sync-version");
     let expectedUpdatedAt: Date | null | undefined;
+    if (versionHeader === null) {
+      return jsonError("x-desktop-sync-version header is required", 400, requestId);
+    }
     if (versionHeader === "new") {
       expectedUpdatedAt = null;
-    } else if (versionHeader !== null) {
+    } else {
       expectedUpdatedAt = new Date(versionHeader);
       if (Number.isNaN(expectedUpdatedAt.getTime())) {
         return jsonError("invalid desktop sync version", 400, requestId);

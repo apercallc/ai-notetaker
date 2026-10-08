@@ -153,14 +153,25 @@ describe("POST /api/v1/desktop-sync/meetings", () => {
     const payload = { id: "meeting-1", title: "Planning", transcript: [], summary: "Done", actionItems: [] };
     const response = await POST(new Request(endpoint, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-desktop-sync-version": "new" },
       body: JSON.stringify(payload),
     }));
 
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({ updatedAt: "2026-10-04T12:00:00.000Z" });
-    expect(upsertMeeting).toHaveBeenCalledWith(payload, "workspace-1", "user-1", { expectedUpdatedAt: undefined });
+    expect(upsertMeeting).toHaveBeenCalledWith(payload, "workspace-1", "user-1", { expectedUpdatedAt: null });
+  });
+
+  it("requires the x-desktop-sync-version header so a blind overwrite is impossible", async () => {
+    const response = await POST(new Request(endpoint, { method: "POST", body: JSON.stringify({ id: "meeting-1" }) }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "x-desktop-sync-version header is required" });
+    expect(upsertMeeting).not.toHaveBeenCalled();
+
+    const invalid = await POST(new Request(endpoint, { method: "POST", headers: { "x-desktop-sync-version": "garbage" }, body: "{}" }));
+    expect(invalid.status).toBe(400);
+    expect(upsertMeeting).not.toHaveBeenCalled();
   });
 
   it("passes the desktop version baseline and returns safe conflicts", async () => {
@@ -239,7 +250,7 @@ describe("POST /api/v1/desktop-sync/meetings", () => {
     expect(cancel).toHaveBeenCalledOnce();
 
     upsertMeeting.mockRejectedValueOnce(new Error("private database details"));
-    const failed = await POST(new Request(endpoint, { method: "POST", body: "{}" }));
+    const failed = await POST(new Request(endpoint, { method: "POST", headers: { "x-desktop-sync-version": "new" }, body: "{}" }));
     expect(failed.status).toBe(500);
     expect(apiErrorResponse).toHaveBeenCalledWith(expect.any(Error), {
       requestId: "desktop-sync-test",

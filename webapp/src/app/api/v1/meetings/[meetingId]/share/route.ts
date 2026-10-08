@@ -3,6 +3,8 @@ import { apiErrorResponse, requestIdFrom } from "@/lib/apiErrors";
 import { getAppUrl } from "@/lib/deploymentConfig";
 import { getManagedSession, managedUnauthorized } from "@/lib/managedAuth";
 import { recordAudit } from "@/lib/audit";
+import { SYNC_SUBSCRIPTION_REQUIRED_MESSAGE } from "@/lib/syncAccess";
+import { writeBlock } from "@/lib/workspaceAccess";
 import { createMeetingShare, SharingValidationError } from "@/lib/sharing";
 
 /**
@@ -17,6 +19,12 @@ export async function POST(request: Request, context: { params: Promise<{ meetin
   const session = await getManagedSession(request);
   if (!session) return managedUnauthorized(requestId);
   try {
+    if (await writeBlock(session.workspaceId)) {
+      return NextResponse.json(
+        { error: SYNC_SUBSCRIPTION_REQUIRED_MESSAGE, requestId },
+        { status: 402, headers: { "x-request-id": requestId } },
+      );
+    }
     const { meetingId } = await context.params;
     if (!meetingId || meetingId.length > 128) {
       return NextResponse.json({ error: "meetingId is required", requestId }, { status: 400, headers: { "x-request-id": requestId } });

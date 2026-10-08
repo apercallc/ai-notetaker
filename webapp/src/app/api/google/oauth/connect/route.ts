@@ -4,6 +4,8 @@ import { getSessionContext } from "@/lib/sessions";
 import { publicUrl } from "@/lib/publicUrl";
 import { createOAuthState, GoogleIntegrationError, sealOAuthState } from "@/lib/googleIntegration";
 
+import { contextFromRequest } from "@/lib/requestContext";
+import { shouldUseSecureCookies } from "@/lib/sessionCookie";
 import { OAUTH_STATE_COOKIE } from "../stateCookie";
 
 export async function GET(request: Request) {
@@ -16,7 +18,7 @@ export async function GET(request: Request) {
     const response = NextResponse.redirect(authorizationUrl);
     response.cookies.set(OAUTH_STATE_COOKIE, sealOAuthState(state), {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: shouldUseSecureCookies(contextFromRequest(request)),
       sameSite: "lax",
       path: "/api/google/oauth",
       maxAge: 10 * 60,

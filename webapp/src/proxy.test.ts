@@ -80,6 +80,22 @@ describe("managed API proxy boundaries", () => {
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
+  it("compares Origin with the public APP_URL origin when the request URL is the internal address", async () => {
+    process.env.MANAGED_HOSTING = "true";
+    const originalAppUrl = process.env.APP_URL;
+    process.env.APP_URL = "https://public.example.test";
+    try {
+      const internal = (origin: string) =>
+        new NextRequest("https://0.0.0.0:8080/api/v1/uploads", { method: "OPTIONS", headers: { origin } });
+      const same = await proxy(internal("https://public.example.test"));
+      expect(same.status).toBe(204);
+      expect(same.headers.get("access-control-allow-origin")).toBe("https://public.example.test");
+      expect((await proxy(internal("https://0.0.0.0:8080"))).status).toBe(403);
+    } finally {
+      if (originalAppUrl === undefined) delete process.env.APP_URL; else process.env.APP_URL = originalAppUrl;
+    }
+  });
+
   it("keeps the legacy bearer boundary correlated too", async () => {
     const response = await proxy(request("/api/meetings", { method: "GET", headers: { "x-request-id": "proxy-legacy-auth-test" } }));
     expect(response.status).toBe(401);

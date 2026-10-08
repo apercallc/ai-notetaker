@@ -81,17 +81,27 @@ function validateBillingRedirect(value: string): string {
   return redirect.toString();
 }
 
-async function stripePost(path: string, form: URLSearchParams): Promise<Record<string, unknown>> {
-  // A hung Stripe call would hold the checkout claim (an hour-long mutex) and the user's request.
-  const response = await fetch(stripeUrl(path), { method: "POST", headers: stripeHeaders(), body: form, signal: AbortSignal.timeout(20_000) }).catch(() => null);
-  if (!response) throw new BillingError("Stripe did not respond. Try again in a moment.");
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    // Stripe's own text for a 5xx or a misconfiguration ("No such price") is not for end users.
-    if (response.status >= 500 || response.status === 401 || response.status === 403) throw new BillingError("Billing is temporarily unavailable. Try again in a moment.");
-    throw new BillingError(typeof body.error === "object" && body.error && "message" in body.error ? String(body.error.message) : "Stripe request failed");
+async function stripePost(path: string, form: URLSearchParams, idempotencyKey?: string): Promise<Record<string, unknown>> {
+  // With an Idempotency-Key, an ambiguous failure (timeout, network error, 5xx)
+  // is retried once with the same key: if Stripe did create the session, the
+  // retry returns it instead of leaving an orphan session that could still be paid.
+  const attempts = idempotencyKey ? 2 : 1;
+  for (let attempt = 1; ; attempt += 1) {
+    const headers = { ...(stripeHeaders() as Record<string, string>), ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}) };
+    // A hung Stripe call would hold the checkout claim (an hour-long mutex) and the user's request.
+    const response = await fetch(stripeUrl(path), { method: "POST", headers, body: form, signal: AbortSignal.timeout(20_000) }).catch(() => null);
+    if (!response || response.status >= 500) {
+      if (attempt < attempts) continue;
+      throw new BillingError(response ? "Billing is temporarily unavailable. Try again in a moment." : "Stripe did not respond. Try again in a moment.");
+    }
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) {
+      // Stripe's own text for a misconfiguration ("No such price") is not for end users.
+      if (response.status === 401 || response.status === 403) throw new BillingError("Billing is temporarily unavailable. Try again in a moment.");
+      throw new BillingError(typeof body.error === "object" && body.error && "message" in body.error ? String(body.error.message) : "Stripe request failed");
+    }
+    return body;
   }
-  return body;
 }
 
 export async function createCheckoutSession(workspaceId: string, email: string, priceId: string, successUrl: string, cancelUrl: string) {
@@ -131,7 +141,10 @@ export async function createCheckoutSession(workspaceId: string, email: string, 
     });
     if (subscription?.stripeCustomerId) form.set("customer", subscription.stripeCustomerId);
     else form.set("customer_email", email);
-    const body = await stripePost("checkout/sessions", form);
+    // The claim timestamp scopes the key to this attempt; a superseded or
+    // released claim gets a fresh timestamp and therefore a fresh key.
+    const claimedAt = subscription?.checkoutClaimedAt?.getTime() ?? Date.now();
+    const body = await stripePost("checkout/sessions", form, `checkout:${workspaceId}:${claimedAt}`);
     if (typeof body.url !== "string") throw new BillingError("Stripe returned no checkout URL");
     if (typeof body.id === "string") {
       await prisma.workspaceSubscription.updateMany({ where: { workspaceId }, data: { checkoutSessionId: body.id } });

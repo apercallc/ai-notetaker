@@ -39,35 +39,38 @@ export function managedConfigurationStatus(env: DeploymentEnv = process.env): Ma
     return { enabled: false, ready: true, objectStorage: objectStorage(env), missing: [] };
   }
 
-  const storageMissing = objectStorage(env) === "r2"
-    ? ["R2_BUCKET", ...(hasValue(env, "R2_ENDPOINT") || hasValue(env, "R2_ACCOUNT_ID") ? [] : ["R2_ACCOUNT_ID"]), "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]
-    : objectStorage(env) === "s3"
-      ? ["S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
-      : ["S3_BUCKET or R2_BUCKET"];
-  const transcriptionProvider = env.MANAGED_TRANSCRIPTION_PROVIDER?.trim().toLowerCase() || "groq";
-  const summaryProvider = env.MANAGED_SUMMARY_PROVIDER?.trim().toLowerCase() || "openai";
-  const validTranscriptionProvider = transcriptionProvider === "groq" || transcriptionProvider === "deepgram";
-  const validSummaryProvider = summaryProvider === "openai" || summaryProvider === "anthropic";
-  const missing = [
-    "MANAGED_WORKER_TOKEN",
-    // A shared private bucket is temporary staging for jobs running on the
-    // separate worker service. Audio is deleted after processing/expiry.
-    ...storageMissing,
-    ...(!validTranscriptionProvider ? ["MANAGED_TRANSCRIPTION_PROVIDER (groq or deepgram)"] : []),
-    ...(!validSummaryProvider ? ["MANAGED_SUMMARY_PROVIDER (openai or anthropic)"] : []),
-    transcriptionProvider === "deepgram" ? "MANAGED_DEEPGRAM_API_KEY" : "MANAGED_GROQ_API_KEY",
-    summaryProvider === "anthropic" ? "MANAGED_ANTHROPIC_API_KEY" : "MANAGED_OPENAI_API_KEY",
-    "STRIPE_SECRET_KEY",
-    "STRIPE_WEBHOOK_SECRET",
-    "STRIPE_PRICE_HOSTED_PRO",
-    "STRIPE_PRICE_HOSTED_TEAM",
-  ].filter((name) => !hasValue(env, name));
-  if (env.NODE_ENV === "production") {
-    for (const name of ["MANAGED_DAILY_SPEND_MICROS", "MANAGED_WORKSPACE_DAILY_SPEND_MICROS", "MANAGED_TRIAL_DAILY_SPEND_MICROS", "MANAGED_TRIAL_DAILY_GRANTS"]) {
-      const value = env[name];
-      if (!value || !/^\d+$/.test(value) || BigInt(value) > (name.endsWith("GRANTS") ? 100_000n : 1_000_000_000_000n)) missing.push(name);
+  // Sync-only deployments (the default) need only billing and a public origin.
+  // Provider, worker, storage and spend-cap settings matter only when the
+  // operator opts into hosted AI processing with HOSTED_AI_ENABLED=true.
+  const missing = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_HOSTED_PRO", "STRIPE_PRICE_HOSTED_TEAM"].filter((name) => !hasValue(env, name));
+  if (hostedAiEnabled(env)) {
+    const storageMissing = objectStorage(env) === "r2"
+      ? ["R2_BUCKET", ...(hasValue(env, "R2_ENDPOINT") || hasValue(env, "R2_ACCOUNT_ID") ? [] : ["R2_ACCOUNT_ID"]), "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]
+      : objectStorage(env) === "s3"
+        ? ["S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
+        : ["S3_BUCKET or R2_BUCKET"];
+    const transcriptionProvider = env.MANAGED_TRANSCRIPTION_PROVIDER?.trim().toLowerCase() || "groq";
+    const summaryProvider = env.MANAGED_SUMMARY_PROVIDER?.trim().toLowerCase() || "openai";
+    const validTranscriptionProvider = transcriptionProvider === "groq" || transcriptionProvider === "deepgram";
+    const validSummaryProvider = summaryProvider === "openai" || summaryProvider === "anthropic";
+    missing.push(...[
+      "MANAGED_WORKER_TOKEN",
+      // A shared private bucket is temporary staging for jobs running on the
+      // separate worker service. Audio is deleted after processing/expiry.
+      ...storageMissing,
+      ...(!validTranscriptionProvider ? ["MANAGED_TRANSCRIPTION_PROVIDER (groq or deepgram)"] : []),
+      ...(!validSummaryProvider ? ["MANAGED_SUMMARY_PROVIDER (openai or anthropic)"] : []),
+      transcriptionProvider === "deepgram" ? "MANAGED_DEEPGRAM_API_KEY" : "MANAGED_GROQ_API_KEY",
+      summaryProvider === "anthropic" ? "MANAGED_ANTHROPIC_API_KEY" : "MANAGED_OPENAI_API_KEY",
+    ].filter((name) => !hasValue(env, name)));
+    if (env.NODE_ENV === "production") {
+      for (const name of ["MANAGED_DAILY_SPEND_MICROS", "MANAGED_WORKSPACE_DAILY_SPEND_MICROS", "MANAGED_TRIAL_DAILY_SPEND_MICROS", "MANAGED_TRIAL_DAILY_GRANTS"]) {
+        const value = env[name];
+        if (!value || !/^\d+$/.test(value) || BigInt(value) > (name.endsWith("GRANTS") ? 100_000n : 1_000_000_000_000n)) missing.push(name);
+      }
     }
   }
+  if (env.LEGACY_INGEST_ENABLED === "true") missing.push("LEGACY_INGEST_ENABLED (must be off when MANAGED_HOSTING=true)");
   if (!validAppUrl(env.APP_URL ?? env.NEXT_PUBLIC_APP_URL)) missing.push("APP_URL");
 
   return {
@@ -134,6 +137,9 @@ export function isSignupAllowed(env: DeploymentEnv = process.env): boolean {
 /** Called once from instrumentation.ts so a misconfigured managed deploy fails at boot. */
 export function assertManagedStartupConfig(env: DeploymentEnv = process.env): void {
   if (env.MANAGED_HOSTING !== "true") return;
+  if (env.LEGACY_INGEST_ENABLED === "true") {
+    throw new DeploymentConfigError("LEGACY_INGEST_ENABLED=true cannot be combined with MANAGED_HOSTING=true: the legacy AUTH_TOKEN ingest API has no tenant identity");
+  }
   getAppUrl(env);
 }
 

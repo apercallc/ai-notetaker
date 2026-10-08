@@ -220,12 +220,6 @@ export async function upsertMeeting(
   // front; the meeting's own rows are deleted below, so only foreign owners
   // matter.
   const clientActionIds = input.actionItems.map((item) => item.id).filter((id): id is string => Boolean(id));
-  const foreignActionIds = new Set(
-    clientActionIds.length > 0
-      ? (await prisma.actionItem.findMany({ where: { id: { in: clientActionIds }, meeting: { NOT: { id: input.id } } }, select: { id: true } })).map((row) => row.id)
-      : [],
-  );
-
   const result = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       SELECT pg_advisory_xact_lock(hashtextextended(${input.id}, 0))
@@ -233,6 +227,11 @@ export async function upsertMeeting(
     await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "Meeting" WHERE "id" = ${input.id} FOR UPDATE
     `;
+    const foreignActionIds = new Set(
+      clientActionIds.length > 0
+        ? (await tx.actionItem.findMany({ where: { id: { in: clientActionIds }, meeting: { NOT: { id: input.id } } }, select: { id: true } })).map((row) => row.id)
+        : [],
+    );
     const existing = await tx.meeting.findUnique({
       where: { id: input.id },
       select: {

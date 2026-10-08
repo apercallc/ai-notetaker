@@ -60,4 +60,20 @@ describe("POST /api/v1/meetings", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: "startedAt must be an ISO 8601 string" });
   });
+
+  it("answers 402 with the sync message when a managed workspace has no active plan", async () => {
+    const original = process.env.MANAGED_HOSTING;
+    process.env.MANAGED_HOSTING = "true";
+    try {
+      const blocked = await POST(request({ id: randomUUID() }));
+      expect(blocked.status).toBe(402);
+      expect(await blocked.json()).toMatchObject({ error: expect.stringContaining("Cloud sync needs an active") });
+
+      await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_pro", status: "active" } });
+      expect((await POST(request({ id: "bad" }))).status).toBe(400);
+    } finally {
+      if (original === undefined) delete process.env.MANAGED_HOSTING;
+      else process.env.MANAGED_HOSTING = original;
+    }
+  });
 });

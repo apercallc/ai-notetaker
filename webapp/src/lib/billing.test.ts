@@ -111,8 +111,34 @@ describe("Stripe checkout retry", () => {
 
   it("turns a Stripe outage into a plain retry message", async () => {
     await withWorkspace(async (workspaceId) => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "No such price: price_internal" } }), { status: 500 }));
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ error: { message: "No such price: price_internal" } }), { status: 500 }));
       await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).rejects.toThrow("temporarily unavailable");
+      // One same-key retry for the ambiguous failure, then the claim is released.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const row = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+      expect(row?.checkoutClaimedAt).toBeNull();
+    });
+  });
+
+  it("creates the session with an Idempotency-Key scoped to the workspace claim", async () => {
+    await withWorkspace(async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ id: "cs_idem", url: "https://checkout.stripe.com/idem" }));
+      await createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel);
+      const headers = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
+      expect(headers["Idempotency-Key"]).toMatch(new RegExp(`^checkout:${workspaceId}:\\d+$`));
+    });
+  });
+
+  it("retries a timed-out creation with the same key so Stripe returns the session instead of orphaning one", async () => {
+    await withWorkspace(async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      fetchSpy.mockRejectedValueOnce(new Error("socket hang up"));
+      fetchSpy.mockResolvedValueOnce(json({ id: "cs_replayed", url: "https://checkout.stripe.com/replayed" }));
+      await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).resolves.toBe("https://checkout.stripe.com/replayed");
+      const keys = fetchSpy.mock.calls.map((call) => (call[1]?.headers as Record<string, string>)["Idempotency-Key"]);
+      expect(keys[0]).toBe(keys[1]);
+      const row = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+      expect(row?.checkoutSessionId).toBe("cs_replayed");
     });
   });
 
