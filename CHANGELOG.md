@@ -2,6 +2,24 @@
 
 All notable changes to AI Notetaker are documented here.
 
+## 0.21.1 - 2026-10-08
+
+### Desktop app
+- **One place for your account and sync.** Settings no longer has a separate "Web app sync"
+  section with a URL and token to paste. Signing in under Account & sync already connects your
+  notes; sync status, Sync now and conflict review now live there too. Anyone who set up a pasted
+  token keeps syncing.
+- "See plans" in Settings opens the in-app Plan page.
+- Sync error messages now say what to do (sign out and back in) instead of pointing at the removed
+  token screen.
+- Removed the unused hosted-processing code. Notes are still made on your device with your own
+  keys; recordings left over from older versions are still released to local on startup.
+
+### Web app
+- Settings → Integrations no longer offers a desktop sync token; the desktop app gets its own
+  when you sign in. The token form now defaults to the read-only token for AI assistants.
+- Removed the unused `POST /api/v1/ask` endpoint (nothing called it).
+
 ## 0.21.0 - 2026-10-07
 
 ### Product
