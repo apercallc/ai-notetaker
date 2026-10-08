@@ -94,13 +94,43 @@ export const FAQS: Faq[] = [
     question: "Can I cancel any time?",
     topics: ["pricing"],
     answer:
-      "Yes. Cancel from the billing page. Your plan stays active until the end of the period you already paid for, and your recordings on your own device are never affected.",
+      "Yes. Cancel from the billing page (Manage billing). Your plan stays active until the end of the period you already paid for and does not renew. Changed your mind before it ends? Resume it from the same page. Your recordings on your own device are never affected.",
+  },
+  {
+    question: "Can I get a refund?",
+    topics: ["pricing"],
+    answer:
+      "Yes, in these cases. New subscribers get a full refund of their first payment, monthly or yearly, if they ask within 14 days. A charge made by mistake or twice is refunded in full when you tell us within 60 days. If a yearly plan renews and you did not mean to keep it, ask within 7 days of the renewal for a full refund. If sync is unavailable because of us for more than 72 hours in a row, we refund the affected time. Outside those cases a period that has started is not refunded, but you keep your plan until it ends and it does not renew. Refunds go back to the original payment method and usually appear in 5 to 10 business days.",
+  },
+  {
+    question: "What if I cancel a yearly plan partway through the year?",
+    topics: ["pricing"],
+    answer:
+      "Your plan keeps working until the end of the year you paid for, and then it ends without renewing. We do not refund the unused months after the 14-day window, so cancel before a renewal if you do not want another year. If you want to switch to monthly, change your plan from Manage billing and the unused time on your yearly plan is credited toward the new price.",
+  },
+  {
+    question: "Can I switch between Pro, Team, monthly and yearly?",
+    topics: ["pricing"],
+    answer:
+      "Yes, from Manage billing on the billing page. The change takes effect straight away and the unused time on your current plan is credited toward the new price, so you are never charged twice for the same days. Moving to Team turns on the shared workspace features. Moving down to Pro keeps your notes but turns off the Team-only features.",
+  },
+  {
+    question: "What happens if a Team owner cancels?",
+    topics: ["pricing"],
+    answer:
+      "Only the workspace owner can cancel or change the plan. When the plan ends, sync stops for everyone in the workspace. Each member's notes stay in the workspace read-only and can be exported, and notes on each person's own computer are never affected. Anyone can subscribe again later and sync resumes.",
+  },
+  {
+    question: "What if I think a charge is wrong?",
+    topics: ["pricing"],
+    answer:
+      "Contact us first. We check it and refund anything charged in error, usually faster than a bank dispute. If you do open a dispute with your bank for a charge that was valid, we may pause sync on that workspace until it is resolved. Your notes stay available to read and export.",
   },
   {
     question: "What happens to my notes if I cancel or my payment fails?",
     topics: ["pricing"],
     answer:
-      "Nothing is deleted, and notes on your computer are never touched. If a payment fails you keep full access for a short grace period while it is retried. After a plan ends, the notes already in your account stay there, read-only: you can still read, search, export and delete them, and download them to the desktop app. Editing, sharing, integrations, inviting people and uploading new notes need a plan. Notes you make on your computer in the meantime stay there and upload when you subscribe again. We do not delete notes because a plan ended.",
+      "Nothing is deleted, and notes on your computer are never touched. If a payment fails you keep full access for 3 days while it is retried, then sync stops until the payment goes through. After a plan ends, the notes already in your account stay there, read-only: you can still read, search, export and delete them, and download them to the desktop app. Editing, sharing, integrations, inviting people and uploading new notes need a plan. Notes you make on your computer in the meantime stay there and upload when you subscribe again. We do not delete notes because a plan ended.",
   },
   {
     question: "Do you store my card details?",
