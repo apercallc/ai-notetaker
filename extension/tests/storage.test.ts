@@ -33,6 +33,16 @@ describe("settings storage", () => {
     expect(settings).toEqual(DEFAULT_SETTINGS);
   });
 
+  it("falls back to defaults for unknown provider or meeting-mode values", async () => {
+    await chrome.storage.local.set({
+      "notetaker.settings": { ...DEFAULT_SETTINGS, transcriptionProvider: "whisper", summarizationProvider: 7, defaultMeetingMode: "party" },
+    });
+    const settings = await getSettings();
+    expect(settings.transcriptionProvider).toBe(DEFAULT_SETTINGS.transcriptionProvider);
+    expect(settings.summarizationProvider).toBe(DEFAULT_SETTINGS.summarizationProvider);
+    expect(settings.defaultMeetingMode).toBe(DEFAULT_SETTINGS.defaultMeetingMode);
+  });
+
   it("round-trips saved settings", async () => {
     await saveSettings({
       ...DEFAULT_SETTINGS,

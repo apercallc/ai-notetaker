@@ -27,8 +27,9 @@ describe("generatePkcePair", () => {
 describe("connectCalendar", () => {
   it("launches the auth flow, exchanges the code, and returns a connection", async () => {
     chromeMock.identity.launchWebAuthFlow.mockImplementation(
-      (_details: unknown, callback: (url?: string) => void) => {
-        callback("https://fake-extension-id.chromiumapp.org/?code=fake-auth-code");
+      (details: { url: string }, callback: (url?: string) => void) => {
+        const state = new URL(details.url).searchParams.get("state");
+        callback(`https://fake-extension-id.chromiumapp.org/?code=fake-auth-code&state=${state}`);
       },
     );
     const fetchImpl = vi.fn(async () => ({
@@ -45,6 +46,25 @@ describe("connectCalendar", () => {
       "https://oauth2.googleapis.com/token",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("sends a state value and rejects a redirect whose state does not match", async () => {
+    let sentState: string | null = null;
+    chromeMock.identity.launchWebAuthFlow.mockImplementation(
+      (details: { url: string }, callback: (url?: string) => void) => {
+        sentState = new URL(details.url).searchParams.get("state");
+        callback("https://fake-extension-id.chromiumapp.org/?code=injected&state=attacker");
+      },
+    );
+    const fetchImpl = vi.fn();
+    await expect(connectCalendar("google", "client-id", "client-secret", fetchImpl as unknown as typeof fetch)).rejects.toThrow(/did not match/);
+    expect(sentState).toBeTruthy();
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    chromeMock.identity.launchWebAuthFlow.mockImplementation(
+      (_details: unknown, callback: (url?: string) => void) => callback("https://fake-extension-id.chromiumapp.org/?code=injected"),
+    );
+    await expect(connectCalendar("google", "client-id", "client-secret", fetchImpl as unknown as typeof fetch)).rejects.toThrow(/did not match/);
   });
 
   it("rejects when the auth flow returns no code", async () => {

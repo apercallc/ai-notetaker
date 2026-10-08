@@ -92,6 +92,30 @@ describe("BackgroundController", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("finalizes a recording with no restored capture instead of showing it live forever", async () => {
+    const first = new BackgroundController(createFakeClient(), vi.fn());
+    await first.init();
+    const meetingId = await first.startRecording("general", "meet");
+    expect(await getMeeting(meetingId)).toMatchObject({ status: "recording" });
+
+    const restarted = new BackgroundController(createFakeClient(), vi.fn());
+    await restarted.init({ hasLiveCapture: () => false });
+    await vi.waitFor(async () => expect(await getMeeting(meetingId)).toMatchObject({ status: "saved", endedAt: expect.any(String) }));
+    expect(restarted.getState().activeMeeting).toBeNull();
+  });
+
+  it("keeps a recording live when its capture was restored", async () => {
+    const first = new BackgroundController(createFakeClient(), vi.fn());
+    await first.init();
+    const meetingId = await first.startRecording("general", "meet");
+
+    vi.spyOn(browserStorage, "lastBrowserMeetSequence").mockResolvedValue(-1);
+    const restarted = new BackgroundController(createFakeClient(), vi.fn());
+    await restarted.init({ hasLiveCapture: (id) => id === meetingId });
+    expect(restarted.getState().activeMeeting).toEqual({ id: meetingId });
+    expect(await getMeeting(meetingId)).toMatchObject({ status: "recording" });
+  });
+
   it("does not call an older calendar connection for a new Meet recording", async () => {
     const controller = new BackgroundController(createFakeClient(), vi.fn());
     await controller.init();
@@ -1197,6 +1221,10 @@ describe("BackgroundController", () => {
     await controller.init();
     const meetingId = await controller.startRecording();
 
+    await expect(controller.deleteMeeting(meetingId)).rejects.toThrow(/Stop the recording/);
+    await expect(controller.discardRecording(meetingId)).rejects.toThrow(/Stop the recording/);
+    expect(await getMeeting(meetingId)).not.toBeNull();
+    await controller.stopRecording(meetingId);
     await controller.deleteMeeting(meetingId);
 
     expect(client.deleteMeeting).toHaveBeenCalledWith(meetingId);
@@ -1267,9 +1295,7 @@ describe("BackgroundController", () => {
     const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
     controller.setFetchImpl(fetchImpl as unknown as typeof fetch);
 
-    // `desktop: true` used to route through the helper, which made a
-    // missing helper block desktop onboarding's key gate entirely.
-    const result = await controller.testProviderKey("deepgram", "some-key", { desktop: true });
+    const result = await controller.testProviderKey("deepgram", "some-key");
 
     expect(client.testProviderKey).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("api.deepgram.com"), expect.anything());

@@ -1,5 +1,5 @@
 import { getSettings, listMeetings } from "../lib/storage";
-import { createDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../lib/desktopMigration";
+import { assertNoActiveRecording, buildDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../lib/desktopMigration";
 import { testWebappHealth } from "../lib/providerTest";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { escapeHtml } from "../lib/html";
@@ -436,7 +436,7 @@ function wireEvents(): void {
     setResult(status, "Choose where to save the archive…", "pending");
     try {
       const result = await saveDesktopAudioArchive(settings, listMeetings);
-      setResult(status, `Archive saved with ${result.meetingCount} meeting record${result.meetingCount === 1 ? "" : "s"} and ${(result.audioBytes / (1024 * 1024)).toFixed(1)} MB of saved audio. The extension source is unchanged.`, "valid");
+      setResult(status, `Archive saved with ${result.meetingCount} meeting record${result.meetingCount === 1 ? "" : "s"} and ${(result.audioBytes / (1024 * 1024)).toFixed(1)} MB of saved audio. The extension source is unchanged.${result.adjustments?.length ? ` Note: ${result.adjustments!.join(" ")}` : ""}`, "valid");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         setResult(status, "Archive export cancelled. Your extension data is unchanged.", "pending");
@@ -455,9 +455,10 @@ function wireEvents(): void {
     button.disabled = true;
     setResult(status, "Preparing notes-only transfer…", "pending");
     try {
-      const archive = createDesktopMigrationArchive(settings, await listMeetings());
+      await assertNoActiveRecording();
+      const { archive, adjustments } = buildDesktopMigrationArchive(settings, await listMeetings());
       downloadDesktopMigrationArchive(archive);
-      setResult(status, `Notes-only file saved with ${archive.meetings.length} meeting records. Raw audio is not included.`, "valid");
+      setResult(status, `Notes-only file saved with ${archive.meetings.length} meeting records. Raw audio is not included.${adjustments.length ? ` Note: ${adjustments.join(" ")}` : ""}`, "valid");
     } catch (error) {
       setResult(status, error instanceof Error ? error.message : "Could not create the notes-only transfer file. Your extension data is unchanged.", "invalid");
     } finally {

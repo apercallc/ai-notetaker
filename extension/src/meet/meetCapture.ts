@@ -15,6 +15,7 @@ export interface MeetAudioChunk {
 }
 
 const SAMPLE_RATE_HZ = 48_000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 /** chrome.storage.session key for the active-capture map. */
 const SESSION_CAPTURES_KEY = "meet-active-captures";
 const SESSION_WIDGET_OWNERS_KEY = "meet-widget-owners";
@@ -323,6 +324,8 @@ export class MeetCaptureController {
 
   forwardChunk(message: MeetAudioChunk): void | Promise<void> {
     if (!this.activeMeetings.has(message.meetingId)) return;
+    if (message.channel !== "mic" && message.channel !== "speaker") throw new Error("Meet audio chunk channel is invalid");
+    if (!UUID_PATTERN.test(message.meetingId)) throw new Error("Meet audio chunk meeting id is invalid");
     if (message.chunkId !== undefined && (typeof message.chunkId !== "string" || message.chunkId.length === 0 || message.chunkId.length > 128)) throw new Error("Meet audio chunk identity is invalid");
     if (message.sampleRateHz !== SAMPLE_RATE_HZ) throw new Error("Meet capture must use 48 kHz audio");
     let binary: string;

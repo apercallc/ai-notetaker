@@ -125,13 +125,29 @@ export class BackgroundController {
     this.fetchImpl = fetchImpl;
   }
 
-  async init(): Promise<void> {
+  /**
+   * `hasLiveCapture` reports whether a restored capture backs a meeting. A
+   * "recording" Meet meeting with no capture behind it (browser restarted, the
+   * session map is gone) can never finish by itself, so it is finalized from
+   * its durable audio instead of being shown as live forever.
+   */
+  async init(options: { hasLiveCapture?: (meetingId: string) => boolean } = {}): Promise<void> {
     this.settings = await getSettings();
     const latest = await listMeetings(1);
     const active = latest.find((meeting) => meeting.status === "recording" && meeting.captureSource === "meet");
-    if (active) {
+    let orphanedMeetingId: string | null = null;
+    if (active && options.hasLiveCapture && !options.hasLiveCapture(active.id)) {
+      orphanedMeetingId = active.id;
+    } else if (active) {
       this.activeMeetingId = active.id;
       this.meetChunkSequence.set(active.id, (await lastBrowserMeetSequence(active.id)) + 1);
+    }
+    if (orphanedMeetingId) {
+      const meetingId = orphanedMeetingId;
+      void this.stopRecording(meetingId).catch(async (error) => {
+        console.warn("Orphaned Meet recording could not be finalized", error);
+        await this.failRecording(meetingId, "This recording ended unexpectedly. Your saved audio is available for retry.").catch(() => undefined);
+      });
     }
     this.pushCurrentSettings();
     // Meet recording is extension-owned and does not require the desktop
@@ -759,6 +775,7 @@ export class BackgroundController {
   }
 
   async discardRecording(meetingId: string): Promise<void> {
+    if (this.activeMeetingId === meetingId) throw new Error("Stop the recording before discarding it.");
     try {
       this.client.discardRecording(meetingId);
     } catch {
@@ -772,6 +789,7 @@ export class BackgroundController {
   }
 
   async deleteMeeting(meetingId: string): Promise<void> {
+    if (this.activeMeetingId === meetingId) throw new Error("Stop the recording before deleting it.");
     try {
       this.client.deleteMeeting(meetingId);
     } catch {
@@ -791,13 +809,9 @@ export class BackgroundController {
    * verbatim with the settings, so the same check proves them to both
    * users, without making a missing helper block setup.
    */
-  testProviderKey(provider: ProviderKind, key: string, options: { desktop?: boolean } = {}): Promise<{ valid: boolean; message: string }> {
-    // `desktop` is ignored: every key the extension saves is also pushed
-    // verbatim to the helper with the settings, so a direct check proves the
-    // key to both users of it. The old helper-routed path made a missing
-    // helper block desktop onboarding entirely (the user cannot finish
-    // setup before the helper exists — that is the whole point of the flow).
-    void options;
+  testProviderKey(provider: ProviderKind, key: string): Promise<{ valid: boolean; message: string }> {
+    // Every key the extension saves is also pushed verbatim to the helper with
+    // the settings, so a direct check proves the key to both users of it.
     return testProviderKeyDirect(provider, key, this.fetchImpl);
   }
 

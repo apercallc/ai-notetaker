@@ -89,4 +89,24 @@ describe("reportManagedError", () => {
     expect(body).toEqual({ message: "background operation failed", surface: "background", errorClass: "TypeError" });
     expect(JSON.stringify(body)).not.toMatch(/private|secret|signed|meeting/);
   });
+
+  it("never sends the bearer token to an insecure or malformed service URL", () => {
+    const fetchImpl = mockFetch();
+    for (const [index, baseUrl] of ["http://evil.example.test", "not a url", "https://user:pw@managed.example.test"].entries()) {
+      reportManagedError({ ...config, baseUrl }, new Error("x"), { surface: "managed_upload", key: `bad-url-${index}`, fetchImpl });
+    }
+    expect(fetchImpl.calls.length).toBe(0);
+  });
+
+  it("never leaks provider text, tokens, or workspace identity in the payload", () => {
+    const fetchImpl = mockFetch();
+    reportManagedError(
+      { ...config, accessToken: "private-access-token", workspaceId: "private-workspace", accountId: "private-account" },
+      new Error("provider body: private transcript https://signed.example.test?token=secret"),
+      { surface: "managed_upload", key: "privacy-regression-1", meetingId: "private-meeting-id", extensionVersion: "1.2.3", fetchImpl },
+    );
+    const [, init] = fetchImpl.calls[0]!;
+    expect(JSON.stringify(JSON.parse(init.body as string))).not.toMatch(/private|secret|token|transcript/);
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer private-access-token");
+  });
 });

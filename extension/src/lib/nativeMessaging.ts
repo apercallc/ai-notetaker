@@ -252,7 +252,11 @@ export class NativeMessagingClient {
     // success states before pairing/version errors arrived.
     if (raw.type === "helper_info") {
       this.reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
-      this.setStatus(raw.protocolVersion === HELPER_PROTOCOL_VERSION ? "connected" : "incompatible");
+      const compatible = raw.protocolVersion === HELPER_PROTOCOL_VERSION;
+      this.setStatus(compatible ? "connected" : "incompatible");
+      // A helper that answered with the wrong protocol will not get better by
+      // reconnecting; stop the retry loop instead of hot-cycling.
+      if (!compatible) this.cancelReconnect();
     } else if (this.currentStatus === "connected") {
       // Healthy traffic keeps the next reconnect responsive, without
       // changing the already validated state.

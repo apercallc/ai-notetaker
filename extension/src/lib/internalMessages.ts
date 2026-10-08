@@ -33,7 +33,7 @@ export type UiToBackgroundMessage =
   | { type: "RESUME_RECORDING"; meetingId: string }
   | { type: "DISCARD_RECORDING"; meetingId: string }
   | { type: "DELETE_MEETING"; meetingId: string }
-  | { type: "TEST_PROVIDER_KEY"; provider: ProviderKind; key: string; desktop?: boolean };
+  | { type: "TEST_PROVIDER_KEY"; provider: ProviderKind; key: string };
 
 export interface BackgroundState {
   activeMeeting: { id: string; starting?: boolean } | null;

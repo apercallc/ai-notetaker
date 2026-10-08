@@ -4,10 +4,10 @@ import sharedDesktopFixtureBase64 from "../test-fixtures/desktop-audio-transfer-
 import { DEFAULT_SETTINGS, type MeetingRecord } from "../src/types";
 import { IDBFactory } from "fake-indexeddb";
 import { appendBrowserMeetChunk, listBrowserMeetChunks } from "../src/meet/browserStorage";
-import { createDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../src/lib/desktopMigration";
+import { buildDesktopMigrationArchive, createDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../src/lib/desktopMigration";
 
 const completed: MeetingRecord = {
-  id: "meeting-1",
+  id: "11111111-1111-4111-8111-111111111111",
   title: "Planning",
   startedAt: "2026-10-01T10:00:00.000Z",
   endedAt: "2026-10-01T10:30:00.000Z",
@@ -43,7 +43,7 @@ describe("desktop migration archive", () => {
 
     expect(picker).toHaveBeenCalledOnce();
     expect(loadMeetings).toHaveBeenCalledOnce();
-    expect(result).toEqual({ meetingCount: 1, chunkCount: 3, audioBytes: 6 });
+    expect(result).toEqual({ meetingCount: 1, chunkCount: 3, audioBytes: 6, adjustments: [] });
     expect(writer.close).toHaveBeenCalledOnce();
     expect(writer.abort).not.toHaveBeenCalled();
     const all = new Uint8Array(writes.reduce((sum, item) => sum + item.length, 0));
@@ -74,8 +74,8 @@ describe("desktop migration archive", () => {
     settings.webapp = { url: "https://notes.example.test", token: "sync-secret" };
     settings.calendar = { accessToken: "calendar-secret", expiresAt: 1 } as never;
     settings.drive = { accessToken: "drive-secret", clientId: "client", expiresAt: 1 };
-    const unfinished = { ...completed, id: "meeting-2", status: "processing" as const, endedAt: null };
-    const saved = { ...completed, id: "meeting-3", status: "saved" as const, summary: null, transcript: [], actionItems: [] };
+    const unfinished = { ...completed, id: "22222222-2222-4222-8222-222222222222", status: "processing" as const, endedAt: null };
+    const saved = { ...completed, id: "33333333-3333-4333-8333-333333333333", status: "saved" as const, summary: null, transcript: [], actionItems: [] };
 
     const archive = createDesktopMigrationArchive(settings, [completed, unfinished, saved], "2026-10-03T12:00:00.000Z");
     const encoded = JSON.stringify(archive);
@@ -122,9 +122,12 @@ describe("desktop migration archive", () => {
   });
 
   it("refuses to download a transfer file above the desktop import limit", () => {
-    const archive = createDesktopMigrationArchive(DEFAULT_SETTINGS, [
-      { ...completed, transcript: [{ speaker: "you" as const, text: "x".repeat(21 * 1024 * 1024), timestamp: "2026-10-01T10:10:00.000Z", isFinal: true }] },
-    ]);
+    const bigTranscript = Array.from({ length: 80 }, () => ({ speaker: "you" as const, text: "x".repeat(25_000), timestamp: "2026-10-01T10:10:00.000Z", isFinal: true }));
+    const archive = createDesktopMigrationArchive(DEFAULT_SETTINGS, Array.from({ length: 11 }, (_, index) => ({
+      ...completed,
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      transcript: bigTranscript,
+    })));
 
     expect(() => downloadDesktopMigrationArchive(archive)).toThrow(/20 MB/);
   });
@@ -165,8 +168,9 @@ describe("desktop migration archive", () => {
     globalThis.indexedDB = new IDBFactory();
     const writer = { write: vi.fn(async () => {}), close: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
     Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: async () => ({ createWritable: async () => writer }) });
-    const oversized = { ...completed, transcript: [{ speaker: "you" as const, text: "x".repeat(21 * 1024 * 1024), timestamp: "2026-10-01T10:10:00.000Z", isFinal: true }] };
-    await expect(saveDesktopAudioArchive(DEFAULT_SETTINGS, async () => [oversized])).rejects.toThrow(/20 MB/);
+    const bigTranscript = Array.from({ length: 80 }, () => ({ speaker: "you" as const, text: "x".repeat(25_000), timestamp: "2026-10-01T10:10:00.000Z", isFinal: true }));
+    const oversized = Array.from({ length: 11 }, (_, index) => ({ ...completed, id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, transcript: bigTranscript }));
+    await expect(saveDesktopAudioArchive(DEFAULT_SETTINGS, async () => oversized)).rejects.toThrow(/20 MB/);
     expect(writer.abort).toHaveBeenCalledOnce();
 
     globalThis.indexedDB = new IDBFactory();
@@ -191,5 +195,79 @@ describe("desktop migration archive", () => {
     writer.abort.mockClear();
     await expect(saveDesktopAudioArchive(DEFAULT_SETTINGS, async () => [])).rejects.toThrow(/invalid sequence data/);
     expect(writer.abort).toHaveBeenCalledOnce();
+  });
+
+  describe("desktop import limits", () => {
+        it("repairs or drops records the desktop app would reject", () => {
+      const long = (n: number) => "é".repeat(n);
+      const bad: MeetingRecord = {
+        ...completed,
+        id: "44444444-4444-4444-8444-444444444444",
+        title: `  Weekly\u0000 sync\u0007${long(300)}`,
+        endedAt: "2020-01-01T00:00:00.000Z",
+        summary: long(100_001),
+        transcript: [
+          { speaker: "them-2", text: long(25_001), timestamp: "not a date", isFinal: true },
+          { speaker: "bogus" as never, text: "hi\0", timestamp: "2026-10-01T10:10:00.000Z", isFinal: true },
+        ],
+        actionItems: Array.from({ length: 1_001 }, () => ({ text: long(2_500), owner: long(300), status: "weird" as never, dueAt: "tomorrow" })),
+      };
+      const noId = { ...completed, id: "meeting-1" };
+      const noStart = { ...completed, id: "55555555-5555-4555-8555-555555555555", startedAt: "yesterday" };
+      const noEnd = { ...completed, id: "66666666-6666-4666-8666-666666666666", endedAt: null };
+      const settings = { ...DEFAULT_SETTINGS, customVocabulary: [long(150)] };
+
+      const { archive, adjustments } = buildDesktopMigrationArchive(settings, [bad, noId, noStart, noEnd]);
+
+      expect(archive.meetings.map((meeting) => meeting.id)).toEqual([bad.id, noEnd.id]);
+      const fixed = archive.meetings[0]!;
+      expect(Array.from(fixed.title).length).toBeLessThanOrEqual(200);
+      // eslint-disable-next-line no-control-regex
+      expect(fixed.title).not.toMatch(/[\u0000-\u001f]/);
+      expect(fixed.endedAt).toBe(bad.startedAt);
+      expect(Array.from(fixed.summary ?? "").length).toBe(100_000);
+      expect(fixed.transcript.map((segment) => segment.speaker)).toEqual(["them-2", "them"]);
+      expect(fixed.transcript[0]!.timestamp).toBe(bad.startedAt);
+      expect(Array.from(fixed.transcript[0]!.text).length).toBe(25_000);
+      expect(fixed.transcript[1]!.text).toBe("hi");
+      expect(fixed.actionItems).toHaveLength(1_000);
+      expect(fixed.actionItems[0]).toMatchObject({ status: undefined, dueAt: null });
+      expect(Array.from(fixed.actionItems[0]!.owner ?? "").length).toBe(200);
+      expect(archive.settings.customVocabulary[0]!.length).toBe(100);
+      expect(archive.meetings[1]!.endedAt).toBe(noEnd.startedAt);
+      expect(adjustments.join(" ")).toMatch(/2 meeting records were left out/);
+      expect(adjustments.join(" ")).toMatch(/shortened or corrected/);
+    });
+
+    it("keeps at most 2000 meetings and leaves valid data untouched", () => {
+      const many = Array.from({ length: 2_002 }, (_, index) => ({ ...completed, id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}` }));
+      const { archive, adjustments } = buildDesktopMigrationArchive(DEFAULT_SETTINGS, many);
+      expect(archive.meetings).toHaveLength(2_000);
+      expect(adjustments).toEqual([expect.stringMatching(/2 older meeting records were left out/)]);
+      expect(buildDesktopMigrationArchive(DEFAULT_SETTINGS, [completed]).adjustments).toEqual([]);
+    });
+
+    it("blocks the audio export while a recording is active and does not create a writer", async () => {
+      const createWritable = vi.fn();
+      Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: async () => ({ createWritable }) });
+      await expect(saveDesktopAudioArchive(DEFAULT_SETTINGS, async () => [], undefined, {
+        isRecordingActive: async () => { throw new Error("A recording is in progress."); },
+      })).rejects.toThrow(/recording is in progress/);
+      expect(createWritable).not.toHaveBeenCalled();
+    });
+
+    it("opens the save picker before waiting for settings", async () => {
+      const order: string[] = [];
+      let release!: (value: typeof DEFAULT_SETTINGS) => void;
+      const pending = new Promise<typeof DEFAULT_SETTINGS>((resolve) => { release = resolve; });
+      const writer = { write: vi.fn(async () => {}), close: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
+      Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: async () => { order.push("picker"); return { createWritable: async () => writer }; } });
+      globalThis.indexedDB = new IDBFactory();
+      const done = saveDesktopAudioArchive(pending, async () => [], undefined, { isRecordingActive: async () => {} });
+      await Promise.resolve();
+      expect(order).toEqual(["picker"]);
+      release(DEFAULT_SETTINGS);
+      await expect(done).resolves.toMatchObject({ meetingCount: 0 });
+    });
   });
 });

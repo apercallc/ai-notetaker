@@ -193,6 +193,7 @@ export function buildAuthorizationUrl(
   clientId: string,
   redirectUri: string,
   challenge: string,
+  state?: string,
 ): string {
   const config = PROVIDER_CONFIG[provider];
   const params = new URLSearchParams({
@@ -204,6 +205,7 @@ export function buildAuthorizationUrl(
     code_challenge_method: "S256",
     access_type: "offline",
     prompt: "consent",
+    ...(state ? { state } : {}),
   });
   return `${config.authEndpoint}?${params.toString()}`;
 }
@@ -237,13 +239,19 @@ export async function connectCalendar(
   }
   const redirectUri = getRedirectUri();
   const { verifier, challenge } = await generatePkcePair();
-  const authUrl = buildAuthorizationUrl(provider, clientId, redirectUri, challenge);
+  // Binds the redirect to this attempt: a code from any other authorization
+  // flow (CSRF / code injection) is rejected.
+  const state = crypto.randomUUID();
+  const authUrl = buildAuthorizationUrl(provider, clientId, redirectUri, challenge, state);
   const redirectUrl = await launchWebAuthFlow(authUrl);
 
   const redirectParams = new URL(redirectUrl).searchParams;
   const code = redirectParams.get("code");
   if (!code) {
     throw new Error(redirectParams.get("error") ?? "calendar authorization did not return a code");
+  }
+  if (redirectParams.get("state") !== state) {
+    throw new Error("calendar authorization response did not match this request");
   }
 
   const config = PROVIDER_CONFIG[provider];
