@@ -14,16 +14,6 @@ const SETTINGS_FILE: &str = "desktop-settings.json";
 
 pub const DEFAULT_WEBAPP_URL: &str = "https://ai-notetaker.apercallc.com";
 
-/// Who runs transcription and summaries: the user's own provider keys on this device (the
-/// account-free default), or the hosted service the user signed in to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessingChoice {
-    #[default]
-    Local,
-    Hosted,
-}
-
 /// Non-secret details of the signed-in hosted account. The session token itself lives in
 /// the operating system credential store.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,8 +50,6 @@ pub struct DesktopPreferences {
     pub custom_summary_instructions: String,
     pub webapp_url: String,
     #[serde(default)]
-    pub processing: ProcessingChoice,
-    #[serde(default)]
     pub hosted_account: Option<HostedAccount>,
     /// Cloud sync was connected automatically by signing in (not by a token the user pasted), so
     /// signing out must disconnect it again and leave the app fully offline.
@@ -78,7 +66,6 @@ impl Default for DesktopPreferences {
             custom_vocabulary: Vec::new(),
             custom_summary_instructions: String::new(),
             webapp_url: DEFAULT_WEBAPP_URL.to_string(),
-            processing: ProcessingChoice::Local,
             hosted_account: None,
             sync_from_sign_in: false,
         }
@@ -104,12 +91,6 @@ impl DesktopPreferences {
         let path = data_dir.join(SETTINGS_FILE);
         match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice::<Self>(&bytes)
-                .map(|mut preferences| {
-                    // Hosted AI is not offered: the subscription sells sync, and notes are made
-                    // with the user's own keys. Settings saved while it existed fall back to keys.
-                    preferences.processing = ProcessingChoice::Local;
-                    preferences
-                })
                 .map_err(|error| format!("Saved desktop settings could not be read: {error}")),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(format!("Saved desktop settings could not be read: {error}")),
@@ -183,8 +164,7 @@ pub fn set_hosted_token(token: Option<&str>) -> Result<(), String> {
     set_secret("hosted-session-token", token)
 }
 
-/// The signed-in hosted account's connection, whether or not hosted processing is selected.
-/// Used for account calls (usage, Ask, Team, billing), which only need a live session.
+/// The signed-in hosted account's connection. Used for account calls (usage, Ask, Team, billing), which only need a live session.
 pub fn hosted_session(preferences: &DesktopPreferences) -> Option<ManagedServiceConfig> {
     let account = preferences
         .hosted_account
@@ -201,15 +181,6 @@ pub fn hosted_session(preferences: &DesktopPreferences) -> Option<ManagedService
         workspace_id: account.workspace_id.clone(),
         plan: account.plan.clone(),
     })
-}
-
-/// The hosted service connection to hand the pipeline, present only while hosted processing is
-/// selected and the saved session is still usable.
-pub fn hosted_service(preferences: &DesktopPreferences) -> Option<ManagedServiceConfig> {
-    if preferences.processing != ProcessingChoice::Hosted {
-        return None;
-    }
-    hosted_session(preferences)
 }
 
 pub fn settings_view(
@@ -311,11 +282,21 @@ mod hosted_tests {
     }
 
     #[test]
-    fn settings_saved_before_hosted_sign_in_still_load_as_local() {
+    fn settings_saved_before_hosted_sign_in_still_load() {
         let old = r#"{"transcriptionProvider":"deepgram","summarizationProvider":"claude","defaultMeetingMode":"general","customVocabulary":[],"customSummaryInstructions":"","webappUrl":""}"#;
         let loaded: DesktopPreferences = serde_json::from_str(old).unwrap();
-        assert_eq!(loaded.processing, ProcessingChoice::Local);
         assert!(loaded.hosted_account.is_none());
+    }
+
+    #[test]
+    fn settings_saved_with_the_removed_processing_choice_still_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let old = r#"{"transcriptionProvider":"groq","summarizationProvider":"claude","defaultMeetingMode":"general","customVocabulary":[],"customSummaryInstructions":"","webappUrl":"","processing":"hosted"}"#;
+        std::fs::write(directory.path().join(SETTINGS_FILE), old).unwrap();
+
+        let loaded = DesktopPreferences::load(directory.path()).unwrap();
+
+        assert_eq!(loaded.transcription_provider, TranscriptionProviderId::Groq);
     }
 
     #[test]
@@ -326,41 +307,8 @@ mod hosted_tests {
     }
 
     #[test]
-    fn local_processing_never_hands_out_a_hosted_connection() {
-        let preferences = DesktopPreferences {
-            hosted_account: Some(account("2999-01-01T00:00:00Z")),
-            ..DesktopPreferences::default()
-        };
-        assert!(hosted_service(&preferences).is_none());
-    }
-
-    #[test]
-    fn settings_saved_with_hosted_processing_load_as_own_keys() {
-        let directory = tempfile::tempdir().unwrap();
-        DesktopPreferences {
-            processing: ProcessingChoice::Hosted,
-            ..DesktopPreferences::default()
-        }
-        .save(directory.path())
-        .unwrap();
-
-        let loaded = DesktopPreferences::load(directory.path()).unwrap();
-
-        assert_eq!(loaded.processing, ProcessingChoice::Local);
-    }
-
-    #[test]
-    fn account_calls_need_a_session_not_hosted_processing() {
-        // No token is stored in the test keyring, so both are None; the point is that choosing
-        // own keys never changes which of them is consulted for account pages.
-        let preferences = DesktopPreferences {
-            processing: ProcessingChoice::Local,
-            hosted_account: Some(account("2999-01-01T00:00:00Z")),
-            ..DesktopPreferences::default()
-        };
-        assert!(hosted_service(&preferences).is_none());
+    fn an_expired_session_hands_out_no_connection() {
         let expired = DesktopPreferences {
-            processing: ProcessingChoice::Hosted,
             hosted_account: Some(account("2020-01-01T00:00:00Z")),
             ..DesktopPreferences::default()
         };

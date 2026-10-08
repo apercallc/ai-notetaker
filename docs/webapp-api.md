@@ -14,10 +14,11 @@ Every private API request (reads included — see the architecture spec §3.5
 and root `CLAUDE.md`) must authenticate its caller. Browser pages use their
 session cookie; managed APIs retain their established client/session auth;
 legacy extension ingestion uses its `AUTH_TOKEN`.
-Desktop sync uses a hashed, revocable `desktop_notes_sync` token created in
-the signed-in web app at Settings → Integrations. The token is bound to that
-user's active workspace; the route rechecks membership on each request. Keep
-it in the desktop operating-system credential vault. `GET /api/health` stays
+Desktop sync uses a hashed, revocable `desktop_notes_sync` token that the
+desktop app obtains when the user signs in (password or one-time
+connect-desktop code). The token is bound to that user's active workspace; the
+route rechecks membership on each request. The desktop keeps it in the
+operating-system credential vault. `GET /api/health` stays
 public for setup diagnostics; no workspace-note route is anonymous.
 
 ### Desktop note sync

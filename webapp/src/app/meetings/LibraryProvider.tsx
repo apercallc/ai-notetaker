@@ -16,7 +16,7 @@ export interface LibItem {
   subtree?: string[];
 }
 
-export const keyOf = (item: LibItem) => `${item.kind}:${item.id}`;
+const keyOf = (item: LibItem) => `${item.kind}:${item.id}`;
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 interface Toast {

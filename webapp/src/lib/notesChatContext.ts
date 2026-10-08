@@ -7,9 +7,9 @@ import { randomUUID } from "node:crypto";
  */
 
 export const MAX_QUESTION_LENGTH = 500;
-export const MAX_TERMS = 8;
-export const CONTEXT_CHAR_BUDGET = 24_000;
-export const MAX_SOURCES = 8;
+const MAX_TERMS = 8;
+const CONTEXT_CHAR_BUDGET = 24_000;
+const MAX_SOURCES = 8;
 const EXCERPT_CHARS = 600;
 
 const STOPWORDS = new Set(

@@ -190,7 +190,7 @@ export async function signDirectUpload(key: string, byteLength: number, expiresI
 }
 
 /** Staged audio is legitimately kept 24 hours at most; anything older is an orphan. */
-export const STALE_STAGED_OBJECT_MS = 48 * 60 * 60 * 1_000;
+const STALE_STAGED_OBJECT_MS = 48 * 60 * 60 * 1_000;
 const STAGED_PREFIX = "uploads/";
 const SWEEP_LIST_PAGES = 5;
 

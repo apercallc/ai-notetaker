@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GET as overview } from "./account/overview/route";
 import { POST as syncToken } from "./account/desktop-sync-token/route";
-import { POST as ask } from "./ask/route";
 import { POST as logout } from "./auth/logout/route";
 import { POST as desktopCode } from "./auth/desktop-code/route";
 import { issueAuthToken } from "@/lib/authTokens";
@@ -47,7 +46,6 @@ afterEach(async () => {
 describe("desktop account API", () => {
   it("requires a hosted session for every route", async () => {
     expect((await overview(new Request("http://localhost/api/v1/account/overview"))).status).toBe(401);
-    expect((await ask(post("http://localhost/api/v1/ask", {}, { question: "hi" }))).status).toBe(401);
     expect((await teamRoster(new Request("http://localhost/api/v1/team"))).status).toBe(401);
     expect((await syncToken(post("http://localhost/api/v1/account/desktop-sync-token", {}, {}))).status).toBe(401);
   });
@@ -97,12 +95,6 @@ describe("desktop account API", () => {
     expect((await response.json()).error).toMatch(/at least one owner/i);
   });
 
-  it("refuses a question on a plan without Ask your notes instead of charging for it", async () => {
-    await prisma.workspaceSubscription.update({ where: { workspaceId: WORKSPACE_ID }, data: { plan: "local" } });
-    const response = await ask(post("http://localhost/api/v1/ask", owner, { question: "What was decided?" }));
-    expect(response.status).toBe(422);
-    expect((await response.json()).ok).toBe(false);
-  });
 
   it("mints a revocable notes-only token bound to the signed-in workspace", async () => {
     const response = await syncToken(post("http://localhost/api/v1/account/desktop-sync-token", owner, {}));

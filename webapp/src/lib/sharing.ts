@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { hashToken } from "./apiTokens";
 import { prisma } from "./db";
 import { getMeeting } from "./meetings";
 import type { MeetingDetailResponse } from "./types";
@@ -19,10 +20,6 @@ export type ShareExpiry = number | null;
 const stillValid = () => ({ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] });
 
 export class SharingValidationError extends Error {}
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 function expiryDate(days: number): Date {
   if (!Number.isSafeInteger(days) || days < 1 || days > MAX_SHARE_EXPIRY_DAYS) {

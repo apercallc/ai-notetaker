@@ -13,7 +13,7 @@ import { normalizeEmail } from "./email";
 export type AuthTokenPurpose = "verify_email" | "reset_password" | "invite" | "desktop_connect";
 
 const HOUR = 60 * 60 * 1000;
-export const AUTH_TOKEN_TTL_MS: Record<AuthTokenPurpose, number> = {
+const AUTH_TOKEN_TTL_MS: Record<AuthTokenPurpose, number> = {
   verify_email: 24 * HOUR,
   reset_password: 1 * HOUR,
   invite: 7 * 24 * HOUR,

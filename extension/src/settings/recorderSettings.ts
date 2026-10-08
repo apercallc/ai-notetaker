@@ -26,7 +26,7 @@ async function render(): Promise<void> {
     </section>
     <section class="settings-section">
       <h2>Earlier extension data</h2>
-      <p>Earlier notes, provider settings, and recovery controls remain available here. Desktop provider settings and web-app sync are configured separately in the desktop app.</p>
+      <p>Earlier notes, provider settings, and recovery controls remain available here. Desktop provider settings and cloud sync (sign in) are managed in the desktop app.</p>
       <button class="secondary" id="open-previous-settings">Open previous settings</button>
     </section>`;
 

@@ -18,7 +18,7 @@ export const MAX_UPLOAD_CHUNKS = 10_000;
 // below that boundary so a valid request can never fail at persistence time.
 export const MAX_UPLOAD_BYTES = 1_900_000_000;
 export const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
-export const MAX_METADATA_BYTES = 64 * 1024;
+const MAX_METADATA_BYTES = 64 * 1024;
 export const MANAGED_UPLOAD_TTL_MS = 24 * 60 * 60 * 1_000;
 /** Bound audio staging reservations across every member of a workspace. */
 export const MAX_PENDING_MANAGED_UPLOADS = 5;

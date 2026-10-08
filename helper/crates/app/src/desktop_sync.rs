@@ -427,9 +427,9 @@ impl DesktopSync {
         if !identity_response.status().is_success() {
             let status = identity_response.status();
             let message = match status.as_u16() {
-                401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
+                401 => "Your sync connection expired or was revoked. Sign out and sign in again in Settings → Account & sync.",
                 402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
-                403 => "The desktop sync token no longer has access to its workspace.",
+                403 => "Your sync connection no longer has access to its workspace. Sign out and sign in again in Settings → Account & sync.",
                 404 => "This web-app version does not support desktop note sync yet.",
                 429 => "The web app is receiving too many requests. Sync will retry later.",
                 _ => "The web app could not confirm the selected workspace.",
@@ -537,11 +537,11 @@ impl DesktopSync {
                         )?;
                     }
                     let message = match status.as_u16() {
-                        409 => "A web-app note conflicts with this desktop copy. Review the conflict in Settings → Web app sync.",
+                        409 => "A web-app note conflicts with this desktop copy. Review the conflict in Settings → Account & sync.",
                         400 | 413 | 422 => "The web app rejected a saved note. Update the web app, then retry sync.",
-                        401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
+                        401 => "Your sync connection expired or was revoked. Sign out and sign in again in Settings → Account & sync.",
                         402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
-                        403 => "The desktop sync token no longer has access to its workspace. Create a token for the correct workspace.",
+                        403 => "Your sync connection no longer has access to its workspace. Sign out and sign in again in Settings → Account & sync.",
                         404 => "This web-app version does not support desktop note sync yet.",
                         429 => "The web app is receiving too many requests. Sync will retry later.",
                         _ => "The web app could not save this note. Sync will retry later.",
@@ -624,9 +624,9 @@ impl DesktopSync {
             if !response.status().is_success() {
                 let status = response.status();
                 let message = match status.as_u16() {
-                    401 => "The web-app token is invalid, expired, or revoked. Create a new desktop sync token and save it again.",
+                    401 => "Your sync connection expired or was revoked. Sign out and sign in again in Settings → Account & sync.",
                     402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
-                    403 => "The desktop sync token no longer has access to its workspace.",
+                    403 => "Your sync connection no longer has access to its workspace. Sign out and sign in again in Settings → Account & sync.",
                     404 => "This web-app version does not support workspace note sync yet.",
                     429 => "The web app is receiving too many requests. Sync will retry later.",
                     _ => "The web app could not return workspace notes.",

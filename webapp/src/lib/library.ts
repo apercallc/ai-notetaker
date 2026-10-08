@@ -121,7 +121,7 @@ export async function moveNotes(session: LibrarySession, meetingIds: string[], f
 }
 
 /** Owners may trash anything; a member may trash their own notes. */
-export function canTrashNote(session: LibrarySession, authorUserId: string): boolean {
+function canTrashNote(session: LibrarySession, authorUserId: string): boolean {
   return session.role === "owner" || authorUserId === session.userId;
 }
 

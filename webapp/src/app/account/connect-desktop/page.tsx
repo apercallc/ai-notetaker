@@ -33,7 +33,7 @@ export default async function ConnectDesktopPage() {
           {canSync ? "Sync is active for this workspace." : <>Sync is off for this workspace until it has a Pro or Team plan. <Link href="/billing">See plans</Link>.</>}
         </p>
       )}
-      {managed ? <ConnectDesktopForm /> : <p className="muted-copy">Sign-in from the desktop app is not available on this deployment. Use a desktop sync token from Settings → Integrations instead.</p>}
+      {managed ? <ConnectDesktopForm /> : <p className="muted-copy">Sign-in from the desktop app is not available on this deployment.</p>}
     </div>
   );
 }
