@@ -60,7 +60,15 @@ impl RollingFile {
     fn open(&self, date: NaiveDate, index: u32) -> io::Result<Current> {
         fs::create_dir_all(&self.dir)?;
         let path = self.dir.join(Self::file_name(date, index));
-        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        // Logs can mention meeting titles and file paths: owner-only, like the rest of the data folder.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&path)?;
         let written = file.metadata()?.len();
         self.prune();
         Ok(Current {
@@ -215,6 +223,20 @@ mod tests {
 
     fn day(day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 9, day).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_files_are_readable_by_their_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let logs = RollingFile::with_limits(dir.path().join("logs"), 14, MAX_FILE_BYTES);
+        logs.write_on(day(24), b"one\n").unwrap();
+        let mode = fs::metadata(dir.path().join("logs").join("helper-2026-09-24.log"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o077, 0, "mode was {mode:o}");
     }
 
     #[test]

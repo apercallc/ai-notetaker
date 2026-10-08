@@ -85,7 +85,32 @@ enum Native {
     Unavailable,
 }
 
-async fn try_native<R: Runtime>(app: &AppHandle<R>, force: bool) -> Native {
+/// Whether a check should run now. A manual check always runs; automatic ones wait out
+/// `CHECK_INTERVAL` after the last successful one, whichever updater path made it.
+fn check_is_due(state: &CheckState, now: DateTime<Utc>, force: bool) -> bool {
+    force
+        || state
+            .last_successful_check
+            .is_none_or(|checked| now.signed_duration_since(checked) >= CHECK_INTERVAL)
+}
+
+/// Whether to bother the user about `version`. A version already offered once is not offered
+/// again (not downloaded, not asked about) unless the user asks via a manual check.
+fn should_prompt(state: &CheckState, version: &str, force: bool) -> bool {
+    force || !state.prompted_versions.contains(version)
+}
+
+fn record_checked(path: &Path, state: &mut CheckState) {
+    state.last_successful_check = Some(Utc::now());
+    write_state(path, state);
+}
+
+async fn try_native<R: Runtime>(
+    app: &AppHandle<R>,
+    force: bool,
+    state_path: &Path,
+    state: &mut CheckState,
+) -> Native {
     // A Linux .deb cannot replace itself; only an AppImage can.
     #[cfg(target_os = "linux")]
     if std::env::var_os("APPIMAGE").is_none() {
@@ -102,6 +127,7 @@ async fn try_native<R: Runtime>(app: &AppHandle<R>, force: bool) -> Native {
     let update = match updater.check().await {
         Ok(Some(update)) => update,
         Ok(None) => {
+            record_checked(state_path, state);
             if force {
                 show_manual_notice(
                     app,
@@ -121,6 +147,13 @@ async fn try_native<R: Runtime>(app: &AppHandle<R>, force: bool) -> Native {
         return Native::Handled;
     }
     let version = update.version.clone();
+    let silent = STARTED_HIDDEN.load(std::sync::atomic::Ordering::Acquire) && !force;
+    // Choosing "Later" must stick: a version the user was already asked about is neither
+    // downloaded nor offered again by the automatic check.
+    if !silent && !should_prompt(state, &version, force) {
+        record_checked(state_path, state);
+        return Native::Handled;
+    }
     let bytes = match update.download(|_, _| {}, || {}).await {
         Ok(bytes) => bytes,
         Err(error) => {
@@ -135,12 +168,13 @@ async fn try_native<R: Runtime>(app: &AppHandle<R>, force: bool) -> Native {
             return Native::Handled;
         }
     };
-    let silent = STARTED_HIDDEN.load(std::sync::atomic::Ordering::Acquire) && !force;
     if silent && !crate::tray::recording_active() {
         tracing::info!(%version, "applying update at login");
         install_and_restart(app, update, bytes);
         return Native::Handled;
     }
+    state.prompted_versions.insert(version.clone());
+    record_checked(state_path, state);
     let handle = app.clone();
     app.dialog()
         .message(format!(
@@ -182,17 +216,18 @@ fn install_and_restart<R: Runtime>(
 
 async fn check<R: Runtime>(app: &AppHandle<R>, data_dir: &Path, force: bool) {
     let _guard = CHECK_LOCK.lock().await;
-    if matches!(try_native(app, force).await, Native::Handled) {
-        return;
-    }
     let state_path = data_dir.join(CHECK_STATE_FILE);
     let mut state = read_state(&state_path);
     let now = Utc::now();
-    if !force
-        && state
-            .last_successful_check
-            .is_some_and(|checked| now.signed_duration_since(checked) < CHECK_INTERVAL)
-    {
+    // One gate for both update paths, so the 6-hour wake-up never re-checks, re-downloads or
+    // re-asks inside the 24-hour interval.
+    if !check_is_due(&state, now, force) {
+        return;
+    }
+    if matches!(
+        try_native(app, force, &state_path, &mut state).await,
+        Native::Handled
+    ) {
         return;
     }
 
@@ -276,9 +311,9 @@ async fn check<R: Runtime>(app: &AppHandle<R>, data_dir: &Path, force: bool) {
     }
 
     let version = latest.to_string();
-    let already_prompted = state.prompted_versions.contains(&version);
+    let prompt = should_prompt(&state, &version, force);
     write_state(&state_path, &state);
-    if already_prompted && !force {
+    if !prompt {
         return;
     }
 
@@ -347,4 +382,56 @@ fn temporary_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(".tmp");
     PathBuf::from(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(checked_hours_ago: Option<i64>, prompted: &[&str]) -> CheckState {
+        CheckState {
+            last_successful_check: checked_hours_ago
+                .map(|hours| Utc::now() - Duration::hours(hours)),
+            prompted_versions: prompted.iter().map(|v| v.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn automatic_checks_wait_out_the_interval_and_manual_ones_do_not() {
+        let now = Utc::now();
+        assert!(check_is_due(&state(None, &[]), now, false));
+        assert!(
+            !check_is_due(&state(Some(6), &[]), now, false),
+            "6h wake-up is inside 24h"
+        );
+        assert!(!check_is_due(&state(Some(23), &[]), now, false));
+        assert!(check_is_due(&state(Some(25), &[]), now, false));
+        assert!(check_is_due(&state(Some(1), &[]), now, true));
+    }
+
+    #[test]
+    fn a_version_the_user_already_deferred_is_not_offered_again_automatically() {
+        let seen = state(Some(30), &["1.2.3"]);
+        assert!(!should_prompt(&seen, "1.2.3", false));
+        assert!(
+            should_prompt(&seen, "1.2.3", true),
+            "manual check asks again"
+        );
+        assert!(
+            should_prompt(&seen, "1.2.4", false),
+            "a newer version is offered"
+        );
+    }
+
+    #[test]
+    fn recorded_checks_and_prompts_survive_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CHECK_STATE_FILE);
+        let mut saved = CheckState::default();
+        saved.prompted_versions.insert("2.0.0".into());
+        record_checked(&path, &mut saved);
+        let reloaded = read_state(&path);
+        assert!(!check_is_due(&reloaded, Utc::now(), false));
+        assert!(!should_prompt(&reloaded, "2.0.0", false));
+    }
 }

@@ -65,6 +65,27 @@ struct PersistedSyncState {
     /// the next pull must not quietly bring it back (which would look like a duplicate).
     #[serde(default)]
     dismissed: HashSet<Uuid>,
+    /// Why a queued note could not upload, for notes whose failure is about the note itself (too
+    /// large, rejected, not ready). Other notes keep syncing; the entry clears on success.
+    #[serde(default)]
+    note_errors: HashMap<Uuid, String>,
+}
+
+/// How an upload refusal affects the rest of the queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UploadRefusal {
+    /// Only this note is the problem: record it and carry on with the next one.
+    ThisNote,
+    /// The connection, account or service is the problem: every later note would fail the same
+    /// way, so stop and retry later.
+    WholeQueue,
+}
+
+fn classify_refusal(status: u16) -> UploadRefusal {
+    match status {
+        400 | 409 | 413 | 422 => UploadRefusal::ThisNote,
+        _ => UploadRefusal::WholeQueue,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,6 +394,7 @@ impl DesktopSync {
     pub fn dismiss(&self, meeting_id: Uuid) -> Result<(), String> {
         let mut state = self.lock_state();
         state.dismissed.insert(meeting_id);
+        state.note_errors.remove(&meeting_id);
         state.pending.retain(|id| *id != meeting_id);
         self.persist(&state)
     }
@@ -382,6 +404,7 @@ impl DesktopSync {
             return Ok(());
         }
         let mut state = self.lock_state();
+        state.note_errors.remove(&meeting_id);
         state.pending.retain(|id| *id != meeting_id);
         self.persist(&state)
     }
@@ -451,23 +474,43 @@ impl DesktopSync {
             .trim_end_matches('/')
             .to_owned();
         let source_id = format!("{source_base}/workspace/{workspace_id}");
+        let mut note_failures: Vec<String> = Vec::new();
         for meeting_id in pending {
             if self.should_skip_upload(meeting_id, &source_base, &workspace_id) {
                 continue;
             }
-            let store = store.clone();
-            let payload = tokio::task::spawn_blocking(move || build_payload(&store, meeting_id))
-                .await
-                .map_err(|_| "A saved note could not be prepared for sync.".to_string())?
-                .inspect_err(|error| {
-                    self.record_error(error.clone());
-                })?;
-            let body = serde_json::to_vec(&payload)
-                .map_err(|_| "A saved note could not be encoded for sync.".to_string())?;
+            let build_store = store.clone();
+            let payload =
+                match tokio::task::spawn_blocking(move || build_payload(&build_store, meeting_id))
+                    .await
+                {
+                    Ok(Ok(payload)) => payload,
+                    Ok(Err(error)) => {
+                        self.record_note_error(meeting_id, &error);
+                        note_failures.push(error);
+                        continue;
+                    }
+                    Err(_) => {
+                        let error = "A saved note could not be prepared for sync.".to_string();
+                        self.record_note_error(meeting_id, &error);
+                        note_failures.push(error);
+                        continue;
+                    }
+                };
+            let body = match serde_json::to_vec(&payload) {
+                Ok(body) => body,
+                Err(_) => {
+                    let error = "A saved note could not be encoded for sync.".to_string();
+                    self.record_note_error(meeting_id, &error);
+                    note_failures.push(error);
+                    continue;
+                }
+            };
             if body.len() > MAX_REQUEST_BYTES {
                 let error = "This note is too large for the web-app sync API.".to_string();
-                self.record_error(error.clone());
-                return Err(error);
+                self.record_note_error(meeting_id, &error);
+                note_failures.push(error);
+                continue;
             }
 
             let expected_version = {
@@ -547,6 +590,11 @@ impl DesktopSync {
                         _ => "The web app could not save this note. Sync will retry later.",
                     };
                     let error = format!("{message} (HTTP {status})");
+                    if classify_refusal(status.as_u16()) == UploadRefusal::ThisNote {
+                        self.record_note_error(meeting_id, &error);
+                        note_failures.push(error);
+                        continue;
+                    }
                     self.record_error(error.clone());
                     return Err(error);
                 }
@@ -556,6 +604,18 @@ impl DesktopSync {
                     return Err(error);
                 }
             }
+        }
+        if let Some(first) = note_failures.first() {
+            let error = if note_failures.len() == 1 {
+                first.clone()
+            } else {
+                format!(
+                    "{} notes could not sync. First problem: {first}",
+                    note_failures.len()
+                )
+            };
+            self.record_error(error.clone());
+            return Err(error);
         }
         Ok(())
     }
@@ -796,6 +856,7 @@ impl DesktopSync {
         let source_id = format!("{normalized_url}/workspace/{workspace_id}");
         let mut state = self.lock_state();
         state.pending.retain(|id| *id != meeting_id);
+        state.note_errors.remove(&meeting_id);
         state.remote_versions.insert(meeting_id, updated_at);
         state
             .scoped_remote_versions
@@ -847,6 +908,16 @@ impl DesktopSync {
             workspace_id,
         ));
         self.persist(&state)
+    }
+
+    /// A problem with one note. It stays queued (it may become uploadable after an update or once
+    /// processing finishes) but no longer blocks the notes behind it.
+    fn record_note_error(&self, meeting_id: Uuid, error: &str) {
+        let mut state = self.lock_state();
+        state.note_errors.insert(meeting_id, error.to_owned());
+        if let Err(persist_error) = self.persist(&state) {
+            tracing::warn!(%persist_error, "web-app sync status could not be saved");
+        }
     }
 
     fn record_error(&self, error: String) {
@@ -1688,5 +1759,185 @@ mod tests {
         assert_eq!(imported, 1);
         assert!(store.load_meta(deleted).is_err());
         assert!(store.load_meta(kept).is_ok());
+    }
+
+    #[test]
+    fn only_note_specific_refusals_skip_ahead() {
+        for status in [400, 409, 413, 422] {
+            assert_eq!(
+                classify_refusal(status),
+                UploadRefusal::ThisNote,
+                "{status}"
+            );
+        }
+        for status in [401, 402, 403, 404, 429, 500, 502, 503] {
+            assert_eq!(
+                classify_refusal(status),
+                UploadRefusal::WholeQueue,
+                "{status}"
+            );
+        }
+    }
+
+    fn finished_note(store: &MeetingStore) -> Uuid {
+        let id = Uuid::new_v4();
+        let started = Utc::now();
+        store.create_meeting(id, started).unwrap();
+        store
+            .mark_stopped(id, started + chrono::Duration::minutes(5))
+            .unwrap();
+        store
+            .write_summary(
+                id,
+                &Summary {
+                    summary: "Ready".into(),
+                    action_items: vec![],
+                },
+            )
+            .unwrap();
+        store.mark_processed(id).unwrap();
+        id
+    }
+
+    /// Serves one canned `(status line, body)` per connection, in order.
+    async fn scripted_server(
+        responses: Vec<(&'static str, String)>,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for (status, body) in responses {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = BufReader::new(stream);
+                let mut length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).await.unwrap() == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut discard = vec![0u8; length];
+                reader.read_exact(&mut discard).await.unwrap();
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                reader
+                    .into_inner()
+                    .write_all(response.as_bytes())
+                    .await
+                    .unwrap();
+            }
+        });
+        (address, server)
+    }
+
+    #[tokio::test]
+    async fn a_note_the_web_app_rejects_does_not_block_the_notes_behind_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::new(directory.path()).unwrap());
+        let rejected = finished_note(&store);
+        let accepted = finished_note(&store);
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(rejected).unwrap();
+        sync.enqueue(accepted).unwrap();
+
+        let receipt = serde_json::json!({ "updatedAt": Utc::now(), "workspaceId": "workspace-1" })
+            .to_string();
+        let (address, server) = scripted_server(vec![
+            (
+                "200 OK",
+                r#"{"workspace":{"id":"workspace-1","name":"Product"}}"#.into(),
+            ),
+            ("422 Unprocessable Entity", r#"{"error":"bad note"}"#.into()),
+            ("201 Created", receipt),
+        ])
+        .await;
+
+        let error = sync
+            .sync_pending(store, &format!("http://{address}"), "sync-token")
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert!(error.contains("HTTP 422"), "{error}");
+        let state = sync.lock_state();
+        assert!(
+            state.pending.contains(&rejected),
+            "the rejected note stays queued"
+        );
+        assert!(state.note_errors.contains_key(&rejected));
+        assert!(
+            !state.pending.contains(&accepted),
+            "the second note uploaded"
+        );
+        assert!(state.remote_versions.contains_key(&accepted));
+    }
+
+    #[tokio::test]
+    async fn a_note_that_is_not_ready_is_recorded_and_the_next_note_still_uploads() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::new(directory.path()).unwrap());
+        let unfinished = Uuid::new_v4();
+        store.create_meeting(unfinished, Utc::now()).unwrap();
+        let ready = finished_note(&store);
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(unfinished).unwrap();
+        sync.enqueue(ready).unwrap();
+
+        let receipt = serde_json::json!({ "updatedAt": Utc::now(), "workspaceId": "workspace-1" })
+            .to_string();
+        let (address, server) = scripted_server(vec![
+            (
+                "200 OK",
+                r#"{"workspace":{"id":"workspace-1","name":"Product"}}"#.into(),
+            ),
+            ("201 Created", receipt),
+        ])
+        .await;
+
+        let error = sync
+            .sync_pending(store, &format!("http://{address}"), "sync-token")
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert!(error.contains("not finished"), "{error}");
+        let state = sync.lock_state();
+        assert!(state.pending.contains(&unfinished));
+        assert!(!state.pending.contains(&ready));
+    }
+
+    #[tokio::test]
+    async fn an_expired_connection_still_stops_the_whole_queue() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::new(directory.path()).unwrap());
+        let first = finished_note(&store);
+        let second = finished_note(&store);
+        let sync = DesktopSync::load(directory.path());
+        sync.enqueue(first).unwrap();
+        sync.enqueue(second).unwrap();
+
+        let (address, server) = scripted_server(vec![
+            (
+                "200 OK",
+                r#"{"workspace":{"id":"workspace-1","name":"Product"}}"#.into(),
+            ),
+            ("401 Unauthorized", r#"{"error":"expired"}"#.into()),
+        ])
+        .await;
+
+        let error = sync
+            .sync_pending(store, &format!("http://{address}"), "sync-token")
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert!(error.contains("HTTP 401"), "{error}");
+        assert_eq!(sync.status(true).pending, 2);
     }
 }

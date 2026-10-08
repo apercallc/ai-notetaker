@@ -4,6 +4,8 @@ set -eu
 host_name='com.ainotetaker.helper'
 extension_id='jidooookkdbbbhkkdmcajnnnhhphodok'
 host_binary='/usr/bin/notetaker-nm-host'
+# Tolerates whitespace around the colon, so a pretty-printed manifest from this package still matches.
+path_pattern="\"path\"[[:space:]]*:[[:space:]]*\"$host_binary\""
 
 remove_manifest() {
     manifest_path="$1/$host_name.json"
@@ -12,7 +14,7 @@ remove_manifest() {
     # a user's replacement or another application's manifest with the same name.
     if [ -f "$manifest_path" ] &&
         grep -Fq "chrome-extension://$extension_id/" "$manifest_path" &&
-        grep -Fq "\"path\":\"$host_binary\"" "$manifest_path"; then
+        grep -Eq "$path_pattern" "$manifest_path"; then
         rm -f "$manifest_path"
     fi
 }
@@ -26,6 +28,6 @@ gecko_id='notetaker@apercallc.dev'
 firefox_manifest_path="/usr/lib/mozilla/native-messaging-hosts/$host_name.json"
 if [ -f "$firefox_manifest_path" ] &&
     grep -Fq "\"$gecko_id\"" "$firefox_manifest_path" &&
-    grep -Fq "\"path\":\"$host_binary\"" "$firefox_manifest_path"; then
+    grep -Eq "$path_pattern" "$firefox_manifest_path"; then
     rm -f "$firefox_manifest_path"
 fi

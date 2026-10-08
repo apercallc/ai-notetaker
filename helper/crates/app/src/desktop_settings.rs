@@ -183,6 +183,95 @@ pub fn hosted_session(preferences: &DesktopPreferences) -> Option<ManagedService
     })
 }
 
+/// Which credentials exist, without their values. Reading the OS credential store can block on a
+/// keychain prompt or a D-Bus round trip, and the window asks for a snapshot often, so presence is
+/// remembered until a credential is written.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CredentialPresence {
+    pub deepgram: bool,
+    pub groq: bool,
+    pub claude: bool,
+    pub gemini: bool,
+    pub deepseek: bool,
+    pub webapp_token: bool,
+    pub hosted_token: bool,
+}
+
+#[derive(Default)]
+struct PresenceCache {
+    slot: std::sync::Mutex<Option<CredentialPresence>>,
+}
+
+impl PresenceCache {
+    /// Returns the remembered presence, or loads it. Failures are never remembered, so unlocking
+    /// the keychain is noticed on the next call.
+    fn get_or_load(
+        &self,
+        load: impl FnOnce() -> Result<CredentialPresence, String>,
+    ) -> Result<CredentialPresence, String> {
+        let mut slot = self
+            .slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(presence) = *slot {
+            return Ok(presence);
+        }
+        let presence = load()?;
+        *slot = Some(presence);
+        Ok(presence)
+    }
+
+    fn invalidate(&self) {
+        *self
+            .slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
+
+static PRESENCE: std::sync::LazyLock<PresenceCache> =
+    std::sync::LazyLock::new(PresenceCache::default);
+
+fn present(secret: Option<String>) -> bool {
+    secret.is_some_and(|secret| !secret.trim().is_empty())
+}
+
+/// Cached credential presence for the snapshot; see [`CredentialPresence`].
+pub fn credential_presence() -> Result<CredentialPresence, String> {
+    PRESENCE.get_or_load(|| {
+        Ok(CredentialPresence {
+            deepgram: present(get_secret("provider-deepgram")?),
+            groq: present(get_secret("provider-groq")?),
+            claude: present(get_secret("provider-claude")?),
+            gemini: present(get_secret("provider-gemini")?),
+            deepseek: present(get_secret("provider-deepseek")?),
+            webapp_token: present(get_webapp_token()?),
+            hosted_token: present(get_hosted_token()?),
+        })
+    })
+}
+
+pub fn settings_view_from_presence(
+    preferences: DesktopPreferences,
+    presence: CredentialPresence,
+) -> DesktopSettingsView {
+    let has_hosted_session = preferences
+        .hosted_account
+        .as_ref()
+        .is_some_and(|account| !account.is_expired())
+        && presence.hosted_token;
+    DesktopSettingsView {
+        preferences,
+        has_deepgram_key: presence.deepgram,
+        has_groq_key: presence.groq,
+        has_claude_key: presence.claude,
+        has_gemini_key: presence.gemini,
+        has_deepseek_key: presence.deepseek,
+        has_webapp_token: presence.webapp_token,
+        has_hosted_session,
+    }
+}
+
 pub fn settings_view(
     preferences: DesktopPreferences,
     keys: &ApiKeys,
@@ -216,6 +305,27 @@ pub fn wire_webapp_config(url: &str) -> Result<Option<WebappConfig>, String> {
     Ok(Some(WebappConfig { url, token }))
 }
 
+/// True for `localhost` and literal loopback addresses. `host_str` keeps the brackets around an
+/// IPv6 literal, so they are trimmed before parsing.
+pub fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+/// https anywhere, or plain http only to a loopback host (local development). The host is parsed
+/// rather than prefix-matched: `http://localhost.evil.com` must not pass for loopback. Every
+/// service address (sign-in, sync, hosted calls) goes through this one rule.
+pub fn service_url_is_allowed(url: &reqwest::Url) -> bool {
+    match url.scheme() {
+        "https" => url.host_str().is_some(),
+        "http" => url.host_str().is_some_and(is_loopback_host),
+        _ => false,
+    }
+}
+
 pub fn normalize_webapp_url(url: &str) -> Result<Option<String>, String> {
     let url = url.trim();
     if url.is_empty() {
@@ -223,9 +333,7 @@ pub fn normalize_webapp_url(url: &str) -> Result<Option<String>, String> {
     }
     let parsed = reqwest::Url::parse(url)
         .map_err(|_| "Enter a valid web-app URL, including https://".to_string())?;
-    let host = parsed.host_str().unwrap_or_default();
-    let loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
-    if parsed.scheme() != "https" && !(parsed.scheme() == "http" && loopback) {
+    if !service_url_is_allowed(&parsed) {
         return Err(
             "Use https:// for web-app sync. Plain http is allowed only for localhost.".into(),
         );
@@ -252,6 +360,14 @@ fn get_secret(account: &str) -> Result<Option<String>, String> {
 }
 
 fn set_secret(account: &str, secret: Option<&str>) -> Result<(), String> {
+    // Invalidate before and after: a failed write may still have changed the store.
+    PRESENCE.invalidate();
+    let result = write_secret(account, secret);
+    PRESENCE.invalidate();
+    result
+}
+
+fn write_secret(account: &str, secret: Option<&str>) -> Result<(), String> {
     let entry = keyring::Entry::new(SERVICE, account)
         .map_err(|_| "The operating system credential store is unavailable. Unlock your keychain or enable a Linux Secret Service, then try again.".to_string())?;
     match secret.filter(|secret| !secret.is_empty()) {
@@ -268,6 +384,56 @@ fn set_secret(account: &str, secret: Option<&str>) -> Result<(), String> {
 #[cfg(test)]
 mod hosted_tests {
     use super::*;
+
+    #[test]
+    fn loopback_sign_in_urls_normalize_for_every_loopback_spelling() {
+        for url in [
+            "http://localhost:3000",
+            "http://127.0.0.1:8080",
+            "http://127.0.0.2:8080",
+            "http://[::1]:3000",
+            "https://notes.example.com/",
+        ] {
+            assert!(normalize_webapp_url(url).unwrap().is_some(), "{url}");
+        }
+        for url in [
+            "http://notes.example.com",
+            "http://localhost.evil.com",
+            "http://[2001:db8::1]",
+        ] {
+            assert!(normalize_webapp_url(url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn credential_presence_is_loaded_once_until_invalidated_and_failures_are_not_kept() {
+        let cache = PresenceCache::default();
+        let mut loads = 0;
+        let mut load = |has_claude: bool| {
+            loads += 1;
+            Ok(CredentialPresence {
+                claude: has_claude,
+                ..Default::default()
+            })
+        };
+        assert!(cache.get_or_load(|| load(true)).unwrap().claude);
+        assert!(
+            cache.get_or_load(|| load(false)).unwrap().claude,
+            "second call is cached"
+        );
+        cache.invalidate();
+        assert!(
+            !cache.get_or_load(|| load(false)).unwrap().claude,
+            "reloaded after a write"
+        );
+        assert_eq!(loads, 2);
+
+        let failing = PresenceCache::default();
+        assert!(failing.get_or_load(|| Err("locked".into())).is_err());
+        assert!(failing
+            .get_or_load(|| Ok(CredentialPresence::default()))
+            .is_ok());
+    }
 
     fn account(expires_at: &str) -> HostedAccount {
         HostedAccount {
