@@ -11,6 +11,7 @@ import type { ShellContext } from "./Shell";
 const UNSIGNED_DOC = "https://github.com/apercallc/ai-notetaker/blob/main/docs/code-signing-policy.md";
 const ACCEPTANCE_DOC = "https://github.com/apercallc/ai-notetaker/blob/main/docs/launch/release-candidate-checklist.md";
 const EFFECTIVE = "September 30, 2026";
+const TERMS_EFFECTIVE = "October 8, 2026";
 
 function PageHead({ title, lede }: { title: string; lede?: string }) {
   return (
@@ -214,11 +215,11 @@ export function PricingView({ context, prices }: { context: ShellContext; prices
           <div className="mk-prose">
             <ul>
               <li>The desktop app and a free account cost nothing, and need no card.</li>
-              <li>Paid plans are billed monthly in US dollars by Stripe. We never see or store your card number.</li>
+              <li>Paid plans are billed monthly or yearly in US dollars by Stripe. We never see or store your card number.</li>
               <li>Pro syncs your finished notes across your devices. Team adds a shared workspace for your teammates.</li>
               <li>Without a subscription your notes stay on your device and keep working. Nothing is deleted when a plan ends.</li>
-              <li>Cancel from the billing page. Your plan stays active until the end of the period you paid for.</li>
-              <li>If a payment fails, you keep access for a short grace period while Stripe retries.</li>
+              <li>Cancel from the billing page. Your plan stays active until the end of the period you paid for. New subscribers can get a full refund within 14 days. See the refund details in the terms.</li>
+              <li>If a payment fails, you keep access for 3 days while Stripe retries, then sync stops until it is paid.</li>
               <li>Your recordings are always saved on your device first, whatever your plan.</li>
             </ul>
           </div>
@@ -825,7 +826,7 @@ export function TermsView() {
   const law = governingLaw();
   return (
     <>
-      <PageHead title="Terms of use" lede={`Effective ${EFFECTIVE}. These cover this website, the software, and the account and sync service.`} />
+      <PageHead title="Terms of use" lede={`Effective ${TERMS_EFFECTIVE}. These cover this website, the software, and the account and sync service.`} />
       <section className="mk-section mk-section--flush">
         <div className="mk-wrap">
           <div className="mk-prose">
@@ -855,15 +856,68 @@ export function TermsView() {
 
             <h2>Plans and billing</h2>
             <ul>
-              <li>The desktop app and a free account cost nothing. Pro (cloud sync) and Team (team sync) are monthly subscriptions billed in US dollars through Stripe, as shown on the pricing page.</li>
+              <li>The desktop app and a free account cost nothing. Pro (cloud sync) and Team (team sync) are subscriptions billed monthly or yearly in US dollars through Stripe, as shown on the pricing page. Yearly billing charges once for twelve months at the price shown.</li>
               <li>Without an active subscription, cloud sync is off. Your notes stay on your device and keep working. Notes already in your account stay there, read-only: you can read, search, export and delete them, and download them to the desktop app. We do not delete notes because a plan ended; editing, sharing, integrations, invitations and new uploads need a plan.</li>
-              <li>Cancel from the billing page. The plan stays active until the end of the period you already paid for, and it does not renew.</li>
+              <li>Cancel from the billing page (Manage billing). The plan stays active until the end of the period you already paid for and does not renew. Until it ends you can resume it from the same page. Only a workspace owner can cancel or change a plan.</li>
+              <li>If a payment fails, access continues for 3 days while Stripe retries the card. After that, or if the subscription is cancelled, sync stops. Paying the open invoice or subscribing again turns it back on.</li>
+            </ul>
+
+            <h2>Refunds and cancellations</h2>
+            <ul>
               <li>
-                Fees for a billing period that has started are not refunded, except where the law requires it or we
-                could not provide the service. If you were charged by mistake or twice, contact us within 14 days and
-                we will review it and refund what was charged in error.
+                <strong>First 14 days.</strong> If you are a new subscriber, you can ask for a full refund of your first
+                payment, monthly or yearly, within 14 days of paying. This applies once per account.
               </li>
-              <li>If a payment fails, access continues for a short grace period while Stripe retries, and then sync stops.</li>
+              <li>
+                <strong>Charged by mistake or twice.</strong> Tell us within 60 days and we will refund what was charged in error.
+              </li>
+              <li>
+                <strong>Yearly renewals.</strong> We do not guarantee a reminder before a yearly plan renews, so cancel before the
+                renewal date if you do not want another year. If a yearly plan renews and you did not mean to keep it, ask within
+                7 days of the renewal for a full refund.
+              </li>
+              <li>
+                <strong>Service we could not provide.</strong> If sync is unavailable because of us for more than 72 hours in a
+                row, we will refund the affected time, calculated as a share of the period you paid for.
+              </li>
+              <li>
+                <strong>Otherwise.</strong> Fees for a billing period that has started are not refunded, including for unused
+                months of a yearly plan, except where the law requires it. Cancelling stops the next renewal and keeps your plan
+                until the period ends.
+              </li>
+              <li>
+                <strong>Changing plans.</strong> Switching between Pro, Team, monthly and yearly from Manage billing takes effect
+                immediately. The unused time on your current plan is credited toward the new price, so you are not charged twice
+                for the same days.
+              </li>
+              <li>
+                <strong>Deleting your account.</strong> This cancels any active subscription straight away. The period you paid for
+                is not refunded unless it falls under one of the cases above.
+              </li>
+              <li>
+                <strong>Team workspaces.</strong> Only the owner can cancel or change the plan. When it ends, sync stops for every
+                member. Notes in the workspace stay read-only and can be exported, and notes on members&apos; own computers are
+                never affected.
+              </li>
+              <li>
+                <strong>Disputes.</strong> Please contact us before disputing a charge with your bank, because we can usually refund
+                an error sooner. If a valid charge is disputed, we may pause sync on that workspace until it is resolved. Your notes
+                stay available to read and export.
+              </li>
+              <li>
+                <strong>How refunds are paid.</strong> Refunds go back to the original payment method only, in US dollars, and
+                usually appear in 5 to 10 business days. Any tax collected on the refunded amount is refunded with it. Fees your
+                bank charges for currency conversion are set by your bank and are not refunded by us. AI provider costs you pay
+                directly to Deepgram, Groq, Anthropic and the like are billed by them, not us, and are not refundable by us.
+              </li>
+              <li>
+                To ask for a refund, {contact ? <>email <a href={`mailto:${contact}`}>{contact}</a></> : "raise it on the project's issue tracker"} with
+                your account email and the charge date.
+              </li>
+            </ul>
+
+            <h2>Plan changes and limits</h2>
+            <ul>
               <li>We may rate-limit requests to protect the service. We may change prices and plans for future billing periods, and will tell subscribers in advance; a change does not affect a period you have already paid for.</li>
             </ul>
 
