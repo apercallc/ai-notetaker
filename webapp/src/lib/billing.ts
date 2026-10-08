@@ -46,7 +46,12 @@ function stripeHeaders(): HeadersInit {
 }
 
 function priceFor(priceId: string): string {
-  const allowed = [process.env.STRIPE_PRICE_HOSTED_PRO, process.env.STRIPE_PRICE_HOSTED_TEAM].filter((value): value is string => Boolean(value));
+  const allowed = [
+    process.env.STRIPE_PRICE_HOSTED_PRO,
+    process.env.STRIPE_PRICE_HOSTED_TEAM,
+    process.env.STRIPE_PRICE_HOSTED_PRO_YEARLY,
+    process.env.STRIPE_PRICE_HOSTED_TEAM_YEARLY,
+  ].filter((value): value is string => Boolean(value));
   if (!allowed.includes(priceId)) throw new BillingError("unknown hosted plan");
   return priceId;
 }
@@ -286,6 +291,14 @@ export function verifyStripeSignature(payload: string, signature: string | null)
 
 export type PurchasablePlan = "hosted_pro" | "hosted_team";
 
+export type BillingInterval = "month" | "year";
+
+/** Stripe price id for a plan and billing interval; yearly prices are optional. */
+export function priceIdFor(plan: PurchasablePlan, interval: BillingInterval = "month"): string | undefined {
+  if (plan === "hosted_pro") return (interval === "year" ? process.env.STRIPE_PRICE_HOSTED_PRO_YEARLY : process.env.STRIPE_PRICE_HOSTED_PRO) || undefined;
+  return (interval === "year" ? process.env.STRIPE_PRICE_HOSTED_TEAM_YEARLY : process.env.STRIPE_PRICE_HOSTED_TEAM) || undefined;
+}
+
 export interface PlanOffer {
   id: PurchasablePlan;
   name: string;
@@ -293,6 +306,8 @@ export interface PlanOffer {
   meetingLimit: number;
   /** Formatted price such as "$19.00 / month", or null when it cannot be resolved. */
   priceLabel: string | null;
+  /** Annual billing, present only when a yearly Stripe price is configured. */
+  yearly: { priceId: string; priceLabel: string | null; monthsFree: number | null } | null;
 }
 
 const PRICE_CACHE_TTL_MS = 10 * 60 * 1_000;
@@ -339,19 +354,39 @@ export function clearPriceCache(): void {
   priceCache.clear();
 }
 
+/** Whole months saved by paying yearly, derived from the two formatted labels ("$12 / month", "$120 / year"). */
+export function monthsFree(monthly: string | null, yearly: string | null): number | null {
+  const amount = (label: string | null) => {
+    const match = label?.replace(/,/gu, "").match(/\d+(?:\.\d+)?/u);
+    return match ? Number(match[0]) : null;
+  };
+  const m = amount(monthly);
+  const y = amount(yearly);
+  if (!m || !y || m <= 0) return null;
+  const free = Math.floor(12 - y / m + 1e-9);
+  return free >= 1 ? free : null;
+}
+
 /** Purchasable plans with their prices. Prices come from Stripe, with HOSTED_*_PRICE_LABEL as a fallback. */
 export async function getPlanCatalog(): Promise<PlanOffer[]> {
-  const entries: { id: PurchasablePlan; priceId: string | undefined; label: string | undefined }[] = [
-    { id: "hosted_pro", priceId: process.env.STRIPE_PRICE_HOSTED_PRO, label: process.env.HOSTED_PRO_PRICE_LABEL },
-    { id: "hosted_team", priceId: process.env.STRIPE_PRICE_HOSTED_TEAM, label: process.env.HOSTED_TEAM_PRICE_LABEL },
+  const entries: { id: PurchasablePlan; label: string | undefined; yearlyLabel: string | undefined }[] = [
+    { id: "hosted_pro", label: process.env.HOSTED_PRO_PRICE_LABEL, yearlyLabel: process.env.HOSTED_PRO_YEARLY_PRICE_LABEL },
+    { id: "hosted_team", label: process.env.HOSTED_TEAM_PRICE_LABEL, yearlyLabel: process.env.HOSTED_TEAM_YEARLY_PRICE_LABEL },
   ];
-  return Promise.all(entries.map(async ({ id, priceId, label }) => ({
-    id,
-    name: planLabel(id),
-    priceId: priceId ?? null,
-    meetingLimit: PLAN_MEETING_LIMITS[id],
-    priceLabel: priceId ? await lookupPriceLabel(priceId, label) : null,
-  })));
+  return Promise.all(entries.map(async ({ id, label, yearlyLabel }) => {
+    const priceId = priceIdFor(id);
+    const yearlyId = priceIdFor(id, "year");
+    const priceLabel = priceId ? await lookupPriceLabel(priceId, label) : null;
+    const yearlyPriceLabel = yearlyId ? await lookupPriceLabel(yearlyId, yearlyLabel) : null;
+    return {
+      id,
+      name: planLabel(id),
+      priceId: priceId ?? null,
+      meetingLimit: PLAN_MEETING_LIMITS[id],
+      priceLabel,
+      yearly: yearlyId ? { priceId: yearlyId, priceLabel: yearlyPriceLabel, monthsFree: monthsFree(priceLabel, yearlyPriceLabel) } : null,
+    };
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -420,8 +455,8 @@ function cancelsAtOf(object: Record<string, unknown>, periodEnd: Date | undefine
 
 function planForPrice(priceId: string | undefined): "hosted_pro" | "hosted_team" | undefined {
   if (!priceId) return undefined;
-  if (priceId === process.env.STRIPE_PRICE_HOSTED_TEAM) return "hosted_team";
-  if (priceId === process.env.STRIPE_PRICE_HOSTED_PRO) return "hosted_pro";
+  if (priceId === process.env.STRIPE_PRICE_HOSTED_TEAM || priceId === process.env.STRIPE_PRICE_HOSTED_TEAM_YEARLY) return "hosted_team";
+  if (priceId === process.env.STRIPE_PRICE_HOSTED_PRO || priceId === process.env.STRIPE_PRICE_HOSTED_PRO_YEARLY) return "hosted_pro";
   return undefined;
 }
 

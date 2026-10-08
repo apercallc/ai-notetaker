@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Download, Laptop, Puzzle, Share2 } from "lucide-react";
 import { NOT_LEGAL_ADVICE, SITE, governingLaw, supportEmail } from "./content";
+import { ALTERNATIVES, ALTERNATIVES_REVIEWED, type Alternative } from "./alternatives";
 import { Faq } from "./Faq";
 import { Icon } from "./Icon";
 import { Plans, type PlanDisplay } from "./Plans";
@@ -529,6 +530,14 @@ export function CompareView({ context }: { context: ShellContext }) {
           </div>
           <p className="mk-small mk-mt-s">
             Bot notetakers differ from one another. This describes the common pattern, not any single product.
+            Looking at a specific one?{" "}
+            {ALTERNATIVES.map((alternative, index) => (
+              <span key={alternative.slug}>
+                {index > 0 && ", "}
+                <Link href={`/alternatives/${alternative.slug}`}>{alternative.name}</Link>
+              </span>
+            ))}
+            .
           </p>
         </div>
       </section>
@@ -549,6 +558,71 @@ export function CompareView({ context }: { context: ShellContext }) {
             <Link className="mk-btn mk-btn--solid" href={startHref()}>Get the desktop app</Link>
             <Link className="mk-btn mk-btn--quiet" href="/how-it-works">See how it works</Link>
           </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+export function AlternativeView({ alternative }: { alternative: Alternative; context: ShellContext }) {
+  return (
+    <>
+      <PageHead title={`${alternative.name} alternative: AI Notetaker`} lede={alternative.lede} />
+      <section className="mk-section mk-section--flush" aria-label={`AI Notetaker compared with ${alternative.name}`}>
+        <div className="mk-wrap">
+          <p className="mk-small">{alternative.theirStrength}</p>
+          <div className="mk-table-wrap" role="region" aria-label="Comparison table, scrolls sideways on small screens" tabIndex={0}>
+            <table className="mk-table">
+              <caption>{alternative.name} and AI Notetaker, side by side</caption>
+              <thead>
+                <tr>
+                  <th scope="col"><span className="mk-visually-hidden">Topic</span></th>
+                  <th scope="col">{alternative.name}</th>
+                  <th scope="col">AI Notetaker</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alternative.rows.map((row) => (
+                  <tr key={row.label}>
+                    <th scope="row">{row.label}</th>
+                    <td>{row.them}</td>
+                    <td>{row.ours}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mk-small mk-mt-s">
+            Last reviewed {ALTERNATIVES_REVIEWED}. Products change, so check{" "}
+            <a href={alternative.pricingUrl} rel="noopener noreferrer">{alternative.name}&apos;s pricing page</a>{" "}
+            for current plans. Names belong to their owners; AI Notetaker is not affiliated with {alternative.name}.
+          </p>
+        </div>
+      </section>
+      <section className="mk-section mk-section--tint" aria-labelledby="choose-title">
+        <div className="mk-wrap">
+          <div className="mk-section-head">
+            <h2 className="mk-h2" id="choose-title">Which one should you pick?</h2>
+          </div>
+          <div className="mk-prose">
+            <h3 className="mk-h3">Pick {alternative.name} if</h3>
+            <p>{alternative.whenTheyFit}</p>
+            <h3 className="mk-h3">Pick AI Notetaker if</h3>
+            <p>{alternative.whenWeFit}</p>
+          </div>
+          <div className="mk-cta-row">
+            <Link className="mk-btn mk-btn--solid" href={startHref()}>Get the desktop app</Link>
+            <Link className="mk-btn mk-btn--quiet" href="/pricing">See pricing</Link>
+          </div>
+          <p className="mk-small mk-mt-s">
+            More comparisons:{" "}
+            {ALTERNATIVES.filter((other) => other.slug !== alternative.slug).map((other, index) => (
+              <span key={other.slug}>
+                {index > 0 && ", "}
+                <Link href={`/alternatives/${other.slug}`}>{other.name}</Link>
+              </span>
+            ))}
+          </p>
         </div>
       </section>
     </>

@@ -9,6 +9,7 @@ import {
   createPortalSession,
   formatStripePrice,
   getPlanCatalog,
+  monthsFree,
   verifyStripeSignature,
 } from "./billing";
 import { prisma } from "./db";
@@ -655,8 +656,8 @@ describe("plan catalog", () => {
     try {
       const catalog = await getPlanCatalog();
       expect(catalog).toEqual([
-        { id: "hosted_pro", name: "Pro", priceId: "price_catalog_pro", meetingLimit: 300, priceLabel: "$19.50 / month" },
-        { id: "hosted_team", name: "Team", priceId: "price_catalog_team", meetingLimit: 2_500, priceLabel: "$49 / month" },
+        { id: "hosted_pro", name: "Pro", priceId: "price_catalog_pro", meetingLimit: 300, priceLabel: "$19.50 / month", yearly: null },
+        { id: "hosted_team", name: "Team", priceId: "price_catalog_team", meetingLimit: 2_500, priceLabel: "$49 / month", yearly: null },
       ]);
 
       // The next render is served from the price cache: only the Pro lookup ever hit Stripe.
@@ -723,5 +724,36 @@ describe("cancelWorkspaceSubscription", () => {
       vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network"));
       await expect(cancelWorkspaceSubscription(workspaceId)).rejects.toThrow("could not be reached");
     });
+  });
+});
+
+describe("annual pricing", () => {
+  it("derives whole months saved from the two price labels", () => {
+    expect(monthsFree("$12 / month", "$120 / year")).toBe(2);
+    expect(monthsFree("$39 / month", "$390 / year")).toBe(2);
+    expect(monthsFree("$12 / month", "$144 / year")).toBeNull();
+    expect(monthsFree(null, "$120 / year")).toBeNull();
+  });
+
+  it("lists a yearly offer only when a yearly price is configured", async () => {
+    const keys = ["STRIPE_SECRET_KEY", "STRIPE_PRICE_HOSTED_PRO", "STRIPE_PRICE_HOSTED_PRO_YEARLY", "STRIPE_PRICE_HOSTED_TEAM", "STRIPE_PRICE_HOSTED_TEAM_YEARLY", "HOSTED_PRO_PRICE_LABEL", "HOSTED_PRO_YEARLY_PRICE_LABEL"] as const;
+    const originals = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) delete process.env[key];
+    process.env.STRIPE_PRICE_HOSTED_PRO = "price_annual_pro_m";
+    process.env.STRIPE_PRICE_HOSTED_PRO_YEARLY = "price_annual_pro_y";
+    process.env.HOSTED_PRO_PRICE_LABEL = "$12 / month";
+    process.env.HOSTED_PRO_YEARLY_PRICE_LABEL = "$120 / year";
+    clearPriceCache();
+    try {
+      const [pro, team] = await getPlanCatalog();
+      expect(pro?.yearly).toEqual({ priceId: "price_annual_pro_y", priceLabel: "$120 / year", monthsFree: 2 });
+      expect(team?.yearly).toBeNull();
+    } finally {
+      clearPriceCache();
+      for (const [key, value] of Object.entries(originals)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value as string;
+      }
+    }
   });
 });

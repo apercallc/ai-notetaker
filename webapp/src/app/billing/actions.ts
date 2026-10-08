@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/currentUser";
 import { prisma } from "@/lib/db";
-import { BillingError, BillingPortalRequiredError, createCheckoutSession, createPortalSession } from "@/lib/billing";
+import { BillingError, BillingPortalRequiredError, createCheckoutSession, createPortalSession, priceIdFor } from "@/lib/billing";
 import { DeploymentConfigError, getAppUrl } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 
@@ -30,7 +30,8 @@ export async function startCheckout(_previous: BillingActionState, formData: For
   const session = await requireSession();
   if (session.role !== "owner") return { error: "Only the workspace owner can manage billing." };
   const plan = String(formData.get("plan") ?? "");
-  const priceId = plan === "hosted_pro" ? process.env.STRIPE_PRICE_HOSTED_PRO : plan === "hosted_team" ? process.env.STRIPE_PRICE_HOSTED_TEAM : undefined;
+  const interval = formData.get("interval") === "year" ? "year" : "month";
+  const priceId = plan === "hosted_pro" || plan === "hosted_team" ? priceIdFor(plan, interval) : undefined;
   if (!priceId) return { error: "Hosted billing is not configured on this server yet." };
   let destination: string;
   try {

@@ -1,5 +1,6 @@
 import { getAppUrl } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
+import { ALTERNATIVES } from "@/marketing/alternatives";
 import { FALLBACK_PRICE_LABELS, FAQS, LIMITS, SITE } from "@/marketing/content";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,7 @@ export function GET(): Response {
     `- [How it works](${page("/how-it-works")}): step-by-step setup with your own keys`,
     `- [Pricing](${page("/pricing")}): plans, limits and billing`,
     `- [Compare](${page("/compare")}): bot notetakers versus recording from your own device`,
+    ...ALTERNATIVES.map((alternative) => `- [${alternative.name} alternative](${page(`/alternatives/${alternative.slug}`)}): how AI Notetaker differs from ${alternative.name}`),
     `- [Download](${page("/download")}): Chrome extension and cross-platform desktop app`,
     `- [Privacy notice](${page("/privacy")}) and [Terms](${page("/terms")})`,
     `- [Source code](${SITE.repoUrl}), [releases](${SITE.releasesUrl}), [security policy](${SITE.securityUrl})`,

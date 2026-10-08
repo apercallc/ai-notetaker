@@ -1212,3 +1212,9 @@
 .mk-download .mk-btn--solid .mk-small {
   color: inherit;
 }
+
+.mk-plan-yearly {
+  margin: -4px 0 12px;
+  font-size: 0.9rem;
+  color: var(--mk-muted, inherit);
+}

@@ -14,6 +14,10 @@ const PRIORITY: Record<MarketingPath, number> = {
   "/how-it-works": 0.8,
   "/download": 0.8,
   "/compare": 0.7,
+  "/alternatives/otter": 0.7,
+  "/alternatives/fireflies": 0.7,
+  "/alternatives/granola": 0.7,
+  "/alternatives/fathom": 0.7,
   "/privacy": 0.3,
   "/terms": 0.3,
 };

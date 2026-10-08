@@ -4,7 +4,7 @@
  * read or render user data. Self-hosted instances keep the rule that every
  * route requires a session, so none of these paths are public there.
  */
-export const MARKETING_PATHS = ["/", "/how-it-works", "/pricing", "/download", "/compare", "/privacy", "/terms"] as const;
+export const MARKETING_PATHS = ["/", "/how-it-works", "/pricing", "/download", "/compare", "/alternatives/otter", "/alternatives/fireflies", "/alternatives/granola", "/alternatives/fathom", "/privacy", "/terms"] as const;
 
 export type MarketingPath = (typeof MARKETING_PATHS)[number];
 

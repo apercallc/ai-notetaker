@@ -38,6 +38,7 @@ describe("route classification", () => {
       expect(PRIVATE_PATHS.some((entry) => entry === `/${folder}` || entry === `/${folder}/`), folder).toBe(true);
     }
     const marketingFolders = Object.entries(ROUTE_FOLDERS).filter(([, kind]) => kind === "marketing").map(([folder]) => `/${folder}`);
-    expect([...marketingFolders].sort()).toEqual(MARKETING_PATHS.filter((entry) => entry !== "/").sort());
+    const listedFolders = new Set(MARKETING_PATHS.filter((entry) => entry !== "/").map((entry) => `/${entry.split("/")[1]}`));
+    expect([...marketingFolders].sort()).toEqual([...listedFolders].sort());
   });
 });

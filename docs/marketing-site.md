@@ -59,6 +59,7 @@ When you change a price in Stripe, update `FALLBACK_PRICE_LABELS` and
   download page then shows "Add to Chrome".
 - The download page reads the latest GitHub release (cached ten minutes) and
   shows "Release links could not be loaded" with a link to GitHub releases when no release can be read.
+- Competitor pages live in `marketing/alternatives.ts`; keep claims structural (no prices) and bump `ALTERNATIVES_REVIEWED` when re-checked.
 - Sitemap `lastModified` is a constant in `app/sitemap.ts`; bump it when page
   content changes meaningfully.
 - `/llms.txt` and `/llms-full.txt` are generated from `marketing/content.ts`;

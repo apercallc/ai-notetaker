@@ -24,6 +24,7 @@ export const ROUTE_FOLDERS: Record<string, "private" | "marketing" | "metadata">
   pricing: "marketing",
   download: "marketing",
   compare: "marketing",
+  alternatives: "marketing",
   privacy: "marketing",
   terms: "marketing",
   "llms.txt": "metadata",
