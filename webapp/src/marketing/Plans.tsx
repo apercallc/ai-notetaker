@@ -66,6 +66,7 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
           <li><Icon as={Check} /><span>Keys and audio stay on your device</span></li>
           <li><Icon as={Check} /><span>Optional free account: sign in, manage your devices and your data</span></li>
           <li><Icon as={Check} /><span>Open source</span></li>
+          <li className="mk-checks-off"><span>Not included: sync across devices, shared team library, integrations</span></li>
         </ul>
         <Link className="mk-btn mk-btn--quiet" href="/download">Get the desktop app</Link>
       </article>

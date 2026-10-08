@@ -1218,3 +1218,9 @@
   font-size: 0.9rem;
   color: var(--mk-muted, inherit);
 }
+
+.mk-checks .mk-checks-off {
+  padding-left: 30px;
+  color: var(--mk-muted);
+  font-size: 0.9rem;
+}
