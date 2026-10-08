@@ -11,7 +11,10 @@ Most users should begin with the [main getting-started guide](../docs/getting-st
 The extension and desktop app never receive provider secrets or server-side
 credentials.
 
-## Deploy on Railway (project operator)
+## Deploy on Railway (project operator only)
+
+This section is for the maintainers who run the managed service. Self-hosting
+the web app is not supported; local use is the desktop app with your own keys.
 
 1. If a published Railway template link is available, open it. Otherwise,
    create a new Railway project, add this repo's `webapp/` directory as a

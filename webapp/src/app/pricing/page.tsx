@@ -1,4 +1,4 @@
-import { breadcrumbNode, JsonLd, organizationNode, softwareNode, webPageNode, websiteNode } from "@/marketing/jsonld";
+import { breadcrumbNode, faqNode, JsonLd, organizationNode, softwareNode, webPageNode, websiteNode } from "@/marketing/jsonld";
 import { marketingContext, pageMetadata, requireMarketing, siteOrigin } from "@/marketing/page";
 import { planPrices } from "@/marketing/Plans";
 import { MarketingShell } from "@/marketing/Shell";
@@ -24,6 +24,7 @@ export default async function PricingPage() {
           websiteNode(origin),
           webPageNode(origin, "/pricing", TITLE, DESCRIPTION),
           softwareNode(origin),
+          faqNode(origin, "pricing"),
           breadcrumbNode(origin, [{ name: "AI Notetaker", path: "/" }, { name: "Pricing", path: "/pricing" }]),
         ]}
       />

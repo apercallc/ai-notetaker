@@ -13,7 +13,10 @@ API keys. Free, account-free, and audio goes straight from your device to the
 providers you pick.
 
 - **Free account** — optional. Sign in to manage your devices and your data.
-- **Subscription** — cloud sync of your notes across devices, and team sync.
+- **Subscription** — cloud sync of your notes across devices (Pro, $12/month)
+  and team sync with a shared workspace (Team, $39/month). Recording and
+  your own keys are never paid. See [pricing](https://ai-notetaker.apercallc.com/pricing)
+  and the [`llms.txt`](https://ai-notetaker.apercallc.com/llms.txt) fact sheet.
 
 Optional workspace sync copies finished notes to the web app and brings workspace
 notes into the desktop library. Provider keys never leave your device.
@@ -171,8 +174,9 @@ Package-specific notes live in [`extension/README.md`](extension/README.md),
 Coverage commands and the distinction between deterministic tests and real
 OS/browser/provider validation are in [`docs/testing.md`](docs/testing.md).
 The target architecture is
-[`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-dual-mode-product-design.md);
-the [2026-09-21 architecture](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md)
+[`docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`](docs/superpowers/specs/2026-10-03-desktop-first-product-design.md);
+the [2026-09-24 dual-mode design](docs/superpowers/specs/2026-09-24-dual-mode-product-design.md)
+and the [2026-09-21 architecture](docs/superpowers/specs/2026-09-21-notetaker-architecture-design.md)
 is the historical baseline.
 
 ## License

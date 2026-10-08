@@ -6,7 +6,7 @@ import { MARKETING_PATHS, type MarketingPath } from "@/marketing/paths";
 export const dynamic = "force-dynamic";
 
 // Bump when a page's content meaningfully changes; a fake "always now" date teaches crawlers to ignore it.
-const CONTENT_UPDATED = new Date("2026-09-29T00:00:00Z");
+const CONTENT_UPDATED = new Date("2026-10-08T00:00:00Z");
 
 const PRIORITY: Record<MarketingPath, number> = {
   "/": 1,

@@ -101,6 +101,12 @@ describe("structured data", () => {
     expect(faq.mainEntity[0]).toMatchObject({ name: FAQS[0].question, acceptedAnswer: { text: FAQS[0].answer } });
   });
 
+  it("limits FAQPage markup to the topic the page actually shows", () => {
+    const faq = faqNode(ORIGIN, "setup") as { mainEntity: { name: string }[] };
+    expect(faq.mainEntity.map((q) => q.name)).toEqual(FAQS.filter((f) => f.topics?.includes("setup")).map((f) => f.question));
+    expect(faq.mainEntity.length).toBeLessThan(FAQS.length);
+  });
+
   it("builds absolute breadcrumb and HowTo URLs", () => {
     const crumbs = breadcrumbNode(ORIGIN, [{ name: "Home", path: "/" }, { name: "Pricing", path: "/pricing" }]) as { itemListElement: { position: number; item: string }[] };
     expect(crumbs.itemListElement.map((entry) => [entry.position, entry.item])).toEqual([[1, `${ORIGIN}/`], [2, `${ORIGIN}/pricing`]]);

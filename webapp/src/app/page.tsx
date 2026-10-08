@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 const TITLE = "AI Notetaker: meeting notes without the meeting bot";
 
-export const metadata = pageMetadata({ path: "/", title: TITLE, description: SITE.description });
+export const metadata = pageMetadata({ path: "/", title: TITLE, description: SITE.metaDescription });
 
 export default async function RootPage() {
   // Self-hosted instances have no public front page: straight to the notes,
@@ -27,7 +27,7 @@ export default async function RootPage() {
         nodes={[
           organizationNode(origin),
           websiteNode(origin),
-          webPageNode(origin, "/", TITLE, SITE.description),
+          webPageNode(origin, "/", TITLE, SITE.metaDescription),
           softwareNode(origin),
           howToNode(origin),
           faqNode(origin),
