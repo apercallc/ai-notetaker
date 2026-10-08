@@ -1,4 +1,4 @@
-import { ownOrigin } from "@/lib/publicUrl";
+import { ownOrigin, publicUrl } from "@/lib/publicUrl";
 import { NextResponse, type NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 import { isAuthorizedBearer } from "./lib/auth";
@@ -205,7 +205,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     });
   }
   if (!user) {
-    const loginUrl = new URL("/login", request.url);
+    const loginUrl = publicUrl("/login", request);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
