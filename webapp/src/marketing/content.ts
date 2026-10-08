@@ -124,7 +124,7 @@ export const FAQS: Faq[] = [
     question: "What if I think a charge is wrong?",
     topics: ["pricing"],
     answer:
-      "Contact us first. We check it and refund anything charged in error, usually faster than a bank dispute. If you do open a dispute with your bank for a charge that was valid, we may pause sync on that workspace until it is resolved. Your notes stay available to read and export.",
+      "Contact us first. We check it and refund anything charged in error, usually faster than a bank dispute. If you do open a dispute with your bank for a charge that was valid, we cancel that subscription, so sync stops, until it is resolved. Your notes stay available to read and export, and you can subscribe again.",
   },
   {
     question: "What happens to my notes if I cancel or my payment fails?",

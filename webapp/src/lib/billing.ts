@@ -247,7 +247,12 @@ export async function cancelWorkspaceSubscription(workspaceId: string): Promise<
   }
   if (!subscription?.stripeSubscriptionId) return;
   if (TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) return;
-  const response = await fetch(stripeUrl(`subscriptions/${encodeURIComponent(subscription.stripeSubscriptionId)}`), {
+  await cancelStripeSubscriptionNow(subscription.stripeSubscriptionId);
+}
+
+/** Ends a Stripe subscription immediately. A subscription Stripe already reports gone counts as ended. */
+async function cancelStripeSubscriptionNow(stripeSubscriptionId: string): Promise<void> {
+  const response = await fetch(stripeUrl(`subscriptions/${encodeURIComponent(stripeSubscriptionId)}`), {
     method: "DELETE",
     headers: stripeHeaders(),
     signal: AbortSignal.timeout(15_000),
@@ -460,6 +465,32 @@ function planForPrice(priceId: string | undefined): "hosted_pro" | "hosted_team"
   return undefined;
 }
 
+/**
+ * A bank dispute on a subscription charge ends that subscription at once, the
+ * usual SaaS response: sync stops, nothing is deleted, and the customer can
+ * resubscribe if the dispute is resolved in their favour. The dispute carries
+ * the charge id but not the customer, so the charge is fetched to find the
+ * workspace. Cancelling twice is harmless, so Stripe's retries are safe.
+ */
+async function endSubscriptionForDispute(dispute: Record<string, unknown> | undefined): Promise<void> {
+  const chargeId = asString(dispute?.charge);
+  if (!chargeId) return;
+  const response = await fetch(stripeUrl(`charges/${encodeURIComponent(chargeId)}`), {
+    headers: stripeHeaders(),
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null);
+  if (!response) throw new BillingError("Stripe could not be reached to look up the disputed charge");
+  if (!response.ok) throw new BillingError(`Stripe could not return the disputed charge (${response.status})`);
+  const charge = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const customerId = asString(charge.customer);
+  if (!customerId) return;
+  const subscription = await prisma.workspaceSubscription.findFirst({ where: { stripeCustomerId: customerId } });
+  if (!subscription?.stripeSubscriptionId || TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) return;
+  console.error("stripe dispute opened: cancelling subscription", { workspaceId: subscription.workspaceId, chargeId });
+  captureWarning("subscription cancelled after a payment dispute", { workspaceId: subscription.workspaceId, chargeId });
+  await cancelStripeSubscriptionNow(subscription.stripeSubscriptionId);
+}
+
 export async function applyStripeEvent(event: unknown): Promise<void> {
   if (typeof event !== "object" || event === null) throw new BillingError("invalid Stripe event");
   const value = event as { id?: unknown; type?: unknown; created?: unknown; data?: { object?: Record<string, unknown> } };
@@ -467,6 +498,10 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
   const eventId = value.id;
   const eventType = value.type;
   const eventCreatedAt = typeof value.created === "number" && Number.isSafeInteger(value.created) && value.created >= 0 ? value.created : undefined;
+  if (eventType === "charge.dispute.created") {
+    await endSubscriptionForDispute(value.data?.object);
+    return;
+  }
   const isSubscriptionEvent = SUBSCRIPTION_EVENTS.has(eventType);
   const isPaymentFailure = eventType === "invoice.payment_failed";
   const isCheckoutCompletion = eventType === "checkout.session.completed";
