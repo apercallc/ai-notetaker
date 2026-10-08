@@ -901,8 +901,8 @@ export function TermsView() {
               </li>
               <li>
                 <strong>Disputes.</strong> Please contact us before disputing a charge with your bank, because we can usually refund
-                an error sooner. If a valid charge is disputed, we may pause sync on that workspace until it is resolved. Your notes
-                stay available to read and export.
+                an error sooner. If a valid charge is disputed, we cancel that subscription, so sync stops, until it is resolved. Your
+                notes stay available to read and export, and you can subscribe again.
               </li>
               <li>
                 <strong>How refunds are paid.</strong> Refunds go back to the original payment method only, in US dollars, and

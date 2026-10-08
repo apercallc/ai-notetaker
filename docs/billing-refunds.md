@@ -20,7 +20,7 @@ yearly through Stripe.
 | Team owner cancels | Sync stops for every member at period end; notes stay read-only and exportable | Nothing |
 | Switches plan or interval from Manage billing | Immediate change; unused time credited toward the new price | Nothing. Stripe prorates |
 | Payment fails | 3 days of continued access (`PAYMENT_GRACE_MS`) while Stripe retries, then sync stops | Nothing. Paying the open invoice restores sync |
-| Bank dispute on a valid charge | We may pause sync on that workspace until resolved; notes stay readable | See "Disputes" |
+| Bank dispute on a charge | The subscription is cancelled automatically, so sync stops; notes stay readable and the customer can resubscribe | Respond to the dispute in Stripe; see "Disputes" |
 
 ## Issuing a refund correctly
 
@@ -73,20 +73,27 @@ the customer pays directly to Deepgram, Groq, Anthropic and similar.
 
 ## Disputes (chargebacks)
 
-The billing webhook does not listen for `charge.dispute.created`, so a
-dispute does not change access automatically. When you get a dispute notice:
+The billing webhook listens for `charge.dispute.created`. When one arrives,
+`endSubscriptionForDispute` (`webapp/src/lib/billing.ts`) fetches the charge,
+finds the workspace by its Stripe customer, logs a warning to Sentry and
+cancels the subscription immediately. Stripe then sends
+`customer.subscription.deleted` and the workspace moves to `canceled`. Notes
+are never deleted. If Stripe cannot be reached the webhook returns an error and
+Stripe retries; cancelling twice is harmless.
+
+What you do:
 
 1. Check whether the customer contacted us first and whether a refund was
-   already due under the table above. If it was, refund it and let the dispute
-   close.
+   already due under the table above. If so, refund it; the dispute usually
+   closes in the customer's favour and nothing else is needed.
 2. If the charge was valid, submit evidence in Stripe (plan, dates, sync
-   activity) and, if the dispute stays open, cancel the subscription
-   immediately from the Stripe dashboard so sync pauses. Notes stay readable
-   and exportable.
+   activity).
+3. If the dispute is won and the customer wants the service back, they
+   subscribe again from the billing page. Nothing restores a cancelled
+   subscription automatically.
 
-Automating this (subscribe the endpoint to `charge.dispute.created`, resolve
-the workspace through the charge's customer, and cancel) is a reasonable
-follow-up if disputes become frequent.
+The webhook endpoint must have `charge.dispute.created` in its enabled events
+(it is enabled on the live endpoint).
 
 ## Customer portal settings (Stripe, live)
 

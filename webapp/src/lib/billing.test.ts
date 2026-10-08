@@ -727,6 +727,42 @@ describe("cancelWorkspaceSubscription", () => {
   });
 });
 
+describe("payment disputes", () => {
+  async function withCustomer(status: string, run: (customerId: string) => Promise<void>) {
+    const workspaceId = randomUUID();
+    const customerId = `cus_dispute_${workspaceId}`;
+    process.env.STRIPE_SECRET_KEY = "sk_dispute";
+    await prisma.workspace.create({ data: { id: workspaceId, name: "Dispute workspace" } });
+    await prisma.workspaceSubscription.create({ data: { workspaceId, plan: "hosted_pro", status, stripeCustomerId: customerId, stripeSubscriptionId: `sub_dispute_${workspaceId}` } });
+    try { await run(customerId); } finally { await prisma.workspace.delete({ where: { id: workspaceId } }); vi.restoreAllMocks(); }
+  }
+  const dispute = { id: "evt_dispute", type: "charge.dispute.created", created: 1, data: { object: { id: "dp_1", charge: "ch_1" } } };
+
+  it("cancels the disputing customer's subscription at Stripe", async () => {
+    await withCustomer("active", async (customerId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(JSON.stringify({ id: "ch_1", customer: customerId }), { status: 200 }))
+        .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+      await applyStripeEvent({ ...dispute, id: `evt_${randomUUID()}` });
+      expect(String(fetchSpy.mock.calls[0]?.[0])).toBe("https://api.stripe.com/v1/charges/ch_1");
+      expect(String(fetchSpy.mock.calls[1]?.[0])).toMatch(/\/v1\/subscriptions\/sub_dispute_/u);
+      expect(fetchSpy.mock.calls[1]?.[1]?.method).toBe("DELETE");
+    });
+  });
+
+  it("ignores customers with no live subscription and surfaces Stripe failures so the event is retried", async () => {
+    await withCustomer("canceled", async (customerId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ id: "ch_1", customer: customerId }), { status: 200 }));
+      await applyStripeEvent({ ...dispute, id: `evt_${randomUUID()}` });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+    await withCustomer("active", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 500 }));
+      await expect(applyStripeEvent({ ...dispute, id: `evt_${randomUUID()}` })).rejects.toThrow("could not return the disputed charge");
+    });
+  });
+});
+
 describe("annual pricing", () => {
   it("derives whole months saved from the two price labels", () => {
     expect(monthsFree("$12 / month", "$120 / year")).toBe(2);
