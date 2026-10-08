@@ -27,6 +27,10 @@ const AI_AND_SEARCH_CRAWLERS = [
   "Applebot",
   "Applebot-Extended",
   "DuckDuckBot",
+  "CCBot",
+  "Amazonbot",
+  "Meta-ExternalAgent",
+  "cohere-ai",
 ];
 
 export default function robots(): MetadataRoute.Robots {

@@ -40,6 +40,7 @@ async function render(): Promise<void> {
         <p>For Google Meet, Microsoft Teams, Zoom, Discord calls, and Slack huddles playing in Chrome. Your microphone and this tab’s audio stay separate and local. Tell everyone before you record.</p>
       </section>
       ${error ? `<p class="start-error" role="alert">${escapeHtml(error)}</p>` : ""}
+      ${state.recoverableMeeting ? `<section class="banner" role="alert" id="recoverable-banner"><strong>An interrupted recording was found</strong><p>Started ${escapeHtml(dateLabel(state.recoverableMeeting.startedAt))}. Resume it, or discard its saved audio.</p><button class="primary" id="resume-recording" data-meeting="${escapeHtml(state.recoverableMeeting.meetingId)}">Resume recording</button> <button class="secondary" id="discard-recording" data-meeting="${escapeHtml(state.recoverableMeeting.meetingId)}">Discard</button></section>` : ""}
       ${state.activeMeeting && !activeMeet ? '<p class="banner">Another recording is active. Finish it before starting a browser recording.</p>' : ""}
       <div class="record-controls">
         ${activeMeet
@@ -63,8 +64,15 @@ async function render(): Promise<void> {
     document.getElementById("open-setup")?.addEventListener("click", () => void chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") }));
     document.getElementById("start-recording")?.addEventListener("click", () => void run(async () => {
       if (typeof tab?.id !== "number") throw new Error("Open a secure browser meeting tab first.");
-      const result = await sendToBackground<{ meetingId: string }>({ type: "START_RECORDING", captureSource: "meet", tabId: tab.id, titleHint: browserTitleForTab(tab) });
+      const result = await sendToBackground<{ meetingId: string }>({ type: "START_RECORDING", captureSource: "meet", tabId: tab.id, meetingMode: settings.defaultMeetingMode, titleHint: browserTitleForTab(tab) });
       if (!result.meetingId) throw new Error("Capture did not start. Check microphone access and try again.");
+    }));
+    document.getElementById("resume-recording")?.addEventListener("click", (event) => void run(async () => {
+      await sendToBackground({ type: "RESUME_RECORDING", meetingId: (event.currentTarget as HTMLElement).dataset.meeting! });
+    }));
+    document.getElementById("discard-recording")?.addEventListener("click", (event) => void run(async () => {
+      if (!confirm("Discard this interrupted recording and its saved audio?")) return;
+      await sendToBackground({ type: "DISCARD_RECORDING", meetingId: (event.currentTarget as HTMLElement).dataset.meeting! });
     }));
     document.getElementById("stop-recording")?.addEventListener("click", () => void run(async () => {
       if (activeMeet) await sendToBackground({ type: "STOP_RECORDING", meetingId: activeMeet.id });
@@ -82,6 +90,7 @@ async function render(): Promise<void> {
             type: "START_RECORDING",
             captureSource: "meet",
             tabId: tab.id!,
+            meetingMode: settings.defaultMeetingMode,
             ...(intent.titleHint ? { titleHint: intent.titleHint } : {}),
           });
           if (!result.meetingId) throw new Error("Capture did not start. Check microphone access and try again.");

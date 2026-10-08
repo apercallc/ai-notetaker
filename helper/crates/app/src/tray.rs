@@ -458,11 +458,11 @@ fn open_latest_note(data_dir: &Path) {
 fn open_with_default_app(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        Command::new("open").arg(path).spawn()?;
+        crate::spawn_and_reap(Command::new("open").arg(path))?;
     }
     #[cfg(target_os = "linux")]
     {
-        Command::new("xdg-open").arg(path).spawn()?;
+        crate::spawn_and_reap(Command::new("xdg-open").arg(path))?;
     }
     #[cfg(target_os = "windows")]
     {
@@ -472,12 +472,10 @@ fn open_with_default_app(path: &Path) -> std::io::Result<()> {
         // start line. raw_arg hands cmd the exact line we built, with the
         // path explicitly quoted; the leading "" is start's title slot.
         use std::os::windows::process::CommandExt;
-        Command::new("cmd")
-            .raw_arg(format!(
-                "/C start \"\" \"{}\"",
-                path.to_string_lossy().replace('"', "")
-            ))
-            .spawn()?;
+        crate::spawn_and_reap(Command::new("cmd").raw_arg(format!(
+            "/C start \"\" \"{}\"",
+            path.to_string_lossy().replace('"', "")
+        )))?;
     }
     Ok(())
 }

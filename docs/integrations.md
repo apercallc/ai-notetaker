@@ -2,7 +2,7 @@
 
 Owners connect destinations in **Settings → Integrations → Send notes elsewhere**.
 When a note is ready (hosted processing finished, an import finished, or a finished
-note synced from the extension/helper) each enabled destination receives it once.
+desktop note synced to your workspace) each enabled destination receives it once.
 Failed deliveries retry after 1 min, 5 min, 30 min, 2 h and 6 h (6 attempts), then
 stop and show the error in Settings. Up to 10 destinations per workspace. Secrets are
 stored encrypted (AES-256-GCM) and shown only once; deliveries keep ids and status,

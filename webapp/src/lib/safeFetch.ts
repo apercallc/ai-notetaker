@@ -144,6 +144,11 @@ export function safeRequest(request: SafeRequest): Promise<SafeResponse> {
         response.on("data", (chunk: Buffer) => {
           if (size < maxBytes) chunks.push(chunk.subarray(0, maxBytes - size));
           size += chunk.length;
+          if (size > maxBytes) {
+            // Past the cap: answer with what was kept and stop downloading the rest.
+            finish(() => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+            response.destroy();
+          }
         });
         response.on("end", () => finish(() => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") })));
         response.on("error", () => finish(() => reject(new SafeFetchError("The connection was interrupted."))));

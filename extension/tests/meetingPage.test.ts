@@ -152,4 +152,20 @@ describe("meeting page: delete with undo", () => {
     await vi.waitFor(async () => expect(await getMeeting("m1")).toBeNull());
     expect(document.body.textContent).toContain("Meeting deleted");
   });
+
+  it("keeps the meeting and reports the reason when the background refuses the delete", async () => {
+    vi.spyOn(window, "close").mockImplementation(() => undefined);
+    await openMeeting();
+    chromeMock.runtime.sendMessage.mockResolvedValue({ error: "Stop the recording before deleting it." });
+    vi.useFakeTimers();
+    const { UNDO_DELETE_MS } = await import("../src/meeting/meeting");
+
+    $("delete-meeting").click();
+    await vi.advanceTimersByTimeAsync(UNDO_DELETE_MS + 100);
+    vi.useRealTimers();
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Stop the recording before deleting it."));
+    expect(await getMeeting("m1")).not.toBeNull();
+    expect(document.body.textContent).not.toContain("Meeting deleted");
+  });
 });

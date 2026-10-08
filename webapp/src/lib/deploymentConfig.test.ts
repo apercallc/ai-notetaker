@@ -12,6 +12,7 @@ import {
 
 const completeManagedEnv = {
   MANAGED_HOSTING: "true",
+  HOSTED_AI_ENABLED: "true",
   APP_URL: "https://notes.example.com",
   R2_ACCOUNT_ID: "account-id",
   R2_BUCKET: "private-meetings",
@@ -39,7 +40,7 @@ describe("managed deployment configuration", () => {
   });
 
   it("reports managed mode incomplete without exposing secret values", () => {
-    const status = managedConfigurationStatus({ MANAGED_HOSTING: "true", APP_URL: "https://notes.example.com" });
+    const status = managedConfigurationStatus({ MANAGED_HOSTING: "true", HOSTED_AI_ENABLED: "true", APP_URL: "https://notes.example.com" });
     expect(status.enabled).toBe(true);
     expect(status.ready).toBe(false);
     expect(status.missing).toContain("MANAGED_WORKER_TOKEN");
@@ -62,10 +63,48 @@ describe("managed deployment configuration", () => {
   });
 });
 
+describe("sync-only managed deployment (HOSTED_AI_ENABLED off)", () => {
+  const syncOnly = {
+    MANAGED_HOSTING: "true",
+    APP_URL: "https://notes.example.com",
+    STRIPE_SECRET_KEY: "stripe-secret",
+    STRIPE_WEBHOOK_SECRET: "stripe-webhook",
+    STRIPE_PRICE_HOSTED_PRO: "price-pro",
+    STRIPE_PRICE_HOSTED_TEAM: "price-team",
+  };
+
+  it("is ready and opens signup without AI, worker, storage or spend-cap settings", () => {
+    expect(managedConfigurationStatus(syncOnly)).toMatchObject({ enabled: true, ready: true, missing: [] });
+    expect(isSignupAllowed({ ...syncOnly, NODE_ENV: "production" })).toBe(true);
+  });
+
+  it("still requires Stripe and APP_URL", () => {
+    const { STRIPE_SECRET_KEY: _omit, ...withoutStripe } = syncOnly;
+    expect(managedConfigurationStatus(withoutStripe).missing).toEqual(["STRIPE_SECRET_KEY"]);
+    expect(isSignupAllowed(withoutStripe)).toBe(false);
+    expect(managedConfigurationStatus({ ...syncOnly, APP_URL: undefined }).missing).toContain("APP_URL");
+  });
+
+  it("requires the AI settings again once hosted AI is switched on", () => {
+    const status = managedConfigurationStatus({ ...syncOnly, HOSTED_AI_ENABLED: "true" });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toContain("MANAGED_WORKER_TOKEN");
+  });
+
+  it("refuses managed hosting combined with the legacy ingest API", () => {
+    const both = { ...syncOnly, LEGACY_INGEST_ENABLED: "true" };
+    expect(managedConfigurationStatus(both).ready).toBe(false);
+    expect(managedConfigurationStatus(both).missing[0]).toContain("LEGACY_INGEST_ENABLED");
+    expect(() => assertManagedStartupConfig(both)).toThrow(DeploymentConfigError);
+    expect(() => assertManagedStartupConfig({ MANAGED_HOSTING: "false", LEGACY_INGEST_ENABLED: "true" })).not.toThrow();
+  });
+});
+
 describe("managed URL configuration", () => {
   it("accepts existing private S3 staging without requiring R2", () => {
     const status = managedConfigurationStatus({
       MANAGED_HOSTING: "true",
+      HOSTED_AI_ENABLED: "true",
       APP_URL: "https://notes.example.com",
       S3_BUCKET: "private-temporary-audio",
       S3_ACCESS_KEY_ID: "s3-access-key",

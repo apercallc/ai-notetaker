@@ -97,7 +97,9 @@ export async function getSettings(): Promise<NotetakerSettings> {
             plan: typeof stored.managedService.plan === "string" ? stored.managedService.plan : "free",
           }
         : defaults.managedService,
-    defaultMeetingMode: stored.defaultMeetingMode ?? defaults.defaultMeetingMode,
+    transcriptionProvider: (["deepgram", "groq"] as const).find((value) => value === stored.transcriptionProvider) ?? defaults.transcriptionProvider,
+    summarizationProvider: (["claude", "gemini", "deepseek"] as const).find((value) => value === stored.summarizationProvider) ?? defaults.summarizationProvider,
+    defaultMeetingMode: (["general", "standup", "sales", "one_on_one", "interview", "lecture", "custom"] as const).find((value) => value === stored.defaultMeetingMode) ?? defaults.defaultMeetingMode,
     customVocabulary: Array.isArray(stored.customVocabulary)
       ? stored.customVocabulary.filter((term): term is string => typeof term === "string").slice(0, 100)
       : defaults.customVocabulary,

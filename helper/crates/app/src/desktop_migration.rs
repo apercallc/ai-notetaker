@@ -28,6 +28,8 @@ const MAX_AUDIO_CHUNKS: u64 = 50_000_000;
 pub struct MigrationArchive {
     format: String,
     version: u32,
+    /// Present in every export; parsed only so `deny_unknown_fields` still accepts it.
+    #[allow(dead_code)]
     exported_at: DateTime<Utc>,
     pub settings: MigrationSettings,
     meetings: Vec<MigrationMeeting>,
@@ -85,6 +87,8 @@ struct MigrationActionItem {
 pub struct MigrationImportReport {
     pub imported: usize,
     pub already_present: usize,
+    /// True only when this import brought in something new. Re-importing a transfer that is
+    /// already present must not roll the person's current preferences back to the archive's.
     pub preferences_imported: bool,
     pub audio_imported: usize,
     pub audio_bytes: u64,
@@ -114,7 +118,6 @@ fn validate_archive(archive: &MigrationArchive) -> Result<(), String> {
     if archive.format != "ai-notetaker-desktop-transfer" || archive.version != 1 {
         return Err("This transfer file version is not supported.".into());
     }
-    let _ = archive.exported_at;
     validate_settings(&archive.settings)?;
     if archive.meetings.len() > MAX_MEETINGS {
         return Err("Transfer file contains too many meetings.".into());
@@ -218,7 +221,7 @@ pub fn import_archive(
     let mut report = MigrationImportReport {
         imported: 0,
         already_present: 0,
-        preferences_imported: true,
+        preferences_imported: false,
         audio_imported: 0,
         audio_bytes: 0,
     };
@@ -231,6 +234,7 @@ pub fn import_archive(
             false => report.already_present += 1,
         }
     }
+    report.preferences_imported = report.imported > 0;
     Ok(report)
 }
 
@@ -283,6 +287,7 @@ fn into_imported_note(meeting: MigrationMeeting) -> ImportedMeetingNote {
 pub fn import_audio_archive_file(
     path: &Path,
     store: &MeetingStore,
+    data_dir: &Path,
 ) -> Result<(MigrationImportReport, MigrationSettings), String> {
     let metadata =
         fs::metadata(path).map_err(|_| "The selected archive could not be read.".to_string())?;
@@ -291,12 +296,79 @@ pub fn import_audio_archive_file(
     }
     let file =
         File::open(path).map_err(|_| "The selected archive could not be opened.".to_string())?;
-    import_audio_archive(file, store)
+    let staging_parent = staging_parent(data_dir);
+    // Audio is staged before it is committed, so room for the whole archive must exist up front;
+    // a full disk otherwise surfaces minutes into a multi-gigabyte import.
+    ensure_free_space(
+        free_space_bytes(data_dir),
+        metadata.len().saturating_add(STAGING_MARGIN_BYTES),
+    )?;
+    import_audio_archive(file, store, &staging_parent)
+}
+
+/// Headroom kept free beyond the audio itself (metadata, filesystem overhead).
+const STAGING_MARGIN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Staging lives inside the app data directory (the same volume as the library, private to this
+/// user), not the system temp directory, which may be a small tmpfs or a shared location.
+fn staging_parent(data_dir: &Path) -> PathBuf {
+    data_dir.join("import-staging")
+}
+
+fn ensure_free_space(free: Option<u64>, needed: u64) -> Result<(), String> {
+    match free {
+        Some(free) if free < needed => Err(format!(
+            "Not enough free disk space for this import. About {} MB is needed and {} MB is free. Free some space and retry; already imported meetings are skipped.",
+            needed.div_ceil(1024 * 1024),
+            free / (1024 * 1024)
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Free bytes available to this user on the volume holding `path`; `None` when unknown, in which
+/// case the check is skipped rather than blocking the import.
+#[allow(clippy::unnecessary_cast)]
+fn free_space_bytes(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+        // SAFETY: `path` is a valid NUL-terminated string and `stats` is a zeroed out-parameter
+        // that statvfs fills on success.
+        let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(path.as_ptr(), &mut stats) } != 0 {
+            return None;
+        }
+        Some((stats.f_bavail as u64).saturating_mul(stats.f_frsize as u64))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut available = 0_u64;
+        // SAFETY: `wide` is NUL-terminated and the out-parameters are valid or null.
+        let ok = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut available,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        (ok != 0).then_some(available)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        None
+    }
 }
 
 fn import_audio_archive<R: Read>(
     mut reader: R,
     store: &MeetingStore,
+    staging_parent: &Path,
 ) -> Result<(MigrationImportReport, MigrationSettings), String> {
     let mut header = [0_u8; 12];
     reader
@@ -337,10 +409,24 @@ fn import_audio_archive<R: Read>(
     }
     let imported_settings = manifest.notes.settings.clone();
     let imported_sample_rate_hz = manifest.sample_rate_hz;
+    fs::create_dir_all(staging_parent)
+        .map_err(|_| "The app data folder is unavailable for this import.".to_string())?;
+    // A crash mid-import leaves its staging folder behind; nothing else uses this folder.
+    if let Ok(entries) = fs::read_dir(staging_parent) {
+        for entry in entries.flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("ai-notetaker-import-")
+            {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
     let temp_root = tempfile::Builder::new()
         .prefix("ai-notetaker-import-")
-        .tempdir()
-        .map_err(|_| "Temporary space is unavailable for this import.".to_string())?;
+        .tempdir_in(staging_parent)
+        .map_err(|_| "Space in the app data folder is unavailable for this import.".to_string())?;
     let mut previous_sequence: HashMap<(Uuid, u8), u64> = HashMap::new();
     let mut audio_tracks: HashMap<(Uuid, u8), PathBuf> = HashMap::new();
     let mut audio_bytes_by_meeting: HashMap<Uuid, u64> = HashMap::new();
@@ -450,10 +536,17 @@ fn import_audio_archive<R: Read>(
             return Err("The audio archive is missing one of its recordings.".into());
         }
     }
+    // Each meeting's audio is copied into the library while the staged copy still exists, so the
+    // largest single recording must fit on top of what is already staged.
+    let largest = audio_bytes_by_meeting.values().copied().max().unwrap_or(0);
+    ensure_free_space(
+        free_space_bytes(staging_parent),
+        largest.saturating_add(STAGING_MARGIN_BYTES),
+    )?;
     let mut report = MigrationImportReport {
         imported: 0,
         already_present: 0,
-        preferences_imported: true,
+        preferences_imported: false,
         audio_imported: 0,
         audio_bytes: 0,
     };
@@ -481,6 +574,7 @@ fn import_audio_archive<R: Read>(
             report.already_present += 1;
         }
     }
+    report.preferences_imported = report.imported > 0;
     Ok((report, imported_settings))
 }
 
@@ -530,7 +624,12 @@ mod tests {
             import_archive(parse_archive_json(&archive_json(id)).unwrap(), &store).unwrap();
 
         assert_eq!(first.imported, 1);
+        assert!(first.preferences_imported);
         assert_eq!(second.already_present, 1);
+        assert!(
+            !second.preferences_imported,
+            "a repeat import must not overwrite the current preferences"
+        );
         let meta = store.load_meta(id).unwrap();
         assert_eq!(meta.state, MeetingState::Processed);
         assert!(meta.text_only_import);
@@ -653,7 +752,12 @@ mod tests {
             )
             .unwrap();
 
-        let (report, settings) = import_audio_archive(bytes.as_slice(), &store).unwrap();
+        let (report, settings) = import_audio_archive(
+            bytes.as_slice(),
+            &store,
+            &temp.path().join("import-staging"),
+        )
+        .unwrap();
         assert_eq!(report.imported, 1);
         assert_eq!(report.audio_imported, 1);
         assert_eq!(report.audio_bytes, 6);
@@ -679,7 +783,12 @@ mod tests {
             "Publish installers"
         );
 
-        let (second, _) = import_audio_archive(bytes.as_slice(), &store).unwrap();
+        let (second, _) = import_audio_archive(
+            bytes.as_slice(),
+            &store,
+            &temp.path().join("import-staging"),
+        )
+        .unwrap();
         assert_eq!(second.already_present, 1);
         assert_eq!(second.audio_imported, 0);
         assert_eq!(
@@ -695,16 +804,24 @@ mod tests {
         truncated.pop();
         let temp = tempdir().unwrap();
         let store = MeetingStore::new(temp.path()).unwrap();
-        assert!(import_audio_archive(truncated.as_slice(), &store)
-            .unwrap_err()
-            .contains("end marker"));
+        assert!(import_audio_archive(
+            truncated.as_slice(),
+            &store,
+            &temp.path().join("import-staging")
+        )
+        .unwrap_err()
+        .contains("end marker"));
 
         let mut bad_count = audio_archive_bytes(id);
         let end = bad_count.len() - 8;
         bad_count[end..].copy_from_slice(&3_u64.to_le_bytes());
-        assert!(import_audio_archive(bad_count.as_slice(), &store)
-            .unwrap_err()
-            .contains("chunk count"));
+        assert!(import_audio_archive(
+            bad_count.as_slice(),
+            &store,
+            &temp.path().join("import-staging")
+        )
+        .unwrap_err()
+        .contains("chunk count"));
 
         let mut unknown = audio_archive_bytes(id);
         let notes_len = u32::from_le_bytes(unknown[8..12].try_into().unwrap()) as usize;
@@ -714,15 +831,43 @@ mod tests {
         } else {
             b'0'
         };
-        assert!(import_audio_archive(unknown.as_slice(), &store)
-            .unwrap_err()
-            .contains("meeting reference"));
+        assert!(import_audio_archive(
+            unknown.as_slice(),
+            &store,
+            &temp.path().join("import-staging")
+        )
+        .unwrap_err()
+        .contains("meeting reference"));
 
         let mut damaged_audio = audio_archive_bytes(id);
         let manifest_size = u32::from_le_bytes(damaged_audio[8..12].try_into().unwrap()) as usize;
         damaged_audio[12 + manifest_size + 62] ^= 0x01;
-        assert!(import_audio_archive(damaged_audio.as_slice(), &store)
-            .unwrap_err()
-            .contains("damaged audio"));
+        assert!(import_audio_archive(
+            damaged_audio.as_slice(),
+            &store,
+            &temp.path().join("import-staging")
+        )
+        .unwrap_err()
+        .contains("damaged audio"));
+    }
+
+    #[test]
+    fn staging_needs_room_for_the_archive_and_unknown_free_space_does_not_block() {
+        assert!(ensure_free_space(Some(10 * 1024 * 1024), 20 * 1024 * 1024).is_err());
+        assert!(ensure_free_space(Some(20 * 1024 * 1024), 20 * 1024 * 1024).is_ok());
+        assert!(ensure_free_space(None, u64::MAX).is_ok());
+        assert!(free_space_bytes(Path::new(".")).is_some_and(|free| free > 0));
+    }
+
+    #[test]
+    fn audio_is_staged_inside_the_data_folder_and_cleaned_up() {
+        let temp = tempdir().unwrap();
+        let store = MeetingStore::new(temp.path()).unwrap();
+        let staging = staging_parent(temp.path());
+        assert!(staging.starts_with(temp.path()));
+        let id = Uuid::new_v4();
+        import_audio_archive(audio_archive_bytes(id).as_slice(), &store, &staging).unwrap();
+        let leftovers = fs::read_dir(&staging).unwrap().count();
+        assert_eq!(leftovers, 0, "staging folder is removed after import");
     }
 }

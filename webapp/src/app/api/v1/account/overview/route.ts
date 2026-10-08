@@ -39,7 +39,7 @@ export async function GET(request: Request) {
           cancelsAt: live ? subscription?.cancelsAt?.toISOString() ?? null : null,
         },
         // Only the owner can buy or manage a plan; members see usage read-only.
-        offers: session.role === "owner" ? catalog.map(({ id, name, priceId, meetingLimit, priceLabel }) => ({ id, name, priceId, meetingLimit, priceLabel })) : [],
+        offers: session.role === "owner" ? catalog.map(({ id, name, priceId, meetingLimit, priceLabel, yearly }) => ({ id, name, priceId, meetingLimit, priceLabel, yearly })) : [],
       },
       { headers: { "x-request-id": requestId } },
     );

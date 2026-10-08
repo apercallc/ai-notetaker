@@ -1,4 +1,4 @@
-import { FALLBACK_PRICE_AMOUNTS, FAQS, LIMITS, SITE } from "./content";
+import { FALLBACK_PRICE_AMOUNTS, FAQS, LIMITS, SITE, type FaqTopic } from "./content";
 
 type Node = Record<string, unknown>;
 
@@ -97,11 +97,13 @@ export function softwareNode(origin: string): Node {
   };
 }
 
-export function faqNode(origin: string): Node {
+/** Mirrors the visible `<Faq topic>` list so the markup never claims answers the page does not show. */
+export function faqNode(origin: string, topic?: FaqTopic): Node {
+  const items = topic ? FAQS.filter((faq) => faq.topics?.includes(topic)) : FAQS;
   return {
     "@type": "FAQPage",
-    "@id": url(origin, "/#faq"),
-    mainEntity: FAQS.map((faq) => ({
+    "@id": url(origin, topic ? `/#faq-${topic}` : "/#faq"),
+    mainEntity: items.map((faq) => ({
       "@type": "Question",
       name: faq.question,
       acceptedAnswer: { "@type": "Answer", text: faq.answer },

@@ -423,6 +423,21 @@ describe("NativeMessagingClient", () => {
       expect(statuses).toContain("incompatible");
       expect(statuses).not.toContain("connected");
     });
+
+    it("stops the reconnect loop once the helper is incompatible", async () => {
+      const port = createFakePort();
+      chromeMock.runtime.connectNative.mockReturnValue(port);
+      const client = new NativeMessagingClient();
+      const cancel = vi.spyOn(client as unknown as { cancelReconnect(): void }, "cancelReconnect");
+      await client.connect();
+
+      port._emitMessage({ type: "helper_info", helperVersion: "0.1.0", protocolVersion: 2, platform: "linux" });
+      expect(cancel).toHaveBeenCalled();
+
+      cancel.mockClear();
+      port._emitMessage({ type: "helper_info", helperVersion: "0.16.2", protocolVersion: 3, platform: "linux" });
+      expect(cancel).not.toHaveBeenCalled();
+    });
   });
 
   it("reconnects automatically on disconnect (MV3 service workers die and must resume)", async () => {

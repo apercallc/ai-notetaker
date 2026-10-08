@@ -11,6 +11,9 @@ export const SITE = {
   tagline: "Meeting notes without the meeting bot.",
   description:
     "One desktop app for macOS, Windows, and Linux records browser and desktop meetings, saves the audio on your device, and makes your notes with your own AI provider keys. An optional Chrome extension can record a browser tab. A free account lets you sign in and manage your devices; a subscription adds cloud sync and team sync. Raw audio and provider keys stay on the device.",
+  /** ~155 characters: the snippet search results show. */
+  metaDescription:
+    "Botless AI meeting notes for Mac, Windows and Linux. Records on your device, free with your own AI keys. Optional cloud and team sync from $12/month.",
   repoUrl: "https://github.com/apercallc/ai-notetaker",
   releasesUrl: "https://github.com/apercallc/ai-notetaker/releases/latest",
   licenseUrl: "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE",

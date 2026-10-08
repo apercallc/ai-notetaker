@@ -319,9 +319,10 @@
   gap: 32px;
 }
 
-.mk-footer h2 {
+.mk-footer .mk-footer-title {
   margin: 0 0 12px;
   font-size: 0.95rem;
+  font-weight: 600;
   letter-spacing: 0;
   color: var(--mk-ink);
 }
@@ -1210,4 +1211,16 @@
 
 .mk-download .mk-btn--solid .mk-small {
   color: inherit;
+}
+
+.mk-plan-yearly {
+  margin: -4px 0 12px;
+  font-size: 0.9rem;
+  color: var(--mk-muted, inherit);
+}
+
+.mk-checks .mk-checks-off {
+  padding-left: 30px;
+  color: var(--mk-muted);
+  font-size: 0.9rem;
 }

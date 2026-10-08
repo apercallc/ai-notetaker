@@ -43,4 +43,19 @@ describe("Meet recorder settings", () => {
     await vi.waitFor(() => expect(archive.saveDesktopAudioArchive).toHaveBeenCalledOnce());
     expect(document.querySelector("#archive-status")?.textContent).toContain("Chrome data is unchanged");
   });
+
+  it("treats a cancelled save picker as a cancel, not a failure", async () => {
+    archive.saveDesktopAudioArchive.mockRejectedValueOnce(new DOMException("The user aborted a request.", "AbortError"));
+    await loadSettings();
+    (document.querySelector("#export-archive") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector("#archive-status")?.textContent).toContain("cancelled"));
+    expect(document.querySelector("#archive-status")?.textContent).not.toContain("was not saved");
+  });
+
+  it("passes settings to the archive as a pending promise so the picker can open first", async () => {
+    await loadSettings();
+    (document.querySelector("#export-archive") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(archive.saveDesktopAudioArchive).toHaveBeenCalledOnce());
+    expect(archive.saveDesktopAudioArchive.mock.calls[0]![0]).toBeInstanceOf(Promise);
+  });
 });

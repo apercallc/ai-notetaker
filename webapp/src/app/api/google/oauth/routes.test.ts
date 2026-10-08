@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { cookies, getSessionContext, createSession, resolveGoogleAccount, createSignInState, completeGoogleSignIn, createGoogleExtensionCode, googleOAuthConfigured, createOAuthState, sealOAuthState, completeOAuthConnection, oauthStateMatches, openOAuthState } = vi.hoisted(() => ({
   createSession: vi.fn(),
@@ -162,6 +162,35 @@ describe("redirects behind the platform proxy", () => {
       const response = await connect(new Request("https://fallback.example.test/api/google/oauth/connect"));
       expect(response.headers.get("location")).toBe("https://fallback.example.test/login?next=/account");
     } finally { restore(); }
+  });
+});
+
+describe("OAuth state cookie Secure flag follows the session-cookie rule", () => {
+  const originalUrl = process.env.APP_URL;
+  const originalInsecure = process.env.INSECURE_COOKIES;
+  afterEach(() => {
+    if (originalUrl === undefined) delete process.env.APP_URL; else process.env.APP_URL = originalUrl;
+    if (originalInsecure === undefined) delete process.env.INSECURE_COOKIES; else process.env.INSECURE_COOKIES = originalInsecure;
+  });
+
+  it("is Secure for an https deployment and not Secure for plain-http or INSECURE_COOKIES deployments", async () => {
+    googleOAuthConfigured.mockReturnValue(true);
+    createSignInState.mockReturnValue({ state: { ...state, userId: "", purpose: "signin" }, authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=state-1" });
+    const cookieFor = async (handler: typeof start, path: string) =>
+      (await handler(new Request(`https://app.example.com/api/google/oauth/${path}`))).cookies.get("google_oauth_state");
+
+    delete process.env.INSECURE_COOKIES;
+    process.env.APP_URL = "https://app.example.com";
+    expect((await cookieFor(start, "start"))?.secure).toBe(true);
+    expect((await cookieFor(connect, "connect"))?.secure).toBe(true);
+
+    process.env.APP_URL = "http://lan-box.example:3000";
+    expect((await cookieFor(start, "start"))?.secure).toBeFalsy();
+    expect((await cookieFor(connect, "connect"))?.secure).toBeFalsy();
+
+    process.env.APP_URL = "https://app.example.com";
+    process.env.INSECURE_COOKIES = "true";
+    expect((await cookieFor(start, "start"))?.secure).toBeFalsy();
   });
 });
 

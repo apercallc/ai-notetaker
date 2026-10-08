@@ -58,8 +58,11 @@ When you change a price in Stripe, update `FALLBACK_PRICE_LABELS` and
 - Set `CHROME_WEB_STORE_URL` on the deployment once the listing exists; the
   download page then shows "Add to Chrome".
 - The download page reads the latest GitHub release (cached ten minutes) and
-  shows a "first release is being prepared" notice until one exists.
+  shows "Release links could not be loaded" with a link to GitHub releases when no release can be read.
+- Competitor pages live in `marketing/alternatives.ts`; keep claims structural (no prices) and bump `ALTERNATIVES_REVIEWED` when re-checked.
 - Sitemap `lastModified` is a constant in `app/sitemap.ts`; bump it when page
   content changes meaningfully.
+- `/llms.txt` and `/llms-full.txt` are generated from `marketing/content.ts`;
+  FAQPage markup is emitted per topic and must match the visible FAQ list.
 - The contact points are GitHub issues and the security policy. Add a monitored
   support address before advertising one.

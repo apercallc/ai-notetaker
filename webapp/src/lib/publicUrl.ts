@@ -19,3 +19,8 @@ export function publicUrl(path: string, request: Request, env: Record<string, st
   }
   return new URL(path, request.url);
 }
+
+/** This deployment's own origin: APP_URL on managed hosting, the request's origin otherwise. */
+export function ownOrigin(request: Request, env: Record<string, string | undefined> = process.env): string {
+  return publicUrl("/", request, env).origin;
+}

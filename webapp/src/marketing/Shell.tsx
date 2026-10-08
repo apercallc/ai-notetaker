@@ -50,7 +50,7 @@ export function MarketingShell({
             ) : (
               <>
                 <Link className="mk-btn mk-btn--quiet" href="/login">Sign in</Link>
-                {context.signupOpen && <Link className="mk-btn mk-btn--solid" href="/login?tab=signup" aria-label="Create an account"><span className="mk-label-full">Create an account</span><span className="mk-label-short">Try free</span></Link>}
+                {context.signupOpen && <Link className="mk-btn mk-btn--solid" href="/login?tab=signup"><span className="mk-label-full">Create an account</span><span className="mk-label-short">Sign up free</span></Link>}
               </>
             )}
           </div>
@@ -70,7 +70,7 @@ export function MarketingShell({
               </p>
             </div>
             <div>
-              <h2>Product</h2>
+              <p className="mk-footer-title">Product</p>
               <ul>
                 <li><Link href="/how-it-works">How it works</Link></li>
                 <li><Link href="/pricing">Pricing</Link></li>
@@ -79,7 +79,7 @@ export function MarketingShell({
               </ul>
             </div>
             <div>
-              <h2>Trust</h2>
+              <p className="mk-footer-title">Trust</p>
               <ul>
                 <li><Link href="/privacy">Privacy</Link></li>
                 <li><Link href="/terms">Terms</Link></li>
@@ -88,7 +88,7 @@ export function MarketingShell({
               </ul>
             </div>
             <div>
-              <h2>Project</h2>
+              <p className="mk-footer-title">Project</p>
               <ul>
                 <li><a href={SITE.repoUrl}>Source code</a></li>
                 <li><a href={SITE.releasesUrl}>Releases</a></li>

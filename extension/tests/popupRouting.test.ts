@@ -29,6 +29,22 @@ describe("browser recorder popup", () => {
     await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "START_RECORDING", captureSource: "meet", tabId: 7 })));
   });
 
+  it("offers resume and discard for an interrupted recording", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, { recoverableMeeting: { meetingId: "m-rec", startedAt: "2026-10-01T10:00:00.000Z" } });
+    expect(document.querySelector("#recoverable-banner")).not.toBeNull();
+    (document.querySelector("#resume-recording") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "RESUME_RECORDING", meetingId: "m-rec" }));
+
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    (document.querySelector("#discard-recording") as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DISCARD_RECORDING" }));
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    (document.querySelector("#discard-recording") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "DISCARD_RECORDING", meetingId: "m-rec" }));
+  });
+
   it("starts from a secure Teams tab", async () => {
     await loadPopup({ id: 8, url: "https://teams.microsoft.com/v2/" });
     expect((document.querySelector("#start-recording") as HTMLButtonElement).disabled).toBe(false);
@@ -76,7 +92,7 @@ describe("browser recorder popup", () => {
 
   it.each(["https://meet.google.com/abc-defg-hij", "https://teams.microsoft.com/v2/", "https://us02web.zoom.us/wc/123/join", "https://discord.com/channels/@me/123", "https://app.slack.com/client/T1/C1"])("completes the widget pending start on %s", async (url) => {
     await loadPopup({ id: 7, url }, undefined, {}, 7);
-    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "START_RECORDING", captureSource: "meet", tabId: 7 }));
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "START_RECORDING", captureSource: "meet", tabId: 7, meetingMode: "general" }));
   });
 
   it("does not start a pending capture from another tab", async () => {

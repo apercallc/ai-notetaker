@@ -23,7 +23,7 @@ export default async function HowItWorksPage() {
           websiteNode(origin),
           webPageNode(origin, "/how-it-works", TITLE, DESCRIPTION),
           howToNode(origin),
-          faqNode(origin),
+          faqNode(origin, "setup"),
           breadcrumbNode(origin, [{ name: "AI Notetaker", path: "/" }, { name: "How it works", path: "/how-it-works" }]),
         ]}
       />

@@ -1,3 +1,4 @@
+import { ownOrigin } from "./publicUrl";
 import { getSessionContext, getSessionUser } from "./sessions";
 import { getUserDefaultWorkspaceId, getUserRole, resolveActiveWorkspace } from "./workspaces";
 
@@ -68,7 +69,7 @@ function cookieValue(header: string | null, name: string): string | undefined {
 export async function getBrowserManagedSession(request: Request): Promise<ManagedSession | null> {
   if (!managedHostingEnabled()) return null;
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) return null;
+  if (!origin || origin !== ownOrigin(request)) return null;
   if (request.headers.get(BROWSER_API_HEADER) !== "1") return null;
 
   const context = await getSessionContext(cookieValue(request.headers.get("cookie"), "session"));

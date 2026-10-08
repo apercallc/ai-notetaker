@@ -9,6 +9,7 @@ import {
   createPortalSession,
   formatStripePrice,
   getPlanCatalog,
+  monthsFree,
   verifyStripeSignature,
 } from "./billing";
 import { prisma } from "./db";
@@ -111,8 +112,34 @@ describe("Stripe checkout retry", () => {
 
   it("turns a Stripe outage into a plain retry message", async () => {
     await withWorkspace(async (workspaceId) => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "No such price: price_internal" } }), { status: 500 }));
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ error: { message: "No such price: price_internal" } }), { status: 500 }));
       await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).rejects.toThrow("temporarily unavailable");
+      // One same-key retry for the ambiguous failure, then the claim is released.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const row = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+      expect(row?.checkoutClaimedAt).toBeNull();
+    });
+  });
+
+  it("creates the session with an Idempotency-Key scoped to the workspace claim", async () => {
+    await withWorkspace(async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ id: "cs_idem", url: "https://checkout.stripe.com/idem" }));
+      await createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel);
+      const headers = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
+      expect(headers["Idempotency-Key"]).toMatch(new RegExp(`^checkout:${workspaceId}:\\d+$`));
+    });
+  });
+
+  it("retries a timed-out creation with the same key so Stripe returns the session instead of orphaning one", async () => {
+    await withWorkspace(async (workspaceId) => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      fetchSpy.mockRejectedValueOnce(new Error("socket hang up"));
+      fetchSpy.mockResolvedValueOnce(json({ id: "cs_replayed", url: "https://checkout.stripe.com/replayed" }));
+      await expect(createCheckoutSession(workspaceId, "o@example.com", "price_pro_retry", success, cancel)).resolves.toBe("https://checkout.stripe.com/replayed");
+      const keys = fetchSpy.mock.calls.map((call) => (call[1]?.headers as Record<string, string>)["Idempotency-Key"]);
+      expect(keys[0]).toBe(keys[1]);
+      const row = await prisma.workspaceSubscription.findUnique({ where: { workspaceId } });
+      expect(row?.checkoutSessionId).toBe("cs_replayed");
     });
   });
 
@@ -629,8 +656,8 @@ describe("plan catalog", () => {
     try {
       const catalog = await getPlanCatalog();
       expect(catalog).toEqual([
-        { id: "hosted_pro", name: "Pro", priceId: "price_catalog_pro", meetingLimit: 300, priceLabel: "$19.50 / month" },
-        { id: "hosted_team", name: "Team", priceId: "price_catalog_team", meetingLimit: 2_500, priceLabel: "$49 / month" },
+        { id: "hosted_pro", name: "Pro", priceId: "price_catalog_pro", meetingLimit: 300, priceLabel: "$19.50 / month", yearly: null },
+        { id: "hosted_team", name: "Team", priceId: "price_catalog_team", meetingLimit: 2_500, priceLabel: "$49 / month", yearly: null },
       ]);
 
       // The next render is served from the price cache: only the Pro lookup ever hit Stripe.
@@ -697,5 +724,36 @@ describe("cancelWorkspaceSubscription", () => {
       vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network"));
       await expect(cancelWorkspaceSubscription(workspaceId)).rejects.toThrow("could not be reached");
     });
+  });
+});
+
+describe("annual pricing", () => {
+  it("derives whole months saved from the two price labels", () => {
+    expect(monthsFree("$12 / month", "$120 / year")).toBe(2);
+    expect(monthsFree("$39 / month", "$390 / year")).toBe(2);
+    expect(monthsFree("$12 / month", "$144 / year")).toBeNull();
+    expect(monthsFree(null, "$120 / year")).toBeNull();
+  });
+
+  it("lists a yearly offer only when a yearly price is configured", async () => {
+    const keys = ["STRIPE_SECRET_KEY", "STRIPE_PRICE_HOSTED_PRO", "STRIPE_PRICE_HOSTED_PRO_YEARLY", "STRIPE_PRICE_HOSTED_TEAM", "STRIPE_PRICE_HOSTED_TEAM_YEARLY", "HOSTED_PRO_PRICE_LABEL", "HOSTED_PRO_YEARLY_PRICE_LABEL"] as const;
+    const originals = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) delete process.env[key];
+    process.env.STRIPE_PRICE_HOSTED_PRO = "price_annual_pro_m";
+    process.env.STRIPE_PRICE_HOSTED_PRO_YEARLY = "price_annual_pro_y";
+    process.env.HOSTED_PRO_PRICE_LABEL = "$12 / month";
+    process.env.HOSTED_PRO_YEARLY_PRICE_LABEL = "$120 / year";
+    clearPriceCache();
+    try {
+      const [pro, team] = await getPlanCatalog();
+      expect(pro?.yearly).toEqual({ priceId: "price_annual_pro_y", priceLabel: "$120 / year", monthsFree: 2 });
+      expect(team?.yearly).toBeNull();
+    } finally {
+      clearPriceCache();
+      for (const [key, value] of Object.entries(originals)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value as string;
+      }
+    }
   });
 });

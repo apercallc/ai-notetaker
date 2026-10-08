@@ -419,9 +419,13 @@ async function commitDelete(id: string): Promise<void> {
   pendingDelete = null;
   try {
     await sendToBackground({ type: "DELETE_MEETING", meetingId: id });
-  } catch {
-    // The helper may be offline; local deletion remains authoritative for
-    // the extension UI and can be retried for helper-owned raw audio.
+  } catch (error) {
+    // The background refuses to delete a live recording (and may fail for
+    // other reasons). Deleting only the local record here would orphan its raw
+    // audio, so stop and tell the person instead.
+    cancelDelete();
+    showMeetingError(error instanceof Error && error.message ? error.message : "The meeting could not be deleted. Try again.");
+    return;
   }
   try {
     await deleteLocalMeeting(id);

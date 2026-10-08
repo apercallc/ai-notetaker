@@ -3,7 +3,7 @@
 
   const invoke = window.__TAURI__?.core?.invoke;
   const listen = window.__TAURI__?.event?.listen;
-  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0 };
+  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0, noticeKind: "", noticeSource: "", syncWarning: "" };
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const prettyDate = (value) => {
@@ -32,13 +32,34 @@
   const meetingModeName = (id) => ({ general: "General", standup: "Stand-up", sales: "Sales", one_on_one: "1:1", interview: "Interview", lecture: "Lecture", custom: "Custom" })[id] || id;
   const platformName = (id) => ({ macos: "macOS", windows: "Windows", linux: "Linux" })[id] || id;
 
-  function notify(message, kind = "") {
+  // Errors are announced assertively (role="alert"), stay until dismissed or replaced by a newer
+  // message, and are never timed out; other notices clear themselves. `passive` notices come from
+  // render() and must not replace a message the person has not read yet.
+  function notify(message, kind = "", { passive = false, source = "" } = {}) {
     const box = $("#notice");
-    box.textContent = message;
-    box.className = `notice ${kind}`.trim();
-    box.hidden = !message;
+    if (passive && state.noticeKind === "error" && !box.hidden) return;
     clearTimeout(state.noticeTimer);
-    if (message) state.noticeTimer = setTimeout(() => { box.hidden = true; }, 6500);
+    state.noticeKind = message ? kind : "";
+    state.noticeSource = message ? source : "";
+    box.textContent = "";
+    box.className = `notice ${kind}`.trim();
+    box.setAttribute("role", kind === "error" ? "alert" : "status");
+    box.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
+    box.hidden = !message;
+    if (!message) return;
+    const text = document.createElement("span");
+    text.textContent = message;
+    box.append(text);
+    if (kind === "error") {
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "notice-dismiss";
+      dismiss.textContent = "Dismiss";
+      dismiss.addEventListener("click", () => notify(""));
+      box.append(dismiss);
+    } else {
+      state.noticeTimer = setTimeout(() => { box.hidden = true; state.noticeKind = ""; }, 6500);
+    }
   }
 
   function setTopbarStatus(label, dotClass = "") {
@@ -72,6 +93,7 @@
   async function refreshSnapshot() {
     try {
       state.snapshot = await invoke("desktop_snapshot");
+      if (state.noticeSource === "refresh") notify("");
       for (const meetingId of state.finalizingMeetingIds) {
         const meeting = state.snapshot.meetings.find((item) => item.id === meetingId);
         if (!meeting || meeting.status !== "recording") state.finalizingMeetingIds.delete(meetingId);
@@ -90,6 +112,11 @@
         if (selection && selection.every(Number.isInteger)) replacement?.setSelectionRange(...selection);
       }
     } catch (error) {
+      if (state.snapshot) {
+        // Keep what is on screen (a live recording's controls above all) and say the refresh failed.
+        notify(`Could not refresh the latest status: ${String(error)}`, "error", { source: "refresh" });
+        return;
+      }
       $("#content").innerHTML = `<div class="empty-state"><strong>Workspace could not open</strong>${esc(error)}<p><button class="secondary-button" id="retry-load">Try again</button></p></div>`;
       $("#retry-load")?.addEventListener("click", refresh);
       setTopbarStatus("Workspace unavailable", "needs-attention");
@@ -166,9 +193,10 @@
     $("#open-webapp").hidden = !snapshot.settings.preferences.webappUrl;
     if (hostedSignedIn() && !accountState.overview && !accountState.loading && !accountState.error) void loadOverview();
     state.setupNeeded = !appReady;
+    if (snapshot.webappSync.configured) state.syncWarning = "";
     renderNav(state.setupNeeded);
-    if (snapshot.credentialStoreError) notify(snapshot.credentialStoreError, "error");
-    else if (snapshot.unreadableRecordings) notify(`${snapshot.unreadableRecordings} recording${snapshot.unreadableRecordings === 1 ? "" : "s"} could not be read. Other notes remain available.`, "warn");
+    if (snapshot.credentialStoreError) notify(snapshot.credentialStoreError, "error", { passive: true });
+    else if (snapshot.unreadableRecordings) notify(`${snapshot.unreadableRecordings} recording${snapshot.unreadableRecordings === 1 ? "" : "s"} could not be read. Other notes remain available.`, "warn", { passive: true });
     try {
       if (state.page === "record") renderRecord();
       else if (state.page === "notes") renderNotes();
@@ -202,7 +230,7 @@
     });
     if (!active) announceRecordingReadiness(startHint);
     const openAudioSettings = !audio.ready && !audio.checking
-      ? `<button class="small-button" id="open-screen-recording-settings">${audio.platform === "macos" ? "Open macOS audio permissions" : audio.platform === "windows" ? "Open Windows microphone settings" : "Open sound settings"}</button>`
+      ? `<button class="small-button" id="open-screen-recording-settings" data-pane="${permissionPane(audio)}">${audio.platform === "macos" ? (permissionPane(audio) === "microphone" ? "Open macOS microphone permission" : "Open macOS screen &amp; audio recording permission") : audio.platform === "windows" ? "Open Windows microphone settings" : "Open sound settings"}</button>`
       : "";
     const macAudioUnavailable = audio.platform === "macos" && audio.driver === "Unavailable";
     const audioGuidance = macAudioUnavailable
@@ -353,9 +381,15 @@
     catch (error) { notify(String(error), "error"); }
   }
 
+  // macOS keeps microphone and Screen & System Audio Recording in separate panes. No microphone
+  // reported means the microphone permission is the missing one; otherwise it is loopback capture.
+  function permissionPane(audio) {
+    return audio.platform === "macos" && !audio.microphone ? "microphone" : "screen_capture";
+  }
+
   async function openScreenRecordingSettings() {
     try {
-      await invoke("desktop_open_screen_recording_settings");
+      await invoke("desktop_open_screen_recording_settings", { pane: permissionPane(state.snapshot.audio) });
       notify("System Settings opened. Add or enable AI Notetaker, reopen the app, then check audio again.");
     } catch (error) { notify(String(error), "error"); }
   }
@@ -630,8 +664,10 @@
   async function hostedAction(button, command, args, success) {
     button.disabled = true;
     try {
-      await invoke(command, args);
-      notify(success);
+      const reply = await invoke(command, args);
+      state.syncWarning = reply?.syncWarning || "";
+      if (state.syncWarning) notify(state.syncWarning, "warn");
+      else notify(success);
       await refresh();
     } catch (error) {
       const status = $("#hosted-status");
@@ -647,12 +683,6 @@
   const accountState = { overview: null, loading: false, error: "", team: { roster: null, loading: false, error: "", busy: false, message: "", link: "" }, actionQuery: "", actionFilter: "open", billingBusy: false };
   const hostedSignedIn = () => Boolean(state.snapshot?.settings.hasHostedSession);
   const longDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
-
-  function meter(label, used, limit, text) {
-    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-    const level = limit > 0 && used >= limit ? "full" : pct >= 80 ? "high" : "";
-    return `<div class="meter-row"><div class="meter-head"><strong>${esc(label)}</strong><span>${esc(text)}</span></div><div class="meter ${level}" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="${limit}" aria-valuenow="${Math.min(used, limit)}"><span style="width:${pct}%"></span></div></div>`;
-  }
 
   async function loadOverview(force = false) {
     if (!hostedSignedIn() || accountState.loading || (accountState.overview && !force)) return;
@@ -686,6 +716,7 @@
     const owner = data.account.role === "owner";
     const reset = e.period?.end ? longDate(e.period.end) : "";
     const notices = [];
+    if (state.syncWarning) notices.push(state.syncWarning);
     if (e.inPaymentGrace) notices.push(`Your last payment failed. Sync continues until ${longDate(e.graceEndsAt)} while we retry. Update your payment method to keep it.`);
     if (!e.canSync) notices.push("Cloud sync is off. Your notes stay on this device and upload when a plan is active. Notes already in your account stay readable and exportable on the web.");
     if (data.subscription.cancelsAt) notices.push(`Your plan is set to end on ${longDate(data.subscription.cancelsAt)}.`);
@@ -829,7 +860,7 @@
     const syncDetails = `<details class="other-keys"><summary>What gets synced</summary><div class="privacy-note"><p>Finished desktop notes upload to your workspace. Notes created in the web app are copied here and updated on the next sync. Web edits do not change recordings made on this desktop. Note deletions and settings do not sync between the desktop and web app.</p><p>Sync sends notes only; it does not send raw audio or provider keys.</p></div></details>`;
     const syncBlock = state.snapshot.webappSync.configured || conflicts.length ? `${conflictMarkup}${sync_status}${sync_controls}${syncDetails}` : "";
     const processingBody = cloudLine + syncBlock + (account
-      ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(planName(accountState.overview?.entitlements?.plan || account.plan))} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep your notes syncing.</p>'}
+      ? `<div class="hosted-account"><p><strong>${esc(account.email)}</strong> · ${esc(planName(accountState.overview?.entitlements?.plan || account.plan))} plan</p>${s.hasHostedSession ? "" : '<p class="key-status">This session has ended. Sign in again to keep your notes syncing.</p>'}${state.syncWarning ? `<p class="setup-note" role="alert">${esc(state.syncWarning)}</p>` : ""}
         <div class="inline-actions"><button type="button" class="secondary-button" id="hosted-sign-out">Sign out</button><button type="button" class="secondary-button" id="hosted-manage-web">Manage account, devices &amp; data on the web</button></div></div>
         ${s.hasHostedSession ? "" : hostedForm(account.email)}`
       : hostedForm(""));

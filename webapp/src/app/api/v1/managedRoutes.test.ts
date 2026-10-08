@@ -593,8 +593,15 @@ describe("managed upload routes", () => {
     expect(Number.isFinite(Date.parse(body.expiresAt))).toBe(true);
 
     // The same meeting is invisible to another workspace.
+    await prisma.workspaceSubscription.create({ data: { workspaceId: OTHER_WORKSPACE_ID, plan: "hosted_pro", status: "active" } });
     const cross = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST", headers: auth(otherSessionId) }), context);
     expect(cross.status).toBe(400);
+
+    // A workspace without an active plan cannot create shares (same write block as the web action).
+    await prisma.workspaceSubscription.deleteMany({ where: { workspaceId: WORKSPACE_ID } });
+    const blocked = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST", headers: auth(sessionId) }), context);
+    expect(blocked.status).toBe(402);
+    expect(((await blocked.json()) as { error: string }).error).toContain("Cloud sync needs an active");
 
     // Unauthenticated callers get nothing.
     const anonymous = await createShare(new Request("http://localhost/api/v1/meetings/x/share", { method: "POST" }), context);

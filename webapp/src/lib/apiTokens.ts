@@ -65,19 +65,22 @@ export async function createApiToken(
       expiresAt,
     },
   });
-  await pruneApiTokens(userId, now);
+  await pruneApiTokens(userId, scope, now);
   return { id: row.id, token, expiresAt };
 }
 
-/** Most tokens one user keeps. Signing the extension in again must always work, so the oldest give way. */
+/**
+ * Most tokens one user keeps per scope. Signing the extension in again must always work, so the
+ * oldest of that scope give way; other scopes (desktop sync, notes read) are never evicted by it.
+ */
 const MAX_API_TOKENS_PER_USER = 25;
 
-async function pruneApiTokens(userId: string, now: number): Promise<void> {
+async function pruneApiTokens(userId: string, scope: string, now: number): Promise<void> {
   try {
     await prisma.apiToken.deleteMany({ where: { userId, expiresAt: { lte: new Date(now) } } });
-    const keep = await prisma.apiToken.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: MAX_API_TOKENS_PER_USER, select: { id: true } });
+    const keep = await prisma.apiToken.findMany({ where: { userId, scope }, orderBy: { createdAt: "desc" }, take: MAX_API_TOKENS_PER_USER, select: { id: true } });
     if (keep.length === MAX_API_TOKENS_PER_USER) {
-      await prisma.apiToken.deleteMany({ where: { userId, id: { notIn: keep.map((token) => token.id) } } });
+      await prisma.apiToken.deleteMany({ where: { userId, scope, id: { notIn: keep.map((token) => token.id) } } });
     }
   } catch (error) {
     // Housekeeping must never fail the sign-in that triggered it.

@@ -52,7 +52,7 @@ const meetCapture = new MeetCaptureController((pcm16, meetingId, channel, chunkI
 const readyPromise = (async () => {
   await migrateSavedProcessingModeToApiKeys().catch((error) => console.warn("API-key mode migration failed", error));
   await meetCapture.restoreCaptures().catch((error) => console.warn("Capture restore failed", error));
-  await controller.init().catch((error) => console.warn("Controller init failed", error));
+  await controller.init({ hasLiveCapture: (id) => meetCapture.isActive(id) }).catch((error) => console.warn("Controller init failed", error));
 })();
 
 // A captured tab that closes, or leaves its call, is the end of the call and
@@ -214,15 +214,12 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       // page-side sender is never allowed to name another one.
       const { captureSource, tabId } = resolveStartRequest(message, kind, sender.tab?.id);
       if (captureSource !== "meet") throw new Error("Start desktop calls from the AI Notetaker desktop app.");
-      const meetingId =
-        captureSource === "meet"
-          ? await startMeetRecording(controller, meetCapture, {
-              tabId,
-              ...(message.meetingMode ? { meetingMode: message.meetingMode } : {}),
-              ...(message.titleHint ? { titleHint: message.titleHint } : {}),
-              ...(message.allowProviderWarning ? { allowProviderWarning: true } : {}),
-            })
-          : await controller.startRecording(message.meetingMode, captureSource, message.titleHint, message.allowProviderWarning);
+      const meetingId = await startMeetRecording(controller, meetCapture, {
+        tabId,
+        ...(message.meetingMode ? { meetingMode: message.meetingMode } : {}),
+        ...(message.titleHint ? { titleHint: message.titleHint } : {}),
+        ...(message.allowProviderWarning ? { allowProviderWarning: true } : {}),
+      });
       return { meetingId };
     }
     case "STOP_RECORDING":
@@ -299,9 +296,7 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await controller.deleteMeeting(message.meetingId);
       return {};
     case "TEST_PROVIDER_KEY":
-      // Always direct from the extension (see lib/testProviderKey.ts). The
-      // desktop flag is accepted for older UI pages but no longer routes
-      // through the helper, so setup is never blocked by a missing helper.
+      // Always direct from the extension (see lib/testProviderKey.ts).
       return controller.testProviderKey(message.provider, message.key);
   }
 }

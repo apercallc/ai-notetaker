@@ -48,10 +48,16 @@ async function render(): Promise<void> {
     button.disabled = true;
     status.textContent = "Choose where to save the archive…";
     try {
-      const result = await saveDesktopAudioArchive(await getSettings(), listMeetings);
-      status.textContent = `Saved ${result.meetingCount} meeting records and ${(result.audioBytes / 1024 / 1024).toFixed(1)} MB of audio. Chrome data is unchanged.`;
+      // Settings load is passed as a pending promise so the save picker opens
+      // within the click's user activation.
+      const result = await saveDesktopAudioArchive(getSettings(), listMeetings);
+      status.textContent = `Saved ${result.meetingCount} meeting records and ${(result.audioBytes / 1024 / 1024).toFixed(1)} MB of audio. Chrome data is unchanged.${result.adjustments?.length ? ` Note: ${result.adjustments.join(" ")}` : ""}`;
     } catch (error) {
-      status.innerHTML = `Archive was not saved: ${escapeHtml(String(error))}`;
+      if (error instanceof DOMException && error.name === "AbortError") {
+        status.textContent = "Archive export cancelled. Your extension data is unchanged.";
+      } else {
+        status.innerHTML = `Archive was not saved: ${escapeHtml(error instanceof Error ? error.message : String(error))}`;
+      }
     } finally {
       button.disabled = false;
     }

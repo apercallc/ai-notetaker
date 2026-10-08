@@ -127,6 +127,10 @@ struct AppState {
     pairing_token: Mutex<Option<String>>,
     settings: Mutex<Option<Settings>>,
     active: Mutex<HashMap<Uuid, ActiveRecording>>,
+    /// Held for the whole of a StartRecording. The one-desktop-capture check and the insert into
+    /// `active` are separated by awaits (opening the device can take seconds or show a
+    /// permission prompt), so without this two starts could both pass the check.
+    start_lock: Mutex<()>,
     pipelines: Mutex<HashMap<Uuid, Arc<Mutex<Pipeline>>>>,
     retry_tasks: Mutex<HashMap<Uuid, RetryWorker>>,
     recovering: Mutex<HashSet<Uuid>>,
@@ -276,29 +280,37 @@ impl Drop for StopGuard {
     }
 }
 
+/// A new desktop capture may not start while a different desktop capture is live. Browser (Meet)
+/// recordings carry their own audio and never conflict.
+fn another_desktop_capture_running<'a>(
+    active: impl IntoIterator<Item = (&'a Uuid, &'a bool)>,
+    meeting_id: Uuid,
+    capture_source: CaptureSource,
+) -> bool {
+    capture_source != CaptureSource::Meet
+        && active
+            .into_iter()
+            .any(|(id, holds_device)| *id != meeting_id && *holds_device)
+}
+
+/// Stop is only meaningful for a recording that is live (or already being stopped). Anything else
+/// must be reported to the person who pressed Stop instead of silently "succeeding".
+fn check_stop_target(
+    is_active: bool,
+    has_pipeline: bool,
+    stop_in_flight: bool,
+) -> Result<(), String> {
+    if is_active || has_pipeline || stop_in_flight {
+        Ok(())
+    } else {
+        Err("This recording is not active, so there is nothing to stop. If it was interrupted, recover it from the Record page.".into())
+    }
+}
+
 /// https anywhere, or plain http only to a loopback host (local development). The host is
 /// parsed rather than prefix-matched: `http://localhost.evil.com` must not pass for loopback.
 fn hosted_url_is_allowed(raw: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
-        return false;
-    };
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    match url.scheme() {
-        "https" => true,
-        "http" => {
-            host.eq_ignore_ascii_case("localhost")
-                || host
-                    .parse::<std::net::Ipv4Addr>()
-                    .is_ok_and(|address| address.is_loopback())
-                || host
-                    .trim_matches(['[', ']'])
-                    .parse::<std::net::Ipv6Addr>()
-                    .is_ok_and(|address| address.is_loopback())
-        }
-        _ => false,
-    }
+    reqwest::Url::parse(raw.trim()).is_ok_and(|url| desktop_settings::service_url_is_allowed(&url))
 }
 
 /// Location of the pairing token inside the (0700) data directory. Shared
@@ -525,6 +537,7 @@ fn main() {
                 pairing_token: Mutex::new(existing_token),
                 settings: Mutex::new(None),
                 active: Mutex::new(HashMap::new()),
+                start_lock: Mutex::new(()),
                 pipelines: Mutex::new(HashMap::new()),
                 retry_tasks: Mutex::new(HashMap::new()),
                 recovering: Mutex::new(HashSet::new()),
@@ -703,27 +716,21 @@ async fn desktop_snapshot(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let stored_keys = desktop_settings::load_api_keys();
-    let stored_token = desktop_settings::get_webapp_token();
     let mut credential_error = context
         .key_storage_error
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let keys = match stored_keys {
-        Ok(keys) => keys,
+    // Presence only, remembered until a credential is written: polling the snapshot must not
+    // round-trip to the OS keychain every time.
+    let presence = match desktop_settings::credential_presence() {
+        Ok(presence) => presence,
         Err(error) => {
             credential_error = Some(error);
-            ApiKeys::default()
+            desktop_settings::CredentialPresence::default()
         }
     };
-    let has_webapp_token = match stored_token {
-        Ok(token) => token.is_some_and(|token| !token.trim().is_empty()),
-        Err(error) => {
-            credential_error.get_or_insert(error);
-            false
-        }
-    };
+    let has_webapp_token = presence.webapp_token;
     let webapp_sync = context.sync.status(
         has_webapp_token
             && desktop_settings::normalize_webapp_url(&preferences.webapp_url)
@@ -821,7 +828,7 @@ async fn desktop_snapshot(
 
     Ok(DesktopSnapshot {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        settings: desktop_settings::settings_view(preferences, &keys, has_webapp_token),
+        settings: desktop_settings::settings_view_from_presence(preferences, presence),
         credential_store_error: credential_error,
         audio,
         active_meeting_id,
@@ -952,6 +959,16 @@ struct HostedLoginReply {
     email: Option<String>,
 }
 
+/// The settings after signing in, plus a warning when the account signed in but notes sync could
+/// not be connected (the UI shows it in the Account panel instead of claiming everything works).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostedSignInReply {
+    #[serde(flatten)]
+    view: desktop_settings::DesktopSettingsView,
+    sync_warning: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct HostedLoginError {
     error: Option<String>,
@@ -965,7 +982,7 @@ async fn desktop_hosted_sign_in(
     email: String,
     password: String,
     base_url: Option<String>,
-) -> Result<desktop_settings::DesktopSettingsView, String> {
+) -> Result<HostedSignInReply, String> {
     let email = email.trim().to_string();
     if email.is_empty()
         || email.chars().count() > 320
@@ -1047,7 +1064,7 @@ async fn desktop_hosted_sign_in_code(
     context: tauri::State<'_, DesktopCommandContext>,
     code: String,
     base_url: Option<String>,
-) -> Result<desktop_settings::DesktopSettingsView, String> {
+) -> Result<HostedSignInReply, String> {
     let code = code.trim().to_string();
     if code.is_empty() || code.chars().count() > 128 || code.chars().any(char::is_whitespace) {
         return Err("Paste the code exactly as the web app shows it.".into());
@@ -1092,7 +1109,7 @@ async fn finish_hosted_sign_in(
     email: String,
     base_url: String,
     reply: HostedLoginReply,
-) -> Result<desktop_settings::DesktopSettingsView, String> {
+) -> Result<HostedSignInReply, String> {
     if reply.access_token.is_empty() || reply.account_id.is_empty() || reply.workspace_id.is_empty()
     {
         return Err("The service sent an incomplete sign-in reply. Try again.".into());
@@ -1126,6 +1143,7 @@ async fn finish_hosted_sign_in(
     // web app show the same notes. A sync token the user already set up is never replaced.
     let mut preferences = preferences;
     let mut connected_sync = false;
+    let mut sync_warning = None;
     if desktop_settings::get_webapp_token()
         .ok()
         .flatten()
@@ -1145,9 +1163,19 @@ async fn finish_hosted_sign_in(
                     // without one the service would answer every request with 402.
                     connected_sync = can_sync;
                 }
-                Err(error) => tracing::warn!(%error, "could not store the notes-sync token"),
+                Err(error) => {
+                    tracing::warn!(%error, "could not store the notes-sync token");
+                    sync_warning = Some(format!(
+                        "Signed in, but notes sync could not be connected: {error}"
+                    ));
+                }
             },
-            Err(error) => tracing::warn!(%error, "could not connect notes sync after sign-in"),
+            Err(error) => {
+                tracing::warn!(%error, "could not connect notes sync after sign-in");
+                sync_warning = Some(format!(
+                    "Signed in, but notes sync could not be connected: {error} Use Sync now to try again."
+                ));
+            }
         }
     }
     if let Err(error) = preferences.save(&context.app.data_dir) {
@@ -1166,7 +1194,7 @@ async fn finish_hosted_sign_in(
             context.ui_app.clone(),
         );
     }
-    Ok(view)
+    Ok(HostedSignInReply { view, sync_warning })
 }
 
 /// Asks the service to end a token (best effort; the token also expires on its own).
@@ -1503,7 +1531,9 @@ async fn desktop_import_transfer(
             .await
             .map_err(|_| "Desktop transfer import stopped unexpectedly.".to_string())??;
 
-    apply_imported_desktop_preferences(context.inner(), imported_preferences).await?;
+    if report.preferences_imported {
+        apply_imported_desktop_preferences(context.inner(), imported_preferences).await?;
+    }
     Ok(report)
 }
 
@@ -1530,12 +1560,15 @@ async fn desktop_import_audio_transfer(
         .into_path()
         .map_err(|_| "The selected archive path is invalid.".to_string())?;
     let store = context.app.store.clone();
+    let data_dir = context.app.data_dir.clone();
     let (report, imported_preferences) = tokio::task::spawn_blocking(move || {
-        desktop_migration::import_audio_archive_file(&path, &store)
+        desktop_migration::import_audio_archive_file(&path, &store, &data_dir)
     })
     .await
     .map_err(|_| "Audio archive import stopped unexpectedly.".to_string())??;
-    apply_imported_desktop_preferences(context.inner(), imported_preferences).await?;
+    if report.preferences_imported {
+        apply_imported_desktop_preferences(context.inner(), imported_preferences).await?;
+    }
     Ok(Some(report))
 }
 
@@ -1633,6 +1666,9 @@ async fn desktop_stop_recording(
     meeting_id: String,
 ) -> Result<(), String> {
     let meeting_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    let is_active = context.app.active.lock().await.contains_key(&meeting_id);
+    let has_pipeline = context.app.pipelines.lock().await.contains_key(&meeting_id);
+    check_stop_target(is_active, has_pipeline, StopGuard::is_in_flight(meeting_id))?;
     handle_message(
         context.app.clone(),
         context.tray.clone(),
@@ -2135,11 +2171,39 @@ async fn desktop_save_text_file(
     let path = chosen
         .into_path()
         .map_err(|_| "That location cannot be used.".to_string())?;
-    tokio::task::spawn_blocking(move || std::fs::write(path, contents))
+    tokio::task::spawn_blocking(move || write_file_atomically(&path, contents.as_bytes()))
         .await
         .map_err(|_| "The file could not be saved.".to_string())?
         .map_err(|error| format!("The file could not be saved: {error}"))?;
     Ok(true)
+}
+
+/// Writes next to the destination and renames over it, so a crash or a full disk mid-write leaves
+/// the previous file intact instead of a truncated export.
+fn write_file_atomically(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let directory = path.parent().filter(|dir| !dir.as_os_str().is_empty());
+    let name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no file name"))?;
+    let temporary = directory.unwrap_or_else(|| Path::new(".")).join(format!(
+        ".{}.{}.tmp",
+        name.to_string_lossy(),
+        Uuid::new_v4()
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 #[tauri::command]
@@ -2181,19 +2245,39 @@ async fn desktop_test_audio(
     Ok(())
 }
 
-/// Opens the operating system's own page for fixing audio access: Screen Recording on
-/// macOS, microphone privacy on Windows, and the sound settings on Linux.
-#[tauri::command]
-fn desktop_open_screen_recording_settings() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        open_external(
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-        )
+/// Which privacy pane the audio permission shortcut should open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PermissionPane {
+    Microphone,
+    ScreenCapture,
+}
+
+/// The OS settings URL for a permission pane. macOS keeps microphone and screen/system-audio
+/// capture in different panes, so opening the wrong one leaves the person hunting. Windows has a
+/// single microphone privacy page (loopback capture needs no permission); Linux has none, so the
+/// sound settings are opened by the caller instead.
+fn permission_settings_url(os: &str, pane: PermissionPane) -> Option<&'static str> {
+    match (os, pane) {
+        ("macos", PermissionPane::Microphone) => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        }
+        ("macos", PermissionPane::ScreenCapture) => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        }
+        ("windows", _) => Some("ms-settings:privacy-microphone"),
+        _ => None,
     }
-    #[cfg(target_os = "windows")]
-    {
-        open_external("ms-settings:privacy-microphone")
+}
+
+/// Opens the operating system's own page for fixing audio access: the microphone or Screen &
+/// System Audio Recording pane on macOS, microphone privacy on Windows, and the sound settings
+/// on Linux.
+#[tauri::command]
+fn desktop_open_screen_recording_settings(pane: Option<PermissionPane>) -> Result<(), String> {
+    let pane = pane.unwrap_or(PermissionPane::ScreenCapture);
+    if let Some(url) = permission_settings_url(std::env::consts::OS, pane) {
+        return open_external(url);
     }
     #[cfg(target_os = "linux")]
     {
@@ -2202,20 +2286,12 @@ fn desktop_open_screen_recording_settings() -> Result<(), String> {
             ("systemsettings", &["kcm_pulseaudio"][..]),
             ("pavucontrol", &[][..]),
         ] {
-            if std::process::Command::new(program)
-                .args(args)
-                .spawn()
-                .is_ok()
-            {
+            if spawn_and_reap(std::process::Command::new(program).args(args)).is_ok() {
                 return Ok(());
             }
         }
-        Err("Open your system's sound settings to choose a microphone and output.".into())
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    {
-        Err("Open your operating system's sound settings.".into())
-    }
+    Err("Open your system's sound settings to choose a microphone and output.".into())
 }
 
 #[tauri::command]
@@ -2377,21 +2453,29 @@ fn desktop_resolve_webapp_conflict(
     Ok(())
 }
 
+/// Starts a helper program and reaps it from a background thread, so a long-lived opener
+/// (xdg-open, a settings app) can never be left as a zombie of this process.
+pub(crate) fn spawn_and_reap(command: &mut std::process::Command) -> std::io::Result<()> {
+    let mut child = command.spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 fn open_external(target: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(target).spawn();
+    let result = spawn_and_reap(std::process::Command::new("open").arg(target));
     #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("explorer").arg(target).spawn();
+    let result = spawn_and_reap(std::process::Command::new("explorer").arg(target));
     #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(target).spawn();
+    let result = spawn_and_reap(std::process::Command::new("xdg-open").arg(target));
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    let result: Result<std::process::Child, std::io::Error> = Err(std::io::Error::new(
+    let result: std::io::Result<()> = Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "opening external locations is unsupported on this platform",
     ));
-    result
-        .map(|_| ())
-        .map_err(|error| format!("Could not open this location: {error}"))
+    result.map_err(|error| format!("Could not open this location: {error}"))
 }
 
 fn validate_secret(value: Option<String>) -> Result<Option<String>, String> {
@@ -2549,6 +2633,8 @@ async fn handle_message(
             capture_source,
             processing_mode: _,
         } => {
+            // Starts run one at a time; see `AppState::start_lock`.
+            let _start_guard = state.start_lock.lock().await;
             // One desktop capture session at a time: starting a second would stop the first's
             // capture (the session is shared) while it still looks active, silently losing its audio.
             // The extension retries a start it did not hear back about; the second one must not
@@ -2558,14 +2644,14 @@ async fn handle_message(
             {
                 return true;
             }
-            if capture_source != CaptureSource::Meet
-                && state
-                    .active
-                    .lock()
-                    .await
-                    .iter()
-                    .any(|(id, active)| *id != meeting_id && active.audio.is_some())
-            {
+            let devices_held: HashMap<Uuid, bool> = state
+                .active
+                .lock()
+                .await
+                .iter()
+                .map(|(id, recording)| (*id, recording.audio.is_some()))
+                .collect();
+            if another_desktop_capture_running(&devices_held, meeting_id, capture_source) {
                 let _ = out_tx.send(HelperToExtension::Error {
                     meeting_id: Some(meeting_id),
                     code: ErrorCode::DeviceNotFound,
@@ -3913,6 +3999,82 @@ mod tests {
     use notetaker_core::storage::MeetingStore;
 
     #[test]
+    fn a_second_desktop_capture_is_refused_while_one_is_live_but_meet_audio_is_not() {
+        let live = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let mut held: HashMap<Uuid, bool> = HashMap::new();
+        assert!(!another_desktop_capture_running(
+            &held,
+            other,
+            CaptureSource::DesktopLoopback
+        ));
+        held.insert(live, true);
+        assert!(another_desktop_capture_running(
+            &held,
+            other,
+            CaptureSource::DesktopLoopback
+        ));
+        assert!(!another_desktop_capture_running(
+            &held,
+            live,
+            CaptureSource::DesktopLoopback
+        ));
+        assert!(!another_desktop_capture_running(
+            &held,
+            other,
+            CaptureSource::Meet
+        ));
+        // A Meet recording holds no device, so it never blocks a desktop one.
+        held.insert(live, false);
+        assert!(!another_desktop_capture_running(
+            &held,
+            other,
+            CaptureSource::DesktopLoopback
+        ));
+    }
+
+    #[tokio::test]
+    async fn the_start_lock_makes_check_then_insert_atomic_across_concurrent_starts() {
+        // Mirrors StartRecording: check, await (opening the device), then insert.
+        let held: Arc<Mutex<HashMap<Uuid, bool>>> = Arc::new(Mutex::new(HashMap::new()));
+        let start_lock = Arc::new(Mutex::new(()));
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let (held, start_lock) = (held.clone(), start_lock.clone());
+            tasks.push(tokio::spawn(async move {
+                let _guard = start_lock.lock().await;
+                let id = Uuid::new_v4();
+                let snapshot = held.lock().await.clone();
+                if another_desktop_capture_running(&snapshot, id, CaptureSource::DesktopLoopback) {
+                    return false;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                held.lock().await.insert(id, true);
+                true
+            }));
+        }
+        let mut started = 0;
+        for task in tasks {
+            started += usize::from(task.await.unwrap());
+        }
+        assert_eq!(started, 1, "exactly one concurrent start may win");
+    }
+
+    #[test]
+    fn stopping_a_recording_that_is_not_active_is_an_error_but_a_stop_in_flight_is_not() {
+        assert!(check_stop_target(true, true, false).is_ok());
+        assert!(
+            check_stop_target(false, true, false).is_ok(),
+            "pipeline still draining"
+        );
+        assert!(
+            check_stop_target(false, false, true).is_ok(),
+            "a double click while stopping"
+        );
+        assert!(check_stop_target(false, false, false).is_err());
+    }
+
+    #[test]
     fn a_second_stop_for_the_same_meeting_is_refused_until_the_first_ends() {
         let id = Uuid::new_v4();
         let first = StopGuard::acquire(id).expect("first stop proceeds");
@@ -3953,6 +4115,38 @@ mod tests {
         release_tx.send(()).unwrap();
         drain_task.await.unwrap();
         assert!(queue.close().await.is_none());
+    }
+
+    #[test]
+    fn the_permission_shortcut_opens_the_pane_that_matches_the_missing_permission() {
+        assert!(permission_settings_url("macos", PermissionPane::Microphone)
+            .unwrap()
+            .ends_with("Privacy_Microphone"));
+        assert!(
+            permission_settings_url("macos", PermissionPane::ScreenCapture)
+                .unwrap()
+                .ends_with("Privacy_ScreenCapture")
+        );
+        assert_eq!(
+            permission_settings_url("windows", PermissionPane::ScreenCapture),
+            Some("ms-settings:privacy-microphone")
+        );
+        assert_eq!(
+            permission_settings_url("linux", PermissionPane::Microphone),
+            None
+        );
+    }
+
+    #[test]
+    fn exports_replace_the_file_whole_and_leave_no_temporary_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("note.md");
+        std::fs::write(&target, "old").unwrap();
+        write_file_atomically(&target, b"new contents").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new contents");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        // A destination that cannot be written fails without touching anything else.
+        assert!(write_file_atomically(&dir.path().join("missing").join("x.md"), b"x").is_err());
     }
 
     #[test]

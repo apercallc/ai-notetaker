@@ -208,7 +208,18 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
                 ) : live ? (
                   <BillingActionForm action={openBillingPortal} label={`Switch to ${offer.name}`} pendingLabel="Opening billing portal…" />
                 ) : offer.priceId ? (
-                  <BillingActionForm action={startCheckout} label={`Choose ${offer.id === "hosted_pro" ? "Pro" : "Team"}`} fields={{ plan: offer.id }} />
+                  <>
+                    {offer.yearly && (
+                      <p className="muted-copy">
+                        Or pay yearly: <strong>{offer.yearly.priceLabel ?? "yearly price shown at checkout"}</strong>
+                        {offer.yearly.monthsFree ? ` (${offer.yearly.monthsFree} months free)` : ""}
+                      </p>
+                    )}
+                    <BillingActionForm action={startCheckout} label={`Choose ${offer.id === "hosted_pro" ? "Pro" : "Team"}${offer.yearly ? " monthly" : ""}`} fields={{ plan: offer.id, interval: "month" }} />
+                    {offer.yearly && (
+                      <BillingActionForm action={startCheckout} label={`Choose ${offer.id === "hosted_pro" ? "Pro" : "Team"} yearly`} fields={{ plan: offer.id, interval: "year" }} />
+                    )}
+                  </>
                 ) : (
                   <button type="button" disabled>Not available yet</button>
                 )}

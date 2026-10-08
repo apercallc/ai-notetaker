@@ -1,3 +1,4 @@
+import { ownOrigin, publicUrl } from "@/lib/publicUrl";
 import { NextResponse, type NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 import { isAuthorizedBearer } from "./lib/auth";
@@ -126,8 +127,10 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     }
     if (pathname.startsWith("/api/v1/")) {
       const origin = request.headers.get("origin");
-      const corsHeaders = managedCorsHeaders(origin, request.nextUrl.origin);
-      if (!isManagedCorsOrigin(origin, request.nextUrl.origin)) {
+      // Behind Railway request.nextUrl is the internal address; compare against the public origin.
+      const selfOrigin = ownOrigin(request);
+      const corsHeaders = managedCorsHeaders(origin, selfOrigin);
+      if (!isManagedCorsOrigin(origin, selfOrigin)) {
         return NextResponse.json({ error: "origin not allowed", requestId }, { status: 403, headers: { ...corsHeaders, "x-request-id": requestId } });
       }
       if (request.method === "OPTIONS") {
@@ -202,7 +205,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     });
   }
   if (!user) {
-    const loginUrl = new URL("/login", request.url);
+    const loginUrl = publicUrl("/login", request);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
