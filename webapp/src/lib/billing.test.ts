@@ -656,8 +656,8 @@ describe("plan catalog", () => {
     try {
       const catalog = await getPlanCatalog();
       expect(catalog).toEqual([
-        { id: "hosted_pro", name: "Pro", priceId: "price_catalog_pro", meetingLimit: 300, priceLabel: "$19.50 / month", yearly: null },
-        { id: "hosted_team", name: "Team", priceId: "price_catalog_team", meetingLimit: 2_500, priceLabel: "$49 / month", yearly: null },
+        { id: "hosted_pro", name: "Pro", priceId: "price_catalog_pro", meetingLimit: 300, priceLabel: "$19.50 / month", priceAmount: 19.5, priceCurrency: "USD", yearly: null },
+        { id: "hosted_team", name: "Team", priceId: "price_catalog_team", meetingLimit: 2_500, priceLabel: "$49 / month", priceAmount: 49, priceCurrency: "USD", yearly: null },
       ]);
 
       // The next render is served from the price cache: only the Pro lookup ever hit Stripe.
@@ -782,7 +782,7 @@ describe("annual pricing", () => {
     clearPriceCache();
     try {
       const [pro, team] = await getPlanCatalog();
-      expect(pro?.yearly).toEqual({ priceId: "price_annual_pro_y", priceLabel: "$120 / year", monthsFree: 2 });
+      expect(pro?.yearly).toEqual({ priceId: "price_annual_pro_y", priceLabel: "$120 / year", priceAmount: 120, priceCurrency: "USD", monthsFree: 2 });
       expect(team?.yearly).toBeNull();
     } finally {
       clearPriceCache();

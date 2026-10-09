@@ -4,7 +4,12 @@ import sharedDesktopFixtureBase64 from "../test-fixtures/desktop-audio-transfer-
 import { DEFAULT_SETTINGS, type MeetingRecord } from "../src/types";
 import { IDBFactory } from "fake-indexeddb";
 import { appendBrowserMeetChunk, listBrowserMeetChunks } from "../src/meet/browserStorage";
-import { buildDesktopMigrationArchive, createDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../src/lib/desktopMigration";
+import { sendToBackground } from "../src/lib/sendToBackground";
+import { assertNoActiveRecording, buildDesktopMigrationArchive, createDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../src/lib/desktopMigration";
+
+vi.mock("../src/lib/sendToBackground", () => ({
+  sendToBackground: vi.fn(async () => ({ activeMeeting: null })),
+}));
 
 const completed: MeetingRecord = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -19,6 +24,12 @@ const completed: MeetingRecord = {
 };
 
 describe("desktop migration archive", () => {
+  it("fails closed when the extension cannot confirm recording state", async () => {
+    vi.mocked(sendToBackground).mockRejectedValueOnce(new Error("Extension disconnected"));
+
+    await expect(assertNoActiveRecording()).rejects.toThrow(/Could not confirm whether a recording is active/);
+  });
+
   it("streams saved Meet audio and notes into one archive without deleting source chunks", async () => {
     globalThis.indexedDB = new IDBFactory();
     const id = "2f6dd7bf-1f39-4a7c-a7a7-43c4c46d1c36";
