@@ -1,4 +1,4 @@
-import { FALLBACK_PRICE_AMOUNTS, FAQS, LIMITS, SITE, type FaqTopic } from "./content";
+import { FAQS, LIMITS, SITE, type FaqTopic } from "./content";
 
 type Node = Record<string, unknown>;
 
@@ -37,26 +37,35 @@ export function websiteNode(origin: string): Node {
   };
 }
 
-function monthlyOffer(origin: string, name: string, price: number, description: string): Node {
+function priceOffer(origin: string, name: string, price: number, currency: string, billingDuration: "P1M" | "P1Y", description: string): Node {
+  const serializedPrice = price.toFixed(
+    new Intl.NumberFormat("en-US", { style: "currency", currency }).resolvedOptions().maximumFractionDigits,
+  );
   return {
     "@type": "Offer",
     name,
     description,
-    price: price.toFixed(2),
-    priceCurrency: "USD",
+    price: serializedPrice,
+    priceCurrency: currency,
     url: url(origin, "/pricing"),
     availability: "https://schema.org/InStock",
     priceSpecification: {
       "@type": "UnitPriceSpecification",
-      price: price.toFixed(2),
-      priceCurrency: "USD",
-      billingDuration: "P1M",
+      price: serializedPrice,
+      priceCurrency: currency,
+      billingDuration,
       unitCode: "MON",
     },
   };
 }
 
-export function softwareNode(origin: string): Node {
+export function softwareNode(
+  origin: string,
+  planOffers: { name: "Pro" | "Team"; price: number; currency: string; billingDuration: "P1M" | "P1Y" }[] = [
+    { name: "Pro", price: 12, currency: "USD", billingDuration: "P1M" },
+    { name: "Team", price: 39, currency: "USD", billingDuration: "P1M" },
+  ],
+): Node {
   return {
     "@type": "SoftwareApplication",
     "@id": url(origin, "/#software"),
@@ -74,7 +83,7 @@ export function softwareNode(origin: string): Node {
     featureList: [
       "Chrome extension captures audio from browser meeting tabs, including Google Meet, Zoom, Teams, Slack, and Discord web",
       "Desktop app captures browser and desktop meetings on macOS, Windows, and Linux",
-      "Saves audio on your device before any AI provider is called",
+      "Saves audio on your device before sending it to the selected transcription provider",
       "Keeps your microphone and the meeting's audio as separate channels",
       "Transcript, summary, decisions and action items for every meeting",
       "Local use with your own AI provider keys and no required account",
@@ -91,8 +100,14 @@ export function softwareNode(origin: string): Node {
         url: url(origin, "/how-it-works"),
         availability: "https://schema.org/InStock",
       },
-      monthlyOffer(origin, "Pro", FALLBACK_PRICE_AMOUNTS.hosted_pro, "Cloud sync of notes across your devices for one person."),
-      monthlyOffer(origin, "Team", FALLBACK_PRICE_AMOUNTS.hosted_team, "Team sync: a shared workspace and library for your teammates."),
+      ...planOffers.map((offer) => priceOffer(
+        origin,
+        offer.name,
+        offer.price,
+        offer.currency,
+        offer.billingDuration,
+        offer.name === "Pro" ? "Cloud sync of notes across your devices for one person." : "Team sync: a shared workspace and library for your teammates.",
+      )),
     ],
   };
 }
@@ -138,7 +153,7 @@ export function howToNode(origin: string): Node {
       {
         "@type": "HowToStep",
         name: "Record",
-        text: "Acknowledge the recording notice, then start. The Chrome extension saves tab and microphone audio for later import, while the desktop app can record and process browser or desktop calls locally.",
+        text: "The desktop app asks you to acknowledge the recording notice before you start. The Chrome extension shows a recording reminder and saves tab and microphone audio for later import. The desktop app saves audio locally before sending it to the selected transcription provider.",
       },
       {
         "@type": "HowToStep",

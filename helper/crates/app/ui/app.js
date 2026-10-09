@@ -3,7 +3,7 @@
 
   const invoke = window.__TAURI__?.core?.invoke;
   const listen = window.__TAURI__?.event?.listen;
-  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0, noticeKind: "", noticeSource: "", syncWarning: "" };
+  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", notesPageLimit: 100, recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0, noticeKind: "", noticeSource: "", syncWarning: "" };
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const prettyDate = (value) => {
@@ -215,7 +215,7 @@
     const audio = s.audio;
     const keyReady = processingReady(s.settings);
     const setup = s.credentialStoreError || !keyReady;
-    const ownKeysMessage = `Add your own ${providerName(s.settings.preferences.transcriptionProvider)} (transcription) and ${providerName(s.settings.preferences.summarizationProvider)} (summaries) keys. Your notes never leave this device except for calls to those providers. An account is optional, and a subscription adds cloud sync.`;
+    const ownKeysMessage = `Add your own ${providerName(s.settings.preferences.transcriptionProvider)} (transcription) and ${providerName(s.settings.preferences.summarizationProvider)} (summaries) keys. Audio is saved here before it is sent to those providers. An account is optional; a subscription can sync finished note text to your workspace.`;
     const setupMessage = s.credentialStoreError || ownKeysMessage;
     const startHint = recordingStartHint({
       credentialStoreError: s.credentialStoreError,
@@ -421,7 +421,7 @@
       <section class="card note-detail" id="note-detail">${state.detailError ? `<div class="empty-state"><strong>Note could not open</strong>${esc(state.detailError)}</div>` : state.selectedId ? '<div class="loading-state"><span class="spinner"></span><span>Opening note…</span></div>' : '<div class="empty-state"><strong>Select a recording</strong>Your transcript, summary, and action items will appear here.</div>'}</section>
     </div>`;
     const search = $("#notes-search");
-    search.addEventListener("input", () => { state.notesQuery = search.value; renderMeetingList(state.notesQuery, noteCounts); });
+    search.addEventListener("input", () => { state.notesQuery = search.value; state.notesPageLimit = 100; renderMeetingList(state.notesQuery, noteCounts); });
     renderMeetingList(state.notesQuery, noteCounts);
     $("#meeting-list").scrollTop = listScroll;
     for (const button of document.querySelectorAll("[data-folder-path]")) button.addEventListener("click", () => openFolder(button.dataset.folderPath || null));
@@ -478,6 +478,7 @@
   function openFolder(id) {
     state.currentFolderId = id;
     state.notesQuery = "";
+    state.notesPageLimit = 100;
     state.selectedId = null;
     state.detail = null;
     state.detailError = null;
@@ -497,9 +498,21 @@
     const childFolders = needle ? [] : folders.filter((folder) => folder.parentId === state.currentFolderId)
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
     const folderRows = childFolders.map((folder) => { const count = noteCounts.get(folder.id) || 0; return `<button class="folder-list-item" data-open-folder="${esc(folder.id)}"><span aria-hidden="true">▤</span><strong>${esc(folder.name)}</strong><span>${count} ${count === 1 ? "note" : "notes"}</span></button>`; }).join("");
-    list.innerHTML = folderRows + (filtered.length ? filtered.map((meeting) => `<button class="meeting-list-item ${meeting.id === state.selectedId ? "selected" : ""}" data-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><span>${esc(prettyDate(meeting.startedAt))} · ${esc(statusLabel(meeting.status))}</span></button>`).join("") : !folderRows ? `<div class="empty-state">${state.snapshot.meetings.length ? needle ? "No matching notes." : "This folder is empty." : "No recordings yet."}</div>` : "");
+    const visible = filtered.slice(0, state.notesPageLimit);
+    const more = filtered.length > visible.length
+      ? `<button class="load-more-meetings" type="button" id="load-more-meetings">Show more notes <span>${visible.length} of ${filtered.length}</span></button>`
+      : "";
+    list.innerHTML = folderRows + (visible.length ? visible.map((meeting) => `<button class="meeting-list-item ${meeting.id === state.selectedId ? "selected" : ""}" data-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><span>${esc(prettyDate(meeting.startedAt))} · ${esc(statusLabel(meeting.status))}</span></button>`).join("") : !folderRows ? `<div class="empty-state">${state.snapshot.meetings.length ? needle ? "No matching notes." : "This folder is empty." : "No recordings yet."}</div>` : "") + more + `<span class="sr-only" role="status" aria-live="polite">Showing ${visible.length} of ${filtered.length} notes.</span>`;
     for (const button of list.querySelectorAll("[data-open-folder]")) button.addEventListener("click", () => openFolder(button.dataset.openFolder));
     for (const button of list.querySelectorAll("[data-id]")) button.addEventListener("click", () => openMeeting(button.dataset.id));
+    $("#load-more-meetings", list)?.addEventListener("click", () => {
+      const scrollTop = list.scrollTop;
+      state.notesPageLimit += 100;
+      renderMeetingList(state.notesQuery, noteCounts);
+      list.scrollTop = scrollTop;
+      const nextPageButton = $("#load-more-meetings", list);
+      (nextPageButton || list.querySelector("[data-id]:last-of-type"))?.focus();
+    });
   }
 
   async function openMeeting(id) {
@@ -851,7 +864,7 @@
       ? ["Offline", ""]
       : !s.hasHostedSession ? ["Sign in again", "warn"] : needsPlan ? ["Needs plan", "warn"] : ["Signed in", "ok"];
     const syncOn = state.snapshot.webappSync.configured && !needsPlan;
-    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : needsPlan ? "Cloud sync is off." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Audio never leaves this device." : needsPlan ? "Your notes stay on this device, and anything you make now uploads when a plan is active. Notes already in your account stay readable on the web, and still download here. Choose a Pro or Team plan to sync again." : "Your notes stay on this device. Sign in if you want an account; a subscription adds cloud sync."}</p>${needsPlan ? '<div class="inline-actions"><button type="button" class="primary-button" id="upgrade-plan">See plans</button></div>' : ""}`;
+    const cloudLine = `<p class="privacy-note cloud-status"><strong>${syncOn ? "Cloud sync is on." : needsPlan ? "Cloud sync is off." : "You are offline."}</strong> ${syncOn ? "Finished notes sync with your workspace, the web app and your other devices. Deleting a note here removes it from this device only. Raw audio is saved locally first, then sent to your selected transcription provider; sync does not upload audio." : needsPlan ? "Your notes stay on this device, and anything you make now uploads when a plan is active. Notes already in your account stay readable on the web, and still download here. Raw audio is saved locally first, then sent to your selected transcription provider. Choose a Pro or Team plan to sync notes again." : "Your notes stay on this device. Sign in if you want an account; a subscription adds cloud sync. Raw audio is saved locally first, then sent to your selected transcription provider."}</p>${needsPlan ? '<div class="inline-actions"><button type="button" class="primary-button" id="upgrade-plan">See plans</button></div>' : ""}`;
     const syncState = state.snapshot.webappSync;
     const defaultOpen = { processing: Boolean(conflicts.length || syncState.lastError) || (!account && providersReady), providers: !providersReady, "note-style": false, import: false, about: false };
     const isOpen = (id) => (id in state.settingsOpen ? state.settingsOpen[id] : defaultOpen[id]);

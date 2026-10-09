@@ -1,5 +1,24 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Repository-wide audit — 2026-10-09
+
+- [x] Correct privacy copy to say raw audio is saved locally before it is sent
+      to the selected transcription provider; note sync excludes raw audio and
+      provider keys remain on the device. Scope managed processing separately.
+- [x] Align recording-consent copy with the desktop confirmation and extension
+      reminder, and update comparison pages for competitors that also offer
+      botless capture.
+- [x] Keep pricing metadata synchronized with resolved monthly and yearly
+      Stripe amounts; remove fixed prices from copy that could become stale.
+- [x] Fail extension archive export closed when recorder state cannot be read.
+- [x] Limit initial desktop library rendering to 100 notes with a clear
+      progressive-load control. Extension archive transcript search/indexing
+      remains tracked in the transcript-write follow-up below.
+- [x] Refresh release evidence to the published v0.23.0 and correct the
+      roadmap's active architecture reference to the desktop-first spec.
+- [ ] Resolve native audio-writer backpressure without blocking capture or
+      silently dropping samples; tracked in “Desktop audio writer backpressure”.
+
 ## Cross-site browser recorder controls — 2026-10-05
 
 - [x] Add a floating recorder control for supported Google Meet, Microsoft
@@ -66,7 +85,7 @@
       passing on `3d971c1`. It reconciled the follow-up code fix into the
       published v0.18.10 release.
 
-## v0.18.8 release and Mac update — 2026-10-05
+## Historical v0.18.8–v0.18.11 releases and Mac update — 2026-10-05
 
 - [x] Publish the v0.18.8 desktop and extension release. Workflow
       [37284514728](https://github.com/apercallc/ai-notetaker/actions/runs/37284514728)
@@ -172,6 +191,16 @@
       A blocked OS API call cannot be cancelled safely; it is not duplicated.
       Windows/macOS slow-device behavior and rendered accessibility still need
       device acceptance.
+
+## Desktop audio writer backpressure — 2026-10-09
+
+- [ ] Bound the native frame-delivery queue without blocking the OS capture
+      callback or silently dropping audio. Disk stalls currently let queued
+      frames accumulate in memory while a single delivery thread writes them.
+      Choose and implement an audio-safe overflow policy, then verify on slow
+      storage and real capture devices. A naive bounded blocking queue can
+      stall native capture callbacks and lose audio, so this needs an explicit
+      failure and recovery design first.
 
 ## Download page and test reliability — 2026-10-04
 
@@ -829,11 +858,12 @@ Spec: [`docs/superpowers/specs/2026-09-30-ux-overhaul-design.md`](docs/superpowe
       Large-table index-build impact was not benchmarked, and no 100M-user load
       certification is claimed.
 
-This tracks the current implementation baseline, the approved dual-mode
+This tracks the current implementation baseline, the approved desktop-first
 product migration, and the remaining production gates. The current target
 architecture is
-[`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`](docs/superpowers/specs/2026-09-24-dual-mode-product-design.md);
-the 2026-09-21 architecture is historical.
+[`docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`](docs/superpowers/specs/2026-10-03-desktop-first-product-design.md).
+The 2026-09-24 dual-mode and 2026-09-21 architecture documents are historical
+implementation baselines.
 
 Check items off as they land. If a decision here turns out wrong once
 you're building, update the spec doc first, then this file — don't let
@@ -1895,5 +1925,5 @@ Consciously deferred (why):
   pass before calling that sub-project done, not just at the very end.
 - If scope changes (a gap turns out bigger or smaller than expected),
   update the current design spec
-  (`docs/superpowers/specs/2026-09-24-dual-mode-product-design.md`)
+  (`docs/superpowers/specs/2026-10-03-desktop-first-product-design.md`)
   first, then reflect the change here.

@@ -5,17 +5,18 @@ Private, botless meeting notes: no bot joins your call.
 AI Notetaker is one desktop app for macOS, Windows, and Linux. It records your
 microphone and the meeting audio (Google Meet, Teams, Zoom, Discord, Slack, or any
 app) on your device, saves the audio first, then turns it into a transcript, summary,
-and action items. Everything works the same on all three systems, and no browser
-extension is required.
+and action items. Capture options and system permissions vary by platform; real
+call acceptance is still in progress. No browser extension is required for the
+desktop workflow.
 
 Notes are made with **your own keys**: paste your own transcription and summary
 API keys. Free, account-free, and audio goes straight from your device to the
 providers you pick.
 
 - **Free account** — optional. Sign in to manage your devices and your data.
-- **Subscription** — cloud sync of your notes across devices (Pro, $12/month)
-  and team sync with a shared workspace (Team, $39/month). Recording and
-  your own keys are never paid. See [pricing](https://ai-notetaker.apercallc.com/pricing)
+- **Subscription** — cloud sync of your notes across devices (Pro) and team
+  sync with a shared workspace (Team). Recording and your own keys are never
+  paid. See [current pricing](https://ai-notetaker.apercallc.com/pricing)
   and the [`llms.txt`](https://ai-notetaker.apercallc.com/llms.txt) fact sheet.
 
 Optional workspace sync copies finished notes to the web app and brings workspace
@@ -149,7 +150,7 @@ provider keys or recordings.
   provider tier and test it again in Settings. Do not put provider keys in
   the webapp.
 - **A recording was interrupted:** open the desktop app and use its recovery
-  prompt. Raw audio remains local.
+  prompt. The locally saved audio remains available for recovery.
 - **An existing extension says "Helper not detected":** launch the legacy
   helper and reload the extension. New desktop users do not need Native
   Messaging registration.

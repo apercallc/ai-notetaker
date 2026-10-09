@@ -115,10 +115,11 @@ describe("structured data", () => {
 });
 
 describe("facts stay consistent", () => {
-  it("states the real fallback prices in the FAQ and sells sync, not hosted AI", () => {
+  it("keeps the FAQ price-independent and sells sync, not hosted AI", () => {
     const cost = FAQS.find((faq) => faq.question.startsWith("How much"))?.answer ?? "";
-    expect(cost).toContain(FALLBACK_PRICE_LABELS.hosted_pro);
-    expect(cost).toContain(FALLBACK_PRICE_LABELS.hosted_team);
+    expect(cost).toContain("current prices");
+    expect(cost).not.toContain(FALLBACK_PRICE_LABELS.hosted_pro);
+    expect(cost).not.toContain(FALLBACK_PRICE_LABELS.hosted_team);
     expect(cost).not.toMatch(/trial|meetings or|Hosted AI/i);
   });
 
@@ -159,7 +160,8 @@ describe("crawler surfaces", () => {
     expect(response.headers.get("content-type")).toContain("text/plain");
     const body = await response.text();
     expect(body).toContain("# AI Notetaker");
-    expect(body).toContain(FALLBACK_PRICE_LABELS.hosted_pro);
+    expect(body).toContain("See the pricing page for current prices");
+    expect(body).not.toContain(FALLBACK_PRICE_LABELS.hosted_pro);
     expect(body).toContain(`${ORIGIN}/pricing`);
     expect(body).toContain(FAQS[0].question);
     delete process.env.MANAGED_HOSTING;

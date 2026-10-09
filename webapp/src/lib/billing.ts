@@ -311,12 +311,16 @@ export interface PlanOffer {
   meetingLimit: number;
   /** Formatted price such as "$19.00 / month", or null when it cannot be resolved. */
   priceLabel: string | null;
+  /** Numeric price and ISO currency resolved from Stripe or a parseable fallback label. */
+  priceAmount: number | null;
+  priceCurrency: string | null;
   /** Annual billing, present only when a yearly Stripe price is configured. */
-  yearly: { priceId: string; priceLabel: string | null; monthsFree: number | null } | null;
+  yearly: { priceId: string; priceLabel: string | null; priceAmount: number | null; priceCurrency: string | null; monthsFree: number | null } | null;
 }
 
 const PRICE_CACHE_TTL_MS = 10 * 60 * 1_000;
-const priceCache = new Map<string, { expires: number; label: string | null }>();
+type ResolvedPrice = { label: string | null; amount: number | null; currency: string | null };
+const priceCache = new Map<string, { expires: number } & ResolvedPrice>();
 
 const ZERO_DECIMAL_CURRENCIES = new Set(["bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf"]);
 
@@ -332,18 +336,31 @@ export function formatStripePrice(unitAmount: number, currency: string, interval
   return interval ? `${formatted} / ${interval}` : formatted;
 }
 
-async function lookupPriceLabel(priceId: string, configuredLabel: string | undefined): Promise<string | null> {
+function parseUsdLabel(label: string | undefined): ResolvedPrice {
+  const match = label?.trim().match(/^\$\s*([\d,]+(?:\.\d{1,2})?)\s*\/\s*(?:month|year)$/iu);
+  return match
+    ? { label: label!.trim(), amount: Number(match[1].replace(/,/gu, "")), currency: "USD" }
+    : { label: label?.trim() || null, amount: null, currency: null };
+}
+
+async function lookupPrice(priceId: string, configuredLabel: string | undefined): Promise<ResolvedPrice> {
   const cached = priceCache.get(priceId);
-  if (cached && cached.expires > Date.now()) return cached.label;
-  let label: string | null = configuredLabel?.trim() || null;
+  if (cached && cached.expires > Date.now()) return cached;
+  let result = parseUsdLabel(configuredLabel);
   const key = process.env.STRIPE_SECRET_KEY;
   if (key) {
     try {
       const response = await fetch(stripeUrl(`prices/${encodeURIComponent(priceId)}`), { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(5_000) });
       if (response.ok) {
         const body = (await response.json()) as { unit_amount?: unknown; currency?: unknown; recurring?: { interval?: unknown } | null };
-        if (typeof body.unit_amount === "number" && typeof body.currency === "string") {
-          label = formatStripePrice(body.unit_amount, body.currency, typeof body.recurring?.interval === "string" ? body.recurring.interval : null);
+        if (typeof body.unit_amount === "number" && Number.isSafeInteger(body.unit_amount) && body.unit_amount >= 0 && typeof body.currency === "string" && /^[a-z]{3}$/iu.test(body.currency)) {
+          const currency = body.currency.toUpperCase();
+          const amount = ZERO_DECIMAL_CURRENCIES.has(currency.toLowerCase()) ? body.unit_amount : body.unit_amount / 100;
+          result = {
+            label: formatStripePrice(body.unit_amount, currency, typeof body.recurring?.interval === "string" ? body.recurring.interval : null),
+            amount,
+            currency,
+          };
         }
       }
     } catch {
@@ -351,8 +368,8 @@ async function lookupPriceLabel(priceId: string, configuredLabel: string | undef
     }
   }
   // Cache failures briefly so a Stripe outage does not add a 5s stall to every page load.
-  priceCache.set(priceId, { expires: Date.now() + (label ? PRICE_CACHE_TTL_MS : 30_000), label });
-  return label;
+  priceCache.set(priceId, { expires: Date.now() + (result.label ? PRICE_CACHE_TTL_MS : 30_000), ...result });
+  return result;
 }
 
 export function clearPriceCache(): void {
@@ -381,15 +398,19 @@ export async function getPlanCatalog(): Promise<PlanOffer[]> {
   return Promise.all(entries.map(async ({ id, label, yearlyLabel }) => {
     const priceId = priceIdFor(id);
     const yearlyId = priceIdFor(id, "year");
-    const priceLabel = priceId ? await lookupPriceLabel(priceId, label) : null;
-    const yearlyPriceLabel = yearlyId ? await lookupPriceLabel(yearlyId, yearlyLabel) : null;
+    const price = priceId ? await lookupPrice(priceId, label) : parseUsdLabel(label);
+    const yearlyPrice = yearlyId ? await lookupPrice(yearlyId, yearlyLabel) : null;
     return {
       id,
       name: planLabel(id),
       priceId: priceId ?? null,
       meetingLimit: PLAN_MEETING_LIMITS[id],
-      priceLabel,
-      yearly: yearlyId ? { priceId: yearlyId, priceLabel: yearlyPriceLabel, monthsFree: monthsFree(priceLabel, yearlyPriceLabel) } : null,
+      priceLabel: price.label,
+      priceAmount: price.amount,
+      priceCurrency: price.currency,
+      yearly: yearlyId && yearlyPrice
+        ? { priceId: yearlyId, priceLabel: yearlyPrice.label, priceAmount: yearlyPrice.amount, priceCurrency: yearlyPrice.currency, monthsFree: monthsFree(price.label, yearlyPrice.label) }
+        : null,
     };
   }));
 }

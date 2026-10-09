@@ -1,11 +1,19 @@
 # Release and production acceptance
 
-Updated 2026-10-05. Keep repository/CI evidence separate from install,
+Updated 2026-10-09. Keep repository/CI evidence separate from install,
 provider, account, and physical-device acceptance. The current public release
-is v0.18.11. This does not inherit older app acceptance or prove real audio
-capture.
+is v0.23.0. Its release workflow and artifacts are current; this does not
+inherit older app acceptance or prove real audio capture.
 
 ## Verified release evidence
+
+- [x] GitHub Release [`v0.23.0`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.23.0)
+      was published on 2026-10-08. Release workflow
+      [37841573122](https://github.com/apercallc/ai-notetaker/actions/runs/37841573122)
+      passed release metadata validation, webapp image and extension builds,
+      all four native target builds, and GitHub asset publication. Chrome Web
+      Store upload was skipped. This does not prove install or recording
+      acceptance.
 
 - [x] GitHub Release [`v0.18.2`](https://github.com/apercallc/ai-notetaker/releases/tag/v0.18.2)
       is published with macOS arm64 and x86_64 DMGs, Windows x64 installer,
@@ -120,7 +128,7 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       The mounted app reports version 0.18.11 and passes strict bundle signature
       integrity verification. The signature is ad hoc with no Team ID; this is
       not Developer ID signing or notarization. No install or launch was tried.
-- [ ] Open the v0.18.11 first-run UI and finish macOS arm64 uninstall checks;
+- [ ] Open the v0.23.0 first-run UI and finish macOS arm64 uninstall checks;
       install and verify macOS x86_64,
       Windows x64, and Debian/Ubuntu x64 builds. Native Messaging manifest
       inspection does not prove a browser-to-host connection.
@@ -143,7 +151,7 @@ do not authenticate the publisher. See the [unsigned install guide](../unsigned-
       records remain intact and imported audio stays on separate tracks.
 - [ ] Publish the Chrome Web Store listing and verify store installation,
       permissions, screenshots, extension ID, and Native Messaging origin.
-      Store upload jobs through `v0.18.11` were skipped; manual ZIP
+      Store upload was skipped for `v0.23.0`; manual ZIP
       installation remains available. The published extension ID is absent
       from this Mac's Chrome Default profile, so the registered host has not
       been exercised through Chrome.

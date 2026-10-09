@@ -18,7 +18,7 @@ export default async function RootPage() {
   // Self-hosted instances have no public front page: straight to the notes,
   // where the proxy has already required a session.
   if (!managedHostingEnabled()) redirect("/meetings");
-  const context = await marketingContext();
+  const [context, prices] = await Promise.all([marketingContext(), planPrices()]);
   if (context.signedIn) redirect("/meetings");
   const origin = siteOrigin();
   return (
@@ -28,12 +28,12 @@ export default async function RootPage() {
           organizationNode(origin),
           websiteNode(origin),
           webPageNode(origin, "/", TITLE, SITE.metaDescription),
-          softwareNode(origin),
+          softwareNode(origin, prices.structuredOffers),
           howToNode(origin),
           faqNode(origin),
         ]}
       />
-      <Home context={context} prices={await planPrices()} />
+      <Home context={context} prices={prices} />
     </MarketingShell>
   );
 }

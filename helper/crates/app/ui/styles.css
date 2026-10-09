@@ -322,6 +322,9 @@ h3 { font-size: 15px; font-weight: 650; }
 .meeting-list-item:hover, .meeting-list-item.selected { background: var(--surface-soft); }
 .meeting-list-item strong { display: block; overflow: hidden; margin-bottom: 4px; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .meeting-list-item span { color: var(--muted); font-size: 12px; }
+.load-more-meetings { display: flex; justify-content: space-between; width: 100%; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; color: var(--accent); background: transparent; text-align: left; }
+.load-more-meetings:hover { background: var(--surface-soft); }
+.load-more-meetings span { color: var(--muted); font-size: 12px; }
 .note-detail { padding: 24px 28px; }
 .note-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .note-detail-head time { display: block; margin-top: 8px; color: var(--muted); font-size: 13px; }

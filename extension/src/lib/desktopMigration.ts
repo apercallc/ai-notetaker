@@ -192,8 +192,19 @@ export function createDesktopMigrationArchive(
 
 /** Exporting while a call is being recorded would snapshot audio that is still changing. */
 export async function assertNoActiveRecording(): Promise<void> {
-  const state = await sendToBackground<{ activeMeeting?: unknown } | undefined>({ type: "GET_STATE" }).catch(() => undefined);
-  if (state?.activeMeeting) throw new Error("A recording is in progress. Stop it before exporting so the archive includes its complete audio.");
+  let state: { activeMeeting?: unknown } | undefined;
+  try {
+    state = await sendToBackground<{ activeMeeting?: unknown } | undefined>({ type: "GET_STATE" });
+  } catch {
+    throw new Error("Could not confirm whether a recording is active. Retry after the extension reconnects; no archive was created.");
+  }
+  if (!state || !Object.hasOwn(state, "activeMeeting")) {
+    throw new Error("Could not confirm whether a recording is active. Retry after the extension reconnects; no archive was created.");
+  }
+  if (state.activeMeeting === undefined) {
+    throw new Error("Could not confirm whether a recording is active. Retry after the extension reconnects; no archive was created.");
+  }
+  if (state.activeMeeting !== null) throw new Error("A recording is in progress. Stop it before exporting so the archive includes its complete audio.");
 }
 
 export function downloadDesktopMigrationArchive(archive: DesktopMigrationArchive): void {

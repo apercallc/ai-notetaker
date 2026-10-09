@@ -10,10 +10,10 @@ export const SITE = {
   name: "AI Notetaker",
   tagline: "Meeting notes without the meeting bot.",
   description:
-    "One desktop app for macOS, Windows, and Linux records browser and desktop meetings, saves the audio on your device, and makes your notes with your own AI provider keys. An optional Chrome extension can record a browser tab. A free account lets you sign in and manage your devices; a subscription adds cloud sync and team sync. Raw audio and provider keys stay on the device.",
+    "One desktop app for macOS, Windows, and Linux records browser and desktop meetings and saves audio locally before transcription. Audio is sent to the AI provider you choose; your provider keys stay on your device. An optional Chrome extension can record a browser tab. A free account lets you manage devices; a subscription adds cloud and team sync.",
   /** ~155 characters: the snippet search results show. */
   metaDescription:
-    "Botless AI meeting notes for Mac, Windows and Linux. Records on your device, free with your own AI keys. Optional cloud and team sync from $12/month.",
+    "Botless AI meeting notes for Mac, Windows and Linux. Audio is saved locally before your chosen AI provider transcribes it. Optional personal and team sync.",
   repoUrl: "https://github.com/apercallc/ai-notetaker",
   releasesUrl: "https://github.com/apercallc/ai-notetaker/releases/latest",
   licenseUrl: "https://github.com/apercallc/ai-notetaker/blob/main/LICENSE",
@@ -65,12 +65,12 @@ export const FAQS: Faq[] = [
   {
     question: "Do I need an account?",
     topics: ["setup", "pricing"],
-    answer: `Nothing about recording or notes needs an account. The desktop app records on your device and makes your notes with your own transcription and summary API keys, so the app is free and works with no AI Notetaker login. A free account lets you sign in and manage your devices and data. A subscription adds cloud sync of finished notes across your devices and, with Team, shared workspaces. Your provider keys and raw audio never leave your device.`,
+    answer: `Nothing about recording or notes needs an account. The desktop app saves audio on your device before sending it to your selected transcription provider, then makes notes with your selected summary provider. The app is free and works with no AI Notetaker login. A free account lets you sign in and manage your devices and data. A subscription adds cloud sync of finished notes across your devices and, with Team, shared workspaces. Provider keys stay on your device; note sync does not include raw audio.`,
   },
   {
     question: "How much does AI Notetaker cost?",
     topics: ["pricing"],
-    answer: `The desktop app is free with your own AI provider keys (the providers you choose bill you directly), and needs no account. A free account is also free. Cloud sync is a subscription: Pro is ${FALLBACK_PRICE_LABELS.hosted_pro} for one person, and Team is ${FALLBACK_PRICE_LABELS.hosted_team} for a shared workspace. Team adds shared libraries, an activity log and retention controls for workspace owners. Cancel any time from the billing page.`,
+    answer: "The desktop app is free with your own AI provider keys (the providers you choose bill you directly), and needs no account. A free account is also free. Cloud sync is a subscription: Pro syncs one person's notes, and Team adds a shared workspace, activity log and retention controls for workspace owners. See the pricing page for current prices. Cancel any time from the billing page.",
   },
   {
     question: "Will I lose my notes if I clear my browser history?",
@@ -139,11 +139,11 @@ export const FAQS: Faq[] = [
   },
   {
     question: "Where is my audio stored?",
-    answer: `On your device, always. Raw audio is saved locally before anything is sent anywhere, and AI Notetaker never uploads your recordings. Only the text of finished notes syncs to the cloud, and only if you subscribe and turn sync on.`,
+    answer: `A raw copy is saved on your device first. In local BYOK mode, the app sends audio to the transcription provider you choose, whose terms govern processing and retention. Note sync uploads finished text only. If project-operated managed processing is enabled, its privacy notice explains the temporary upload path.`,
   },
   {
     question: "Which AI providers process my meetings?",
-    answer: `Whichever you choose. Audio and text go only to the providers you select, using the keys you supply, under their terms. We never receive your keys or recordings.`,
+    answer: `In local BYOK mode, the app saves raw audio locally before sending it directly to your selected transcription provider, and sends text to your selected summary provider. Provider terms and retention rules apply, and your keys stay on your device. If project-operated managed processing is enabled, audio is temporarily uploaded for processing; see the Privacy notice for details.`,
   },
   {
     question: "Can I record browser meetings in Google Meet, Zoom, Teams, Slack or Discord?",
@@ -178,7 +178,7 @@ export const FAQS: Faq[] = [
 ];
 
 export const NOT_LEGAL_ADVICE =
-  "Always tell participants you are recording and get the consent that your local law and workplace policy require. AI Notetaker asks you to acknowledge this before every recording. It is not legal advice.";
+  "Always tell participants you are recording and get the consent that your local law and workplace policy require. The desktop app asks you to acknowledge the recording notice before starting; the extension shows a reminder. These prompts are not legal advice.";
 
 /**
  * A monitored support address, set as SUPPORT_EMAIL on the deployment. It is

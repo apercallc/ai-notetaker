@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { getPlanCatalog } from "@/lib/billing";
-import { FALLBACK_PRICE_LABELS } from "./content";
+import { FALLBACK_PRICE_AMOUNTS, FALLBACK_PRICE_LABELS } from "./content";
 import { Icon } from "./Icon";
 
 export interface YearlyDisplay {
@@ -12,6 +12,7 @@ export interface YearlyDisplay {
 export interface PlanDisplay {
   hosted_pro: string;
   hosted_team: string;
+  structuredOffers: { name: "Pro" | "Team"; price: number; currency: string; billingDuration: "P1M" | "P1Y" }[];
   /** Present only for plans that have a yearly Stripe price configured. */
   yearly?: { hosted_pro?: YearlyDisplay; hosted_team?: YearlyDisplay };
 }
@@ -29,9 +30,28 @@ export async function planPrices(): Promise<PlanDisplay> {
       return yearly?.priceLabel ? { label: yearly.priceLabel, monthsFree: yearly.monthsFree } : undefined;
     };
     const yearly = { hosted_pro: yearlyOf("hosted_pro"), hosted_team: yearlyOf("hosted_team") };
-    return { hosted_pro: label("hosted_pro"), hosted_team: label("hosted_team"), ...(yearly.hosted_pro || yearly.hosted_team ? { yearly } : {}) };
+    const structuredOffers: PlanDisplay["structuredOffers"] = [];
+    for (const id of ["hosted_pro", "hosted_team"] as const) {
+      const plan = catalog.find((item) => item.id === id);
+      const name = id === "hosted_pro" ? "Pro" : "Team";
+      if (plan?.priceAmount !== null && plan?.priceAmount !== undefined && plan.priceCurrency) {
+        structuredOffers.push({ name, price: plan.priceAmount, currency: plan.priceCurrency, billingDuration: "P1M" });
+      } else if (label(id) === FALLBACK_PRICE_LABELS[id]) {
+        structuredOffers.push({ name, price: FALLBACK_PRICE_AMOUNTS[id], currency: "USD", billingDuration: "P1M" });
+      }
+      if (plan?.yearly?.priceAmount !== null && plan?.yearly?.priceAmount !== undefined && plan.yearly.priceCurrency) {
+        structuredOffers.push({ name, price: plan.yearly.priceAmount, currency: plan.yearly.priceCurrency, billingDuration: "P1Y" });
+      }
+    }
+    return { hosted_pro: label("hosted_pro"), hosted_team: label("hosted_team"), structuredOffers, ...(yearly.hosted_pro || yearly.hosted_team ? { yearly } : {}) };
   } catch {
-    return { ...FALLBACK_PRICE_LABELS };
+    return {
+      ...FALLBACK_PRICE_LABELS,
+      structuredOffers: [
+        { name: "Pro", price: FALLBACK_PRICE_AMOUNTS.hosted_pro, currency: "USD", billingDuration: "P1M" },
+        { name: "Team", price: FALLBACK_PRICE_AMOUNTS.hosted_team, currency: "USD", billingDuration: "P1M" },
+      ],
+    };
   }
 }
 
@@ -63,7 +83,7 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
         <ul className="mk-checks">
           <li><Icon as={Check} /><span>Record browser and desktop meetings with no bot</span></li>
           <li><Icon as={Check} /><span>Notes made with your own AI providers, billed to you directly</span></li>
-          <li><Icon as={Check} /><span>Keys and audio stay on your device</span></li>
+          <li><Icon as={Check} /><span>Audio is saved locally before provider transcription; keys stay on your device</span></li>
           <li><Icon as={Check} /><span>Optional free account: sign in, manage your devices and your data</span></li>
           <li><Icon as={Check} /><span>Open source</span></li>
           <li className="mk-checks-off"><span>Not included: sync across devices, shared team library, integrations</span></li>
@@ -83,7 +103,7 @@ export function Plans({ prices, signupOpen }: { prices: PlanDisplay; signupOpen:
           <li><Icon as={Check} /><span>Searchable library of your notes on the web</span></li>
           <li><Icon as={Check} /><span>Folders, speaker names, Trash and data export</span></li>
           <li><Icon as={Check} /><span>Slack, Notion, webhooks and an MCP connection for AI assistants</span></li>
-          <li><Icon as={Check} /><span>Recordings never leave your device</span></li>
+          <li><Icon as={Check} /><span>Finished note text syncs; raw audio is not included</span></li>
         </ul>
         <Link className="mk-btn mk-btn--solid" href={startPlan("hosted_pro")}>{signupOpen ? "Start Pro" : "Get the desktop app"}</Link>
       </article>

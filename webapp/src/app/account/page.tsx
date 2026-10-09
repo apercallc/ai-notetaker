@@ -185,7 +185,7 @@ export default async function AccountPage({
                 <h2>Privacy</h2>
                 <ul className="muted-copy settings-list">
                   <li>Workspace members can see your notes. Shared links work until you revoke them or they expire.</li>
-                  <li>We never receive your audio. Recordings stay on your device and never appear in your library.</li>
+                  <li>The synced library does not contain raw audio. In local BYOK mode, audio is saved on your device before it is sent to your selected transcription provider.</li>
                   <li>
                     Notes and transcripts are{" "}
                     {workspace.retentionDays === null

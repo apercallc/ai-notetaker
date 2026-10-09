@@ -150,8 +150,10 @@ export function Home({ context, prices }: { context: ShellContext; prices: PlanD
             <div>
               <dt><Icon as={Cloud} size={22} />With a subscription</dt>
               <dd>
-                Only the text of finished notes syncs to your workspace. We never receive your recordings or your keys,
-                and every workspace is isolated from the others.
+                In local BYOK mode, only finished note text syncs to your workspace; raw audio is saved locally before
+                it goes to your selected transcription provider, and provider keys stay on your device. If managed
+                processing is enabled, audio is temporarily uploaded for processing; see the Privacy notice. Every
+                workspace is isolated.
               </dd>
             </div>
             <div>

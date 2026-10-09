@@ -45,7 +45,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
             <div className="mk-guide">
               <h3 className="mk-h3">Use your provider API keys</h3>
               <ul className="mk-bullets">
-                <li>choose and pay your transcription and summary providers directly</li>
+                <li>choose and pay your transcription and summary providers directly; audio is sent to your chosen transcription provider</li>
                 <li>keep provider keys in your operating-system credential store</li>
                 <li>record browser or desktop calls without an AI Notetaker account</li>
                 <li>in desktop, save raw audio and notes on this device first</li>
@@ -57,7 +57,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
                 <li>sign in from the desktop app and choose a Pro or Team plan</li>
                 <li>finished desktop notes sync to the web app and your other devices</li>
                 <li>workspace notes are copied into the desktop library</li>
-                <li>raw audio and provider keys stay on this device</li>
+                <li>raw audio is saved locally before transcription; provider keys stay on this device</li>
               </ul>
             </div>
           </div>
@@ -90,7 +90,7 @@ export function HowItWorksView({ context }: { context: ShellContext }) {
             </li>
             <li className="mk-step">
               <h3 className="mk-h3">Sign in from the desktop app</h3>
-              <p>Open Settings → Account &amp; sync and sign in, or use the one-time code from your account page. Finished desktop notes then sync; raw audio and provider keys stay local.</p>
+              <p>Open Settings → Account &amp; sync and sign in, or use the one-time code from your account page. Finished desktop notes then sync; raw audio is not included, and provider keys stay local.</p>
             </li>
           </ol>
         </div>
@@ -667,8 +667,8 @@ export function PrivacyView() {
             <ul>
               <li>Raw microphone and meeting audio is saved on your device before any provider request. The two channels stay separate.</li>
               <li>Your provider keys stay in the desktop app&apos;s operating-system credential store. Existing extension users keep their keys in protected browser storage. We never receive them.</li>
-              <li>Audio and text go directly to the providers you configure, under their terms and retention rules.</li>
-              <li>If you subscribe and turn on sync, finished desktop note text syncs to your workspace and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio and provider keys remain on this device.</li>
+              <li>In local BYOK mode, audio and text go directly to the providers you configure, under their terms and retention rules. If project-operated managed processing is enabled, audio may be temporarily uploaded for processing as described in the service privacy terms.</li>
+              <li>If you subscribe and turn on sync, finished desktop note text syncs to your workspace and workspace notes are copied into the desktop library. Web edits refresh workspace copies on sync; desktop-origin notes are protected from automatic overwrites. Deletions and settings do not sync back. Raw audio is not included in note sync; a local copy remains available for recovery, and provider keys stay on this device.</li>
               <li>We do not receive local-mode recordings, transcripts or notes, and local mode sends us no telemetry or error reports.</li>
               <li>The desktop app keeps itself up to date. It checks for a newer release on GitHub (about every six hours, and at startup). On macOS and Windows it installs update packages signed with the project&apos;s update key and restarts only when nothing is recording; on Linux it opens the release page for you to download the new .deb. GitHub, not us, receives your IP address and the app version. Turn automatic updates off in the tray menu and the app only checks when you ask.</li>
               <li>Google Drive export is optional. Google receives what you send it.</li>
@@ -680,7 +680,7 @@ export function PrivacyView() {
               <li><strong>Notes:</strong> if you subscribe and sync, the transcripts, summaries, decisions and action items from your meetings, stored in your workspace.</li>
               <li><strong>Billing:</strong> your plan and its status. Stripe holds your payment details, not us.</li>
               <li><strong>Sign-in and security records:</strong> when you sign in we record a description of your device, your IP address and timestamps. We use them to show your signed-in devices, let you revoke them, limit repeated failed sign-ins, and investigate abuse. A session or extension token ends when you sign out, revoke it, or it expires.</li>
-              <li><strong>Audio:</strong> we never receive or store your recordings. They stay on your device, and there is no audio in the synced library.</li>
+              <li><strong>Audio:</strong> the synced library contains note text, not raw audio. In local BYOK mode, audio is saved on your device before it is sent to your selected transcription provider; provider terms govern its processing and retention.</li>
             </ul>
             <p>
               Every workspace is isolated from the others. Your AI provider keys stay on your device and are

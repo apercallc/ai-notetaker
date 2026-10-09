@@ -1,7 +1,7 @@
 import { getAppUrl } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { ALTERNATIVES } from "@/marketing/alternatives";
-import { FALLBACK_PRICE_LABELS, FAQS, LIMITS, SITE } from "@/marketing/content";
+import { FAQS, LIMITS, SITE } from "@/marketing/content";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,7 @@ export function GET(): Response {
     "## Plans",
     "",
     `- Free: the desktop app with your own keys. The user supplies AI provider keys and pays those providers directly. No AI Notetaker account is required. A free account lets the user sign in and manage devices and data.`,
-    `- Pro at ${FALLBACK_PRICE_LABELS.hosted_pro}: cloud sync of finished notes across the user's devices. Team at ${FALLBACK_PRICE_LABELS.hosted_team}: team sync with a shared workspace, activity log and retention controls. Cancel any time.`,
+    "- Pro syncs one person's finished notes across devices. Team adds a shared workspace, activity log and retention controls. See the pricing page for current prices. Cancel any time.",
     "- Provider keys are configured in desktop Settings. Browser recording controls and archive export are configured in extension Settings. These settings are separate.",
     "",
     "## Facts",
@@ -44,9 +44,9 @@ export function GET(): Response {
     "",
     "## Data handling",
     "",
-    "- The project never receives or stores recordings or provider keys. Only finished note text syncs, and only for subscribers who turn sync on.",
+    "- Local BYOK saves raw audio on the device before sending it to the selected transcription provider; provider keys stay on the device. Optional note sync uploads finished note text only. Provider terms govern audio processing and retention.",
     "- Workspaces are isolated from each other.",
-    `- In own-keys mode, keys stay in protected storage on the user's device and the project receives no recordings, transcripts, notes or telemetry.`,
+    `- In local BYOK mode, keys stay in protected storage on the user's device. The project service does not receive local-mode recordings, transcripts, notes or telemetry.`,
     `- Users are responsible for telling participants they are recording and obtaining any legally required consent.`,
     "",
     "## Pages",
