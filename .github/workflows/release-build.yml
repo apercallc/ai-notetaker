@@ -82,7 +82,7 @@ jobs:
         # with "ai-notetaker-extension" so the release manifest keeps pointing
         # at the load-unpacked fallback.
         run: (cd dist && zip -qr "../../ai-notetaker-chrome-web-store-${GITHUB_REF_NAME}.zip" .)
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: extension-${{ github.ref_name }}
           path: |
@@ -216,7 +216,7 @@ jobs:
           version=$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")
           bash ../packaging/macos/build-dmg.sh "$app" "target/${TARGET}/release/bundle/dmg/AI.Notetaker_${version}_${ARCHITECTURE}-installer.dmg"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: helper-${{ matrix.artifact }}-${{ github.ref_name }}
           path: helper/target/**/bundle
