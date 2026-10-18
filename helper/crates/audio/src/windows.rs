@@ -574,7 +574,7 @@ fn run_wasapi_loopback(
             tx,
             running,
             health,
-            ready.take(),
+            &mut ready,
             announce_restart,
             mic,
         );
@@ -591,6 +591,15 @@ fn run_wasapi_loopback(
                 backoff.reset();
             }
             AttemptOutcome::Failed(message) => {
+                if let Some(sender) = ready.take() {
+                    // The very first attempt failed before capture started:
+                    // that is a start failure, and the caller should see the
+                    // real reason rather than "startup thread exited".
+                    let _ = sender.send(Err(format!(
+                        "Windows output loopback could not start: {message}"
+                    )));
+                    return;
+                }
                 // An invalidated endpoint (default device switch, USB unplug)
                 // surfaces here as a read/initialize failure; re-resolving the
                 // default endpoint on the next attempt is the recovery.
@@ -616,7 +625,7 @@ fn run_wasapi_attempt(
     tx: &Sender<CapturedFrame>,
     running: &Arc<AtomicBool>,
     health: &HealthHub,
-    ready: Option<ReadySender>,
+    ready: &mut Option<ReadySender>,
     announce_restart: bool,
     mic: &mut InputSupervisor,
 ) -> AttemptOutcome {
@@ -637,7 +646,7 @@ fn wasapi_loopback_body(
     tx: &Sender<CapturedFrame>,
     running: &Arc<AtomicBool>,
     health: &HealthHub,
-    ready: Option<ReadySender>,
+    ready: &mut Option<ReadySender>,
     announce_restart: bool,
     mic: &mut InputSupervisor,
 ) -> AttemptOutcome {
@@ -698,7 +707,9 @@ fn wasapi_loopback_body(
             "output loopback capture re-established",
         );
     }
-    if let Some(sender) = ready {
+    // Taken only once the stream runs: an earlier failure leaves the sender
+    // with the caller, which reports it as the start error.
+    if let Some(sender) = ready.take() {
         if sender.send(Ok(())).is_err() {
             // The caller stopped waiting; the running flag will clear.
             let _ = audio_client.stop_stream();

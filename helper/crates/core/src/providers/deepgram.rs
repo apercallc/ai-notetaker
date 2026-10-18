@@ -23,6 +23,10 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 const DEEPGRAM_LISTEN_URL: &str = "https://api.deepgram.com/v1/listen";
 const DEEPGRAM_PROJECTS_URL: &str = "https://api.deepgram.com/v1/projects";
 const DEEPGRAM_STREAM_URL: &str = "wss://api.deepgram.com/v1/listen";
+/// Longest a single WebSocket write may take before the stream counts as
+/// dropped. Live frames are ~10-100 ms of audio, so a healthy connection
+/// accepts them in well under a second.
+const STREAM_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct DeepgramProvider {
     api_key: String,
@@ -84,16 +88,29 @@ struct DeepgramStreamingSession {
 #[async_trait]
 impl StreamingSession for DeepgramStreamingSession {
     async fn send_audio(&mut self, pcm16: &[u8]) -> Result<(), ProviderError> {
-        if self
-            .write
-            .send(WsMessage::Binary(pcm16.to_vec().into()))
-            .await
-            .is_err()
-        {
-            self.closed.store(true, Ordering::Relaxed);
-            return Err(ProviderError::Unreachable("deepgram stream closed".into()));
+        // A connection that silently stops acknowledging (Wi-Fi drop, sleep)
+        // fills the socket buffer and `send` then waits for the OS to give up
+        // on TCP, which takes minutes. This runs on the audio path with the
+        // pipeline held, so treat a stalled send as a dropped stream: the
+        // frame is already on disk and the gap is backfilled.
+        let sent = tokio::time::timeout(
+            STREAM_SEND_TIMEOUT,
+            self.write.send(WsMessage::Binary(pcm16.to_vec().into())),
+        )
+        .await;
+        match sent {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => {
+                self.closed.store(true, Ordering::Relaxed);
+                Err(ProviderError::Unreachable("deepgram stream closed".into()))
+            }
+            Err(_) => {
+                self.closed.store(true, Ordering::Relaxed);
+                Err(ProviderError::Unreachable(
+                    "deepgram stream stopped accepting audio".into(),
+                ))
+            }
         }
-        Ok(())
     }
 
     async fn try_recv_segments(&mut self) -> Vec<(TranscriptSegment, u32)> {
@@ -119,10 +136,14 @@ impl StreamingSession for DeepgramStreamingSession {
     }
 
     async fn close(&mut self) -> Vec<(TranscriptSegment, u32)> {
-        let _ = self
-            .write
-            .send(WsMessage::Text(r#"{"type":"CloseStream"}"#.into()))
-            .await;
+        // Bounded like `send_audio`: stopping a recording must not hang on a
+        // dead connection.
+        let _ = tokio::time::timeout(
+            STREAM_SEND_TIMEOUT,
+            self.write
+                .send(WsMessage::Text(r#"{"type":"CloseStream"}"#.into())),
+        )
+        .await;
         // Drain with a deadline instead of a blind fixed sleep: 300ms was
         // long enough to add latency to every stop yet short enough to
         // discard trailing finals whenever the provider took longer to
@@ -599,6 +620,38 @@ mod tests {
             closed,
             "session should observe the server closing the connection"
         );
+    }
+
+    #[tokio::test]
+    async fn streaming_send_to_a_stalled_connection_times_out_and_closes() {
+        // The server completes the handshake and then never reads again, like
+        // a peer that vanished without a FIN: the socket buffers fill up.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let _ws = accept_async(stream).await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let provider =
+            DeepgramProvider::with_stream_url("test-key".into(), format!("ws://{addr}/"));
+        let mut session = provider
+            .open_streaming_session(AudioChannel::Mic, 16000)
+            .await
+            .unwrap();
+
+        let frame = vec![0_u8; 1024 * 1024];
+        let started = std::time::Instant::now();
+        let mut failed = false;
+        for _ in 0..256 {
+            if session.send_audio(&frame).await.is_err() {
+                failed = true;
+                break;
+            }
+        }
+        assert!(failed, "a send into a full socket must give up");
+        assert!(session.is_closed());
+        assert!(started.elapsed() < STREAM_SEND_TIMEOUT * 3);
     }
 
     fn mic_chunk() -> AudioChunk {

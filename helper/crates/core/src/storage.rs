@@ -1322,7 +1322,13 @@ impl MeetingStore {
                 "invalid audio channel",
             )));
         }
-        Ok(fs::read(path).unwrap_or_default())
+        match fs::read(path) {
+            Ok(bytes) => Ok(bytes),
+            // A channel that was never captured is empty; any other failure
+            // (permissions, a locked file) must not pass for silence.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(StorageError::Io(error)),
+        }
     }
 }
 
@@ -1458,7 +1464,16 @@ impl AudioAppender {
                 .create(true)
                 .append(true)
                 .open(&path)?;
-            channel.len = file.metadata()?.len();
+            let mut len = file.metadata()?.len();
+            if len % 2 != 0 {
+                // A crash or a failed write left half a PCM16 sample at the
+                // end. Appending after it would shift every later sample by
+                // one byte and turn the rest of the channel into noise, so
+                // drop the dangling byte first.
+                len -= 1;
+                truncate_file(&path, len)?;
+            }
+            channel.len = len;
             channel.file = Some(file);
         }
         let start = channel.len;
@@ -1470,9 +1485,14 @@ impl AudioAppender {
                 Ok(start as usize)
             }
             Err(error) => {
-                // A failed write may have landed partially; forget the handle
-                // and length so the next append re-reads the true file size.
+                // A failed write (a full disk) may have landed partially. Cut
+                // the file back to the last complete frame so a later append
+                // stays sample-aligned, then forget the handle and length so
+                // the next append re-reads the true file size.
                 channel.file = None;
+                if let Err(truncate_error) = truncate_file(&path, start) {
+                    tracing::warn!(%truncate_error, "could not trim a partial audio write");
+                }
                 Err(error.into())
             }
         }
@@ -1501,6 +1521,12 @@ impl AudioAppender {
         }
         Ok(())
     }
+}
+
+/// Cuts a channel file back to `len` bytes. Uses its own write handle: an
+/// append-only handle may not truncate on Windows (it lacks `FILE_WRITE_DATA`).
+fn truncate_file(path: &Path, len: u64) -> Result<(), std::io::Error> {
+    fs::OpenOptions::new().write(true).open(path)?.set_len(len)
 }
 
 impl Drop for AudioAppender {
@@ -1857,8 +1883,8 @@ mod tests {
         let id = Uuid::new_v4();
         store.create_meeting(id, Utc::now()).unwrap();
 
-        store.append_audio(id, MIC_FILE, &[1, 2, 3]).unwrap();
-        store.append_audio(id, MIC_FILE, &[4, 5, 6]).unwrap();
+        store.append_audio(id, MIC_FILE, &[1, 2, 3, 4]).unwrap();
+        store.append_audio(id, MIC_FILE, &[5, 6]).unwrap();
 
         let bytes = fs::read(store.audio_path(id, MIC_FILE)).unwrap();
         assert_eq!(bytes, vec![1, 2, 3, 4, 5, 6]);
@@ -2461,6 +2487,35 @@ mod tests {
         // A second appender (a resumed capture) continues at the file's end.
         let mut resumed = store.open_audio_appender(id);
         assert_eq!(resumed.append(MIC_FILE, &[9]).unwrap(), 6);
+    }
+
+    #[test]
+    fn audio_appender_drops_a_dangling_half_sample_before_resuming() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        // A crash mid-write left 2 complete samples plus one stray byte.
+        fs::write(store.audio_path(id, MIC_FILE), [1, 2, 3, 4, 5]).unwrap();
+
+        let mut resumed = store.open_audio_appender(id);
+        assert_eq!(resumed.append(MIC_FILE, &[6, 7]).unwrap(), 4);
+        resumed.sync().unwrap();
+        assert_eq!(
+            store.read_audio_range(id, MIC_FILE, 0, 6).unwrap(),
+            vec![1, 2, 3, 4, 6, 7],
+            "new samples must start on a sample boundary"
+        );
+    }
+
+    #[test]
+    fn read_audio_all_treats_only_a_missing_channel_as_empty() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        assert!(store.read_audio_all(id, MIC_FILE).unwrap().is_empty());
+        // A directory where the file should be is unreadable, not silence.
+        fs::create_dir(store.audio_path(id, SPEAKER_FILE)).unwrap();
+        assert!(store.read_audio_all(id, SPEAKER_FILE).is_err());
     }
 
     #[test]

@@ -100,6 +100,18 @@ const MIN_SAMPLE_RATE_HZ: u32 = 8_000;
 const MAX_SAMPLE_RATE_HZ: u32 = 192_000;
 const FALLBACK_SAMPLE_RATE_HZ: u32 = 48_000;
 
+/// Provider failures that are not about one particular request: every
+/// following call would fail the same way for now.
+fn affects_every_request(error: &crate::providers::ProviderError) -> bool {
+    use crate::providers::ProviderError;
+    matches!(
+        error,
+        ProviderError::Unreachable(_)
+            | ProviderError::RateLimited { .. }
+            | ProviderError::AuthFailed(_)
+    )
+}
+
 fn sane_sample_rate(rate: u32) -> u32 {
     if (MIN_SAMPLE_RATE_HZ..=MAX_SAMPLE_RATE_HZ).contains(&rate) {
         rate
@@ -399,13 +411,18 @@ impl Pipeline {
                 }
             }
             gap_start.get_or_insert(existing_len);
-            match self
-                .transcription_provider
-                .open_streaming_session(channel, sample_rate_hz)
-                .await
+            // Same bound as the first connection: a stalled handshake here
+            // would otherwise hold the pipeline (and stop) indefinitely. On
+            // failure the next frame takes the backoff path above.
+            match tokio::time::timeout(
+                STREAM_CONNECT_TIMEOUT,
+                self.transcription_provider
+                    .open_streaming_session(channel, sample_rate_hz),
+            )
+            .await
             {
-                Ok(new_session) => *session = Some(new_session),
-                Err(_) => return messages,
+                Ok(Ok(new_session)) => *session = Some(new_session),
+                _ => return messages,
             }
         }
 
@@ -421,8 +438,27 @@ impl Pipeline {
                 .saturating_mul(2)
                 .saturating_mul(STREAM_BACKFILL_BATCH_SECONDS)
                 .max(2);
+            let mut provider_down = false;
             while start < existing_len {
                 let end = start.saturating_add(batch_bytes).min(existing_len);
+                // After a provider-wide failure, hand the rest of the gap to
+                // the retry worker rather than stalling live audio on one
+                // timeout per 30-second range.
+                if provider_down
+                    && self
+                        .enqueue_saved_range(
+                            meeting_id,
+                            channel,
+                            channel_file,
+                            sample_rate_hz,
+                            start,
+                            end,
+                        )
+                        .is_ok()
+                {
+                    start = end;
+                    continue;
+                }
                 let backfill =
                     match self
                         .store
@@ -447,8 +483,8 @@ impl Pipeline {
                             return messages;
                         }
                     };
-                messages.extend(
-                    self.transcribe_pending(
+                let (batch_messages, down) = self
+                    .transcribe_pending_reporting(
                         meeting_id,
                         channel,
                         channel_file,
@@ -458,8 +494,9 @@ impl Pipeline {
                             start,
                         },
                     )
-                    .await,
-                );
+                    .await;
+                messages.extend(batch_messages);
+                provider_down |= down;
                 start = end;
             }
         }
@@ -664,6 +701,51 @@ impl Pipeline {
         channel_file: &str,
         pending: PendingAudio,
     ) -> Vec<HelperToExtension> {
+        self.transcribe_pending_reporting(meeting_id, channel, channel_file, pending)
+            .await
+            .0
+    }
+
+    /// Queues `start..end` of a saved channel for the retry worker without
+    /// reading the audio or calling the provider.
+    fn enqueue_saved_range(
+        &mut self,
+        meeting_id: Uuid,
+        channel: AudioChannel,
+        channel_file: &str,
+        sample_rate_hz: u32,
+        start: usize,
+        end: usize,
+    ) -> Result<(), crate::resilience::RetryQueueError> {
+        self.retry_queue
+            .enqueue(
+                RetryableChunk {
+                    meeting_id,
+                    channel,
+                    sample_rate_hz,
+                    audio_ref: RetryAudioRef::FileRange {
+                        channel_file: channel_file.to_string(),
+                        start,
+                        end,
+                    },
+                },
+                Utc::now(),
+            )
+            .map(|_| ())
+    }
+
+    /// Like [`Self::transcribe_pending`], and also reports whether the
+    /// provider failed in a way every following request would hit too
+    /// (unreachable, rate limited, key rejected). Loops over many saved
+    /// ranges use it to queue the rest instead of waiting out one timeout
+    /// per range while the pipeline is held.
+    async fn transcribe_pending_reporting(
+        &mut self,
+        meeting_id: Uuid,
+        channel: AudioChannel,
+        channel_file: &str,
+        pending: PendingAudio,
+    ) -> (Vec<HelperToExtension>, bool) {
         let end = pending.start + pending.pcm16.len();
         let chunk = AudioChunk {
             channel,
@@ -685,11 +767,14 @@ impl Pipeline {
         ) {
             Ok(id) => id,
             Err(error) => {
-                return vec![HelperToExtension::Error {
-                    meeting_id: Some(meeting_id),
-                    code: ErrorCode::StorageError,
-                    message: format!("failed to persist transcription retry: {error}"),
-                }]
+                return (
+                    vec![HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: ErrorCode::StorageError,
+                        message: format!("failed to persist transcription retry: {error}"),
+                    }],
+                    false,
+                )
             }
         };
         match self.transcription_provider.transcribe_chunk(&chunk).await {
@@ -729,18 +814,22 @@ impl Pipeline {
                         });
                     }
                 }
-                messages
+                (messages, false)
             }
             Err(e) => {
                 // The job was persisted before the provider call, so leaving
                 // its initial due time intact makes the first retry eligible
                 // immediately. Subsequent failures use exponential backoff
                 // in process_due_retries.
-                vec![HelperToExtension::Error {
-                    meeting_id: Some(meeting_id),
-                    code: e.to_error_code(),
-                    message: format!("transcription failed, queued for retry: {e}"),
-                }]
+                let provider_down = affects_every_request(&e);
+                (
+                    vec![HelperToExtension::Error {
+                        meeting_id: Some(meeting_id),
+                        code: e.to_error_code(),
+                        message: format!("transcription failed, queued for retry: {e}"),
+                    }],
+                    provider_down,
+                )
             }
         }
     }
@@ -823,6 +912,10 @@ impl Pipeline {
         // finished with part of the call never transcribed.
         self.requeue_exhausted_transcription();
         let mut messages = Vec::new();
+        // Once the provider is down, queue the remaining ranges for the retry
+        // worker instead of waiting out a timeout per five-second batch: an
+        // hour-long recovered call is ~700 batches per channel.
+        let mut provider_down = false;
 
         for (channel, channel_file, start, sample_rate_hz) in [
             (
@@ -863,11 +956,26 @@ impl Pipeline {
                 if batch_end <= offset {
                     break;
                 }
+                if provider_down
+                    && self
+                        .enqueue_saved_range(
+                            meeting_id,
+                            channel,
+                            channel_file,
+                            sample_rate_hz,
+                            offset,
+                            batch_end,
+                        )
+                        .is_ok()
+                {
+                    offset = batch_end;
+                    continue;
+                }
                 let pcm16 =
                     self.store
                         .read_audio_range(meeting_id, channel_file, offset, batch_end)?;
-                messages.extend(
-                    self.transcribe_pending(
+                let (batch_messages, down) = self
+                    .transcribe_pending_reporting(
                         meeting_id,
                         channel,
                         channel_file,
@@ -877,8 +985,9 @@ impl Pipeline {
                             start: offset,
                         },
                     )
-                    .await,
-                );
+                    .await;
+                messages.extend(batch_messages);
+                provider_down |= down;
                 offset = batch_end;
             }
         }
@@ -921,22 +1030,10 @@ impl Pipeline {
                 }]
             }
         };
-        // A silent recording has nothing to summarize: calling a paid provider with an empty
-        // transcript invites an invented summary, or an empty reply that loops through retries.
-        let summarized = if transcript
-            .iter()
-            .all(|segment| segment.text.trim().is_empty())
+        match self
+            .summarize_transcript(&transcript, &meta.summary_options)
+            .await
         {
-            Ok(Summary {
-                summary: "No speech was detected in this recording.".into(),
-                action_items: Vec::new(),
-            })
-        } else {
-            self.summarization_provider
-                .summarize(&transcript, &meta.summary_options)
-                .await
-        };
-        match summarized {
             Ok(summary) => {
                 if let Err(error) = self.store.write_summary(meeting_id, &summary) {
                     return vec![HelperToExtension::Error {
@@ -976,6 +1073,29 @@ impl Pipeline {
                 message: format!("summarization failed: {error}"),
             }],
         }
+    }
+
+    /// A silent recording has nothing to summarize: calling a paid provider with an empty
+    /// transcript invites an invented summary, or an empty reply that loops through retries.
+    /// Shared by the first summary and the one re-run after transcription retries finish
+    /// (where every range having failed is exactly when the transcript is empty).
+    async fn summarize_transcript(
+        &self,
+        transcript: &[crate::providers::TranscriptSegment],
+        options: &SummaryOptions,
+    ) -> Result<Summary, crate::providers::ProviderError> {
+        if transcript
+            .iter()
+            .all(|segment| segment.text.trim().is_empty())
+        {
+            return Ok(Summary {
+                summary: "No speech was transcribed in this recording.".into(),
+                action_items: Vec::new(),
+            });
+        }
+        self.summarization_provider
+            .summarize(transcript, options)
+            .await
     }
 
     /// Crash recovery: called once on helper startup. Every meeting still
@@ -1126,6 +1246,13 @@ impl Pipeline {
                         });
                         messages.extend(self.summarize_after_giving_up(job.meeting_id).await);
                     }
+                    if affects_every_request(&error) {
+                        // The rest of this tick's jobs would wait out the same
+                        // outage one timeout at a time while holding the
+                        // pipeline. They stay due and run on the next tick;
+                        // this job has already moved to its backoff slot.
+                        break;
+                    }
                 }
             }
         }
@@ -1170,8 +1297,7 @@ impl Pipeline {
             }
         };
         match self
-            .summarization_provider
-            .summarize(&transcript, &meta.summary_options)
+            .summarize_transcript(&transcript, &meta.summary_options)
             .await
         {
             Ok(summary) => {
@@ -1625,9 +1751,11 @@ mod tests {
         pipeline.stop_recording(id).await.unwrap();
 
         let messages = pipeline.process_due_retries(Utc::now()).await;
+        // Nothing was transcribed, so the note says so instead of asking the
+        // summarizer to invent something from an empty transcript.
         assert!(messages.iter().any(|message| matches!(
             message,
-            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+            HelperToExtension::SummaryReady { summary, .. } if summary.starts_with("No speech")
         )));
     }
 
@@ -1732,7 +1860,7 @@ mod tests {
         assert!(
             messages.iter().any(|message| matches!(
                 message,
-                HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+                HelperToExtension::SummaryReady { summary, .. } if summary.starts_with("No speech")
             )),
             "one permanently failed chunk must not strand the whole summary",
         );
@@ -1833,6 +1961,96 @@ mod tests {
             MeetingState::Processed
         );
         assert_eq!(pipeline.store.load_transcript(id).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_outage_queues_remaining_ranges_instead_of_one_call_each() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let failures_left = Arc::new(AtomicUsize::new(100));
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(FakeTranscriber {
+                fail_times: failures_left.clone(),
+                return_empty: false,
+            }),
+            Box::new(FakeSummarizer),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        // Three full five-second batches at 16 kHz.
+        let batch = 16_000 * 2 * TRANSCRIPTION_BATCH_SECONDS;
+        pipeline
+            .store
+            .append_audio(id, MIC_FILE, &vec![0; batch * 3])
+            .unwrap();
+
+        let messages = pipeline.recover_recording(id).await.unwrap();
+
+        assert_eq!(
+            failures_left.load(Ordering::SeqCst),
+            99,
+            "only the first range may wait on the unreachable provider"
+        );
+        assert_eq!(pipeline.retry_queue_len(), 3, "every range stays queued");
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| matches!(message, HelperToExtension::Error { .. }))
+                .count(),
+            1,
+            "one outage is reported once, not once per range"
+        );
+
+        // The retry worker likewise stops at the first provider-wide failure.
+        pipeline.process_due_retries(Utc::now()).await;
+        assert_eq!(failures_left.load(Ordering::SeqCst), 98);
+        assert_eq!(pipeline.retry_queue_len(), 3);
+    }
+
+    #[tokio::test]
+    async fn retries_that_all_come_back_empty_do_not_call_the_summarizer() {
+        struct FailingSummarizer;
+        #[async_trait]
+        impl SummarizationProvider for FailingSummarizer {
+            fn id(&self) -> SummarizationProviderId {
+                SummarizationProviderId::Claude
+            }
+            async fn summarize(
+                &self,
+                _transcript: &[TranscriptSegment],
+                _options: &SummaryOptions,
+            ) -> Result<Summary, ProviderError> {
+                panic!("an empty transcript must not reach a paid provider");
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let mut pipeline = Pipeline::new(
+            store,
+            Box::new(FakeTranscriber {
+                fail_times: Arc::new(AtomicUsize::new(1)),
+                return_empty: true,
+            }),
+            Box::new(FailingSummarizer),
+            retry_queue,
+        );
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[1, 2], 16_000)
+            .await;
+        pipeline.stop_recording(id).await.unwrap();
+
+        let messages = pipeline.process_due_retries(Utc::now()).await;
+
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary.contains("No speech")
+        )));
     }
 
     #[tokio::test]
@@ -2341,20 +2559,13 @@ mod tests {
                 .await;
         }
         {
+            // The provider is unreachable, so each channel waits on it once;
+            // the rest of its gap goes straight to the retry queue.
             let captured = calls.lock().unwrap();
-            assert_eq!(captured.len(), 5);
-            assert!(captured
-                .iter()
-                .all(|chunk| chunk.pcm16.len() <= batch_bytes));
-            for (channel, expected) in
-                [(AudioChannel::Mic, &mic), (AudioChannel::Speaker, &speaker)]
-            {
-                let actual: Vec<u8> = captured
-                    .iter()
-                    .filter(|chunk| chunk.channel == channel)
-                    .flat_map(|chunk| chunk.pcm16.iter().copied())
-                    .collect();
-                assert_eq!(&actual, expected);
+            assert_eq!(captured.len(), 2);
+            for (chunk, expected) in captured.iter().zip([&mic, &speaker]) {
+                assert!(chunk.pcm16.len() <= batch_bytes);
+                assert_eq!(chunk.pcm16, expected[..chunk.pcm16.len()]);
             }
         }
         // Failed batches survive restart as small range descriptors, and
@@ -2362,6 +2573,7 @@ mod tests {
         let persisted: RetryQueue<RetryableChunk> =
             RetryQueue::load_or_create(&retry_path).unwrap();
         assert_eq!(persisted.len(), 5);
+        let mut covered = [0_usize; 2];
         for job in persisted.due_jobs(Utc::now()) {
             let RetryAudioRef::FileRange {
                 channel_file,
@@ -2370,12 +2582,13 @@ mod tests {
             } = &job.payload.audio_ref;
             assert!(*start >= 2);
             assert!(*end - *start <= batch_bytes);
-            let expected = if job.payload.channel == AudioChannel::Mic {
-                &mic
+            let (expected, slot) = if job.payload.channel == AudioChannel::Mic {
+                (&mic, 0)
             } else {
-                &speaker
+                (&speaker, 1)
             };
             assert!(*end <= expected.len() + 2);
+            covered[slot] += *end - *start;
             assert_eq!(
                 pipeline
                     .store
@@ -2384,13 +2597,13 @@ mod tests {
                 expected[*start - 2..*end - 2]
             );
         }
+        assert_eq!(covered, [mic.len(), speaker.len()], "no gap byte is lost");
+        // The retry worker re-reads the first range and, still unreachable,
+        // leaves the rest due for its next tick.
         pipeline.process_due_retries(Utc::now()).await;
         let captured = calls.lock().unwrap();
-        assert_eq!(captured.len(), 10);
-        for (original, retried) in captured[..5].iter().zip(&captured[5..]) {
-            assert_eq!(original.channel, retried.channel);
-            assert_eq!(original.pcm16, retried.pcm16);
-        }
+        assert_eq!(captured.len(), 3);
+        assert_eq!(captured[2].pcm16, captured[0].pcm16);
     }
 
     #[tokio::test]
