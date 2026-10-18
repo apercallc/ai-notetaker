@@ -1273,6 +1273,21 @@ async fn hosted_call(
             .to_string()
     })?;
     let status = response.status().as_u16();
+    if status == 401 {
+        // The service ended this session (revoked from the web, or expired early). Forget the
+        // dead token so the app shows "Sign in again" with a sign-in form instead of still
+        // claiming to be signed in. A token replaced by a newer sign-in meanwhile is kept.
+        if desktop_settings::get_hosted_token()
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some(service.access_token.as_str())
+        {
+            if let Err(error) = desktop_settings::set_hosted_token(None) {
+                tracing::warn!(%error, "could not forget an ended hosted session");
+            }
+        }
+    }
     let body = response
         .json::<serde_json::Value>()
         .await
@@ -1835,20 +1850,20 @@ async fn desktop_get_meeting(
         let summary = store
             .load_summary(meeting_id)
             .map_err(|error| format!("Summary could not be opened: {error}"))?;
-        let reprocessed_sources = store
-            .scan_meetings()
-            .map_err(|error| format!("Meeting history could not be read: {error}"))?
-            .readable
-            .into_iter()
-            .filter_map(|candidate| candidate.reprocessed_from)
-            .collect::<HashSet<_>>();
         let reprocessed_from = meta.reprocessed_from;
+        // The full history scan is only needed for imported extension audio, so opening (and
+        // re-polling) an ordinary note does not read every meeting on disk.
         let can_reprocess_extension_audio = !meta.text_only_import
             && meta.extension_source_status.is_some()
             && reprocessed_from.is_none()
-            && !reprocessed_sources.contains(&meta.id)
             && (store.audio_len(meta.id, "mic.pcm").unwrap_or(0) > 0
-                || store.audio_len(meta.id, "speaker.pcm").unwrap_or(0) > 0);
+                || store.audio_len(meta.id, "speaker.pcm").unwrap_or(0) > 0)
+            && !store
+                .scan_meetings()
+                .map_err(|error| format!("Meeting history could not be read: {error}"))?
+                .readable
+                .iter()
+                .any(|candidate| candidate.reprocessed_from == Some(meta.id));
         let status = if active {
             "recording"
         } else if meta.state == notetaker_core::storage::MeetingState::Recording {
@@ -2327,8 +2342,18 @@ async fn run_desktop_sync(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let url = desktop_settings::normalize_webapp_url(&preferences.webapp_url)?;
-    let token = desktop_settings::get_webapp_token()?;
+    // The window shows "Syncing…" until this run reports back, so a run that cannot even read its
+    // address or token (a locked keychain) still records why and emits its status below.
+    let connection = desktop_settings::normalize_webapp_url(&preferences.webapp_url)
+        .and_then(|url| Ok((url, desktop_settings::get_webapp_token()?)));
+    let (url, token) = match connection {
+        Ok(connection) => connection,
+        Err(error) => {
+            sync.record_sync_error(error.clone());
+            tracing::warn!(%error, "desktop note sync could not start");
+            (None, None)
+        }
+    };
     // True when the service answered an upload with 402: the workspace has no active plan. Uploads
     // wait (nothing is lost), but downloading workspace notes below still runs, so a lapsed
     // account can always bring its cloud notes to this device.
@@ -2347,7 +2372,7 @@ async fn run_desktop_sync(
         }
     }
     let configured = !preferences.webapp_url.is_empty()
-        && desktop_settings::get_webapp_token()?.is_some_and(|token| !token.trim().is_empty());
+        && desktop_settings::credential_presence().is_ok_and(|presence| presence.webapp_token);
     if let Err(error) = ui_app.emit("webapp-sync-updated", sync.status(configured)) {
         tracing::debug!(%error, "desktop sync status event could not be emitted");
     }

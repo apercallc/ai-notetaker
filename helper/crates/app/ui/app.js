@@ -73,15 +73,22 @@
 
   let refreshTask = null;
   let refreshQueued = false;
-  function refresh() {
+  let refreshForced = false;
+  let renderedDataKey = "";
+  // Background refreshes (the poll and sync status events) pass `passive`: when nothing on screen
+  // changed they skip re-rendering, so a transcript being read is not rebuilt and scrolled to the top.
+  function refresh(options) {
     if (document.visibilityState === "hidden") return Promise.resolve();
+    if (!options?.passive) refreshForced = true;
     refreshQueued = true;
     if (refreshTask) return refreshTask;
     refreshTask = (async () => {
       try {
         while (refreshQueued && document.visibilityState !== "hidden") {
           refreshQueued = false;
-          await refreshSnapshot();
+          const force = refreshForced;
+          refreshForced = false;
+          await refreshSnapshot(force);
         }
       } finally {
         refreshTask = null;
@@ -90,7 +97,7 @@
     return refreshTask;
   }
 
-  async function refreshSnapshot() {
+  async function refreshSnapshot(force = true) {
     try {
       state.snapshot = await invoke("desktop_snapshot");
       if (state.noticeSource === "refresh") notify("");
@@ -98,10 +105,15 @@
         const meeting = state.snapshot.meetings.find((item) => item.id === meetingId);
         if (!meeting || meeting.status !== "recording") state.finalizingMeetingIds.delete(meetingId);
       }
-      if (state.page === "settings" && state.settingsDirty) return;
+      // Sign-in fields do not mark the form dirty, but rebuilding the page would wipe a password
+      // or code being typed.
+      if (state.page === "settings" && (state.settingsDirty || $("#hosted-password")?.value || $("#hosted-code")?.value)) return;
       if (state.page === "notes" && ($("#new-folder-form:not([hidden])") || $("#folder-manage:not([hidden])")
         || document.activeElement?.id === "note-folder")) return;
       if (state.selectedId && state.page === "notes") await loadDetail(state.selectedId, false);
+      const dataKey = JSON.stringify([state.page, state.selectedId, state.currentFolderId, state.snapshot, state.detail, state.detailError]);
+      if (!force && dataKey === renderedDataKey) return;
+      renderedDataKey = dataKey;
       const focused = document.activeElement;
       const focusedId = focused?.id || null;
       const selection = focusedId && typeof focused.selectionStart === "number" ? [focused.selectionStart, focused.selectionEnd] : null;
@@ -408,6 +420,8 @@
     const directNoteCount = noteCounts.get(state.currentFolderId) || 0;
     const path = folderPath(state.currentFolderId);
     const listScroll = $("#meeting-list")?.scrollTop || 0;
+    const previousDetail = $("#note-detail");
+    const transcriptPosition = previousDetail && { meetingId: previousDetail.dataset.meetingId, scrollTop: $(".transcript-list", previousDetail)?.scrollTop || 0 };
     $("#content").innerHTML = `<div class="notes-layout">
       <section class="card notes-list-panel"><div class="panel-heading">
         ${state.snapshot.libraryError ? '<p class="library-error" role="alert">Folders could not be loaded. Your recordings are still available. Try restarting the app.</p>' : ""}
@@ -429,8 +443,12 @@
     $("#cancel-folder")?.addEventListener("click", () => { $("#new-folder-form").hidden = true; });
     $("#new-folder-form")?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      const submit = event.currentTarget.querySelector('button[type="submit"]');
+      if (submit.disabled) return;
+      submit.disabled = true;
       try { await invoke("desktop_create_folder", { parentId: state.currentFolderId, name: $("#folder-name").value }); $("#new-folder-form").hidden = true; notify("Folder created."); await refresh(); }
       catch (error) { notify(String(error), "error"); }
+      finally { submit.disabled = false; }
     });
     $("#manage-folder")?.addEventListener("click", () => {
       const panel = $("#folder-manage");
@@ -451,7 +469,7 @@
       try { await invoke("desktop_delete_folder", { folderId: state.currentFolderId }); state.currentFolderId = current.parentId; state.selectedId = null; state.detail = null; notify("Empty folder deleted."); await refresh(); }
       catch (error) { notify(String(error), "error"); }
     });
-    if (state.detail) renderDetail(state.detail);
+    if (state.detail) renderDetail(state.detail, transcriptPosition);
   }
 
   function folderPath(id) {
@@ -565,10 +583,13 @@
   }
   const exportName = (title, extension) => `${(title || "meeting").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "meeting"}.${extension}`;
 
-  function renderDetail(detail) {
+  // `kept` carries the transcript scroll position across a re-render of the same note.
+  function renderDetail(detail, kept = null) {
     const root = $("#note-detail");
     if (!root) return;
     const meeting = detail.meeting;
+    const position = kept || { meetingId: root.dataset.meetingId, scrollTop: $(".transcript-list", root)?.scrollTop || 0 };
+    const transcriptScroll = position.meetingId === meeting.id ? position.scrollTop : 0;
     const extensionStatusLabels = new Map([["recording", "in-progress"], ["saved", "audio-saved"], ["processing", "processing"], ["complete", "completed"], ["error", "failed"]]);
     const extensionStatusLabel = extensionStatusLabels.get(meeting.extensionSourceStatus) || "legacy";
     const importNotice = meeting.textOnlyImport
@@ -587,6 +608,9 @@
       ${meeting.canReprocessExtensionAudio ? `<section class="recovery-actions"><p class="privacy-note">Create a separate desktop note from the saved audio. The imported transcript and summary will stay unchanged.</p><button class="secondary-button" id="reprocess-extension-audio" ${state.reprocessingIds.has(meeting.id) ? "disabled" : ""}>${state.reprocessingIds.has(meeting.id) ? "Preparing audio copy…" : "Create notes from saved audio"}</button></section>` : ""}
       ${meeting.status === "recovered" && !meeting.textOnlyImport ? `<section class="recovery-actions"><p class="privacy-note">Audio is safe on this device. Resume processing it to finish the transcript and notes.</p><button class="secondary-button" id="recover-meeting" ${state.recoveringIds.has(meeting.id) ? "disabled" : ""}>${state.recoveringIds.has(meeting.id) ? "Recovering notes…" : "Recover notes from saved audio"}</button></section>` : ""}
       <div class="note-actions"><div class="inline-actions note-export"><button class="secondary-button" id="copy-note">Copy as Markdown</button><button class="secondary-button" id="save-note-md">Save Markdown</button><button class="secondary-button" id="save-note-txt">Save text</button></div><button class="secondary-button" id="delete-note">${meeting.textOnlyImport ? "Delete imported note" : "Delete recording"}</button></div>`;
+    root.dataset.meetingId = meeting.id;
+    const transcriptList = $(".transcript-list", root);
+    if (transcriptList && transcriptScroll) transcriptList.scrollTop = transcriptScroll;
     $("#copy-note")?.addEventListener("click", async () => { try { await navigator.clipboard.writeText(noteMarkdown(detail)); notify("Copied to the clipboard."); } catch { notify("Could not copy. Use Save Markdown instead.", "error"); } });
     for (const [id, extension, build] of [["#save-note-md", "md", noteMarkdown], ["#save-note-txt", "txt", notePlainText]]) $(id)?.addEventListener("click", async () => { try { if (await invoke("desktop_save_text_file", { fileName: exportName(detail.meeting.title, extension), contents: build(detail) })) notify("Saved."); } catch (error) { notify(String(error), "error"); } });
     $("#delete-note")?.addEventListener("click", deleteMeeting);
@@ -678,6 +702,7 @@
     button.disabled = true;
     try {
       const reply = await invoke(command, args);
+      for (const field of [$("#hosted-password"), $("#hosted-code")]) if (field) field.value = "";
       state.syncWarning = reply?.syncWarning || "";
       if (state.syncWarning) notify(state.syncWarning, "warn");
       else notify(success);
@@ -702,7 +727,7 @@
     accountState.loading = true;
     accountState.error = "";
     try { accountState.overview = await invoke("desktop_account_overview"); }
-    catch (error) { accountState.error = String(error); }
+    catch (error) { accountState.error = String(error); void refresh(); }
     finally { accountState.loading = false; renderNav(state.setupNeeded); if (isAccountPage()) renderAccount(); }
   }
 
@@ -712,7 +737,7 @@
     team.loading = true;
     team.error = "";
     try { team.roster = await invoke("desktop_team_roster"); }
-    catch (error) { team.error = String(error); }
+    catch (error) { team.error = String(error); void refresh(); }
     finally { team.loading = false; if (isAccountPage()) renderAccount(); }
   }
 
@@ -757,7 +782,7 @@
       ? `<ul class="action-board">${shown.map(({ meeting, item, index }) => `<li><label><input type="checkbox" data-action-meeting="${esc(meeting.id)}" data-action-index="${index}" ${isDone(item) ? "checked" : ""} /><span class="${isDone(item) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
       : `<div class="empty-state"><strong>${rows.length ? "Nothing here" : "No action items yet"}</strong>${rows.length ? "Try a different filter or search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
     const chips = [["open", "Open"], ["done", "Done"], ["all", "All"]].map(([id, label]) => `<button class="filter-chip ${filter === id ? "active" : ""}" data-action-filter="${id}" aria-pressed="${filter === id}">${label} <span>${counts[id]}</span></button>`).join("");
-    return `<section class="card account-card"><div class="filter-row">${chips}</div><input class="text-input" id="action-search" type="search" placeholder="Search action items" value="${esc(accountState.actionQuery)}" />${list}<p class="fine-print">Checking an item here updates it everywhere you are signed in. Offline, it stays on this device.</p></section>`;
+    return `<section class="card account-card"><div class="filter-row">${chips}</div><input class="text-input" id="action-search" type="search" placeholder="Search action items" aria-label="Search action items" value="${esc(accountState.actionQuery)}" />${list}<p class="fine-print">Checking an item here updates it everywhere you are signed in. Offline, it stays on this device.</p></section>`;
   }
 
   function teamPanel() {
@@ -769,7 +794,7 @@
     const members = team.roster.members.map((member) => `<li class="team-row"><div><strong>${esc(member.email)}</strong><span class="fine-print"> ${member.email === you ? "(you) " : ""}· joined ${esc(longDate(member.joinedAt))}</span></div><div class="inline-actions"><select class="select-input" data-role-for="${esc(member.id)}" aria-label="Role for ${esc(member.email)}"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="owner" ${member.role === "owner" ? "selected" : ""}>Owner</option></select><button class="small-button" data-team-reset="${esc(member.id)}">Send password reset</button><button class="small-button danger" data-team-remove="${esc(member.id)}" data-email="${esc(member.email)}">Remove</button></div></li>`).join("");
     const invites = team.roster.invites.length ? `<h3 class="subhead">Pending invitations</h3><ul class="team-list">${team.roster.invites.map((invite) => `<li class="team-row"><span>${esc(invite.email)}</span><button class="small-button" data-team-revoke="${esc(invite.id)}">Revoke</button></li>`).join("")}</ul>` : "";
     return `<section class="card account-card"><p class="fine-print">${team.roster.members.length} member${team.roster.members.length === 1 ? "" : "s"}. Members share this workspace’s notes, plan and usage.</p>
-      <div class="key-row"><input class="text-input" id="team-invite-email" type="email" placeholder="teammate@company.com" autocomplete="off" /><button class="primary-button" id="team-invite" ${team.busy ? "disabled" : ""}>Send invite</button></div>
+      <div class="key-row"><input class="text-input" id="team-invite-email" type="email" placeholder="teammate@company.com" autocomplete="off" aria-label="Email address to invite" /><button class="primary-button" id="team-invite" ${team.busy ? "disabled" : ""}>Send invite</button></div>
       ${team.message ? `<p class="key-status" role="status">${esc(team.message)}${team.link ? ` <br><code>${esc(team.link)}</code>` : ""}</p>` : ""}
       <h3 class="subhead">Members</h3><ul class="team-list">${members}</ul>${invites}</section>`;
   }
@@ -1136,11 +1161,17 @@
     }
   }).catch(() => {});
   if (listen) listen("webapp-sync-updated", (event) => {
+    // Background sync reports here every minute too; only a sync the person started, or a changed
+    // problem, is announced, so screen readers do not hear "Sync complete." over and over.
+    const requested = state.syncInProgress;
     state.syncInProgress = false;
     const error = event.payload?.lastError;
-    state.syncAnnouncement = error ? `Sync finished with an issue: ${error}` : "Sync complete.";
-    updateSyncFeedback();
-    void refresh();
+    const announcement = error ? `Sync finished with an issue: ${error}` : requested ? "Sync complete." : "";
+    if (requested || announcement !== state.syncAnnouncement) {
+      state.syncAnnouncement = announcement;
+      updateSyncFeedback();
+    }
+    void refresh({ passive: !requested });
   }).catch(() => {});
 
   const REFRESH_INTERVAL_MS = 15000;
@@ -1153,7 +1184,7 @@
   function startRefreshPolling() {
     if (refreshInterval !== null || document.visibilityState !== "visible") return;
     refreshInterval = window.setInterval(() => {
-      if (refreshTask === null && !state.busy && state.page !== "settings" && !isAccountPage()) void refresh();
+      if (refreshTask === null && !state.busy && state.page !== "settings" && !isAccountPage()) void refresh({ passive: true });
     }, REFRESH_INTERVAL_MS);
   }
   document.addEventListener("visibilitychange", () => {

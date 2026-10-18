@@ -928,7 +928,12 @@ impl DesktopSync {
         }
     }
 
+    /// Records a failed sync run. The background loop retries every minute, so an unchanged
+    /// error (an offline machine, a locked keychain) is not rewritten to disk each time.
     pub fn record_sync_error(&self, error: String) {
+        if self.lock_state().last_error.as_deref() == Some(error.as_str()) {
+            return;
+        }
         self.record_error(error);
     }
 
@@ -1066,6 +1071,27 @@ fn validate_remote_meeting(meeting: &RemoteMeeting) -> Result<(), String> {
 mod tests {
     use super::*;
     use notetaker_core::providers::{Summary, TranscriptSegment};
+
+    #[test]
+    fn a_repeated_sync_error_is_not_rewritten_but_a_new_one_is() {
+        let directory = tempfile::tempdir().unwrap();
+        let sync = DesktopSync::load(directory.path());
+        sync.record_sync_error("offline".into());
+        let path = directory.path().join(OUTBOX_FILE);
+        std::fs::remove_file(&path).unwrap();
+
+        sync.record_sync_error("offline".into());
+        assert!(
+            !path.exists(),
+            "an unchanged error must not be persisted again"
+        );
+
+        sync.record_sync_error("keychain locked".into());
+        assert_eq!(
+            DesktopSync::load(directory.path()).status(true).last_error,
+            Some("keychain locked".to_string())
+        );
+    }
 
     #[test]
     fn outbox_survives_restart_and_removes_completed_ids() {
