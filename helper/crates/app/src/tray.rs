@@ -16,15 +16,14 @@
 //! rather than abandoning capture: `initialize` never fails, it logs and
 //! returns a controller whose updates simply have nowhere to go.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 /// Mirrors the tray's recording state so the menu's Quit handler (which has no
@@ -187,18 +186,18 @@ impl<R: Runtime> TrayController<R> {
         };
         if let Some(status) = &self.status {
             let _ = status.set_text(match state {
-                TrayState::Idle => "Status: Idle",
-                TrayState::Recording => "Status: Recording",
-                TrayState::Attention => "Status: Recovered Recording",
+                TrayState::Idle => "Not Recording",
+                TrayState::Recording => "Recording",
+                TrayState::Attention => "Interrupted Recording",
             });
         }
         let Some(tray) = &self.tray else {
             return;
         };
         let _ = tray.set_tooltip(Some(match state {
-            TrayState::Idle => "AI Notetaker — Idle",
+            TrayState::Idle => "AI Notetaker — Not recording",
             TrayState::Recording => "AI Notetaker — Recording",
-            TrayState::Attention => "AI Notetaker — Recovered a recording",
+            TrayState::Attention => "AI Notetaker — Interrupted recording needs review",
         }));
         let Some(icons) = &self.icons else {
             return;
@@ -237,7 +236,7 @@ fn try_initialize<R: Runtime>(
         recording: decode_icon(RECORDING_ICON)?,
     };
 
-    let status = MenuItem::with_id(app, "status", "Status: Idle", false, None::<&str>)?;
+    let status = MenuItem::with_id(app, "status", "Not Recording", false, None::<&str>)?;
     let open_app = MenuItem::with_id(app, "open-app", "Open AI Notetaker", true, None::<&str>)?;
     let open_latest =
         MenuItem::with_id(app, "open-latest", "Open Latest Note", true, None::<&str>)?;
@@ -251,53 +250,50 @@ fn try_initialize<R: Runtime>(
         true,
         None::<&str>,
     )?;
-    let daily_updates = MenuItem::with_id(
+    let daily_updates = CheckMenuItem::with_id(
         app,
         "daily-update-check",
-        if crate::update_check::background_checks_enabled(&data_dir) {
-            "Automatic Updates (On)"
-        } else {
-            "Automatic Updates (Off)"
-        },
+        "Automatic Updates",
         true,
+        crate::update_check::background_checks_enabled(&data_dir),
         None::<&str>,
     )?;
     let pair_browser = MenuItem::with_id(
         app,
         "pair-browser",
-        "Pair Browser Extension (Optional)…",
+        "Reconnect Browser Extension",
         true,
         None::<&str>,
     )?;
-    let launch_at_login = MenuItem::with_id(
+    let launch_enabled = {
+        use tauri_plugin_autostart::ManagerExt;
+        app.autolaunch().is_enabled().unwrap_or(false)
+    };
+    let launch_at_login = CheckMenuItem::with_id(
         app,
         "launch-at-login",
-        "Launch at Login (Off)",
+        "Open at Login",
         true,
+        launch_enabled,
         None::<&str>,
     )?;
-    let launch_label = {
-        use tauri_plugin_autostart::ManagerExt;
-        if app.autolaunch().is_enabled().unwrap_or(false) {
-            "Launch at Login (On)"
-        } else {
-            "Launch at Login (Off)"
-        }
-    };
-    launch_at_login.set_text(launch_label)?;
     let quit = MenuItem::with_id(app, "quit", "Quit AI Notetaker", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
             &status,
+            &PredefinedMenuItem::separator(app)?,
             &open_app,
             &open_latest,
             &open_folder,
-            &open_logs,
+            &PredefinedMenuItem::separator(app)?,
             &check_updates,
             &daily_updates,
-            &pair_browser,
             &launch_at_login,
+            &PredefinedMenuItem::separator(app)?,
+            &pair_browser,
+            &open_logs,
+            &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
     )?;
@@ -306,7 +302,7 @@ fn try_initialize<R: Runtime>(
     let tray = TrayIconBuilder::<R>::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("AI Notetaker — Idle")
+        .tooltip("AI Notetaker — Not recording")
         .icon(icons.idle.clone())
         .icon_as_template(cfg!(target_os = "macos"))
         .on_tray_icon_event(|tray, event| {
@@ -321,7 +317,11 @@ fn try_initialize<R: Runtime>(
         })
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "open-app" => crate::show_main_window(app),
-            "open-latest" => open_latest_note(&data_dir),
+            "open-latest" => {
+                // Notes open in the app, not as raw files in whatever app owns `.json`.
+                crate::show_main_window(app);
+                let _ = app.emit("open-latest-note", ());
+            }
             "open-folder" => {
                 let _ = open_with_default_app(&data_dir.join("meetings"));
             }
@@ -337,13 +337,10 @@ fn try_initialize<R: Runtime>(
             }
             "daily-update-check" => {
                 let enable = !crate::update_check::background_checks_enabled(&data_dir);
-                if crate::update_check::set_background_checks(&data_dir, enable) {
-                    let _ = daily_updates.set_text(if enable {
-                        "Automatic Updates (On)"
-                    } else {
-                        "Automatic Updates (Off)"
-                    });
-                }
+                let _ = crate::update_check::set_background_checks(&data_dir, enable);
+                // The menu toggles its own check mark on click; show the saved setting instead.
+                let _ = daily_updates
+                    .set_checked(crate::update_check::background_checks_enabled(&data_dir));
             }
             "pair-browser" => {
                 // User-gesture re-pairing. The IPC layer cannot tell a fresh
@@ -355,10 +352,21 @@ fn try_initialize<R: Runtime>(
                 // and auto-mints a fresh token; the extension's reconnect
                 // loop picks it up on its own.
                 let path = crate::pairing_token_path(&data_dir);
+                let reconnecting = || {
+                    crate::notify::Notifier::default().notify_deduped(
+                        "pairing-reset",
+                        "AI Notetaker",
+                        "The browser extension will reconnect automatically.",
+                    );
+                };
                 match std::fs::remove_file(&path) {
-                    Ok(()) => tracing::info!(?path, "pairing token cleared for re-pairing"),
+                    Ok(()) => {
+                        tracing::info!(?path, "pairing token cleared for re-pairing");
+                        reconnecting();
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                         // No token existed — the next hello auto-pairs anyway.
+                        reconnecting();
                     }
                     Err(error) => {
                         tracing::warn!(?path, %error, "could not clear pairing token");
@@ -412,7 +420,7 @@ fn quit_with_confirmation<R: Runtime>(app: &AppHandle<R>) {
         });
 }
 
-fn toggle_autostart<R: Runtime>(app: &AppHandle<R>, item: &MenuItem<R>) {
+fn toggle_autostart<R: Runtime>(app: &AppHandle<R>, item: &CheckMenuItem<R>) {
     use tauri_plugin_autostart::ManagerExt;
 
     let manager = app.autolaunch();
@@ -422,37 +430,11 @@ fn toggle_autostart<R: Runtime>(app: &AppHandle<R>, item: &MenuItem<R>) {
     } else {
         manager.enable()
     };
-    if result.is_ok() {
-        let label = if enabled {
-            "Launch at Login (Off)"
-        } else {
-            "Launch at Login (On)"
-        };
-        let _ = item.set_text(label);
+    if let Err(error) = result {
+        tracing::warn!(%error, "could not change Open at Login");
     }
-}
-
-fn open_latest_note(data_dir: &Path) {
-    let meetings_dir = data_dir.join("meetings");
-    let latest = fs::read_dir(&meetings_dir)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_dir())
-        .max_by_key(|entry| entry.metadata().and_then(|m| m.modified()).ok());
-
-    let Some(entry) = latest else {
-        let _ = open_with_default_app(&meetings_dir);
-        return;
-    };
-    let dir = entry.path();
-    let note = ["summary.json", "transcript.json", "meta.json"]
-        .iter()
-        .map(|name| dir.join(name))
-        .find(|path| path.is_file())
-        .unwrap_or(dir);
-    let _ = open_with_default_app(&note);
+    // The menu toggles its own check mark on click; show the real state, even after a failure.
+    let _ = item.set_checked(manager.is_enabled().unwrap_or(false));
 }
 
 fn open_with_default_app(path: &Path) -> std::io::Result<()> {

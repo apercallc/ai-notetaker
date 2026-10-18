@@ -113,14 +113,14 @@ p { line-height: 1.55; }
 .nav-button.active .nav-icon { color: var(--green); }
 .nav-icon { display: grid; flex: none; width: 18px; height: 18px; place-items: center; }
 .nav-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-.nav-button[data-page="record"].active .nav-icon { color: var(--recording); }
+.nav-button.is-recording .nav-icon { color: var(--recording); }
 .nav-dot { display: inline-block; width: 8px; height: 8px; margin-left: auto; border-radius: 50%; background: #e0a43a; }
 .nav-dot[hidden] { display: none; }
 .sidebar-footer { display: grid; gap: 4px; margin-top: auto; padding: 14px 8px 0; border-top: 1px solid var(--line); }
 .local-badge { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
 .status-dot { display: inline-block; flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: #3f9a6b; }
 .status-dot.needs-attention { background: #e0a43a; }
-.status-dot.recording { background: var(--recording); box-shadow: 0 0 0 4px color-mix(in srgb, var(--recording) 18%, transparent); }
+.status-dot.recording { background: var(--recording); box-shadow: 0 0 0 4px color-mix(in srgb, var(--recording) 18%, transparent); animation: pulse 1.6s ease-in-out infinite; }
 .sidebar-link { width: fit-content; min-height: 32px; padding: 0; border: 0; color: var(--muted); background: none; font-size: 13px; text-align: left; }
 .sidebar-link:hover { color: var(--ink); text-decoration: underline; }
 .version-label { margin-top: 6px; color: var(--muted); font-size: 11px; }
@@ -150,7 +150,7 @@ h3 { font-size: 15px; font-weight: 650; }
   font-size: 14px;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
-.text-input::placeholder, .text-area::placeholder { color: color-mix(in srgb, var(--muted) 75%, transparent); }
+.text-input::placeholder, .text-area::placeholder { color: var(--muted); }
 .text-input:focus, .select-input:focus, .text-area:focus, .search-input:focus {
   border-color: var(--green);
   outline: none;
@@ -185,7 +185,11 @@ h3 { font-size: 15px; font-weight: 650; }
 .primary-button:disabled, .danger-button:disabled, .secondary-button:disabled, .small-button:disabled { cursor: not-allowed; opacity: .5; }
 .record-actions .primary-button, .record-actions .danger-button { flex: 0 0 auto; white-space: nowrap; }
 .record-icon { width: 10px; height: 10px; border-radius: 3px; background: currentColor; }
-.secondary-button .record-icon { border-radius: 50%; }
+.secondary-button .record-icon, .primary-button .record-icon { border-radius: 50%; }
+.recording-elapsed { font-variant-numeric: tabular-nums; }
+.ui-icon { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.setup-callout > .ui-icon { width: 18px; height: 18px; margin-top: 1px; }
+.folder-list-item .ui-icon { color: var(--muted); }
 .inline-link { padding: 0; min-height: 0; border: 0; color: var(--green); background: none; font-size: inherit; font-weight: 620; text-decoration: none; cursor: pointer; }
 .inline-link:hover { text-decoration: underline; }
 .inline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -317,7 +321,7 @@ h3 { font-size: 15px; font-weight: 650; }
 .folder-list-item:hover { background: var(--surface-soft); }
 .folder-list-item strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .folder-list-item span:last-child { color: var(--muted); font-size: 12px; }
-.note-folder-control { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+.note-folder-control { display: flex; flex: 1 1 100%; align-items: center; gap: 10px; }
 .note-folder-control .field-label { margin: 0; }
 .note-folder-control .select-input { flex: 1; min-width: 0; }
 .notes-list-panel, .note-detail { min-width: 0; overflow: hidden; }
@@ -334,13 +338,13 @@ h3 { font-size: 15px; font-weight: 650; }
 .note-detail { padding: 24px 28px; }
 .note-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .note-detail-head time { display: block; margin-top: 8px; color: var(--muted); font-size: 13px; }
-.status-pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 99px; color: var(--muted); background: var(--surface-soft); font-size: 12px; font-weight: 650; text-transform: capitalize; }
+.status-pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 99px; color: var(--muted); background: var(--surface-soft); font-size: 12px; font-weight: 650; }
 .note-section { margin-top: 26px; }
 .note-section h3 { margin-bottom: 10px; color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
 .summary-text { color: var(--ink); font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
 .action-list { display: grid; gap: 8px; margin: 0; padding-left: 20px; line-height: 1.55; }
-.transcript-list { display: grid; gap: 12px; max-height: 31vh; overflow: auto; padding-right: 6px; }
-.transcript-item { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.transcript-list { display: grid; gap: 12px; max-height: 60vh; overflow: auto; padding-right: 6px; }
+.transcript-item { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.7; }
 .transcript-item strong { margin-right: 6px; color: var(--green); }
 .note-actions { display: flex; justify-content: flex-end; margin-top: 20px; }
 .recovery-actions { display: grid; gap: 12px; justify-items: start; margin-top: 20px; }
@@ -401,6 +405,7 @@ h3 { font-size: 15px; font-weight: 650; }
   /* A frozen spinner looks broken; a slow pulse still says "working" without spinning. */
   .spinner { animation: pulse 2s ease-in-out infinite !important; border-top-color: var(--line); background: color-mix(in srgb, var(--green) 35%, transparent); }
   .primary-button:active, .danger-button:active { transform: none; }
+  .status-dot.recording { animation: none !important; }
 }
 @keyframes pulse { 50% { opacity: .45; } }
 /* Windows High Contrast and other forced-color modes: keep state dots and focus visible. */
