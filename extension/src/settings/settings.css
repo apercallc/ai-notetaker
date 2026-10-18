@@ -207,3 +207,5 @@ details > summary:focus-visible {
 input[aria-invalid="true"] {
   border-color: var(--color-danger);
 }
+
+.settings-section .test-result { font-size: 0.8125rem; margin: 0; }

@@ -366,7 +366,7 @@ input[type="text"]::placeholder {
 
 .note.warn {
   color: var(--text);
-  border-left: 3px solid #fdd663;
+  border-left: 3px solid var(--warn);
 }
 
 .note.error {

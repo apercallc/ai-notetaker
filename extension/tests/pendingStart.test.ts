@@ -41,6 +41,11 @@ describe("pendingMeetStart", () => {
     expect(chromeMock.storage.session._dump()[KEY]).toBeUndefined();
   });
 
+  it("drops a notes style that is not a known meeting mode, keeping the rest of the handoff", async () => {
+    await chromeMock.storage.session.set({ [KEY]: { tabId: 9, meetingMode: "<script>", titleHint: "Roadmap", createdAt: Date.now() } });
+    expect(await takePendingMeetStart(9)).toEqual({ tabId: 9, titleHint: "Roadmap" });
+  });
+
   it("never returns a malformed entry", async () => {
     await new Promise<void>((resolve) => chromeMock.storage.session.set({ [KEY]: "nonsense" }, resolve));
     expect(await takePendingMeetStart()).toBeNull();

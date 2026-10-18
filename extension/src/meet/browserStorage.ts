@@ -2,10 +2,21 @@ import type { BrowserAudioChannel } from "../types";
 import type { BrowserMeetChunk } from "./browserProcessing";
 
 const DATABASE_NAME = "ai-notetaker-meet-capture";
-/** v2 adds the [meetingId, sequence] index so one meeting can be read in order without scanning every meeting. */
-const DATABASE_VERSION = 2;
+/**
+ * v2 adds the [meetingId, sequence] index so one meeting can be read in order without scanning every meeting.
+ * v3 adds a metadata index (size and capture time in the key) so the archive inventory never loads audio.
+ * Both upgrades only add indexes: no stored record is rewritten or dropped.
+ */
+const DATABASE_VERSION = 3;
 const STORE_NAME = "chunks";
 const MEETING_INDEX = "meetingSequence";
+/**
+ * Keyed [meetingId, sequence, byteLength, capturedAt]. Only records written
+ * since v3 carry `byteLength`; IndexedDB leaves records without every key
+ * path out of an index, so older chunks are simply absent from it and the
+ * inventory falls back to reading those meetings' values.
+ */
+const META_INDEX = "meetingChunkMeta";
 const DEFAULT_BATCH_SIZE = 64;
 
 interface StoredChunk {
@@ -16,6 +27,8 @@ interface StoredChunk {
   bytes: ArrayBuffer;
   /** Epoch ms when the service worker received the chunk; absent on chunks saved before v2. */
   capturedAt?: number;
+  /** `bytes.byteLength`, duplicated so the metadata index can carry it; absent on chunks saved before v3. */
+  byteLength?: number;
 }
 
 export interface BrowserMeetArchiveStats {
@@ -40,6 +53,7 @@ function openDatabase(): Promise<IDBDatabase> {
         ? request.transaction!.objectStore(STORE_NAME)
         : db.createObjectStore(STORE_NAME, { keyPath: "id" });
       if (!store.indexNames.contains(MEETING_INDEX)) store.createIndex(MEETING_INDEX, ["meetingId", "sequence"]);
+      if (!store.indexNames.contains(META_INDEX)) store.createIndex(META_INDEX, ["meetingId", "sequence", "byteLength", "capturedAt"]);
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -89,7 +103,7 @@ export async function appendBrowserMeetChunk(
       const transaction = db.transaction(STORE_NAME, "readwrite");
       const store = transaction.objectStore(STORE_NAME);
       const id = chunkId === undefined ? `${meetingId}:${sequence}` : `${meetingId}:capture:${chunkId}`;
-      const record = { id, meetingId, channel, sequence, bytes: bytes.slice().buffer, capturedAt } satisfies StoredChunk;
+      const record = { id, meetingId, channel, sequence, bytes: bytes.slice().buffer, capturedAt, byteLength: bytes.byteLength } satisfies StoredChunk;
       if (chunkId === undefined) store.put(record);
       else {
         // Lookup and insertion share one readwrite transaction: concurrent
@@ -196,39 +210,95 @@ export async function browserMeetChunkStats(meetingId: string): Promise<{ totalC
   }
 }
 
-/** Index-only archive inventory. Audio bytes are inspected for length but never retained. */
+function emptyStats(meetingId: string): BrowserMeetArchiveStats {
+  return { meetingId, chunkCount: 0, totalBytes: 0, firstCapturedAt: null, lastSequence: -1 };
+}
+
+function addCapturedAt(stats: BrowserMeetArchiveStats, capturedAt: unknown): void {
+  if (typeof capturedAt !== "number" || !Number.isFinite(capturedAt)) return;
+  stats.firstCapturedAt = stats.firstCapturedAt === null ? capturedAt : Math.min(stats.firstCapturedAt, capturedAt);
+}
+
+function addSequence(stats: BrowserMeetArchiveStats, sequence: unknown): void {
+  if (Number.isSafeInteger(sequence) && (sequence as number) >= 0) stats.lastSequence = Math.max(stats.lastSequence, sequence as number);
+}
+
+/**
+ * Per-meeting archive inventory. Chunks written since v3 are measured from the
+ * metadata index's keys alone, so no audio is loaded for them. A meeting that
+ * still holds older chunks (no `byteLength`) is re-measured from its values,
+ * exactly as before. All passes share one read transaction, so a chunk written
+ * mid-inventory cannot make the counts disagree.
+ */
 export async function browserMeetArchiveInventory(): Promise<BrowserMeetArchiveStats[]> {
   const db = await openDatabase();
   try {
     return await new Promise((resolve, reject) => {
+      const store = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME);
+      const fail = (request: IDBRequest) => () => reject(request.error ?? new Error("Meet audio could not be inventoried"));
       const meetings = new Map<string, BrowserMeetArchiveStats>();
-      const request = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).index(MEETING_INDEX).openCursor();
+      const allCounts = new Map<string, number>();
+      const finish = () => resolve([...meetings.values()].sort((a, b) => a.meetingId.localeCompare(b.meetingId)));
+
+      // Pass 3: meetings with pre-v3 chunks are measured from their values.
+      const measureLegacy = (pending: string[]) => {
+        const meetingId = pending.shift();
+        if (meetingId === undefined) return finish();
+        const stats = emptyStats(meetingId);
+        const request = store.index(MEETING_INDEX).openCursor(meetingRange(meetingId));
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) {
+            if (stats.chunkCount > 0) meetings.set(meetingId, stats);
+            else meetings.delete(meetingId);
+            return measureLegacy(pending);
+          }
+          const record = cursor.value as StoredChunk;
+          if (record.bytes && typeof record.bytes.byteLength === "number") {
+            stats.chunkCount += 1;
+            stats.totalBytes += record.bytes.byteLength;
+            addSequence(stats, record.sequence);
+            addCapturedAt(stats, record.capturedAt);
+          }
+          cursor.continue();
+        };
+        request.onerror = fail(request);
+      };
+
+      // Pass 2: sizes and capture times straight from the metadata index's keys.
+      const measureFromKeys = () => {
+        const request = store.index(META_INDEX).openKeyCursor();
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) {
+            const legacy = [...allCounts].filter(([meetingId, count]) => (meetings.get(meetingId)?.chunkCount ?? 0) !== count).map(([meetingId]) => meetingId);
+            return measureLegacy(legacy);
+          }
+          const key = cursor.key;
+          if (Array.isArray(key) && typeof key[0] === "string" && typeof key[2] === "number") {
+            const meetingId = key[0];
+            let stats = meetings.get(meetingId);
+            if (!stats) meetings.set(meetingId, (stats = emptyStats(meetingId)));
+            stats.chunkCount += 1;
+            stats.totalBytes += key[2];
+            addSequence(stats, key[1]);
+            addCapturedAt(stats, key[3]);
+          }
+          cursor.continue();
+        };
+        request.onerror = fail(request);
+      };
+
+      // Pass 1: how many chunks each meeting holds, keys only.
+      const request = store.index(MEETING_INDEX).openKeyCursor();
       request.onsuccess = () => {
         const cursor = request.result;
-        if (!cursor) return resolve([...meetings.values()].sort((a, b) => a.meetingId.localeCompare(b.meetingId)));
+        if (!cursor) return measureFromKeys();
         const key = cursor.key;
-        const meetingId = Array.isArray(key) && typeof key[0] === "string" ? key[0] : null;
-        const record = cursor.value as StoredChunk;
-        if (meetingId && record.bytes && typeof record.bytes.byteLength === "number") {
-          let stats = meetings.get(meetingId);
-          if (!stats) {
-            stats = { meetingId, chunkCount: 0, totalBytes: 0, firstCapturedAt: null, lastSequence: -1 };
-            meetings.set(meetingId, stats);
-          }
-          stats.chunkCount += 1;
-          stats.totalBytes += record.bytes.byteLength;
-          if (Number.isSafeInteger(record.sequence) && record.sequence >= 0) {
-            stats.lastSequence = Math.max(stats.lastSequence, record.sequence);
-          }
-          if (typeof record.capturedAt === "number" && Number.isFinite(record.capturedAt)) {
-            stats.firstCapturedAt = stats.firstCapturedAt === null
-              ? record.capturedAt
-              : Math.min(stats.firstCapturedAt, record.capturedAt);
-          }
-        }
+        if (Array.isArray(key) && typeof key[0] === "string") allCounts.set(key[0], (allCounts.get(key[0]) ?? 0) + 1);
         cursor.continue();
       };
-      request.onerror = () => reject(request.error ?? new Error("Meet audio could not be inventoried"));
+      request.onerror = fail(request);
     });
   } finally {
     db.close();

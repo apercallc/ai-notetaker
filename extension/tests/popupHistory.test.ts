@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromeMock } from "./setup";
 import { DEFAULT_SETTINGS } from "../src/types";
 
-async function loadPopup(): Promise<void> {
+async function loadPopup(override: Record<string, Record<string, unknown>> = {}): Promise<void> {
   vi.resetModules();
   chromeMock.reset();
   document.body.innerHTML = '<main id="app"></main>';
@@ -16,6 +16,7 @@ async function loadPopup(): Promise<void> {
     entries[`notetaker.meeting.${id}`] = {
       id, title: `Call ${i}`, startedAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
       captureSource: i % 2 === 0 ? "meet" : "desktop", status: "saved", transcript: [], summary: null, actionItems: [],
+      ...override[id],
     };
   }
   await new Promise<void>((resolve) => chromeMock.storage.local.set({
@@ -42,5 +43,32 @@ describe("Meet recorder history", () => {
     expect(document.querySelector("#export-recordings")).not.toBeNull();
     expect(document.body.textContent).toContain("import it in the desktop app");
     expect(document.body.textContent).not.toContain("API key");
+  });
+
+  it("explains a failed recording briefly and links to its meeting page", async () => {
+    const long = `Chrome stopped sharing this tab's audio. ${"Details ".repeat(40)}`;
+    await loadPopup({
+      m18: { status: "error", errorMessage: "Call audio could not be saved. <b>Start</b> recording again.", title: "Design <review>" },
+      m16: { status: "error", errorMessage: long },
+      m14: { status: "error" },
+    });
+    const items = [...document.querySelectorAll(".recorder-list li")];
+    const failed = items.find((item) => item.textContent?.includes("Design <review>"))!;
+    expect(failed.textContent).toContain("Needs attention");
+    expect(failed.querySelector(".history-reason")?.textContent).toBe("Call audio could not be saved. <b>Start</b> recording again.");
+    // Untrusted text is escaped, never parsed as markup.
+    expect(failed.querySelector("b")).toBeNull();
+    const link = failed.querySelector<HTMLButtonElement>("[data-open-meeting]")!;
+    expect(link.textContent).toBe("View details");
+    expect(link.getAttribute("aria-label")).toBe("View details for Design <review>");
+    link.click();
+    expect(chromeMock.tabs.create).toHaveBeenCalledWith({ url: expect.stringContaining("meeting/meeting.html?id=m18") });
+
+    const truncated = items.find((item) => item.textContent?.includes("Call 16"))!.querySelector(".history-reason")!.textContent!;
+    expect(truncated.length).toBeLessThanOrEqual(140);
+    expect(truncated.endsWith("…")).toBe(true);
+    expect(items.find((item) => item.textContent?.includes("Call 14"))!.querySelector(".history-reason")?.textContent).toContain("audio saved before it stopped is kept");
+    // Saved recordings carry no failure text.
+    expect(items.find((item) => item.textContent?.includes("Call 12"))!.querySelector(".history-reason")).toBeNull();
   });
 });

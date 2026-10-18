@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT, describeCaptureFailure, finishMeetCaptureForTab, handleMeetCommand, startMeetRecording, stopMeetRecording } from "../src/meet/session";
+import { ACTIVE_CAPTURE_HINT, CAPTURE_PERMISSION_HINT, LOST_CAPTURE_MESSAGE, MIC_PERMISSION_HINT, describeCaptureFailure, finishLostMeetCaptures, finishMeetCaptureForTab, handleMeetCommand, startMeetRecording, stopMeetRecording } from "../src/meet/session";
 import type { BackgroundController } from "../src/lib/backgroundController";
 import type { MeetCaptureController } from "../src/meet/meetCapture";
 import { chromeMock } from "./setup";
@@ -33,6 +33,7 @@ function fakes(active: { id: string } | null = null) {
     isActiveForTab: vi.fn(() => true),
     preflight: vi.fn(async () => undefined),
     stopForTab: vi.fn(async () => [] as string[]),
+    releaseLostCaptures: vi.fn(async () => [] as string[]),
   };
   return { controller, capture, asTypes: () => [controller as unknown as BackgroundController, capture as unknown as MeetCaptureController] as const };
 }
@@ -217,13 +218,26 @@ describe("startMeetRecording", () => {
 });
 
 describe("stopMeetRecording", () => {
-  it("stops capture, then always finalizes the meeting even if capture teardown throws", async () => {
+  // Behavior change: Stop used to reject here, so the popup and widget showed
+  // an error although the meeting had been saved. The audio is already on
+  // disk and the capture is torn down regardless, so Stop now succeeds and
+  // the teardown failure is logged instead.
+  it("finalizes the meeting and succeeds when capture teardown throws, logging the teardown failure", async () => {
     const { controller, capture, asTypes } = fakes();
     capture.stop.mockRejectedValue(new Error("offscreen gone"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const [c, k] = asTypes();
 
-    await expect(stopMeetRecording(c, k, "m1")).rejects.toThrow("offscreen gone");
+    await expect(stopMeetRecording(c, k, "m1")).resolves.toBeUndefined();
     expect(controller.stopRecording).toHaveBeenCalledWith("m1");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("teardown failed"), expect.objectContaining({ message: "offscreen gone" }));
+  });
+
+  it("still rejects when the meeting itself cannot be finalized", async () => {
+    const { controller, asTypes } = fakes();
+    controller.stopRecording.mockRejectedValue(new Error("storage full"));
+    const [c, k] = asTypes();
+    await expect(stopMeetRecording(c, k, "m1")).rejects.toThrow("storage full");
   });
 
   it("skips capture teardown for a desktop recording", async () => {
@@ -234,6 +248,34 @@ describe("stopMeetRecording", () => {
     await stopMeetRecording(c, k, "m1");
     expect(capture.stop).not.toHaveBeenCalled();
     expect(controller.stopRecording).toHaveBeenCalledWith("m1");
+  });
+});
+
+describe("finishLostMeetCaptures", () => {
+  it("finalizes each meeting whose capture page is gone from its saved audio", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.releaseLostCaptures.mockResolvedValue(["m1", "m2"]);
+    const [c, k] = asTypes();
+    await expect(finishLostMeetCaptures(c, k)).resolves.toEqual(["m1", "m2"]);
+    expect(controller.stopRecording.mock.calls).toEqual([["m1"], ["m2"]]);
+    expect(controller.failRecording).not.toHaveBeenCalled();
+  });
+
+  it("marks a meeting failed, keeping its audio, when finalizing it fails", async () => {
+    const { controller, capture, asTypes } = fakes();
+    capture.releaseLostCaptures.mockResolvedValue(["m1"]);
+    controller.stopRecording.mockRejectedValue(new Error("storage busy"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const [c, k] = asTypes();
+    await finishLostMeetCaptures(c, k);
+    expect(controller.failRecording).toHaveBeenCalledWith("m1", LOST_CAPTURE_MESSAGE);
+  });
+
+  it("does nothing while every capture still has its page", async () => {
+    const { controller, asTypes } = fakes();
+    const [c, k] = asTypes();
+    await expect(finishLostMeetCaptures(c, k)).resolves.toEqual([]);
+    expect(controller.stopRecording).not.toHaveBeenCalled();
   });
 });
 

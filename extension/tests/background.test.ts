@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     stopMeetRecording: vi.fn(async () => {}),
     finishMeetCaptureForTab: vi.fn(async () => {}),
     handleMeetCommand: vi.fn(async () => {}),
+    finishLostMeetCaptures: vi.fn(async (): Promise<string[]> => []),
   };
   return { controller, capture, session };
 });
@@ -88,6 +89,26 @@ describe("background message handling", () => {
     expect(mocks.capture.restoreCaptures.mock.invocationCallOrder[0]!).toBeLessThan(mocks.controller.init.mock.invocationCallOrder[0]!);
   });
 
+  it("finalizes captures whose offscreen page is gone after init and before reporting state", async () => {
+    await vi.waitFor(() => expect(mocks.session.finishLostMeetCaptures).toHaveBeenCalledTimes(1));
+    expect(mocks.controller.init.mock.invocationCallOrder[0]!).toBeLessThan(mocks.session.finishLostMeetCaptures.mock.invocationCallOrder[0]!);
+    mocks.controller.getState.mockClear();
+    await send({ type: "GET_STATE" }, popup);
+    expect(mocks.session.finishLostMeetCaptures).toHaveBeenCalledTimes(2);
+    // State is read only after the check, so the reply cannot claim a lost capture is still recording.
+    expect(mocks.session.finishLostMeetCaptures.mock.invocationCallOrder[1]!).toBeLessThan(mocks.controller.getState.mock.invocationCallOrder[0]!);
+    mocks.controller.getWidgetState.mockResolvedValue({ active: null, latest: null, callTitle: null });
+    await send({ type: "GET_WIDGET_STATE" }, contentScript(5));
+    expect(mocks.session.finishLostMeetCaptures).toHaveBeenCalledTimes(3);
+  });
+
+  it("still answers GET_STATE when the lost-capture check fails", async () => {
+    mocks.session.finishLostMeetCaptures.mockRejectedValueOnce(new Error("boom")).mockRejectedValueOnce(new Error("boom"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await send({ type: "GET_STATE" }, popup)).response).toEqual({ activeMeeting: null });
+    warn.mockRestore();
+  });
+
   it("ignores messages from untrusted senders and from other extensions", async () => {
     expect((await send({ type: "GET_STATE" }, { id: "other", url: "chrome-extension://other/x.html" })).handled).toBe(false);
     expect((await send({ type: "GET_STATE" }, { id: EXTENSION_ID, url: "https://evil.example/", tab: { id: 1 } })).handled).toBe(false);
@@ -126,6 +147,13 @@ describe("background message handling", () => {
     const refused = await send({ type: "START_RECORDING", captureSource: "desktop" }, popup);
     expect(refused.response).toEqual({ error: expect.stringContaining("desktop app") });
     expect(mocks.session.startMeetRecording).not.toHaveBeenCalled();
+  });
+
+  it("passes only a known notes style from a start request", async () => {
+    await send({ type: "START_RECORDING", captureSource: "meet", meetingMode: "interview" }, contentScript(5));
+    expect(mocks.session.startMeetRecording).toHaveBeenLastCalledWith(mocks.controller, mocks.capture, expect.objectContaining({ meetingMode: "interview" }));
+    await send({ type: "START_RECORDING", captureSource: "meet", meetingMode: "anything-else" }, contentScript(5));
+    expect(mocks.session.startMeetRecording).toHaveBeenLastCalledWith(mocks.controller, mocks.capture, expect.not.objectContaining({ meetingMode: expect.anything() }));
   });
 
   it("scrubs the widget state for a content script", async () => {

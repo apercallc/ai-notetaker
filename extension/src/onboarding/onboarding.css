@@ -301,3 +301,9 @@ kbd {
   font-size: 0.875em;
   text-align: center;
 }
+
+/* Focus is moved to the heading of a new screen so it is announced; the
+   heading is not a control, so it needs no focus ring. */
+h1[tabindex="-1"]:focus {
+  outline: none;
+}

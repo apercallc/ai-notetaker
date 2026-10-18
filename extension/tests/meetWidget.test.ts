@@ -392,6 +392,29 @@ describe("MeetWidget: recording", () => {
     }
   });
 
+  it("clears the copy-notice label timer when the widget is destroyed", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const setTimeout = vi.spyOn(window, "setTimeout");
+    const clearTimeout = vi.spyOn(window, "clearTimeout");
+    try {
+      harness = await createHarness(baseState({ disclosureNoticeEnabled: true, active: activeMeeting() }));
+      await harness.click("#toggle");
+      await harness.click("#copy-disclosure");
+      // The last 2.5 s timer is the copy click's (the toast uses the same delay).
+      const index = setTimeout.mock.calls.map(([, delay]) => delay).lastIndexOf(2_500);
+      expect(index).toBeGreaterThanOrEqual(0);
+      const copyTimer = setTimeout.mock.results[index]!.value as number;
+      harness.widget.destroy();
+      expect(clearTimeout).toHaveBeenCalledWith(copyTimer);
+    } finally {
+      setTimeout.mockRestore();
+      clearTimeout.mockRestore();
+      if (descriptor) Object.defineProperty(navigator, "clipboard", descriptor);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
   it("shows an unmistakable recording state with elapsed time and quick actions", async () => {
     harness = await recording();
     const { $ } = harness;

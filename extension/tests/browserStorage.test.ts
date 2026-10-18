@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appendBrowserMeetChunk, browserMeetArchiveInventory, clearBrowserMeetChunks, lastBrowserMeetSequence, listBrowserMeetChunks, streamBrowserMeetChunks } from "../src/meet/browserStorage";
 
 const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
@@ -9,6 +9,25 @@ beforeEach(() => {
   // A fresh database per test.
   globalThis.indexedDB = new IDBFactory();
 });
+afterEach(() => vi.restoreAllMocks());
+
+/** Writes records in the shape an older extension version stored them, at that schema version. */
+async function seedLegacy(version: 1 | 2, records: Array<Record<string, unknown>>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("ai-notetaker-meet-capture", version);
+    request.onupgradeneeded = () => {
+      const store = request.result.createObjectStore("chunks", { keyPath: "id" });
+      if (version === 2) store.createIndex("meetingSequence", ["meetingId", "sequence"]);
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction("chunks", "readwrite");
+      for (const record of records) transaction.objectStore("chunks").put(record);
+      transaction.oncomplete = () => { db.close(); resolve(); };
+      transaction.onerror = () => reject(transaction.error);
+    };
+  });
+}
 
 async function collect(meetingId: string, batchSize?: number): Promise<number[]> {
   const sequences: number[] = [];
@@ -128,5 +147,42 @@ describe("browser Meet chunk storage", () => {
     expect(await lastBrowserMeetSequence("old")).toBe(1);
     await appendBrowserMeetChunk("old", "mic", 2, bytes(1, 2));
     expect(await collect("old")).toEqual([0, 1, 2]);
+  });
+
+  it("inventories new chunks from index keys alone, without loading any audio", async () => {
+    await appendBrowserMeetChunk("m2", "mic", 0, bytes(1, 2, 3, 4), 5000);
+    await appendBrowserMeetChunk("m1", "mic", 0, bytes(1, 2), 2000);
+    await appendBrowserMeetChunk("m1", "speaker", 1, bytes(1, 2, 3, 4, 5, 6), 1000);
+    await appendBrowserMeetChunk("m1", "mic", 7, bytes(1, 2), 3000);
+    const valueCursor = vi.spyOn(IDBIndex.prototype, "openCursor");
+    const valueGet = vi.spyOn(IDBIndex.prototype, "getAll");
+
+    expect(await browserMeetArchiveInventory()).toEqual([
+      { meetingId: "m1", chunkCount: 3, totalBytes: 10, firstCapturedAt: 1000, lastSequence: 7 },
+      { meetingId: "m2", chunkCount: 1, totalBytes: 4, firstCapturedAt: 5000, lastSequence: 0 },
+    ]);
+    expect(valueCursor).not.toHaveBeenCalled();
+    expect(valueGet).not.toHaveBeenCalled();
+  });
+
+  it("falls back to reading values for chunks saved before sizes were indexed, with identical totals", async () => {
+    await seedLegacy(2, [
+      { id: "old:0", meetingId: "old", channel: "speaker", sequence: 0, bytes: new Uint8Array([7, 7, 7, 7]).buffer, capturedAt: 900 },
+      { id: "old:1", meetingId: "old", channel: "mic", sequence: 1, bytes: new Uint8Array([8, 8]).buffer },
+      { id: "older:0", meetingId: "older", channel: "mic", sequence: 0, bytes: new Uint8Array([1, 1]).buffer },
+    ]);
+    // A partly-migrated meeting: legacy chunks plus one written after the upgrade.
+    await appendBrowserMeetChunk("old", "mic", 2, bytes(1, 2), 1200);
+    await appendBrowserMeetChunk("new", "mic", 0, bytes(1, 2), 1500);
+
+    expect(await browserMeetArchiveInventory()).toEqual([
+      { meetingId: "new", chunkCount: 1, totalBytes: 2, firstCapturedAt: 1500, lastSequence: 0 },
+      { meetingId: "old", chunkCount: 3, totalBytes: 8, firstCapturedAt: 900, lastSequence: 2 },
+      { meetingId: "older", chunkCount: 1, totalBytes: 2, firstCapturedAt: null, lastSequence: 0 },
+    ]);
+  });
+
+  it("returns an empty inventory for an empty database", async () => {
+    expect(await browserMeetArchiveInventory()).toEqual([]);
   });
 });

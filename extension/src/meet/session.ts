@@ -143,16 +143,53 @@ async function discoverActiveBrowserTab(): Promise<{ id: number; url?: string; t
   }
 }
 
+/**
+ * Stop always finalizes the meeting. Capture teardown failing (the offscreen
+ * page was already gone or did not answer) does not make Stop fail: every
+ * chunk the page delivered is already in IndexedDB, and the controller has
+ * forgotten the capture and closed the page either way, so the person sees
+ * their saved recording instead of an error they cannot act on. The teardown
+ * failure is still logged for diagnosis. A failure to finalize the meeting
+ * itself is real and still rejects.
+ */
 export async function stopMeetRecording(
   controller: BackgroundController,
   capture: MeetCaptureController,
   meetingId: string,
 ): Promise<void> {
+  let teardownError: unknown = null;
   try {
     if (capture.isActive(meetingId)) await capture.stop(meetingId);
-  } finally {
-    await controller.stopRecording(meetingId);
+  } catch (error) {
+    teardownError = error;
   }
+  await controller.stopRecording(meetingId);
+  if (teardownError) console.warn("Meet capture teardown failed during Stop; the recording was saved from the audio already stored", teardownError);
+}
+
+export const LOST_CAPTURE_MESSAGE = "Recording stopped unexpectedly because Chrome closed the recorder. The audio saved before that point is kept.";
+
+/**
+ * Finds captures whose offscreen page has disappeared (see
+ * MeetCaptureController.releaseLostCaptures) and finalizes their meetings
+ * from the audio already saved, the same way Stop does. If finalizing fails,
+ * the meeting is marked failed with its audio kept, never left "recording".
+ * Returns the meetings it ended.
+ */
+export async function finishLostMeetCaptures(
+  controller: BackgroundController,
+  capture: MeetCaptureController,
+): Promise<string[]> {
+  const lost = await capture.releaseLostCaptures();
+  await Promise.all(lost.map(async (meetingId) => {
+    try {
+      await controller.stopRecording(meetingId);
+    } catch (error) {
+      console.warn("A recording whose capture page was lost could not be finalized", { meetingId, error });
+      await controller.failRecording(meetingId, LOST_CAPTURE_MESSAGE).catch(() => undefined);
+    }
+  }));
+  return lost;
 }
 
 /**

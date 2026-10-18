@@ -170,6 +170,76 @@ describe("Google Meet capture orchestration", () => {
     expect(chromeMock.offscreen.closeDocument).toHaveBeenCalled();
   });
 
+  describe("lost offscreen page", () => {
+    it("releases a restored capture whose offscreen document is gone, and persists that", async () => {
+      grantStreamId("stream-abc");
+      await new MeetCaptureController().start(7, "m-lost");
+      // Worker restart: the session map survives, the offscreen page did not.
+      const restarted = new MeetCaptureController();
+      await restarted.restoreCaptures();
+      expect(restarted.isActive("m-lost")).toBe(true);
+      chromeMock.offscreen.hasDocument.mockResolvedValue(false);
+
+      await expect(restarted.releaseLostCaptures()).resolves.toEqual(["m-lost"]);
+      expect(restarted.isActive("m-lost")).toBe(false);
+      const again = new MeetCaptureController();
+      await again.restoreCaptures();
+      expect(again.isActive("m-lost")).toBe(false);
+      // The widget can still find the tab that owned the saved meeting.
+      expect(again.widgetTabId("m-lost")).toBe(7);
+    });
+
+    it("keeps a capture whose offscreen document is still there", async () => {
+      grantStreamId("stream-abc");
+      const controller = new MeetCaptureController();
+      await controller.start(7, "m-live");
+      chromeMock.offscreen.hasDocument.mockResolvedValue(true);
+      await expect(controller.releaseLostCaptures()).resolves.toEqual([]);
+      expect(controller.isActive("m-live")).toBe(true);
+    });
+
+    it("leaves captures alone when the browser cannot answer", async () => {
+      grantStreamId("stream-abc");
+      const controller = new MeetCaptureController();
+      await controller.start(7, "m-unknown");
+      chromeMock.offscreen.hasDocument.mockRejectedValue(new Error("unsupported"));
+      await expect(controller.releaseLostCaptures()).resolves.toEqual([]);
+      expect(controller.isActive("m-unknown")).toBe(true);
+    });
+
+    it("falls back to runtime.getContexts when hasDocument is unavailable", async () => {
+      grantStreamId("stream-abc");
+      const controller = new MeetCaptureController();
+      await controller.start(7, "m-contexts");
+      const offscreen = chromeMock.offscreen as { hasDocument?: unknown };
+      const hasDocument = offscreen.hasDocument;
+      delete offscreen.hasDocument;
+      const getContexts = vi.fn(async () => [] as unknown[]);
+      Object.assign(chromeMock.runtime, { getContexts });
+      try {
+        await expect(controller.releaseLostCaptures()).resolves.toEqual(["m-contexts"]);
+        expect(getContexts).toHaveBeenCalledWith(expect.objectContaining({ contextTypes: ["OFFSCREEN_DOCUMENT"] }));
+      } finally {
+        offscreen.hasDocument = hasDocument;
+        delete (chromeMock.runtime as { getContexts?: unknown }).getContexts;
+      }
+    });
+
+    it("never releases a capture that is still starting", async () => {
+      grantStreamId("stream-abc");
+      let finishStart: (value: { ok: boolean }) => void = () => {};
+      chromeMock.runtime.sendMessage.mockImplementationOnce(() => new Promise((resolve) => { finishStart = resolve; }));
+      const controller = new MeetCaptureController();
+      const starting = controller.start(7, "m-starting");
+      await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalled());
+      chromeMock.offscreen.hasDocument.mockResolvedValue(false);
+      await expect(controller.releaseLostCaptures()).resolves.toEqual([]);
+      finishStart({ ok: true });
+      await starting;
+      expect(controller.isActive("m-starting")).toBe(true);
+    });
+  });
+
   it("reuses an existing offscreen document instead of creating a second one", async () => {
     grantStreamId("stream-abc");
     chromeMock.offscreen.hasDocument.mockResolvedValue(true);

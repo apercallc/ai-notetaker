@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS } from "../src/types";
 
 const state = { activeMeeting: null, recoverableMeeting: null, helperStatus: "helper_not_found", helperInfo: null };
 
-async function loadPopup(tab: { id: number; url: string } | null, settings = { ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true }, stateOverride: Record<string, unknown> = {}, pendingTabId?: number): Promise<void> {
+async function loadPopup(tab: { id: number; url: string } | null, settings = { ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true }, stateOverride: Record<string, unknown> = {}, pendingTabId?: number, pendingExtra: Record<string, unknown> = {}): Promise<void> {
   vi.resetModules();
   chromeMock.reset();
   document.body.innerHTML = '<main id="app"></main>';
@@ -13,7 +13,7 @@ async function loadPopup(tab: { id: number; url: string } | null, settings = { .
     message.type === "GET_STATE" ? { ...state, ...stateOverride } : message.type === "START_RECORDING" ? { meetingId: "new-meet" } : {},
   );
   await new Promise<void>((resolve) => chromeMock.storage.local.set({ "notetaker.settings": settings }, resolve));
-  if (pendingTabId !== undefined) await chromeMock.storage.session.set({ "notetaker.pendingMeetStart": { tabId: pendingTabId, createdAt: Date.now() } });
+  if (pendingTabId !== undefined) await chromeMock.storage.session.set({ "notetaker.pendingMeetStart": { tabId: pendingTabId, createdAt: Date.now(), ...pendingExtra } });
   await import("../src/popup/popup");
   await vi.waitFor(() => expect(document.querySelector("#export-recordings")).not.toBeNull());
 }
@@ -115,8 +115,46 @@ describe("browser recorder popup", () => {
     await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "START_RECORDING", captureSource: "meet", tabId: 7, meetingMode: "general" }));
   });
 
+  it("honors the notes style chosen in the widget for the pending start", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, {}, 7, { meetingMode: "standup", titleHint: "Daily" });
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "START_RECORDING", captureSource: "meet", tabId: 7, meetingMode: "standup", titleHint: "Daily" }));
+  });
+
+  it("falls back to the default notes style when the pending one is not a known mode", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, { ...DEFAULT_SETTINGS, onboardingComplete: true, consentDisclosureAcknowledged: true, defaultMeetingMode: "sales" }, {}, 7, { meetingMode: "bogus" });
+    await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "START_RECORDING", captureSource: "meet", tabId: 7, meetingMode: "sales" }));
+  });
+
   it("does not start a pending capture from another tab", async () => {
     await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, {}, 8);
     expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "START_RECORDING" }));
   });
+
+  it("never lets a slow, older render paint over a newer one", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" });
+    const listener = chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)![0];
+    let releaseOld: () => void = () => {};
+    let call = 0;
+    chromeMock.runtime.sendMessage.mockImplementation(async (message: { type?: string }) => {
+      if (message.type !== "GET_STATE") return {};
+      call += 1;
+      if (call === 1) {
+        // The older state: still offering to recover an interrupted recording.
+        await new Promise<void>((resolve) => { releaseOld = resolve; });
+        return { ...state, recoverableMeeting: { meetingId: "m-old", startedAt: "2026-10-01T10:00:00.000Z" } };
+      }
+      return state;
+    });
+    listener({ type: "MEETING_STATE_CHANGED", meetingId: "m-old" });
+    await vi.waitFor(() => expect(call).toBe(1));
+    listener({ type: "MEETING_STATE_CHANGED", meetingId: "m-old" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The newer render waits for the one in flight instead of racing it.
+    expect(call).toBe(1);
+    releaseOld();
+    await vi.waitFor(() => expect(call).toBe(2));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(document.querySelector("#recoverable-banner")).toBeNull();
+  });
 });
+

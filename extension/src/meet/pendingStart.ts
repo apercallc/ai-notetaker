@@ -15,6 +15,8 @@
  * between the widget's failed start and the popup's open.
  */
 
+import { isMeetingMode, type MeetingMode } from "../types";
+
 const PENDING_START_KEY = "notetaker.pendingMeetStart";
 const MAX_AGE_MS = 2 * 60_000;
 
@@ -22,7 +24,7 @@ export interface PendingMeetStart {
   /** The Meet tab whose capture was blocked. */
   tabId: number;
   /** Chosen notes style, so the auto-start matches what the user picked in the widget. */
-  meetingMode?: string;
+  meetingMode?: MeetingMode;
   /** The call's name when the widget knew it. */
   titleHint?: string;
 }
@@ -50,7 +52,13 @@ export async function takePendingMeetStart(tabId?: number): Promise<PendingMeetS
     }
     if (tabId !== undefined && intent.tabId !== tabId) return null;
     await chrome.storage.session.remove(PENDING_START_KEY);
-    return { tabId: intent.tabId, ...(intent.meetingMode ? { meetingMode: intent.meetingMode } : {}), ...(intent.titleHint ? { titleHint: intent.titleHint } : {}) };
+    // Session storage is only written by this extension, but validate anyway:
+    // an unknown mode is dropped (the caller then uses the default), never passed on.
+    return {
+      tabId: intent.tabId,
+      ...(isMeetingMode(intent.meetingMode) ? { meetingMode: intent.meetingMode } : {}),
+      ...(typeof intent.titleHint === "string" && intent.titleHint ? { titleHint: intent.titleHint } : {}),
+    };
   } catch {
     return null;
   }

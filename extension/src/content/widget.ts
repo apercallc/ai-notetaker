@@ -52,6 +52,8 @@ export class MeetWidget {
   private toastTimer: number | null = null;
   private stopConfirms: Array<{ cancel: () => void }> = [];
   private announceTimer: number | null = null;
+  /** Restores the "Copy notice" button label; cleared on repeat clicks and on destroy. */
+  private copyTimer: number | null = null;
   private refreshInFlight: Promise<void> | null = null;
   private refreshQueued = false;
   private pinnedToBottom = true;
@@ -118,7 +120,8 @@ export class MeetWidget {
     this.stopTimer();
     this.endDrag?.();
     this.cancelStopConfirms();
-    for (const timer of [this.announceTimer, this.toastTimer]) if (timer !== null) window.clearTimeout(timer);
+    for (const timer of [this.announceTimer, this.toastTimer, this.copyTimer]) if (timer !== null) window.clearTimeout(timer);
+    this.announceTimer = this.toastTimer = this.copyTimer = null;
     window.removeEventListener("resize", this.onResize);
     this.host.remove();
   }
@@ -437,8 +440,13 @@ export class MeetWidget {
     const button = this.root.querySelector<HTMLButtonElement>("#copy-disclosure");
     if (!button) return;
     const done = (label: string): void => {
+      if (this.destroyed) return;
       button.textContent = label;
-      window.setTimeout(() => {
+      // The label change alone is not reliably read out; the live region is.
+      this.announce(label);
+      if (this.copyTimer !== null) window.clearTimeout(this.copyTimer);
+      this.copyTimer = window.setTimeout(() => {
+        this.copyTimer = null;
         button.textContent = "Copy notice for chat";
       }, 2_500);
     };

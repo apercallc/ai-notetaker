@@ -74,6 +74,28 @@ async function assertMicrophoneAllowed(): Promise<void> {
   if (state !== "granted") throw new Error(MIC_PERMISSION_HINT);
 }
 
+/**
+ * Whether the capture page still exists: true, false, or null when this
+ * browser cannot say (the caller must then leave the capture alone).
+ * `offscreen.hasDocument` is preferred; `runtime.getContexts` is the
+ * standard fallback in browsers that only expose that.
+ */
+async function offscreenDocumentPresent(): Promise<boolean | null> {
+  try {
+    if (typeof chrome.offscreen?.hasDocument === "function") return (await chrome.offscreen.hasDocument()) === true;
+    if (typeof chrome.runtime?.getContexts === "function") {
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ["OFFSCREEN_DOCUMENT" as chrome.runtime.ContextType],
+        documentUrls: [chrome.runtime.getURL("meet/offscreen.html")],
+      });
+      return Array.isArray(contexts) ? contexts.length > 0 : null;
+    }
+  } catch {
+    // An unanswerable check must never end a live recording.
+  }
+  return null;
+}
+
 interface ActiveCapture {
   tabId: number;
   origin?: string;
@@ -146,6 +168,30 @@ export class MeetCaptureController {
     } catch {
       // A failed restore just means tab-close cleanup works on best effort.
     }
+  }
+
+  /**
+   * The capture map survives a service-worker restart in session storage, but
+   * the offscreen page that actually records can be gone (Chrome closed or
+   * crashed it). A capture with no page behind it will never send audio or
+   * an error, so its meeting would read "recording" until someone pressed
+   * Stop. Returns those meetings, already forgotten here, for the caller to
+   * finalize from the audio saved so far. A start in progress is never
+   * touched: its page may simply not exist yet.
+   */
+  async releaseLostCaptures(): Promise<string[]> {
+    if (this.starting || this.activeMeetings.size === 0) return [];
+    const candidates = [...this.activeMeetings.keys()];
+    if ((await offscreenDocumentPresent()) !== false || this.starting) return [];
+    const lost = candidates.filter((meetingId) => this.activeMeetings.has(meetingId));
+    for (const meetingId of lost) {
+      const capture = this.activeMeetings.get(meetingId);
+      this.activeMeetings.delete(meetingId);
+      // Retire the page-side signaling session too, best effort.
+      if (capture) await this.stopDirect(capture);
+    }
+    if (lost.length > 0) await this.persistCaptures();
+    return lost;
   }
 
   /**

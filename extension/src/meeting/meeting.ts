@@ -121,7 +121,7 @@ async function render(focusActionId?: string): Promise<void> {
   app.innerHTML = `
     <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><a href="../popup/popup.html">AI Notetaker</a></div>
     <div class="title-row" id="title-row">${titleRowHtml(title)}</div>
-    <p class="meeting-meta text-secondary">${new Date(meeting.startedAt).toLocaleString()}</p>
+    <p class="meeting-meta text-secondary">${escapeHtml(Number.isNaN(new Date(meeting.startedAt).getTime()) ? "Date unavailable" : new Date(meeting.startedAt).toLocaleString())}</p>
     ${meeting.status === "saved" || (meeting.recorderOnly && meeting.status === "error") ? '<p class="drive-export-status" role="status">Meet audio is saved in Chrome. Export the recording from extension Settings, then import it in the desktop app to make notes. <button type="button" class="secondary" id="export-saved-audio">Open export</button></p>' : ""}
     ${meeting.attendeeShare
       ? `<p class="drive-export-status" role="status">Attendee share link (expires ${escapeHtml(new Date(meeting.attendeeShare.expiresAt).toLocaleDateString())}): <a href="${escapeHtml(safeShareLink(meeting.attendeeShare.shareUrl))}" target="_blank" rel="noreferrer">${escapeHtml(meeting.attendeeShare.shareUrl)}</a></p>`
@@ -131,7 +131,7 @@ async function render(focusActionId?: string): Promise<void> {
       : meeting.driveExport?.status === "pending"
         ? `<p class="drive-export-status text-secondary" role="status">Saving notes to Google Drive…</p>`
         : meeting.driveExport?.status === "error"
-          ? `<div class="drive-export-status" role="status"><p class="text-warning with-icon">Local meeting is safe, but Drive export failed: ${escapeHtml(meeting.driveExport.errorMessage ?? "unknown error")}.</p><button type="button" class="secondary" id="retry-drive-export">Retry Drive export</button></div>`
+          ? `<div class="drive-export-status" role="status"><p class="text-warning with-icon">Local meeting is safe, but Drive export failed: ${escapeHtml(meeting.driveExport.errorMessage ?? "no details were recorded")}.</p><button type="button" class="secondary" id="retry-drive-export">Retry Drive export</button></div>`
           : ""}
 
     <div class="note-actions" role="group" aria-label="Copy notes">
@@ -143,13 +143,13 @@ async function render(focusActionId?: string): Promise<void> {
 
     <section>
       <h2>Summary</h2>
-      ${meeting.summary && meeting.status === "error" ? `<p class="error-state meeting-error">Failed: ${escapeHtml(meeting.errorMessage ?? "unknown error")}</p>` : ""}
+      ${meeting.summary && meeting.status === "error" ? `<p class="error-state meeting-error">${meeting.recorderOnly ? "Recording problem" : "Failed"}: ${escapeHtml(meeting.errorMessage || "No details were recorded.")}</p>` : ""}
       ${meeting.summary
         ? `<div class="summary">${renderSummaryHtml(meeting.summary, { hideActionItems: hasActions })}</div>`
         : meeting.status === "processing"
           ? `<p class="text-secondary">Still processing…</p>`
           : meeting.status === "error"
-            ? `<p class="error-state meeting-error">Failed: ${escapeHtml(meeting.errorMessage ?? "unknown error")}</p>`
+            ? `<p class="error-state meeting-error">${meeting.recorderOnly ? "Recording problem" : "Failed"}: ${escapeHtml(meeting.errorMessage || "No details were recorded.")}</p>`
             : `<p class="text-secondary">No summary yet.</p>`}
       ${meeting.status === "error" && meeting.captureSource === "meet" && !meeting.recorderOnly ? `<div class="row"><button type="button" class="secondary" id="retry-processing">Retry saved browser audio</button>${meeting.processingMode?.kind !== "managed" ? `<button type="button" class="secondary" id="open-provider-settings">Open AI settings</button>` : ""}</div>` : ""}
     </section>

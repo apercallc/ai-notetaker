@@ -21,9 +21,10 @@ import { REMINDER_ALARM } from "./lib/reminders";
 import { classifySender, isMessageAllowed, resolveStartRequest, type SenderKind } from "./lib/senderPolicy";
 import { saveWidgetPosition } from "./lib/storage";
 import { MeetCaptureController, type MeetAudioChunk } from "./meet/meetCapture";
-import { finishMeetCaptureForTab, handleMeetCommand, startMeetRecording, stopMeetRecording } from "./meet/session";
+import { finishLostMeetCaptures, finishMeetCaptureForTab, handleMeetCommand, startMeetRecording, stopMeetRecording } from "./meet/session";
 import { broadcastToMeetTabs } from "./meet/tabBroadcast";
 import { clearPendingMeetStartFor } from "./meet/pendingStart";
+import { isMeetingMode } from "./types";
 
 // API keys and calendar tokens live in chrome.storage.local. Keep it out of
 // reach of content scripts (the Meet widget runs next to a web page); every
@@ -53,7 +54,15 @@ const readyPromise = (async () => {
   await migrateSavedProcessingModeToApiKeys().catch((error) => console.warn("API-key mode migration failed", error));
   await meetCapture.restoreCaptures().catch((error) => console.warn("Capture restore failed", error));
   await controller.init({ hasLiveCapture: (id) => meetCapture.isActive(id) }).catch((error) => console.warn("Controller init failed", error));
+  // The capture map can outlive the offscreen page that records. Finalize
+  // those meetings from their saved audio instead of showing them as live.
+  await finishLostMeetCaptures(controller, meetCapture).catch((error) => console.warn("Lost-capture check failed", error));
 })();
+
+/** Run before reporting state, so a capture page that vanished mid-call is not shown as recording. */
+async function settleLostCaptures(): Promise<void> {
+  await finishLostMeetCaptures(controller, meetCapture).catch((error) => console.warn("Lost-capture check failed", error));
+}
 
 // A captured tab that closes, or leaves its call, is the end of the call and
 // not a failure: the audio is already on disk, so finish the meeting the way
@@ -195,6 +204,7 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
   await readyPromise;
   switch (message.type) {
     case "GET_STATE":
+      await settleLostCaptures();
       // Opening the popup acknowledges a failure badge; a live recording keeps its own.
       showBadge(controller.getState().activeMeeting && !controller.getState().activeMeeting?.starting ? "REC" : "");
       return controller.getState();
@@ -216,7 +226,8 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       if (captureSource !== "meet") throw new Error("Start desktop calls from the AI Notetaker desktop app.");
       const meetingId = await startMeetRecording(controller, meetCapture, {
         tabId,
-        ...(message.meetingMode ? { meetingMode: message.meetingMode } : {}),
+        // Page-side senders can put anything here: pass only a known notes style.
+        ...(isMeetingMode(message.meetingMode) ? { meetingMode: message.meetingMode } : {}),
         ...(message.titleHint ? { titleHint: message.titleHint } : {}),
         ...(message.allowProviderWarning ? { allowProviderWarning: true } : {}),
       });
@@ -231,6 +242,7 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       if (kind === "meet-content-script" && (sender.tab?.id === undefined || !meetCapture.isActiveForTab(message.meetingId, sender.tab.id))) return { ok: false };
       return { ok: await controller.addBookmark(message.meetingId, message.note) };
     case "GET_WIDGET_STATE": {
+      await settleLostCaptures();
       const state = await controller.getWidgetState();
       if (kind === "meet-content-script") {
         state.callTitle = null;

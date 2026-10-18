@@ -5,6 +5,16 @@ import { sendToBackground } from "../lib/sendToBackground";
 
 const app = document.getElementById("app")!;
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Status lines carry a glyph and color (see theme.css), so success and failure never rely on color alone. */
+function setStatus(element: HTMLElement, text: string, tone: "valid" | "invalid" | "neutral" = "neutral"): void {
+  element.className = tone === "neutral" ? "test-result" : `test-result ${tone}`;
+  element.textContent = text;
+}
+
 async function render(): Promise<void> {
   const settings = await getSettings();
   app.innerHTML = `
@@ -13,40 +23,45 @@ async function render(): Promise<void> {
       <h2>Recording</h2>
       <label><input id="show-widget" type="checkbox" ${settings.showMeetWidget ? "checked" : ""} /> Show recording controls in Meet, Teams, Zoom, Discord, and Slack</label>
       <label><input id="auto-record" type="checkbox" ${settings.autoRecordOnMeetJoin ? "checked" : ""} /> Start recording when I join a Google Meet call</label>
-      <p class="field-hint">Use the floating control on supported meeting sites. If Chrome asks, click the toolbar icon or use the recording shortcut to enable tab audio. Other secure tabs use the popup or shortcut.</p>
-      <p class="field-hint">Tell everyone before recording. Chrome may ask for microphone access when capture starts.</p>
-      <button class="primary" id="save-settings">Save recording settings</button>
-      <p id="save-status" role="status" aria-live="polite"></p>
+      <p class="field-hint">On other secure meeting tabs, start from the toolbar popup or your keyboard shortcut. If Chrome asks, click the extension’s toolbar icon to allow the tab’s audio.</p>
+      <p class="field-hint">Tell everyone before you record. Chrome may ask for microphone access the first time.</p>
+      <button type="button" class="primary" id="save-settings">Save recording settings</button>
+      <p class="test-result" id="save-status" role="status" aria-live="polite"></p>
     </section>
     <section class="settings-section">
       <h2>Make notes in the desktop app</h2>
       <p>Export saved browser audio and older notes as one archive. In the desktop app, open Settings → Import from the extension to transcribe new recordings. The archive is copied; your original stays in Chrome.</p>
-      <button class="primary" id="export-archive">Save full archive</button>
-      <p id="archive-status" role="status" aria-live="polite"></p>
+      <button type="button" class="primary" id="export-archive">Save full archive</button>
+      <p class="test-result" id="archive-status" role="status" aria-live="polite"></p>
     </section>
     <section class="settings-section">
       <h2>Earlier extension data</h2>
       <p>Earlier notes, provider settings, and recovery controls remain available here. Desktop provider settings and cloud sync (sign in) are managed in the desktop app.</p>
-      <button class="secondary" id="open-previous-settings">Open previous settings</button>
+      <button type="button" class="secondary" id="open-previous-settings">Open previous settings</button>
     </section>`;
 
   document.getElementById("save-settings")?.addEventListener("click", async () => {
     const status = document.getElementById("save-status")!;
+    const button = document.getElementById("save-settings") as HTMLButtonElement;
+    button.disabled = true;
+    setStatus(status, "");
     try {
       const latest = await getSettings();
       latest.showMeetWidget = (document.getElementById("show-widget") as HTMLInputElement).checked;
       latest.autoRecordOnMeetJoin = (document.getElementById("auto-record") as HTMLInputElement).checked;
       await sendToBackground({ type: "SAVE_SETTINGS", settings: latest });
-      status.textContent = "Recording settings saved.";
+      setStatus(status, "Recording settings saved.", "valid");
     } catch (error) {
-      status.textContent = `Could not save settings: ${String(error)}`;
+      setStatus(status, `Settings weren’t saved: ${errorText(error)}`, "invalid");
+    } finally {
+      button.disabled = false;
     }
   });
   document.getElementById("export-archive")?.addEventListener("click", async () => {
     const button = document.getElementById("export-archive") as HTMLButtonElement;
     const status = document.getElementById("archive-status")!;
     button.disabled = true;
-    status.textContent = "Choose where to save the archive…";
+    setStatus(status, "Choose where to save the archive…");
     try {
       // Settings load is passed as a pending promise so the save picker opens
       // within the click's user activation.
@@ -56,12 +71,12 @@ async function render(): Promise<void> {
           status.textContent = `Saving archive… ${(written / 1024 / 1024).toFixed(1)} of ${(total / 1024 / 1024).toFixed(1)} MB of audio. Keep this tab open.`;
         },
       });
-      status.textContent = `Saved ${result.meetingCount} meeting records and ${(result.audioBytes / 1024 / 1024).toFixed(1)} MB of audio. Chrome data is unchanged.${result.adjustments?.length ? ` Note: ${result.adjustments.join(" ")}` : ""}`;
+      setStatus(status, `Saved ${result.meetingCount} meeting records and ${(result.audioBytes / 1024 / 1024).toFixed(1)} MB of audio. Chrome data is unchanged.${result.adjustments?.length ? ` Note: ${result.adjustments.join(" ")}` : ""}`, "valid");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        status.textContent = "Archive export cancelled. Your extension data is unchanged.";
+        setStatus(status, "Archive export cancelled. Your extension data is unchanged.");
       } else {
-        status.innerHTML = `Archive was not saved: ${escapeHtml(error instanceof Error ? error.message : String(error))}`;
+        setStatus(status, `Archive was not saved: ${errorText(error)}`, "invalid");
       }
     } finally {
       button.disabled = false;
@@ -73,5 +88,5 @@ async function render(): Promise<void> {
 }
 
 void render().catch((error) => {
-  app.textContent = `Settings could not open: ${String(error)}`;
+  app.innerHTML = `<p class="error-state" role="alert">Settings couldn’t open: ${escapeHtml(errorText(error))}. Reload this page to try again.</p>`;
 });
