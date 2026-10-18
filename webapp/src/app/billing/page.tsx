@@ -113,6 +113,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               aria-valuemin={0}
               aria-valuemax={entitlements.limit}
               aria-valuenow={Math.min(entitlements.used, entitlements.limit)}
+              aria-valuetext={`${entitlements.used.toLocaleString("en-US")} of ${entitlements.limit.toLocaleString("en-US")} meetings used`}
               style={{ height: 8, borderRadius: 4, background: "var(--color-border)", overflow: "hidden", maxWidth: 420 }}
             >
               <div style={{ width: `${usedPercent}%`, height: "100%", background: entitlements.meetingWarning === "none" ? "var(--color-accent)" : "var(--color-danger)" }} />
@@ -138,7 +139,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
             {entitlements.audio.warning === "exhausted"
               ? entitlements.isTrial ? "You have used all of your free trial meeting hours." : "You have used all meeting hours in this billing period."
               : entitlements.isTrial ? "You have used all of your free trial meetings." : "You have used every meeting in this billing period."}{" "}
-            {isOwner ? "Choose a plan below to keep processing meetings." : "Ask the workspace owner to upgrade the plan."}
+            {isOwner ? "Choose a plan below to keep processing meetings." : "Ask a workspace owner to upgrade the plan."}
           </p>
         )}
         {entitlements.warning === "low" && (
@@ -162,7 +163,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         {cancelsDate && (
           <p className="muted-copy">
             Until then everything works as usual. After that your notes stay in your account, read-only, and you can export them
-            {isOwner ? <> any time from <Link href="/account">Account</Link></> : " any time"}. Notes on your computer are never affected.
+            {isOwner ? <> any time from <Link href="/account?tab=data">Settings</Link></> : " any time"}. Notes on your computer are never affected.
           </p>
         )}
         {access.lapsed && (
@@ -174,7 +175,8 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               <li>Editing, sharing, integrations, inviting people and uploading new notes need a plan.</li>
               <li>We do not delete notes because a plan ended.</li>
             </ul>
-            {isOwner && <p><Link className="button button-secondary button-small" href="/account/export">Export all notes</Link></p>}
+            {/* A plain download link: next/link would prefetch (and so run) the export. */}
+            {isOwner && <p><a className="button button-secondary button-small" href="/account/export" download>Export all notes</a></p>}
           </div>
         )}
         {entitlements.status === "canceled" && <p className="muted-copy">Your subscription has ended.</p>}
@@ -228,7 +230,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           })}
         </div>
       ) : (
-        <p className="muted-copy">Only the workspace owner can change the plan.</p>
+        <p className="muted-copy">Only a workspace owner can change the plan.</p>
       )}
     </div>
   );

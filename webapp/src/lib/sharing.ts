@@ -13,6 +13,8 @@ export interface ActiveShare {
 
 const DEFAULT_SHARE_EXPIRY_DAYS = 7;
 const MAX_SHARE_EXPIRY_DAYS = 365;
+/** Active links per note. Keeps the note page's list (and the public surface) bounded. */
+export const MAX_ACTIVE_SHARES_PER_MEETING = 25;
 
 /** `null` means the link never expires. */
 export type ShareExpiry = number | null;
@@ -23,7 +25,7 @@ export class SharingValidationError extends Error {}
 
 function expiryDate(days: number): Date {
   if (!Number.isSafeInteger(days) || days < 1 || days > MAX_SHARE_EXPIRY_DAYS) {
-    throw new SharingValidationError(`share expiry must be between 1 and ${MAX_SHARE_EXPIRY_DAYS} days`);
+    throw new SharingValidationError(`Choose a link that expires in 1 to ${MAX_SHARE_EXPIRY_DAYS} days.`);
   }
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 }
@@ -33,11 +35,15 @@ export async function createMeetingShare(
   meetingId: string,
   expiresInDays: ShareExpiry = DEFAULT_SHARE_EXPIRY_DAYS,
 ): Promise<{ id: string; token: string; expiresAt: Date | null }> {
+  const expiresAt = expiresInDays === null ? null : expiryDate(expiresInDays);
   const meeting = await prisma.meeting.findFirst({ where: { id: meetingId, workspaceId, deletedAt: null }, select: { id: true } });
-  if (!meeting) throw new SharingValidationError("meeting not found");
+  if (!meeting) throw new SharingValidationError("This note no longer exists.");
+  const active = await prisma.meetingShareToken.count({ where: { workspaceId, meetingId, revokedAt: null, ...stillValid() } });
+  if (active >= MAX_ACTIVE_SHARES_PER_MEETING) {
+    throw new SharingValidationError(`This note already has ${MAX_ACTIVE_SHARES_PER_MEETING} active links. Revoke one you no longer need first.`);
+  }
 
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = expiresInDays === null ? null : expiryDate(expiresInDays);
   const share = await prisma.meetingShareToken.create({
     data: { workspaceId, meetingId, tokenHash: hashToken(token), expiresAt },
     select: { id: true, expiresAt: true },
@@ -46,7 +52,7 @@ export async function createMeetingShare(
 }
 
 export async function revokeMeetingShare(workspaceId: string, shareId: string, meetingId?: string): Promise<boolean> {
-  if (!shareId || shareId.length > 128) throw new SharingValidationError("share id is invalid");
+  if (!shareId || shareId.length > 128) throw new SharingValidationError("That link is no longer valid.");
   const result = await prisma.meetingShareToken.updateMany({
     // When the caller names the note (the UI always does), the link must belong to it.
     where: { id: shareId, workspaceId, revokedAt: null, ...(meetingId ? { meetingId } : {}) },
@@ -63,7 +69,8 @@ export async function revokeMeetingShare(workspaceId: string, shareId: string, m
 export async function listActiveShares(workspaceId: string, meetingId: string): Promise<ActiveShare[]> {
   const rows = await prisma.meetingShareToken.findMany({
     where: { workspaceId, meetingId, revokedAt: null, ...stillValid() },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    take: MAX_ACTIVE_SHARES_PER_MEETING,
     select: { id: true, createdAt: true, expiresAt: true },
   });
   return rows.map((row) => ({ id: row.id, createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt?.toISOString() ?? null }));

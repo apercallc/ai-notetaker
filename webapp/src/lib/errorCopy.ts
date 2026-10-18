@@ -43,6 +43,14 @@ export function errorCopyForPath(pathname: string | null): ErrorCopy {
       backLabel: "Reload sign in",
     };
   }
+  if (path.startsWith("/trash")) {
+    return {
+      title: "We couldn't load the trash",
+      body: "Nothing was restored or deleted. Try again in a moment.",
+      backHref: "/meetings",
+      backLabel: "Back to meetings",
+    };
+  }
   if (path.startsWith("/actions")) {
     return {
       title: "We couldn't load your action items",

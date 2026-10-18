@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "./db";
 import { upsertMeeting } from "./meetings";
-import { createMeetingShare, getSharedMeeting, listActiveShares, revokeMeetingShare, SharingValidationError } from "./sharing";
+import { createMeetingShare, getSharedMeeting, listActiveShares, MAX_ACTIVE_SHARES_PER_MEETING, revokeMeetingShare, SharingValidationError } from "./sharing";
 
 const WORKSPACE_ID = "44444444-0000-0000-0000-000000000004";
 const OTHER_WORKSPACE_ID = "55555555-0000-0000-0000-000000000005";
@@ -78,5 +78,23 @@ describe("meeting shares", () => {
     const share = await createMeetingShare(WORKSPACE_ID, MEETING_ID, 1);
     await prisma.meetingShareToken.update({ where: { id: share.id }, data: { expiresAt: new Date(Date.now() - 1_000) } });
     expect(await getSharedMeeting(share.token)).toBeNull();
+  });
+
+  it("caps active links per note so the list and public surface stay bounded", async () => {
+    const now = Date.now();
+    await prisma.meetingShareToken.createMany({
+      data: Array.from({ length: MAX_ACTIVE_SHARES_PER_MEETING }, (_, index) => ({
+        workspaceId: WORKSPACE_ID, meetingId: MEETING_ID, tokenHash: `cap-${index}`, expiresAt: new Date(now + 86_400_000), createdAt: new Date(now - index),
+      })),
+    });
+    await expect(createMeetingShare(WORKSPACE_ID, MEETING_ID)).rejects.toThrow(`already has ${MAX_ACTIVE_SHARES_PER_MEETING} active links`);
+    expect(await listActiveShares(WORKSPACE_ID, MEETING_ID)).toHaveLength(MAX_ACTIVE_SHARES_PER_MEETING);
+    // Revoked and expired links don't count against the cap.
+    const [first, second] = await prisma.meetingShareToken.findMany({ where: { meetingId: MEETING_ID }, take: 2, select: { id: true } });
+    await revokeMeetingShare(WORKSPACE_ID, first!.id);
+    await prisma.meetingShareToken.update({ where: { id: second!.id }, data: { expiresAt: new Date(now - 1_000) } });
+    expect((await createMeetingShare(WORKSPACE_ID, MEETING_ID)).token).toBeTruthy();
+    expect((await createMeetingShare(WORKSPACE_ID, MEETING_ID)).token).toBeTruthy();
+    await expect(createMeetingShare(WORKSPACE_ID, MEETING_ID)).rejects.toBeInstanceOf(SharingValidationError);
   });
 });

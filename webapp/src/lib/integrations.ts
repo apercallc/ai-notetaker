@@ -234,17 +234,28 @@ function appUrl(): string | null {
 export async function buildNotePayload(workspaceId: string, meetingId: string, includeTranscript: boolean): Promise<NotePayload | null> {
   const meeting = await prisma.meeting.findFirst({
     where: { id: meetingId, workspaceId, deletedAt: null },
-    include: {
-      actionItems: true,
+    // Only what a receiver sees: never the previous summary, provider metadata or other columns.
+    select: {
+      id: true,
+      title: true,
+      startedAt: true,
+      endedAt: true,
+      mode: true,
+      folderId: true,
+      summary: true,
+      actionItems: { select: { text: true, owner: true, dueAt: true, status: true } },
       speakers: { select: { speakerKey: true, displayName: true } },
-      ...(includeTranscript ? { transcript: { orderBy: { order: "asc" as const } } } : {}),
     },
   });
   if (!meeting) return null;
   const names = Object.fromEntries(meeting.speakers.map((speaker) => [speaker.speakerKey, speaker.displayName]));
   const base = appUrl();
-  const folders = meeting.folderId ? await prisma.folder.findMany({ where: { workspaceId, deletedAt: null }, select: { id: true, parentId: true, name: true } }) : [];
-  const transcript = (meeting as { transcript?: Array<{ speaker: string; text: string; timestamp: Date | null }> }).transcript;
+  const [folders, transcript] = await Promise.all([
+    meeting.folderId ? prisma.folder.findMany({ where: { workspaceId, deletedAt: null }, select: { id: true, parentId: true, name: true } }) : [],
+    includeTranscript
+      ? prisma.transcriptSegment.findMany({ where: { meetingId: meeting.id }, orderBy: { order: "asc" }, select: { speaker: true, text: true, timestamp: true } })
+      : null,
+  ]);
   return {
     id: meeting.id,
     title: meeting.title,

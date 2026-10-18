@@ -698,8 +698,11 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
+    animation: none !important;
   }
 }
 
@@ -982,9 +985,12 @@ textarea {
 .text-input:focus,
 select:focus,
 textarea:focus {
-  border-color: color-mix(in srgb, var(--color-accent) 65%, var(--color-border));
-  outline: none;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 13%, transparent);
+  /* A full-strength border plus a visible ring (the 13% ring alone measured
+     well under 3:1). The transparent outline still draws in forced-colors
+     (Windows High Contrast), where box-shadow is dropped. */
+  border-color: var(--color-accent);
+  outline: 2px solid transparent;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
 
 .meeting-list {
@@ -1947,7 +1953,8 @@ a.meeting-card:hover,
 
 .ask-input:focus,
 .ask-input:focus-visible {
-  outline: 0;
+  /* The form's focus-within ring is the indicator; transparent keeps one in forced-colors mode. */
+  outline: 2px solid transparent;
   box-shadow: none;
 }
 

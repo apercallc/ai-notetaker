@@ -96,7 +96,7 @@ export function ShareMeeting({ meetingId, links }: { meetingId: string; links: A
 
       <h3 className="subsection-title">Active links</h3>
       {links.length === 0 ? (
-        <p className="muted-copy">No active links. Only you and your workspace can see this meeting.</p>
+        <p className="muted-copy">No active links. Only people in your workspace can see this note.</p>
       ) : (
         <ul className="share-links">
           {links.map((link) => (

@@ -252,6 +252,8 @@ model ManagedUpload {
 
   @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, meetingId])
+  // Deleting a meeting cascades here by meetingId alone.
+  @@index([meetingId])
   @@index([expiresAt, id])
 }
 
@@ -374,6 +376,8 @@ model MeetingShareToken {
   meeting   Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, meetingId])
+  // Deleting a meeting cascades here by meetingId alone.
+  @@index([meetingId])
 }
 
 model BillingEvent {
@@ -603,5 +607,7 @@ model IntegrationDelivery {
 
   @@index([status, nextAttemptAt])
   @@index([integrationId, createdAt])
+  // The account page's recent-deliveries list.
+  @@index([workspaceId, createdAt])
   @@index([createdAt])
 }

@@ -24,7 +24,7 @@ export default async function TrashPage() {
       </nav>
       <div className="page-header">
         <h1>Trash</h1>
-        <p className="total-count">{items.length === 1 ? "1 item" : `${items.length} items`}</p>
+        <p className="total-count">{total === 1 ? "1 item" : `${total} items`}</p>
       </div>
       <p className="muted-copy">Deleted notes and folders stay here for {TRASH_RETENTION_DAYS} days, then are removed for good. Deleting forever removes them now.</p>
       {total > items.length && (

@@ -31,22 +31,25 @@ export default async function AccountPage({
   searchParams: Promise<{ tab?: string; required?: string; google?: string; googleError?: string }>;
 }) {
   const session = await requireSession({ allowPasswordChange: true });
-  const [workspaces, sessions, tokens, workspace, google] = await Promise.all([
-    listUserWorkspaces(session.userId),
-    listUserSessions(session.userId),
-    listApiTokens(session.userId),
+  const params = await searchParams;
+  const { required, google: googleNotice, googleError } = params;
+  const tab = resolveAccountTab(params);
+  // Only the visible section's data is read: one tab renders at a time.
+  const security = tab === "security";
+  const integrationsTab = tab === "integrations";
+  const isOwner = session.role === "owner";
+  const [workspaces, sessions, tokens, workspace, google, integrations, deliveries] = await Promise.all([
+    security || integrationsTab ? listUserWorkspaces(session.userId) : [],
+    security ? listUserSessions(session.userId) : [],
+    integrationsTab ? listApiTokens(session.userId) : [],
     prisma.workspace.findUniqueOrThrow({
       where: { id: session.workspaceId },
       select: { name: true, retentionDays: true, vocabulary: true, summaryLanguage: true },
     }),
-    googleConnectionStatus(session.userId),
+    integrationsTab ? googleConnectionStatus(session.userId) : { configured: false, connected: false, accountEmail: null },
+    integrationsTab && isOwner ? listIntegrations(session.workspaceId) : [],
+    integrationsTab && isOwner ? listRecentDeliveries(session.workspaceId) : [],
   ]);
-  const [integrations, deliveries] = session.role === "owner"
-    ? await Promise.all([listIntegrations(session.workspaceId), listRecentDeliveries(session.workspaceId)])
-    : [[], []];
-  const params = await searchParams;
-  const { required, google: googleNotice, googleError } = params;
-  const tab = resolveAccountTab(params);
 
   return (
     <div className="container">

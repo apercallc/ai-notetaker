@@ -22,7 +22,8 @@ export default async function TeamPage() {
         <Link href="/meetings" className="back-link">
           ← Meetings
         </Link>
-        <p className="empty-state">Only the workspace owner can manage team members.</p>
+        <h1>Team</h1>
+        <p className="empty-state">Only workspace owners can invite or manage members. Ask an owner if you need someone added.</p>
       </div>
     );
   }
@@ -31,7 +32,7 @@ export default async function TeamPage() {
     teamPlanActive(session.workspaceId),
     prisma.workspaceMembership.findMany({
       where: { workspaceId: session.workspaceId },
-      include: { user: { select: { email: true, createdAt: true } } },
+      select: { id: true, role: true, createdAt: true, user: { select: { email: true } } },
       orderBy: { createdAt: "asc" },
     }),
     prisma.workspace.findUniqueOrThrow({ where: { id: session.workspaceId }, select: { retentionDays: true } }),
@@ -64,10 +65,12 @@ export default async function TeamPage() {
               <div className="team-member-actions">
                 <TeamForm operation="role" id={membership.id}>
                   <label>Role <select name="role" defaultValue={membership.role}><option value="member">Member</option><option value="owner">Owner</option></select></label>
-                  <button className="button" type="submit">Update role</button>
+                  <button className="button" type="submit" aria-label={`Update role for ${membership.user.email}`}>Update role</button>
                 </TeamForm>
-                <TeamForm operation="reset" id={membership.id}><button className="button" type="submit">Send password reset</button></TeamForm>
-                <TeamForm operation="remove" id={membership.id}><button className="button button-danger" type="submit">Remove member</button></TeamForm>
+                <TeamForm operation="reset" id={membership.id}><button className="button" type="submit" aria-label={`Send password reset to ${membership.user.email}`}>Send password reset</button></TeamForm>
+                <TeamForm operation="remove" id={membership.id} confirmMessage={`Remove ${membership.user.email} from this workspace? They lose access to its notes right away.`}>
+                  <button className="button button-danger" type="submit" aria-label={`Remove member ${membership.user.email}`}>Remove member</button>
+                </TeamForm>
               </div>
             </details>
           </li>
@@ -83,7 +86,7 @@ export default async function TeamPage() {
                 <div className="team-member-actions">
                   <span className="team-member-email">{invite.email}</span>
                   <span className="team-member-joined">Expires {formatDate(invite.expiresAt)}</span>
-                  <TeamForm operation="revoke-invite" id={invite.id}><button className="button" type="submit">Revoke invitation</button></TeamForm>
+                  <TeamForm operation="revoke-invite" id={invite.id}><button className="button" type="submit" aria-label={`Revoke invitation for ${invite.email}`}>Revoke invitation</button></TeamForm>
                 </div>
               </li>
             ))}

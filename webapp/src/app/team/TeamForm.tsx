@@ -3,9 +3,10 @@
 import { useActionState, type ReactNode } from "react";
 import { manageTeam, type TeamActionResult } from "./actions";
 
-export function TeamForm({ operation, id, children }: { operation: string; id?: string; children: ReactNode }) {
+/** `confirmMessage` asks once before an action that can't be undone from this page (removing someone). */
+export function TeamForm({ operation, id, confirmMessage, children }: { operation: string; id?: string; confirmMessage?: string; children: ReactNode }) {
   const [result, action, pending] = useActionState<TeamActionResult | null, FormData>((_, form) => manageTeam(form), null);
-  return <form action={action} className="login-form">
+  return <form action={action} className="login-form" onSubmit={confirmMessage ? (event) => { if (!window.confirm(confirmMessage)) event.preventDefault(); } : undefined}>
     <input type="hidden" name="operation" value={operation} />
     <input type="hidden" name="id" value={id ?? ""} />
     <fieldset disabled={pending}>{children}</fieldset>

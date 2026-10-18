@@ -101,10 +101,14 @@ export async function revokeUserSession(userId: string, sessionId: string): Prom
   return (await prisma.session.deleteMany({ where: { id: sessionId, userId } })).count > 0;
 }
 
+export const MAX_LISTED_SESSIONS = 50;
+
 export async function listUserSessions(userId: string, now: number = Date.now()) {
   return prisma.session.findMany({
     where: { userId, expiresAt: { gt: new Date(now) } },
     orderBy: [{ lastUsedAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }, { id: "asc" }],
+    // Every sign-in adds a session; show the most recently used ones rather than an unbounded list.
+    take: MAX_LISTED_SESSIONS,
     select: { id: true, userAgent: true, ip: true, createdAt: true, lastUsedAt: true, expiresAt: true, activeWorkspaceId: true },
   });
 }

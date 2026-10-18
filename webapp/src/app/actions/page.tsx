@@ -95,7 +95,7 @@ export default async function ActionItemsPage({
           <Link href="/meetings" className="back-link">← Meetings</Link>
           <h1>Action items</h1>
         </div>
-        <span className="total-count">{page.items.length} of {page.total} shown</span>
+        <span className="total-count">{page.total === 0 ? "None yet" : page.items.length === page.total ? `${page.total} ${page.total === 1 ? "item" : "items"}` : `Showing ${page.items.length} of ${page.total}`}</span>
       </div>
 
       <nav className="filter-links" aria-label="Action item filters">
@@ -136,9 +136,11 @@ export default async function ActionItemsPage({
         </ul>
       )}
 
-      {nextHref && (
+      {(nextHref || filters.cursor) && (
         <nav className="pagination" aria-label="Pagination">
-          <Link href={nextHref}>Next page →</Link>
+          {/* Keyset paging has no "previous"; the first page is always one step away. */}
+          {filters.cursor ? <Link href={filterHref(filters, {})}>← First page</Link> : <span aria-hidden="true" />}
+          {nextHref ? <Link href={nextHref}>Next page →</Link> : <span aria-hidden="true" />}
         </nav>
       )}
     </div>

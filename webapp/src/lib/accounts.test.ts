@@ -51,7 +51,12 @@ async function cleanFixtures(): Promise<void> {
   await prisma.session.deleteMany({ where: { user: { email: { startsWith: EMAIL_PREFIX } } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: EMAIL_PREFIX } } });
   await prisma.workspace.deleteMany({ where: { name: { startsWith: WORKSPACE_PREFIX } } });
-  await prisma.loginThrottle.deleteMany({ where: { emailKey: { contains: "accounts.batch" } } });
+  // Signup budgets are keyed by this file's fixed test IP and a shared global
+  // key; a successful signup records both, so clear them or a re-run on the
+  // same database (or another suite's leftovers) reads as "throttled".
+  await prisma.loginThrottle.deleteMany({
+    where: { OR: [{ emailKey: { contains: "accounts.batch" } }, { emailKey: { in: [`signup:ip:${context.ip}`, "signup:global"] } }] },
+  });
 }
 
 beforeEach(async () => {
@@ -100,7 +105,11 @@ describe("hosted account creation", () => {
     expect(await registerHostedAccount(input({ confirmPassword: "another password" }))).toEqual({ ok: false, error: "password-mismatch" });
     expect(await registerHostedAccount(input({ password: "short", confirmPassword: "short" }))).toMatchObject({ ok: false, error: "weak-password", problem: "too-short" });
     expect(await registerHostedAccount(input({ acceptedTerms: false }))).toEqual({ ok: false, error: "consent-required" });
-    expect(await prisma.user.count()).toBe(0);
+    // Nothing was written for any rejected attempt. Scoped to this file's
+    // fixtures so other suites' rows on a shared database don't matter.
+    expect(await prisma.user.count({ where: { OR: [{ email: { startsWith: EMAIL_PREFIX } }, { email: "bad-address" }] } })).toBe(0);
+    expect(await prisma.workspace.count({ where: { name: { startsWith: WORKSPACE_PREFIX } } })).toBe(0);
+    expect(await prisma.authToken.count({ where: { email: { startsWith: EMAIL_PREFIX } } })).toBe(0);
   });
 
   it("throttles creation, rejects duplicate email, and provisions a normalized account with a trial", async () => {
