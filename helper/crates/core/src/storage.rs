@@ -103,6 +103,64 @@ pub enum StorageError {
     Json(#[from] serde_json::Error),
     #[error("meeting {0} not found")]
     NotFound(Uuid),
+    #[error("{}", .0.message())]
+    NotesRetryRefused(NotesRetryRefusal),
+}
+
+/// Why a meeting cannot have its notes made again from its saved audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotesRetryRefusal {
+    /// Still recording, or interrupted: recovery (not a retry) finishes it.
+    NotFinished,
+    /// Imported transcript text or a web-workspace copy: there is no audio to process.
+    TextOnlyImport,
+    /// Imported extension audio keeps its original note; it gets a separate desktop copy instead.
+    ImportedExtensionAudio,
+    /// Notes already exist.
+    HasNotes,
+    /// Notes are still being prepared.
+    StillProcessing,
+    /// Neither the microphone nor the meeting audio track has any saved audio.
+    NoSavedAudio,
+}
+
+impl NotesRetryRefusal {
+    pub fn message(&self) -> &'static str {
+        match self {
+            Self::NotFinished => "This recording has not finished. Use Finish notes instead.",
+            Self::TextOnlyImport => "This imported note has no saved audio to make notes from.",
+            Self::ImportedExtensionAudio => {
+                "Imported extension audio keeps its original note. Create a separate desktop note instead."
+            }
+            Self::HasNotes => "This meeting already has notes.",
+            Self::StillProcessing => "Notes are already being prepared for this meeting.",
+            Self::NoSavedAudio => "No saved audio was found for this meeting.",
+        }
+    }
+}
+
+/// Whether a finished meeting may have its notes made again, in place, from its retained audio.
+/// `None` means it may. Pure so the app and the store apply exactly the same rule.
+pub fn notes_retry_refusal(
+    meta: &MeetingMeta,
+    has_summary: bool,
+    has_audio: bool,
+) -> Option<NotesRetryRefusal> {
+    if meta.text_only_import || meta.workspace_import {
+        Some(NotesRetryRefusal::TextOnlyImport)
+    } else if meta.extension_source_status.is_some() && meta.reprocessed_from.is_none() {
+        Some(NotesRetryRefusal::ImportedExtensionAudio)
+    } else if meta.state == MeetingState::Recording {
+        Some(NotesRetryRefusal::NotFinished)
+    } else if has_summary {
+        Some(NotesRetryRefusal::HasNotes)
+    } else if meta.summary_pending || meta.managed_pending {
+        Some(NotesRetryRefusal::StillProcessing)
+    } else if !has_audio {
+        Some(NotesRetryRefusal::NoSavedAudio)
+    } else {
+        None
+    }
 }
 
 /// One directory under `<root>/meetings/` that the recovery scan could not
@@ -797,9 +855,11 @@ impl MeetingStore {
         AudioAppender::new(self.meeting_dir(id))
     }
 
+    /// Keeps an end time that is already recorded: a meeting whose notes are made again
+    /// ([`Self::prepare_notes_retry`]) is re-stopped by recovery, and the call did not end then.
     pub fn mark_stopped(&self, id: Uuid, ended_at: DateTime<Utc>) -> Result<(), StorageError> {
         self.update_meta(id, |meta| {
-            meta.ended_at = Some(ended_at);
+            meta.ended_at = Some(meta.ended_at.unwrap_or(ended_at));
             meta.state = MeetingState::Stopped;
             Ok(())
         })
@@ -815,6 +875,53 @@ impl MeetingStore {
             meta.state = MeetingState::Recording;
             Ok(())
         })
+    }
+
+    /// Whether [`Self::prepare_notes_retry`] would accept this meeting right now.
+    pub fn notes_retry_refusal(&self, id: Uuid) -> Result<Option<NotesRetryRefusal>, StorageError> {
+        let meta = self.load_meta(id)?;
+        Ok(notes_retry_refusal(
+            &meta,
+            self.meeting_dir(id).join("summary.json").exists(),
+            self.has_saved_audio(id)?,
+        ))
+    }
+
+    fn has_saved_audio(&self, id: Uuid) -> Result<bool, StorageError> {
+        Ok(self.audio_len(id, MIC_FILE)? > 0 || self.audio_len(id, SPEAKER_FILE)? > 0)
+    }
+
+    /// Sets a finished meeting whose processing gave up (no notes, nothing pending) up for a full
+    /// re-run over its retained audio, in place under the same id. Recovery then transcribes
+    /// both channels from the start and summarizes, exactly as it does for an interrupted call.
+    ///
+    /// Any partial transcript is cleared first: the re-run transcribes every saved byte again,
+    /// so keeping old text would duplicate it. Raw audio, the title, the start/end times, the
+    /// sample rates and the summary options are left untouched. Eligibility is checked under the
+    /// meeting lock, and the meeting leaves the eligible state here, so two concurrent requests
+    /// cannot both prepare it. A crash after this leaves an interrupted recording, which
+    /// startup recovery offers to finish.
+    pub fn prepare_notes_retry(&self, id: Uuid) -> Result<(), StorageError> {
+        let lock = meeting_lock(id);
+        let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut meta = self.load_meta(id)?;
+        let dir = self.meeting_dir(id);
+        if let Some(refusal) = notes_retry_refusal(
+            &meta,
+            dir.join("summary.json").exists(),
+            self.has_saved_audio(id)?,
+        ) {
+            return Err(StorageError::NotesRetryRefused(refusal));
+        }
+        // Transcript first: a crash before the meta write leaves a finished meeting with an empty
+        // transcript, which can simply be retried again, never old text plus a reset cursor.
+        atomic_write(&dir.join("transcript.json"), b"[]")?;
+        remove_if_exists(&dir.join(TRANSCRIPT_LOG_FILE))?;
+        meta.transcribed_mic_bytes = 0;
+        meta.transcribed_speaker_bytes = 0;
+        meta.summary_pending = false;
+        meta.state = MeetingState::Recording;
+        self.write_meta_unlocked(&meta)
     }
 
     /// Records what the user flagged so a summary retried after a restart
@@ -2353,6 +2460,149 @@ mod tests {
         let meta = store.load_meta(id).unwrap();
         assert_eq!(meta.state, MeetingState::Stopped);
         assert_eq!(meta.ended_at, Some(end));
+    }
+
+    /// A finished meeting whose processing gave up: saved audio, a partial transcript, no notes.
+    fn gave_up_meeting(store: &MeetingStore) -> (Uuid, DateTime<Utc>) {
+        let id = Uuid::new_v4();
+        let start = Utc::now() - Duration::hours(1);
+        store.create_meeting(id, start).unwrap();
+        store.append_audio(id, MIC_FILE, &[1, 0, 2, 0]).unwrap();
+        store.append_audio(id, SPEAKER_FILE, &[3, 0]).unwrap();
+        store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "partial".into(),
+                    is_final: true,
+                    timestamp: None,
+                },
+            )
+            .unwrap();
+        store.mark_audio_transcribed(id, MIC_FILE, 4).unwrap();
+        let end = start + Duration::minutes(30);
+        store.mark_stopped(id, end).unwrap();
+        (id, end)
+    }
+
+    #[test]
+    fn notes_retry_is_offered_only_for_finished_desktop_audio_without_notes() {
+        let (_dir, store) = temp_store();
+        let (id, _) = gave_up_meeting(&store);
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(notes_retry_refusal(&meta, false, true), None);
+        assert_eq!(store.notes_retry_refusal(id).unwrap(), None);
+
+        let refused = |change: fn(&mut MeetingMeta), summary: bool, audio: bool| {
+            let mut meta = meta.clone();
+            change(&mut meta);
+            notes_retry_refusal(&meta, summary, audio)
+        };
+        assert_eq!(
+            refused(|_| {}, true, true),
+            Some(NotesRetryRefusal::HasNotes)
+        );
+        assert_eq!(
+            refused(|_| {}, false, false),
+            Some(NotesRetryRefusal::NoSavedAudio)
+        );
+        assert_eq!(
+            refused(|meta| meta.state = MeetingState::Recording, false, true),
+            Some(NotesRetryRefusal::NotFinished)
+        );
+        assert_eq!(
+            refused(|meta| meta.summary_pending = true, false, true),
+            Some(NotesRetryRefusal::StillProcessing)
+        );
+        assert_eq!(
+            refused(|meta| meta.managed_pending = true, false, true),
+            Some(NotesRetryRefusal::StillProcessing)
+        );
+        assert_eq!(
+            refused(|meta| meta.text_only_import = true, false, true),
+            Some(NotesRetryRefusal::TextOnlyImport)
+        );
+        assert_eq!(
+            refused(|meta| meta.workspace_import = true, false, true),
+            Some(NotesRetryRefusal::TextOnlyImport)
+        );
+        assert_eq!(
+            refused(
+                |meta| meta.extension_source_status = Some("saved".into()),
+                false,
+                true
+            ),
+            Some(NotesRetryRefusal::ImportedExtensionAudio)
+        );
+        // A desktop copy made from imported extension audio is an ordinary desktop meeting.
+        assert_eq!(
+            refused(
+                |meta| {
+                    meta.extension_source_status = Some("saved".into());
+                    meta.reprocessed_from = Some(Uuid::new_v4());
+                },
+                false,
+                true
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn preparing_a_notes_retry_resets_the_transcript_in_place_and_keeps_the_audio() {
+        let (_dir, store) = temp_store();
+        let (id, end) = gave_up_meeting(&store);
+        let mic_before = fs::read(store.audio_path(id, MIC_FILE)).unwrap();
+        let speaker_before = fs::read(store.audio_path(id, SPEAKER_FILE)).unwrap();
+
+        store.prepare_notes_retry(id).unwrap();
+
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meta.id, id);
+        assert_eq!(meta.state, MeetingState::Recording);
+        assert_eq!(meta.transcribed_mic_bytes, 0);
+        assert_eq!(meta.transcribed_speaker_bytes, 0);
+        assert_eq!(meta.ended_at, Some(end));
+        assert!(store.load_transcript(id).unwrap().is_empty());
+        assert!(!store.meeting_dir(id).join(TRANSCRIPT_LOG_FILE).exists());
+        assert_eq!(
+            fs::read(store.audio_path(id, MIC_FILE)).unwrap(),
+            mic_before
+        );
+        assert_eq!(
+            fs::read(store.audio_path(id, SPEAKER_FILE)).unwrap(),
+            speaker_before
+        );
+        // Prepared once, it is no longer eligible: a second concurrent request is refused.
+        assert!(matches!(
+            store.prepare_notes_retry(id),
+            Err(StorageError::NotesRetryRefused(
+                NotesRetryRefusal::NotFinished
+            ))
+        ));
+    }
+
+    #[test]
+    fn a_refused_notes_retry_changes_nothing() {
+        let (_dir, store) = temp_store();
+        let (id, _) = gave_up_meeting(&store);
+        store
+            .write_summary(
+                id,
+                &Summary {
+                    summary: "done".into(),
+                    action_items: vec![],
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(
+            store.prepare_notes_retry(id),
+            Err(StorageError::NotesRetryRefused(NotesRetryRefusal::HasNotes))
+        ));
+        assert_eq!(store.load_transcript(id).unwrap().len(), 1);
+        assert_eq!(store.load_meta(id).unwrap().transcribed_mic_bytes, 4);
     }
 
     #[test]

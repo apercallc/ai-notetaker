@@ -36,7 +36,7 @@ use notetaker_core::providers::{
     FlaggedMoment, SummarizationProvider, SummaryOptions, TranscriptSegment, TranscriptionProvider,
 };
 use notetaker_core::resilience::RetryQueue;
-use notetaker_core::storage::MeetingStore;
+use notetaker_core::storage::{notes_retry_refusal, MeetingStore, NotesRetryRefusal};
 use notetaker_core::{
     build_summarization_provider, build_transcription_provider, native_messaging,
 };
@@ -184,6 +184,9 @@ struct DesktopMeetingSummary {
     extension_source_status: Option<String>,
     reprocessed_from: Option<String>,
     can_reprocess_extension_audio: bool,
+    /// A finished desktop meeting whose processing gave up can have its notes made again, in
+    /// place, from its retained audio.
+    can_retry_notes: bool,
     folder_id: Option<String>,
 }
 
@@ -490,6 +493,7 @@ fn main() {
             desktop_stop_recording,
             desktop_recover_meeting,
             desktop_reprocess_extension_audio,
+            desktop_retry_meeting_notes,
             desktop_get_meeting,
             desktop_delete_meeting,
             desktop_create_folder,
@@ -768,6 +772,9 @@ async fn desktop_snapshot(
         .iter()
         .find_map(|(id, recording)| recording.audio.is_some().then(|| id.to_string()));
     drop(active);
+    // An interrupted recording whose recovery (or notes retry) is running is being processed,
+    // not waiting for the user to finish it.
+    let recovering_ids = context.app.recovering.lock().await.clone();
 
     let (library, library_error) = match context.library.snapshot() {
         Ok(library) => (library, None),
@@ -789,23 +796,19 @@ async fn desktop_snapshot(
         for meta in scan.readable.into_iter().rev() {
             let summary = store.load_summary(meta.id).ok().flatten();
             let is_active = active_ids.contains(&meta.id);
-            let status = if is_active {
-                "recording"
-            } else if meta.state == notetaker_core::storage::MeetingState::Recording {
-                "recovered"
-            } else if summary.is_some() {
-                "complete"
-            } else if meta.summary_pending || meta.managed_pending {
-                "processing"
-            } else {
-                "saved"
-            };
+            let status = meeting_status(
+                &meta,
+                summary.is_some(),
+                is_active,
+                recovering_ids.contains(&meta.id),
+            );
             let can_reprocess_extension_audio = !meta.text_only_import
                 && meta.extension_source_status.is_some()
                 && meta.reprocessed_from.is_none()
                 && (store.audio_len(meta.id, "mic.pcm").unwrap_or(0) > 0
                     || store.audio_len(meta.id, "speaker.pcm").unwrap_or(0) > 0)
                 && !reprocessed_sources.contains(&meta.id);
+            let can_retry_notes = can_retry_notes(&store, &meta, status, summary.is_some());
             meetings.push(DesktopMeetingSummary {
                 id: meta.id.to_string(),
                 title: meta.title.unwrap_or_else(|| {
@@ -821,6 +824,7 @@ async fn desktop_snapshot(
                 extension_source_status: meta.extension_source_status,
                 reprocessed_from: meta.reprocessed_from.map(|id| id.to_string()),
                 can_reprocess_extension_audio,
+                can_retry_notes,
                 folder_id: placements.get(&meta.id).map(ToString::to_string),
             });
         }
@@ -842,6 +846,49 @@ async fn desktop_snapshot(
         notes_folder: context.app.data_dir.join("meetings").display().to_string(),
         webapp_sync,
     })
+}
+
+/// The note status the desktop UI shows. An interrupted recording whose recovery (or notes
+/// retry) is already running is being processed, not waiting for the user to finish it.
+fn meeting_status(
+    meta: &notetaker_core::storage::MeetingMeta,
+    has_summary: bool,
+    active: bool,
+    recovering: bool,
+) -> &'static str {
+    if active {
+        "recording"
+    } else if meta.state == notetaker_core::storage::MeetingState::Recording {
+        if recovering {
+            "processing"
+        } else {
+            "recovered"
+        }
+    } else if has_summary {
+        "complete"
+    } else if meta.summary_pending || meta.managed_pending {
+        "processing"
+    } else {
+        "saved"
+    }
+}
+
+/// Only an "Audio only" note (processing gave up) offers "Try making notes again". The audio
+/// lengths are read only for those, so the history scan stays cheap.
+fn can_retry_notes(
+    store: &MeetingStore,
+    meta: &notetaker_core::storage::MeetingMeta,
+    status: &str,
+    has_summary: bool,
+) -> bool {
+    status == "saved"
+        && notes_retry_refusal(
+            meta,
+            has_summary,
+            store.audio_len(meta.id, "mic.pcm").unwrap_or(0) > 0
+                || store.audio_len(meta.id, "speaker.pcm").unwrap_or(0) > 0,
+        )
+        .is_none()
 }
 
 #[tauri::command]
@@ -1829,9 +1876,112 @@ async fn desktop_reprocess_extension_audio(
     Ok(copy_id.to_string())
 }
 
+/// Makes notes again, in place, for a finished desktop meeting whose processing gave up (no
+/// notes, nothing pending). The partial transcript is cleared and both saved channels are
+/// transcribed again from the start through the same recovery path an interrupted recording
+/// uses, so the UI sees the same `recording_stopped` / `summary_ready` / `error` events. Raw
+/// audio is never rewritten or deleted.
+#[tauri::command]
+async fn desktop_retry_meeting_notes(
+    context: tauri::State<'_, DesktopCommandContext>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let meeting_id = Uuid::parse_str(&meeting_id).map_err(|_| "Invalid meeting id.".to_string())?;
+    retry_meeting_notes(context.inner().clone(), meeting_id).await
+}
+
+async fn retry_meeting_notes(
+    context: DesktopCommandContext,
+    meeting_id: Uuid,
+) -> Result<(), String> {
+    if context.app.active.lock().await.contains_key(&meeting_id) {
+        return Err("This recording is still in progress.".into());
+    }
+    if processing_in_flight(&context.app, meeting_id).await {
+        return Err(NotesRetryRefusal::StillProcessing.message().into());
+    }
+    let preferences = current_preferences(&context);
+    let keys = with_credentials(desktop_settings::load_api_keys).await?;
+    processing_ready(&preferences, &keys).map_err(|_| {
+        "Add your transcription and summary provider keys in Settings, then try again. \
+         The saved audio is unchanged."
+            .to_string()
+    })?;
+    if !context.app.recovering.lock().await.insert(meeting_id) {
+        return Err("Notes are already being made for this meeting.".into());
+    }
+    // The guard stays held from here until the recovery task ends (or this fails), so a second
+    // retry or a recovery request for the same meeting cannot interleave with this one.
+    let store = context.app.store.clone();
+    let prepared = tokio::task::spawn_blocking(move || store.prepare_notes_retry(meeting_id))
+        .await
+        .map_err(|_| "The meeting could not be prepared. Its saved audio is unchanged.".to_string())
+        .and_then(|result| {
+            result.map_err(|error| match error {
+                notetaker_core::storage::StorageError::NotesRetryRefused(refusal) => {
+                    refusal.message().to_string()
+                }
+                notetaker_core::storage::StorageError::NotFound(_) => {
+                    "This saved recording could not be found.".to_string()
+                }
+                error => format!(
+                    "The meeting could not be prepared ({error}). Its saved audio is unchanged."
+                ),
+            })
+        });
+    let launched = match prepared {
+        Ok(()) => launch_desktop_recovery(context.clone(), meeting_id, preferences, keys)
+            .await
+            .map_err(|error| {
+                format!("{error} The saved audio is unchanged; use Finish notes to try again.")
+            }),
+        Err(error) => Err(error),
+    };
+    if launched.is_err() {
+        context.app.recovering.lock().await.remove(&meeting_id);
+    }
+    launched
+}
+
+/// A pipeline or a live retry worker already owns this meeting's processing.
+async fn processing_in_flight(app: &AppState, meeting_id: Uuid) -> bool {
+    app.pipelines.lock().await.contains_key(&meeting_id)
+        || app
+            .retry_tasks
+            .lock()
+            .await
+            .get(&meeting_id)
+            .is_some_and(|worker| !worker._task.is_finished())
+}
+
 async fn start_desktop_recovery(
     context: DesktopCommandContext,
     meeting_id: Uuid,
+) -> Result<(), String> {
+    let preferences = current_preferences(&context);
+    let keys = with_credentials(desktop_settings::load_api_keys).await?;
+    resolve_keys(
+        preferences.transcription_provider,
+        preferences.summarization_provider,
+        &keys,
+    )?;
+    if !context.app.recovering.lock().await.insert(meeting_id) {
+        return Err("Recovery is already running for this recording.".into());
+    }
+    let launched = launch_desktop_recovery(context.clone(), meeting_id, preferences, keys).await;
+    if launched.is_err() {
+        context.app.recovering.lock().await.remove(&meeting_id);
+    }
+    launched
+}
+
+/// Resumes an interrupted (`Recording`-state) desktop meeting from its saved audio. The caller
+/// holds the meeting's `recovering` guard; on success the spawned task releases it when done.
+async fn launch_desktop_recovery(
+    context: DesktopCommandContext,
+    meeting_id: Uuid,
+    preferences: desktop_settings::DesktopPreferences,
+    keys: native_messaging::ApiKeys,
 ) -> Result<(), String> {
     if context.app.active.lock().await.contains_key(&meeting_id) {
         return Err("This recording is already in progress.".into());
@@ -1861,17 +2011,6 @@ async fn start_desktop_recovery(
     {
         return Err("Recovery is already processing this recording.".into());
     }
-    let preferences = context
-        .preferences
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    let keys = with_credentials(desktop_settings::load_api_keys).await?;
-    resolve_keys(
-        preferences.transcription_provider,
-        preferences.summarization_provider,
-        &keys,
-    )?;
     if meta.managed_pending {
         // Hosted processing is not offered any more; the saved audio is processed with the
         // user's own keys instead of waiting for a service that will not run it.
@@ -1881,11 +2020,6 @@ async fn start_desktop_recovery(
             .release_managed_to_local(meeting_id)
             .map_err(|error| error.to_string())?;
     }
-    let mut recovering = context.app.recovering.lock().await;
-    if !recovering.insert(meeting_id) {
-        return Err("Recovery is already running for this recording.".into());
-    }
-    drop(recovering);
 
     let app = context.app.clone();
     let tray = context.tray.clone();
@@ -1919,6 +2053,7 @@ async fn desktop_get_meeting(
         .and_then(|library| library.placements.get(&meeting_id).map(ToString::to_string));
     let store = context.app.store.clone();
     let active = context.app.active.lock().await.contains_key(&meeting_id);
+    let recovering = context.app.recovering.lock().await.contains(&meeting_id);
     tokio::task::spawn_blocking(move || {
         let meta = store
             .load_meta(meeting_id)
@@ -1943,17 +2078,8 @@ async fn desktop_get_meeting(
                 .readable
                 .iter()
                 .any(|candidate| candidate.reprocessed_from == Some(meta.id));
-        let status = if active {
-            "recording"
-        } else if meta.state == notetaker_core::storage::MeetingState::Recording {
-            "recovered"
-        } else if summary.is_some() {
-            "complete"
-        } else if meta.summary_pending || meta.managed_pending {
-            "processing"
-        } else {
-            "saved"
-        };
+        let status = meeting_status(&meta, summary.is_some(), active, recovering);
+        let can_retry_notes = can_retry_notes(&store, &meta, status, summary.is_some());
         Ok(DesktopMeetingDetail {
             meeting: DesktopMeetingSummary {
                 id: meta.id.to_string(),
@@ -1970,6 +2096,7 @@ async fn desktop_get_meeting(
                 extension_source_status: meta.extension_source_status,
                 reprocessed_from: reprocessed_from.map(|id| id.to_string()),
                 can_reprocess_extension_audio,
+                can_retry_notes,
                 folder_id,
             },
             transcript,
@@ -4574,6 +4701,40 @@ mod tests {
         std::fs::write(dir.path().join("retry-not-a-uuid.json"), "[]").unwrap();
 
         assert_eq!(pending_processing_meeting_ids(dir.path()), vec![retrying]);
+    }
+
+    #[test]
+    fn only_a_finished_meeting_with_saved_audio_and_no_notes_offers_a_notes_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, chrono::Utc::now()).unwrap();
+        store.append_audio(id, "speaker.pcm", &[1, 0]).unwrap();
+
+        // Still recording, or interrupted: recovery, not a retry.
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meeting_status(&meta, false, true, false), "recording");
+        assert_eq!(meeting_status(&meta, false, false, false), "recovered");
+        assert_eq!(meeting_status(&meta, false, false, true), "processing");
+        assert!(!can_retry_notes(&store, &meta, "recovered", false));
+
+        store.mark_stopped(id, chrono::Utc::now()).unwrap();
+        let meta = store.load_meta(id).unwrap();
+        let status = meeting_status(&meta, false, false, false);
+        assert_eq!(status, "saved");
+        assert!(can_retry_notes(&store, &meta, status, false));
+        assert_eq!(meeting_status(&meta, true, false, false), "complete");
+
+        store.mark_summary_pending(id).unwrap();
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meeting_status(&meta, false, false, false), "processing");
+
+        // An audio-only note with no saved audio has nothing to make notes from.
+        let silent = Uuid::new_v4();
+        store.create_meeting(silent, chrono::Utc::now()).unwrap();
+        store.mark_stopped(silent, chrono::Utc::now()).unwrap();
+        let meta = store.load_meta(silent).unwrap();
+        assert!(!can_retry_notes(&store, &meta, "saved", false));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 
   const invoke = window.__TAURI__?.core?.invoke;
   const listen = window.__TAURI__?.event?.listen;
-  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", notesPageLimit: 100, recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncRunId: null, finishedSyncRuns: [], syncAnnouncement: "", noticeTimer: 0, noticeKind: "", noticeSource: "", syncWarning: "" };
+  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", notesPageLimit: 100, recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), retryingNotesIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncRunId: null, finishedSyncRuns: [], syncAnnouncement: "", noticeTimer: 0, noticeKind: "", noticeSource: "", syncWarning: "" };
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const prettyDate = (value) => {
@@ -638,6 +638,7 @@
       ${importNotice}
       ${meeting.canReprocessExtensionAudio ? `<section class="recovery-actions"><p class="privacy-note">Create a separate desktop note from the saved audio. The imported transcript and summary will stay unchanged.</p><button class="secondary-button" id="reprocess-extension-audio" ${state.reprocessingIds.has(meeting.id) ? "disabled" : ""}>${state.reprocessingIds.has(meeting.id) ? "Preparing audio copy…" : "Create notes from saved audio"}</button></section>` : ""}
       ${meeting.status === "recovered" && !meeting.textOnlyImport ? `<section class="recovery-actions"><p class="privacy-note">Audio is safe on this device. Resume processing it to finish the transcript and notes.</p><button class="secondary-button" id="recover-meeting" ${state.recoveringIds.has(meeting.id) ? "disabled" : ""}>${state.recoveringIds.has(meeting.id) ? "Finishing notes…" : "Finish notes from saved audio"}</button></section>` : ""}
+      ${meeting.status === "saved" && meeting.canRetryNotes ? `<section class="recovery-actions"><p class="privacy-note">Transcribe the saved audio again and make new notes. Any partial transcript is replaced; the audio stays on this device.</p><button class="secondary-button" id="retry-meeting-notes" ${state.retryingNotesIds.has(meeting.id) ? "disabled" : ""}>${state.retryingNotesIds.has(meeting.id) ? "Making notes…" : "Try making notes again"}</button></section>` : ""}
       <div class="note-actions"><div class="note-folder-control"><label class="field-label" for="note-folder">Folder</label><select class="select-input" id="note-folder">${folderOptions(meeting.folderId)}</select><button type="button" class="small-button" id="move-note">Move note</button></div><div class="inline-actions note-export"><button class="secondary-button" id="copy-note">Copy as Markdown</button><button class="secondary-button" id="save-note-md">Save Markdown</button><button class="secondary-button" id="save-note-txt">Save text</button></div><button type="button" class="secondary-button danger" id="delete-note">${meeting.textOnlyImport ? "Delete imported note" : "Delete recording"}</button></div>`;
     root.dataset.meetingId = meeting.id;
     const transcriptList = $(".transcript-list", root);
@@ -647,6 +648,7 @@
     $("#delete-note")?.addEventListener("click", deleteMeeting);
     $("#recover-meeting")?.addEventListener("click", recoverMeeting);
     $("#reprocess-extension-audio")?.addEventListener("click", reprocessExtensionAudio);
+    $("#retry-meeting-notes")?.addEventListener("click", retryMeetingNotes);
     $("#move-note")?.addEventListener("click", async () => {
       const destination = $("#note-folder").value || null;
       if (destination === (meeting.folderId || null)) { notify("The note is already in that folder."); return; }
@@ -681,6 +683,25 @@
     } catch (error) {
       state.reprocessingIds.delete(id);
       notify(String(error), "error");
+      await refresh();
+    }
+  }
+
+  async function retryMeetingNotes() {
+    const id = state.selectedId;
+    const button = $("#retry-meeting-notes");
+    if (!id || !button || state.retryingNotesIds.has(id)) return;
+    state.retryingNotesIds.add(id);
+    button.disabled = true;
+    button.textContent = "Making notes…";
+    try {
+      await invoke("desktop_retry_meeting_notes", { meetingId: id });
+      notify("Making notes from the saved audio. It stays on this device.");
+    } catch (error) {
+      notify(String(error), "error");
+    } finally {
+      // Once started, the note reports "Preparing your notes…" until it finishes or fails.
+      state.retryingNotesIds.delete(id);
       await refresh();
     }
   }

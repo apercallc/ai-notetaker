@@ -2108,6 +2108,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retrying_notes_reruns_the_saved_audio_in_place_without_duplicating_text() {
+        let (_dir, mut pipeline) = build_pipeline(0);
+        let store = pipeline.store.clone();
+        let id = Uuid::new_v4();
+        let start = Utc::now() - chrono::Duration::hours(1);
+        store.create_meeting(id, start).unwrap();
+        store.append_audio(id, MIC_FILE, &[1, 0, 2, 0]).unwrap();
+        store.append_audio(id, SPEAKER_FILE, &[3, 0, 4, 0]).unwrap();
+        // The first attempt transcribed the mic, then gave up before any notes were made.
+        store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "fake transcript".into(),
+                    is_final: true,
+                    timestamp: None,
+                },
+            )
+            .unwrap();
+        store.mark_audio_transcribed(id, MIC_FILE, 4).unwrap();
+        let end = start + chrono::Duration::minutes(30);
+        store.mark_stopped(id, end).unwrap();
+        let mic = std::fs::read(store.audio_path(id, MIC_FILE)).unwrap();
+
+        store.prepare_notes_retry(id).unwrap();
+        let messages = pipeline.recover_recording(id).await.unwrap();
+
+        assert!(messages
+            .iter()
+            .any(|message| matches!(message, HelperToExtension::SummaryReady { meeting_id, .. } if *meeting_id == id)));
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meta.state, MeetingState::Processed);
+        assert_eq!(meta.ended_at, Some(end));
+        let transcript = store.load_transcript(id).unwrap();
+        assert_eq!(
+            transcript
+                .iter()
+                .map(|segment| segment.speaker.as_str())
+                .collect::<Vec<_>>(),
+            ["you", "them"]
+        );
+        assert!(store.load_summary(id).unwrap().is_some());
+        assert_eq!(std::fs::read(store.audio_path(id, MIC_FILE)).unwrap(), mic);
+    }
+
+    #[tokio::test]
     async fn provider_outage_queues_remaining_ranges_instead_of_one_call_each() {
         let dir = tempfile::tempdir().unwrap();
         let store = MeetingStore::new(dir.path()).unwrap();
