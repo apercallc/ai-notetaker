@@ -24,7 +24,7 @@ async function openMeeting(meeting: MeetingRecord = base): Promise<void> {
   window.history.replaceState({}, "", `/meeting/meeting.html?id=${meeting.id}`);
   await saveMeeting(meeting);
   await import("../src/meeting/meeting");
-  await vi.waitFor(() => expect(document.getElementById("copy-notes")).not.toBeNull());
+  await vi.waitFor(() => expect(document.getElementById("delete-meeting")).not.toBeNull());
 }
 
 beforeEach(() => {
@@ -57,6 +57,19 @@ describe("meeting page: background updates", () => {
     expect(document.querySelector("#open-provider-settings")).toBeNull();
     expect(document.querySelector("#export-saved-audio")).not.toBeNull();
     expect(document.body.textContent).toContain("Call audio stopped.");
+    expect(document.querySelector(".meeting-error")?.textContent).toBe("Call audio stopped.");
+    expect(document.body.textContent).toContain("Meeting audio is saved in Chrome.");
+    expect(document.querySelector("#export-saved-audio")?.textContent).toBe("Export recordings");
+    // Audio only: no empty note sections, copy buttons, or text exports.
+    for (const selector of ["#copy-notes", "#export-markdown", "#export-plain-text", "#print-meeting", "section"]) {
+      expect(document.querySelector(selector)).toBeNull();
+    }
+    expect(document.querySelector(".brand-lockup a")).toBeNull();
+  });
+
+  it("drops the redundant prefix from a failed processing message", async () => {
+    await openMeeting({ ...base, summary: null, status: "error", captureSource: "meet", errorMessage: "Provider unavailable" });
+    expect(document.querySelector(".meeting-error")?.textContent).toBe("Provider unavailable");
   });
 
   it("updates Drive export after notes are complete", async () => {

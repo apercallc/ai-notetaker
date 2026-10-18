@@ -42,6 +42,7 @@ describe("Meet recorder settings", () => {
     (document.querySelector("#export-archive") as HTMLButtonElement).click();
     await vi.waitFor(() => expect(archive.saveDesktopAudioArchive).toHaveBeenCalledOnce());
     expect(document.querySelector("#archive-status")?.textContent).toContain("Chrome data is unchanged");
+    expect(document.querySelector("#archive-status")?.textContent).toContain("Saved 2 meetings and");
   });
 
   it("shows write progress instead of leaving the picker prompt on screen", async () => {
@@ -56,6 +57,14 @@ describe("Meet recorder settings", () => {
     await vi.waitFor(() => expect(document.querySelector("#archive-status")?.textContent).toContain("Saving archive… 0.0 of 3.0 MB"));
     finish();
     await vi.waitFor(() => expect(document.querySelector("#archive-status")?.textContent).toContain("Chrome data is unchanged"));
+    expect(document.querySelector("#archive-status")?.textContent).toContain("Saved 1 meeting and 3.0 MB");
+  });
+
+  it("names the export consistently and puts it before recording options", async () => {
+    await loadSettings();
+    expect(document.querySelector("#export-archive")?.textContent).toBe("Export recordings");
+    expect([...document.querySelectorAll("h2")].map((h) => h.textContent)).toEqual(["Make notes in the desktop app", "Recording", "Earlier extension data"]);
+    expect(document.body.textContent).toContain("On other meeting sites,");
   });
 
   it("treats a cancelled save picker as a cancel, not a failure", async () => {

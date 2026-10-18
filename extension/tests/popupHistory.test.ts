@@ -36,12 +36,24 @@ describe("Meet recorder history", () => {
     expect(document.querySelectorAll(".recorder-list li")).toHaveLength(5);
     expect(document.querySelector(".recorder-list")?.textContent).toContain("Audio saved");
     expect(document.querySelector(".recorder-list")?.textContent).not.toContain("Call 19");
+    const expectedDate = new Date(Date.UTC(2026, 0, 1, 0, 18)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    expect(document.querySelector(".recorder-list li span")?.textContent).toContain(expectedDate);
+  });
+
+  it("labels finished notes plainly", async () => {
+    await loadPopup({ m18: { status: "complete", title: "Design <review>" } });
+    const item = [...document.querySelectorAll(".recorder-list li")].find((li) => li.textContent?.includes("Design <review>"))!;
+    expect(item.textContent).toContain("Notes ready");
+    expect(item.textContent).not.toContain("Legacy");
+    const link = item.querySelector<HTMLButtonElement>("[data-open-meeting]")!;
+    expect(link.textContent).toBe("Open notes");
+    expect(link.getAttribute("aria-label")).toBe("Open notes for Design <review>");
   });
 
   it("keeps archive export visible without a provider key", async () => {
     await loadPopup();
     expect(document.querySelector("#export-recordings")).not.toBeNull();
-    expect(document.body.textContent).toContain("import it in the desktop app");
+    expect(document.body.textContent).toContain("import them in the desktop app");
     expect(document.body.textContent).not.toContain("API key");
   });
 

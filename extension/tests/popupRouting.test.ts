@@ -15,7 +15,7 @@ async function loadPopup(tab: { id: number; url: string } | null, settings = { .
   await new Promise<void>((resolve) => chromeMock.storage.local.set({ "notetaker.settings": settings }, resolve));
   if (pendingTabId !== undefined) await chromeMock.storage.session.set({ "notetaker.pendingMeetStart": { tabId: pendingTabId, createdAt: Date.now(), ...pendingExtra } });
   await import("../src/popup/popup");
-  await vi.waitFor(() => expect(document.querySelector("#export-recordings")).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector("#history-heading")).not.toBeNull());
 }
 
 describe("browser recorder popup", () => {
@@ -55,7 +55,7 @@ describe("browser recorder popup", () => {
   it("disables Start outside a secure web tab", async () => {
     await loadPopup({ id: 1, url: "chrome://newtab" });
     expect((document.querySelector("#start-recording") as HTMLButtonElement).disabled).toBe(true);
-    expect(document.body.textContent).toContain("Open a secure browser meeting tab");
+    expect(document.body.textContent).toContain("Go to your meeting tab, then click the AI Notetaker icon again.");
     expect(document.querySelector("#use-desktop")).toBeNull();
   });
 
@@ -80,8 +80,60 @@ describe("browser recorder popup", () => {
     }, resolve));
     chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)?.[0]({ type: "MEETING_STATE_CHANGED", meetingId: "active" });
     await vi.waitFor(() => expect(document.querySelector("#stop-recording")).not.toBeNull());
-    (document.querySelector("#stop-recording") as HTMLButtonElement).click();
+    // The intro never competes with a live recording.
+    expect(document.querySelector("#recorder-intro")).toBeNull();
+    const stop = document.querySelector("#stop-recording") as HTMLButtonElement;
+    stop.click();
+    // One press only arms it, like the in-call controls.
+    expect(stop.classList.contains("armed")).toBe(true);
+    expect(stop.textContent).toBe("Stop recording?");
+    expect(stop.getAttribute("aria-label")).toBe("Press again to stop recording");
+    expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "STOP_RECORDING" }));
+    stop.click();
+    expect(stop.textContent).toBe("Stopping…");
     await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "STOP_RECORDING", meetingId: "active" }));
+  });
+
+  it("lets an armed Stop lapse without stopping", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, { activeMeeting: { id: "active" } });
+      await new Promise<void>((resolve) => chromeMock.storage.local.set({
+        "notetaker.meeting.active": { id: "active", title: "Call", captureSource: "meet", status: "recording", startedAt: "2026-10-04T00:00:00Z", transcript: [], actionItems: [] },
+      }, resolve));
+      chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)?.[0]({ type: "MEETING_STATE_CHANGED", meetingId: "active" });
+      await vi.waitFor(() => expect(document.querySelector("#stop-recording")).not.toBeNull());
+      const stop = document.querySelector("#stop-recording") as HTMLButtonElement;
+      stop.click();
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(stop.classList.contains("armed")).toBe(false);
+      expect(stop.textContent).toBe("Stop recording");
+      expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "STOP_RECORDING" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("labels only the button that was pressed while an action runs", async () => {
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, { recoverableMeeting: { meetingId: "m-rec", startedAt: "2026-10-01T10:00:00.000Z" } });
+    let release: () => void = () => {};
+    chromeMock.runtime.sendMessage.mockImplementation(async (message: { type?: string }) => {
+      if (message.type === "RESUME_RECORDING") await new Promise<void>((resolve) => { release = resolve; });
+      return message.type === "GET_STATE" ? state : {};
+    });
+    (document.querySelector("#resume-recording") as HTMLButtonElement).click();
+    const start = document.querySelector("#start-recording") as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    expect(start.textContent).toBe("Start recording");
+    release();
+  });
+
+  it("shows the intro and hides export until there are recordings", async () => {
+    await loadPopup({ id: 1, url: "chrome://newtab" });
+    expect(document.querySelector("#recorder-intro")).not.toBeNull();
+    expect(document.querySelector("#export-recordings")).toBeNull();
+    expect(document.body.textContent).not.toContain("import them in the desktop app");
+    expect(document.querySelector("#get-desktop")).not.toBeNull();
   });
 
   it("drops Stop and explains when a capture fails mid-call", async () => {
@@ -106,6 +158,15 @@ describe("browser recorder popup", () => {
 
   it("opens archive export from Settings", async () => {
     await loadPopup({ id: 1, url: "chrome://newtab" });
+    await new Promise<void>((resolve) => chromeMock.storage.local.set({
+      "notetaker.meetings.index": ["saved"],
+      "notetaker.meeting.saved": { id: "saved", title: "Call", captureSource: "meet", status: "saved", startedAt: "2026-10-04T00:00:00Z", transcript: [], actionItems: [] },
+    }, resolve));
+    chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)?.[0]({ type: "MEETING_STATE_CHANGED", meetingId: "saved" });
+    await vi.waitFor(() => expect(document.querySelector("#export-recordings")).not.toBeNull());
+    // With recordings saved, the getting-started intro steps aside.
+    expect(document.querySelector("#recorder-intro")).toBeNull();
+    expect(document.querySelector("#export-recordings")?.textContent).toBe("Export recordings");
     (document.querySelector("#export-recordings") as HTMLButtonElement).click();
     expect(chromeMock.runtime.openOptionsPage).toHaveBeenCalled();
   });

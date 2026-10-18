@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import widgetCss from "../src/content/widget.css?raw";
 import { MeetWidget, type WidgetDeps } from "../src/content/widget";
 import { CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "../src/meet/hints";
+import { MEET_DISCLOSURE_TEXT } from "../src/lib/autoRecord";
 import type { UiToBackgroundMessage, WidgetMeeting, WidgetState } from "../src/lib/internalMessages";
 
 const NOW = Date.parse("2026-09-24T12:00:00.000Z");
@@ -168,6 +169,8 @@ describe("MeetWidget: idle", () => {
     await harness.click("#toggle");
 
     expect(harness.$<HTMLButtonElement>("#start")?.disabled).toBe(false);
+    expect(harness.$("#start")?.className).toBe("btn primary block");
+    expect(harness.$(".panel")?.textContent).not.toMatch(/No provider key is needed/);
     expect(harness.$("#helper-note")).toBeNull();
   });
 
@@ -247,8 +250,8 @@ describe("MeetWidget: starting a recording", () => {
 
     expect($(".nt")?.dataset.view).toBe("error");
     expect($("h2")?.textContent).toBe("One Chrome step");
-    expect($(".note.warning")?.textContent).toContain("toolbar icon once; recording will start automatically.");
-    expect(Array.from($(".note.warning")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["Alt", "Shift", "R"]);
+    expect($(".note.warn")?.textContent).toContain("toolbar icon once; recording will start automatically.");
+    expect(Array.from($(".note.warn")!.querySelectorAll("kbd")).map((key) => key.textContent)).toEqual(["Alt", "Shift", "R"]);
     expect($("#retry")).toBeNull();
     expect($("#dismiss")?.textContent).toBe("Got it");
   });
@@ -263,8 +266,8 @@ describe("MeetWidget: starting a recording", () => {
     await click("#toggle");
     await click("#start");
 
-    expect($(".note.warning kbd")).toBeNull();
-    expect($(".note.warning")?.textContent).not.toMatch(/Or press/);
+    expect($(".note.warn kbd")).toBeNull();
+    expect($(".note.warn")?.textContent).not.toMatch(/Or press/);
   });
 
   it("shows macOS-style bindings as individual keycaps", async () => {
@@ -381,8 +384,10 @@ describe("MeetWidget: recording", () => {
     try {
       harness = await createHarness(baseState({ disclosureNoticeEnabled: true, active: activeMeeting() }));
       await harness.click("#toggle");
+      expect(harness.$("#disclosure-text")?.textContent).toBe(MEET_DISCLOSURE_TEXT);
       await harness.click("#copy-disclosure");
       expect(writeText).toHaveBeenCalledOnce();
+      expect(writeText).toHaveBeenCalledWith(MEET_DISCLOSURE_TEXT);
       expect(harness.$("#copy-disclosure")?.textContent).toContain(fails ? "Copy failed" : "Copied");
       await new Promise((resolve) => window.setTimeout(resolve, 2_600));
       expect(harness.$("#copy-disclosure")?.textContent).toBe("Copy notice for chat");
@@ -805,7 +810,7 @@ describe("MeetWidget: edge cases and resilience", () => {
   it("announces retried transcription chunks", async () => {
     harness = await createHarness(baseState({ active: activeMeeting() }));
     harness.widget.handleMessage({ type: "PROCESSING_WARNING", meetingId: "m1", message: "retry" });
-    expect(harness.$(".toast")?.textContent).toMatch(/retried automatically/);
+    expect(harness.$(".toast")?.textContent).toBe("Having trouble reaching your AI provider. Retrying…");
   });
 
   it("offers Jump to latest when the reader scrolled up and new lines arrive", async () => {
@@ -972,6 +977,8 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     const css = widgetCss;
     expect(css).toMatch(/\.nt\[data-view="error"\] \.dot,\s*\.nt\[data-view="disconnected"\] \.dot \{\s*background: var\(--warn\);/);
     expect(css).toMatch(/\.nt\[data-view="recording"\] \.dot \{\s*background: var\(--recording\);/);
+    expect(css).toContain("--recording: #ff453a;");
+    expect(css).not.toMatch(/242, 139, 130/);
   });
 
   it("only lets the pill stop button end a recording on the second press, and lets it lapse", async () => {
@@ -980,7 +987,9 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
       harness = await createHarness(baseState({ active: activeMeeting() }));
       harness.$<HTMLButtonElement>("#pill-stop")!.click();
       expect(harness.$("#pill-stop")?.classList.contains("armed")).toBe(true);
-      expect(harness.$("#pill-stop")?.getAttribute("aria-label")).toMatch(/Confirm/);
+      expect(harness.$("#pill-stop")?.getAttribute("aria-label")).toBe("Press again to stop recording");
+      await vi.advanceTimersByTimeAsync(50);
+      expect(harness.shadow.querySelector(".sr-status")?.textContent).toBe("Press Stop again to end the recording.");
 
       await vi.advanceTimersByTimeAsync(3100);
       expect(harness.$("#pill-stop")?.classList.contains("armed")).toBe(false);

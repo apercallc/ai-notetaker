@@ -117,12 +117,15 @@ async function render(focusActionId?: string): Promise<void> {
   const title = displayTitle(meeting);
   document.title = `${title} — AI Notetaker`;
   const hasActions = meeting.actionItems.length > 0;
+  // A browser recording with nothing written from it yet is audio only: show
+  // how to export it and how to delete it, not empty note sections.
+  const audioOnly = Boolean(meeting.recorderOnly) && !meeting.summary && meeting.transcript.length === 0;
 
   app.innerHTML = `
-    <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><a href="../popup/popup.html">AI Notetaker</a></div>
+    <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><span>AI Notetaker</span></div>
     <div class="title-row" id="title-row">${titleRowHtml(title)}</div>
     <p class="meeting-meta text-secondary">${escapeHtml(Number.isNaN(new Date(meeting.startedAt).getTime()) ? "Date unavailable" : new Date(meeting.startedAt).toLocaleString())}</p>
-    ${meeting.status === "saved" || (meeting.recorderOnly && meeting.status === "error") ? '<p class="drive-export-status" role="status">Meet audio is saved in Chrome. Export the recording from extension Settings, then import it in the desktop app to make notes. <button type="button" class="secondary" id="export-saved-audio">Open export</button></p>' : ""}
+    ${meeting.status === "saved" || (meeting.recorderOnly && meeting.status === "error") ? '<p class="drive-export-status" role="status">Meeting audio is saved in Chrome. Export your recordings from extension Settings, then import them in the desktop app to make notes. <button type="button" class="secondary" id="export-saved-audio">Export recordings</button></p>' : ""}
     ${meeting.attendeeShare
       ? `<p class="drive-export-status" role="status">Attendee share link (expires ${escapeHtml(new Date(meeting.attendeeShare.expiresAt).toLocaleDateString())}): <a href="${escapeHtml(safeShareLink(meeting.attendeeShare.shareUrl))}" target="_blank" rel="noreferrer">${escapeHtml(meeting.attendeeShare.shareUrl)}</a></p>`
       : ""}
@@ -134,22 +137,27 @@ async function render(focusActionId?: string): Promise<void> {
           ? `<div class="drive-export-status" role="status"><p class="text-warning with-icon">Local meeting is safe, but Drive export failed: ${escapeHtml(meeting.driveExport.errorMessage ?? "no details were recorded")}.</p><button type="button" class="secondary" id="retry-drive-export">Retry Drive export</button></div>`
           : ""}
 
+    <div class="undo-bar" id="undo-bar" role="status" hidden></div>
+    ${audioOnly
+      ? meeting.status === "error"
+        ? `<p class="error-state meeting-error">${escapeHtml(meeting.errorMessage || "No details were recorded.")}</p>`
+        : ""
+      : `
     <div class="note-actions" role="group" aria-label="Copy notes">
       <button type="button" class="secondary" id="copy-notes">Copy notes</button>
       <button type="button" class="secondary" id="copy-actions" ${hasActions ? "" : "disabled"}>Copy action items</button>
       <span class="test-result" id="copy-status" role="status" aria-live="polite"></span>
     </div>
-    <div class="undo-bar" id="undo-bar" role="status" hidden></div>
 
     <section>
       <h2>Summary</h2>
-      ${meeting.summary && meeting.status === "error" ? `<p class="error-state meeting-error">${meeting.recorderOnly ? "Recording problem" : "Failed"}: ${escapeHtml(meeting.errorMessage || "No details were recorded.")}</p>` : ""}
+      ${meeting.summary && meeting.status === "error" ? `<p class="error-state meeting-error">${escapeHtml(meeting.errorMessage || "No details were recorded.")}</p>` : ""}
       ${meeting.summary
         ? `<div class="summary">${renderSummaryHtml(meeting.summary, { hideActionItems: hasActions })}</div>`
         : meeting.status === "processing"
           ? `<p class="text-secondary">Still processing…</p>`
           : meeting.status === "error"
-            ? `<p class="error-state meeting-error">${meeting.recorderOnly ? "Recording problem" : "Failed"}: ${escapeHtml(meeting.errorMessage || "No details were recorded.")}</p>`
+            ? `<p class="error-state meeting-error">${escapeHtml(meeting.errorMessage || "No details were recorded.")}</p>`
             : `<p class="text-secondary">No summary yet.</p>`}
       ${meeting.status === "error" && meeting.captureSource === "meet" && !meeting.recorderOnly ? `<div class="row"><button type="button" class="secondary" id="retry-processing">Retry saved browser audio</button>${meeting.processingMode?.kind !== "managed" ? `<button type="button" class="secondary" id="open-provider-settings">Open AI settings</button>` : ""}</div>` : ""}
     </section>
@@ -195,11 +203,11 @@ async function render(focusActionId?: string): Promise<void> {
             .join("")
         : `<p class="text-secondary">No transcript available.</p>`}
     </section>
-
+`}
     <div class="toolbar">
-      <button class="secondary" id="export-markdown">Export as Markdown</button>
+      ${audioOnly ? "" : `<button class="secondary" id="export-markdown">Export as Markdown</button>
       <button class="secondary" id="export-plain-text">Export as text</button>
-      <button class="secondary" id="print-meeting">Print / Save PDF</button>
+      <button class="secondary" id="print-meeting">Print / Save PDF</button>`}
       <button class="danger" id="delete-meeting">Delete meeting</button>
     </div>
   `;
@@ -283,7 +291,7 @@ async function render(focusActionId?: string): Promise<void> {
         await render(input.dataset.actionId);
       } catch {
         input.checked = !input.checked;
-        showMeetingError("Could not update this action item. Check the helper/webapp connection and try again.");
+        showMeetingError("Your change wasn’t saved. Try again.");
       }
     });
   }
@@ -302,7 +310,7 @@ async function render(focusActionId?: string): Promise<void> {
         input.dataset.savedValue = input.value;
       } catch {
         input.value = input.dataset.savedValue ?? "";
-        showMeetingError("Could not save the due date. Check the helper/webapp connection and try again.");
+        showMeetingError("Your change wasn’t saved. Try again.");
       }
     });
   }

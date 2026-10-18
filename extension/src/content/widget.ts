@@ -155,7 +155,7 @@ export class MeetWidget {
         return;
       case "PROCESSING_WARNING":
         this.ui = { ...this.ui, warning: message.message };
-        this.showToast("A transcription chunk will be retried automatically.");
+        this.showToast("Having trouble reaching your AI provider. Retrying…");
         if (this.view === "processing") this.renderView();
         return;
       default:
@@ -385,7 +385,7 @@ export class MeetWidget {
     this.bindStop("#stop", {
       arm: (button) => {
         button.classList.add("armed");
-        button.setAttribute("aria-label", "Confirm: stop notes");
+        button.setAttribute("aria-label", "Press again to stop recording");
         button.textContent = STOP_CONFIRM_LABEL;
       },
       disarm: (button) => {
@@ -397,7 +397,7 @@ export class MeetWidget {
     this.bindStop("#pill-stop", {
       arm: (button) => {
         button.classList.add("armed");
-        button.setAttribute("aria-label", "Confirm: stop notes");
+        button.setAttribute("aria-label", "Press again to stop recording");
         button.textContent = STOP_CONFIRM_LABEL;
       },
       disarm: (button) => {
@@ -520,7 +520,7 @@ export class MeetWidget {
     const options: StopConfirmOptions = {
       arm: () => {
         look.arm(button);
-        this.announce("Press stop again to end the recording and write your notes");
+        this.announce("Press Stop again to end the recording.");
       },
       disarm: () => look.disarm(button),
       confirm: () => void this.stop(),

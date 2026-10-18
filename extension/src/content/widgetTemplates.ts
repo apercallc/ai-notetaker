@@ -4,6 +4,7 @@ import { shortcutKeys } from "../lib/shortcuts";
 import { CAPTURE_PERMISSION_HINT, MIC_PERMISSION_HINT } from "../meet/hints";
 import type { MeetingMode } from "../types";
 import { STOP_LABEL } from "../lib/stopConfirm";
+import { MEET_DISCLOSURE_TEXT } from "../lib/autoRecord";
 import { canStart, formatElapsed, type WidgetUi, type WidgetView } from "./widgetModel";
 
 /** Everything the templates read. They are pure: same context, same markup. */
@@ -128,7 +129,8 @@ export function renderPanel(view: WidgetView, ctx: TemplateContext): string {
             ${
               ctx.state?.disclosureNoticeEnabled
                 ? `<div class="disclosure" id="disclosure-card">
-              <p class="note" id="disclosure-text">Notify the call: this meeting is being recorded.</p>
+              <p class="sub">Paste this in the chat:</p>
+              <p class="note" id="disclosure-text">${escapeHtml(MEET_DISCLOSURE_TEXT)}</p>
               <button type="button" class="btn secondary block" id="copy-disclosure">Copy notice for chat</button>
             </div>`
                 : ""
@@ -176,7 +178,7 @@ function renderError(ctx: TemplateContext): string {
   return `
           <div class="stack">
             <div><h2>${needsCaptureInvocation ? "One Chrome step" : needsProviderConfirmation ? "Provider check needs attention" : "Recording needs attention"}</h2></div>
-            <p class="note ${needsCaptureInvocation ? "warning" : "error"}">${escapeHtml(message)}${shortcutHint}${recoveryHint ? ` ${escapeHtml(recoveryHint)}` : ""}</p>
+            <p class="note ${needsCaptureInvocation ? "warn" : "error"}">${escapeHtml(message)}${shortcutHint}${recoveryHint ? ` ${escapeHtml(recoveryHint)}` : ""}</p>
             <div class="row">
               ${needsProviderConfirmation ? `<button type="button" class="btn secondary" id="open-ai-settings">Open AI settings</button><button type="button" class="btn primary" id="continue-anyway">Record anyway</button>` : ""}
               ${needsMic ? `<button type="button" class="btn primary" id="allow-mic">Allow microphone</button>` : ""}
@@ -204,8 +206,7 @@ function renderReady(ctx: TemplateContext): string {
       <div class="stack">
         <div><h2>Ready when you are</h2><p class="sub">${intro}</p></div>
         <p class="note" id="start-hint">${startHint}</p>
-        <p class="sub">Audio is saved in Chrome until you export it. No provider key is needed to record.</p>
         <p class="consent"><strong>Nobody else is notified.</strong> Tell everyone you're recording; some places require everyone's consent.</p>
-        <button type="button" class="btn secondary block" id="start"${canStart(state) ? "" : " disabled"}>Start recording</button>
+        <button type="button" class="btn primary block" id="start"${canStart(state) ? "" : " disabled"}>Start recording</button>
       </div>`;
 }

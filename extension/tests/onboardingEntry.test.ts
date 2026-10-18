@@ -37,7 +37,7 @@ describe("browser recorder setup", () => {
   it("saves setup only after microphone access and consent", async () => {
     await loadWizard();
     (document.querySelector("#allow-microphone") as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toContain("Microphone ready"));
+    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toContain("Microphone allowed"));
     expect((document.querySelector("#finish-setup") as HTMLButtonElement).disabled).toBe(true);
     const consent = document.querySelector("#recording-consent") as HTMLInputElement;
     consent.checked = true;
@@ -48,6 +48,8 @@ describe("browser recorder setup", () => {
       settings: expect.objectContaining({ onboardingComplete: true, consentDisclosureAcknowledged: true }),
     })));
     expect(document.body.textContent).toContain("Ready to record");
+    // Capture hints point at the toolbar icon, so the first step is pinning it.
+    expect(document.querySelector("#ready-heading + p")?.textContent).toMatch(/^First, pin AI Notetaker to your toolbar: click the puzzle-piece icon/);
     // Keyboard and screen-reader users land on the new screen, not on <body>.
     expect(document.activeElement?.id).toBe("ready-heading");
   });
@@ -57,16 +59,30 @@ describe("browser recorder setup", () => {
     const allow = document.querySelector("#allow-microphone") as HTMLButtonElement;
     allow.focus();
     allow.click();
-    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toContain("Microphone ready"));
-    // The button is done (and disabled), so focus moves on to the consent step.
+    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toContain("Microphone allowed"));
+    // The button is done, so focus moves on to the consent step.
     expect(document.activeElement?.id).toBe("recording-consent");
+    expect(document.querySelector("#allow-microphone")).toBeNull();
+    expect(document.querySelector("#microphone-allowed")?.className).toBe("result ok");
+    expect(document.querySelector("#microphone-allowed")?.textContent).toBe("Microphone allowed");
+  });
+
+  it("explains how to unblock a microphone Chrome blocked", async () => {
+    microphone.requestMicrophone.mockResolvedValue("blocked");
+    await loadWizard();
+    (document.querySelector("#allow-microphone") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toBe(
+      "Chrome blocked the microphone. Click the icon at the left of the address bar, set Microphone to Allow, then try again.",
+    ));
+    expect(document.querySelector("#setup-status")?.className).toBe("result error");
+    expect(document.querySelector("#allow-microphone")).not.toBeNull();
   });
 
   it("shows a save failure without a raw error prefix", async () => {
     await loadWizard();
     microphone.requestMicrophone.mockResolvedValue("granted");
     (document.querySelector("#allow-microphone") as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toContain("Microphone ready"));
+    await vi.waitFor(() => expect(document.querySelector("#setup-status")?.textContent).toContain("Microphone allowed"));
     const consent = document.querySelector("#recording-consent") as HTMLInputElement;
     consent.checked = true;
     consent.dispatchEvent(new Event("change", { bubbles: true }));
