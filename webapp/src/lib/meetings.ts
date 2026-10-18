@@ -503,8 +503,15 @@ export async function listMeetings(
       orderBy: [{ startedAt: "desc" }, { id: "desc" }],
       take: limit,
       skip: offset,
-      include: {
-        actionItems: { where: { status: "open" }, select: { id: true } },
+      // Only what a list card needs: never previousSummary or other note
+      // bodies, and a count rather than up to 1,000 action-item rows each.
+      select: {
+        id: true,
+        title: true,
+        startedAt: true,
+        summary: true,
+        folderId: true,
+        _count: { select: { actionItems: { where: { status: "open" } } } },
         processingJobs: LATEST_JOB,
       },
     }),
@@ -519,7 +526,7 @@ export async function listMeetings(
       title: row.title,
       startedAt: row.startedAt.toISOString(),
       summaryPreview: previewText(row.summary),
-      openActionItems: row.actionItems.length,
+      openActionItems: row._count.actionItems,
       processing: toProcessingState(row.processingJobs),
       folderId: row.folderId,
       match: matches.get(row.id) ?? null,
@@ -701,11 +708,23 @@ export async function updateActionItem(
     await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "Meeting" WHERE "id" = ${item.meetingId} FOR UPDATE
     `;
+    // Re-read under the meeting lock. The web autosave always sends status
+    // with a due-date edit, and desktop PATCHes are retried: re-applying the
+    // current status must not move completedAt or bump the note version.
+    const current = await tx.actionItem.findFirst({
+      where: { id, meetingId: item.meetingId, meeting: { workspaceId, deletedAt: null } },
+      select: { status: true, dueAt: true },
+    });
+    if (!current) return false;
+    const nextDueAt = changes.dueAt === undefined ? undefined : changes.dueAt ? new Date(changes.dueAt) : null;
+    const statusChanged = changes.status !== undefined && changes.status !== current.status;
+    const dueChanged = nextDueAt !== undefined && (nextDueAt?.getTime() ?? null) !== (current.dueAt?.getTime() ?? null);
+    if (!statusChanged && !dueChanged) return true;
     const result = await tx.actionItem.updateMany({
       where: { id, meetingId: item.meetingId, meeting: { workspaceId, deletedAt: null } },
       data: {
-        ...(changes.status ? { status: changes.status, completedAt: changes.status === "done" ? new Date() : null } : {}),
-        ...(changes.dueAt !== undefined ? { dueAt: changes.dueAt ? new Date(changes.dueAt) : null } : {}),
+        ...(statusChanged ? { status: changes.status, completedAt: changes.status === "done" ? new Date() : null } : {}),
+        ...(dueChanged ? { dueAt: nextDueAt } : {}),
       },
     });
     if (result.count > 0) {

@@ -96,7 +96,8 @@ describe("checkout and portal failure recovery", () => {
       await expect(prisma.workspaceSubscription.findUnique({ where: { workspaceId } })).resolves.toMatchObject({ status: "inactive", checkoutClaimedAt: null });
     });
     await withWorkspace("Checkout malformed response", async (workspaceId) => {
-      fetch.mockResolvedValueOnce(new Response("not-json", { status: 500 }));
+      // A 5xx is retried once with the same idempotency key; answer both attempts so the retry never reaches Stripe.
+      fetch.mockResolvedValueOnce(new Response("not-json", { status: 500 })).mockResolvedValueOnce(new Response("not-json", { status: 500 }));
       await expect(createCheckoutSession(workspaceId, "owner@example.com", "price_pro_gaps", "https://billing.example.test/ok", "https://billing.example.test/cancel"))
         .rejects.toThrow("temporarily unavailable");
       await expect(prisma.workspaceSubscription.findUnique({ where: { workspaceId } })).resolves.toMatchObject({ status: "inactive" });

@@ -311,6 +311,9 @@ model ProcessingJob {
   @@unique([workspaceId, idempotencyKey])
   @@unique([uploadId])
   @@index([workspaceId, status, createdAt])
+  // Library and note pages read each meeting's latest job (LATEST_JOB), and a
+  // meeting delete cascades here; without this both scan every job row.
+  @@index([meetingId, createdAt])
   // Global workers poll across workspaces, unlike workspace status pages.
   @@index([status, createdAt])
   @@index([status, startedAt, attempts])

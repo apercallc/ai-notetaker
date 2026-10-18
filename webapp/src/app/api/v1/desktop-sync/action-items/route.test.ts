@@ -63,6 +63,23 @@ describe("desktop action item status", () => {
     expect(reopened.completedAt).toBeNull();
   });
 
+  it("treats a repeated status as a no-op so retries keep completedAt and the note version", async () => {
+    expect((await call(ITEM_ID, { status: "done" })).status).toBe(200);
+    const done = await prisma.actionItem.findUniqueOrThrow({ where: { id: ITEM_ID } });
+    const version = await prisma.meeting.findUniqueOrThrow({ where: { id: MEETING_ID }, select: { updatedAt: true } });
+    expect((await call(ITEM_ID, { status: "done" })).status).toBe(200);
+    const again = await prisma.actionItem.findUniqueOrThrow({ where: { id: ITEM_ID } });
+    expect(again.completedAt?.getTime()).toBe(done.completedAt?.getTime());
+    const after = await prisma.meeting.findUniqueOrThrow({ where: { id: MEETING_ID }, select: { updatedAt: true } });
+    expect(after.updatedAt.getTime()).toBe(version.updatedAt.getTime());
+  });
+
+  it("refuses oversized bodies before parsing them", async () => {
+    const response = await call(ITEM_ID, { status: "done", padding: "x".repeat(8 * 1024) });
+    expect(response.status).toBe(413);
+    expect((await prisma.actionItem.findUniqueOrThrow({ where: { id: ITEM_ID } })).status).toBe("open");
+  });
+
   it("rejects bad input, unknown items, and other workspaces' tokens", async () => {
     expect((await call(ITEM_ID, { status: "finished" })).status).toBe(400);
     expect((await call(randomUUID(), { status: "done" })).status).toBe(404);

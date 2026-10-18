@@ -153,6 +153,16 @@ describe("upsertMeeting", () => {
     expect((await listActionItems(WORKSPACE_ID, { status: "done" })).items).toHaveLength(1);
   });
 
+  it("keeps an item's completion time when only its due date is edited", async () => {
+    await upsertMeeting(sampleMeeting({ actionItems: [{ id: "a-due", text: "One" }] }), WORKSPACE_ID);
+    expect(await updateActionItem(WORKSPACE_ID, "a-due", { status: "done", dueAt: null })).toBe(true);
+    const done = await prisma.actionItem.findUniqueOrThrow({ where: { id: "a-due" } });
+    expect(await updateActionItem(WORKSPACE_ID, "a-due", { status: "done", dueAt: "2026-11-02T00:00:00.000Z" })).toBe(true);
+    const edited = await prisma.actionItem.findUniqueOrThrow({ where: { id: "a-due" } });
+    expect(edited.dueAt?.toISOString()).toBe("2026-11-02T00:00:00.000Z");
+    expect(edited.completedAt?.getTime()).toBe(done.completedAt?.getTime());
+  });
+
   it("restarts from the top when an action-item cursor points at something that no longer exists", async () => {
     await upsertMeeting(sampleMeeting({ actionItems: [{ id: "a-1", text: "One" }, { id: "a-2", text: "Two" }] }), WORKSPACE_ID);
 

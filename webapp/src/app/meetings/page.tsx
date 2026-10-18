@@ -68,9 +68,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 && parsedPage <= MAX_PAGE ? parsedPage : 1;
 
   // Self-hosted instances never run the worker that clears expired trash, so page loads do it (at most hourly). Managed hosting has the worker.
-  if (!managedHostingEnabled()) after(() => purgeExpiredTrash().catch(() => undefined));
   // Same reason: retry any due "note ready" deliveries when there is no worker.
-  void runIntegrationMaintenance().catch(() => undefined);
+  // after() keeps outbound delivery work off the render path.
+  if (!managedHostingEnabled()) {
+    after(() => purgeExpiredTrash().catch(() => undefined));
+    after(() => runIntegrationMaintenance().catch(() => undefined));
+  }
   const folders = await listFolders(workspaceId);
   const requestedFolder = rawFolder?.slice(0, 128);
   const currentFolder = requestedFolder ? folders.find((folder) => folder.id === requestedFolder) ?? null : null;

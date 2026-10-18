@@ -564,6 +564,11 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
     }
     const workspaceId = bound ?? metadataWorkspaceId;
     if (!workspaceId) return;
+    // Stripe delivers events concurrently. Serialize them per workspace so the
+    // read-compare-write below (stale-event check, grace start) sees the other
+    // delivery's committed row: otherwise an older "active" committing after a
+    // newer "deleted" would quietly reinstate a cancelled subscription.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`billing:${workspaceId}`}, 0))`;
     if (!(await tx.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } }))) return;
 
     const current = await tx.workspaceSubscription.findUnique({ where: { workspaceId } });

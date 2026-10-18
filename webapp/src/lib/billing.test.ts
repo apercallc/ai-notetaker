@@ -190,6 +190,41 @@ describe("same-second subscription events", () => {
   });
 });
 
+describe("concurrent subscription events", () => {
+  it("never lets an older event that commits last overwrite a newer cancellation", async () => {
+    const originalPrice = process.env.STRIPE_PRICE_HOSTED_PRO;
+    process.env.STRIPE_PRICE_HOSTED_PRO = "price_pro_concurrent";
+    const workspaceIds: string[] = [];
+    try {
+      for (let round = 0; round < 8; round += 1) {
+        const workspaceId = randomUUID();
+        workspaceIds.push(workspaceId);
+        const subscription = (status: string) => ({
+          id: `sub_concurrent_${round}`,
+          customer: `cus_concurrent_${workspaceId}`,
+          status,
+          current_period_end: Math.floor(Date.now() / 1_000) + 86_400 * 20,
+          metadata: { workspaceId },
+          items: { data: [{ price: { id: "price_pro_concurrent" } }] },
+        });
+        await prisma.workspace.create({ data: { id: workspaceId, name: "Concurrent billing workspace" } });
+        await prisma.workspaceSubscription.create({
+          data: { workspaceId, plan: "hosted_pro", status: "active", stripeCustomerId: `cus_concurrent_${workspaceId}`, stripeSubscriptionId: `sub_concurrent_${round}`, lastBillingEventCreatedAt: 100 },
+        });
+        await Promise.all([
+          applyStripeEvent({ id: `evt-concurrent-updated-${workspaceId}`, type: "customer.subscription.updated", created: 200, data: { object: subscription("active") } }),
+          applyStripeEvent({ id: `evt-concurrent-deleted-${workspaceId}`, type: "customer.subscription.deleted", created: 300, data: { object: subscription("canceled") } }),
+        ]);
+        await expect(prisma.workspaceSubscription.findUnique({ where: { workspaceId } })).resolves.toMatchObject({ status: "canceled", lastBillingEventCreatedAt: 300 });
+      }
+    } finally {
+      await prisma.workspace.deleteMany({ where: { id: { in: workspaceIds } } });
+      if (originalPrice === undefined) delete process.env.STRIPE_PRICE_HOSTED_PRO;
+      else process.env.STRIPE_PRICE_HOSTED_PRO = originalPrice;
+    }
+  });
+});
+
 describe("pending cancellation", () => {
   it("records cancel_at (new API) and cancel_at_period_end (old API), and clears it on resume", async () => {
     const workspaceId = randomUUID();

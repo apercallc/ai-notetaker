@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { apiErrorResponse, jsonError, requestIdFrom } from "@/lib/apiErrors";
 import { authenticateDesktopSync } from "@/lib/desktopSyncAuth";
+import { ManagedValidationError, readManagedBytes } from "@/lib/managedJobs";
 import { updateActionItem } from "@/lib/meetings";
+
+// The body is one status field; refuse anything larger before buffering it.
+const MAX_REQUEST_BYTES = 4 * 1024;
 
 /**
  * Marks one workspace action item open or done from the desktop app, exactly as the web Actions
@@ -14,9 +18,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (!auth.ok) {
       return NextResponse.json({ error: auth.message, requestId }, { status: auth.status, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
     }
+    let bytes: Uint8Array;
+    try {
+      bytes = await readManagedBytes(request, MAX_REQUEST_BYTES);
+    } catch (error) {
+      if (error instanceof ManagedValidationError) return jsonError("request body is too large", 413, requestId);
+      throw error;
+    }
     let body: unknown;
     try {
-      body = await request.json();
+      body = JSON.parse(new TextDecoder().decode(bytes));
     } catch {
       return jsonError("invalid JSON body", 400, requestId);
     }
