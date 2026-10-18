@@ -8,6 +8,11 @@ import { useLibrary } from "./LibraryProvider";
 import { MAX_FOLDER_NAME } from "@/lib/libraryTree";
 
 /** The folder list, with a Finder-style empty row at the top while a new folder is being named. */
+/** The naming row unmounts on save or cancel; send focus back to the button that opened it. */
+function focusNewFolderButton() {
+  requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-new-folder]")?.focus());
+}
+
 export function FolderList({ hasRows, children }: { hasRows: boolean; children: ReactNode }) {
   const library = useLibrary();
   if (!hasRows && !library.creatingFolder) return null;
@@ -19,6 +24,7 @@ export function FolderList({ hasRows, children }: { hasRows: boolean; children: 
     const result = await createFolderAction(formData).catch(() => ({ ok: false as const, error: "Something went wrong. Try again." }));
     if (result.ok) {
       library.setCreatingFolder(false);
+      focusNewFolderButton();
       library.notify(`Created folder “${result.name ?? name}”.`);
       return null;
     }
@@ -31,7 +37,7 @@ export function FolderList({ hasRows, children }: { hasRows: boolean; children: 
         <li className="folder-row lib-row is-new">
           <span className="folder-link">
             <Folder size={18} strokeWidth={1.75} aria-hidden="true" />
-            <InlineName value="" label="New folder name" placeholder="Folder name" maxLength={MAX_FOLDER_NAME} onSave={create} onCancel={() => library.setCreatingFolder(false)} />
+            <InlineName value="" label="New folder name" placeholder="Folder name" maxLength={MAX_FOLDER_NAME} onSave={create} onCancel={() => { library.setCreatingFolder(false); focusNewFolderButton(); }} />
           </span>
         </li>
       )}

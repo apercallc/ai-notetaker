@@ -12,6 +12,8 @@ import { listIntegrations, listRecentDeliveries } from "@/lib/integrations";
 import { NotesDeliveryPanel } from "./NotesDeliveryPanel";
 import { LanguageSettingsForm } from "./LanguageSettingsForm";
 import { managedHostingEnabled } from "@/lib/managedAuth";
+import { googleErrorText } from "@/lib/pageErrors";
+import { TRASH_RETENTION_DAYS } from "@/lib/library";
 
 export const metadata = { title: "Settings", referrer: "no-referrer", robots: { index: false, follow: false } };
 
@@ -34,6 +36,8 @@ export default async function AccountPage({
   const params = await searchParams;
   const { required, google: googleNotice, googleError } = params;
   const tab = resolveAccountTab(params);
+  // googleError is a code from our own OAuth routes; never render the raw value.
+  const googleErrorMessage = googleErrorText(googleError);
   // Only the visible section's data is read: one tab renders at a time.
   const security = tab === "security";
   const integrationsTab = tab === "integrations";
@@ -156,8 +160,8 @@ export default async function AccountPage({
               <section id="google-services" className="settings-card">
                 <h2>Google Drive</h2>
                 <p className="muted-copy">Connect a Google account to export completed notes to a Google Doc in your own Drive. AI Notetaker can only access files it creates. Google access is stored encrypted and can be removed here.</p>
-                {googleNotice === "connected" && <p role="status" className="empty-state">Google account connected.</p>}
-                {googleError && <p role="alert" className="error-text">{googleError}</p>}
+                {googleNotice === "connected" && <p role="status" className="success-text">Google account connected.</p>}
+                {googleErrorMessage && <p role="alert" className="error-text">{googleErrorMessage}</p>}
                 <GoogleConnectionPanel {...google} />
               </section>
             </>
@@ -174,13 +178,13 @@ export default async function AccountPage({
                 <h2>Export</h2>
                 {session.role === "owner" ? (
                   <>
-                    <p className="muted-copy">Download every meeting in {workspace.name} — summary, transcript, and action items — as one JSON file.</p>
+                    <p className="muted-copy">Download every note in {workspace.name} — summary, transcript, and action items — as one JSON file.</p>
                     <a href="/account/export" className="button button-secondary" download>
-                      Export all meetings
+                      Export all notes
                     </a>
                   </>
                 ) : (
-                  <p className="muted-copy">Only the workspace owner can export every meeting in {workspace.name}. You can still download any single note from its page.</p>
+                  <p className="muted-copy">Only the workspace owner can export every note in {workspace.name}. You can still download any single note from its page.</p>
                 )}
               </section>
 
@@ -195,7 +199,7 @@ export default async function AccountPage({
                       ? "kept until you delete them or the workspace."
                       : `kept for ${workspace.retentionDays} day${workspace.retentionDays === 1 ? "" : "s"} under your retention policy.`}
                   </li>
-                  <li>Deleting a meeting or the workspace removes it permanently.</li>
+                  <li>Deleted notes stay in Trash for {TRASH_RETENTION_DAYS} days, then are removed permanently. Deleting the workspace removes everything at once.</li>
                 </ul>
               </section>
             </>
@@ -208,7 +212,7 @@ export default async function AccountPage({
                 {session.role === "owner" ? (
                   <>
                     <p className="muted-copy">
-                      Deleting the workspace removes every meeting and member account that belongs to nothing else. This
+                      Deleting the workspace removes every note and member account that belongs to nothing else. This
                       cannot be undone.
                     </p>
                     <DeleteWorkspaceForm workspaceName={workspace.name} />
@@ -226,9 +230,9 @@ export default async function AccountPage({
               <section className="settings-card settings-card--danger">
                 <h2>Delete my account</h2>
                 <p className="muted-copy">
-                  Permanently deletes your account, your Google connection, and every workspace you own alone (with its meetings
+                  Permanently deletes your account, your Google connection, and every workspace you own alone (with its notes
                   and any active subscription). Workspaces shared with others are left in place and you are simply removed.
-                  Export your meetings first — this cannot be undone.
+                  Export your notes first — this cannot be undone.
                 </p>
                 <DeleteAccountForm email={session.email} />
               </section>

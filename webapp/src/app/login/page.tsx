@@ -16,6 +16,8 @@ import { formatRetryAfter } from "@/lib/loginThrottle";
 import { bootstrap, login, signup, requestPasswordReset, resendVerification, verifyEmail, resetPassword, acceptInvite, acceptInviteNewAccount } from "./actions";
 import { SubmitButton } from "./SubmitButton";
 import { loginUrl, type LoginTab } from "./url";
+import { FORM_ERROR_ID, formFields } from "./fieldErrors";
+import { hostedAiEnabled } from "@/lib/deploymentConfig";
 
 // Verification, reset and invite links carry a secret in the query string —
 // never leak it to third parties through the Referer header.
@@ -107,25 +109,46 @@ function GoogleDivider() {
   return <p className="muted-copy" aria-hidden="true" style={{ textAlign: "center", margin: 0 }}>or</p>;
 }
 
-function Consent() {
+function Consent({ invalid = false, autoFocus = false, linkPolicies }: { invalid?: boolean; autoFocus?: boolean; linkPolicies: boolean }) {
+  // /terms and /privacy are public only on the managed site (marketing/paths.ts);
+  // elsewhere a link would bounce a signed-out reader to sign-in, so plain text.
+  const terms = linkPolicies ? <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> : "Terms of Service";
+  const privacy = linkPolicies ? <a href="/privacy" target="_blank" rel="noopener">Privacy Notice</a> : "Privacy Notice";
   return (
     <div>
       <label style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start" }}>
-        <input type="checkbox" name="acceptTerms" required style={{ marginTop: 4 }} />
+        <input
+          type="checkbox"
+          name="acceptTerms"
+          required
+          style={{ marginTop: 4 }}
+          aria-invalid={invalid ? true : undefined}
+          aria-describedby={invalid ? FORM_ERROR_ID : undefined}
+          autoFocus={autoFocus || undefined}
+        />
         <span>
-          I agree to the Terms of Service and Privacy Notice, and I&apos;ll tell everyone in a meeting — and get their
+          I agree to the {terms} and {privacy}, and I&apos;ll tell everyone in a meeting — and get their
           consent where the law requires it — before recording.
         </span>
       </label>
       <details className="muted-copy">
         <summary>What am I agreeing to?</summary>
-        <p>
-          Your audio is saved on your device first, uploaded to private temporary staging, and sent to our transcription
-          and AI providers to produce notes. Our service deletes its audio after processing succeeds; the worker clears
-          failed or abandoned uploads at the 24-hour expiry. Your transcript, summary, and action items are saved in
-          your workspace under its retention policy; only workspace members can see them. Provider handling follows
-          each provider&apos;s terms. You are responsible for lawful use, including consent to record others.
-        </p>
+        {hostedAiEnabled() ? (
+          <p>
+            Your audio is saved on your device first, uploaded to private temporary staging, and sent to our transcription
+            and AI providers to produce notes. Our service deletes its audio after processing succeeds; the worker clears
+            failed or abandoned uploads at the 24-hour expiry. Your transcript, summary, and action items are saved in
+            your workspace under its retention policy; only workspace members can see them. Provider handling follows
+            each provider&apos;s terms. You are responsible for lawful use, including consent to record others.
+          </p>
+        ) : (
+          <p>
+            Recording and transcription happen in the desktop app with your own provider keys — your audio isn&apos;t
+            uploaded to us. If you turn on sync, finished notes (summary, transcript, action items) are stored in your
+            workspace, visible only to its members, under its retention policy. You&apos;re responsible for getting
+            consent from the people you record.
+          </p>
+        )}
       </details>
     </div>
   );
@@ -162,7 +185,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p role="status" className="muted-copy">Sign in to continue.</p>
       )}
       {noticeText && <p role="status" className="muted-copy">{noticeText}</p>}
-      {errorText && <p className="error-text" role="alert">{errorText}</p>}
+      {errorText && <p id={FORM_ERROR_ID} className="error-text" role="alert">{errorText}</p>}
       {params.error === "unverified" && params.email && (
         <form action={resendVerification} style={formStyle}>
           <input type="hidden" name="email" value={params.email} />
@@ -182,6 +205,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
   // First run of a self-hosted instance: claim it with the deploy-time secret.
   if (userCount === 0 && !managedHosting) {
+    const field = formFields(params.error, ["setup", "email", "password", "confirm"]);
     return (
       <div className="container">
         <form className="login-form" action={bootstrap}>
@@ -190,18 +214,18 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             Create the first account for this instance. You&apos;ll be its workspace owner.
           </p>
           <label htmlFor="setupToken">Setup code</label>
-          <input id="setupToken" name="setupToken" type="password" className="text-input" autoFocus required autoComplete="off" />
-          <p className="muted-copy">
+          <input id="setupToken" name="setupToken" type="password" className="text-input" required autoComplete="off" {...field("setup", { autoFocus: true, hint: "setup-hint" })} />
+          <p id="setup-hint" className="muted-copy">
             The <code>AUTH_TOKEN</code> value you set when deploying this instance — proves you&apos;re the
             one who deployed it, not just the first person to find the URL.
           </p>
           <label htmlFor="email">Email</label>
-          <input id="email" name="email" type="email" className="text-input" required autoComplete="email" />
+          <input id="email" name="email" type="email" className="text-input" required autoComplete="email" {...field("email")} />
           <label htmlFor="password">Password</label>
-          <input id="password" name="password" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
+          <input id="password" name="password" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...field("password")} />
           <label htmlFor="confirmPassword">Confirm password</label>
-          <input id="confirmPassword" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
-          {errorText && <p className="error-text" role="alert">{errorText}</p>}
+          <input id="confirmPassword" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...field("confirm")} />
+          {errorText && <p id={FORM_ERROR_ID} className="error-text" role="alert">{errorText}</p>}
           {cookieHint && <p className="error-text" role="alert">Sign-in cookies would be dropped over plain http; serve over https or set <code>INSECURE_COOKIES=true</code>.</p>}
           <SubmitButton label="Create owner account" pendingLabel="Creating…" />
         </form>
@@ -210,6 +234,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   }
 
   const showTabs = tab === "signin" || tab === "signup";
+  const signinField = formFields(params.error, ["email", "password"]);
+  const signupField = formFields(params.error, ["workspace", "email", "password", "confirm", "consent"]);
+  const forgotField = formFields(params.error, ["email"]);
+  const resetField = formFields(params.error, ["password", "confirm"]);
+  const consentInvalid = params.error === "consent-required";
 
   return (
     <div className="container">
@@ -236,9 +265,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <form action={login} style={formStyle}>
             <input type="hidden" name="next" value={next} />
             <label htmlFor="email">Email</label>
-            <input id="email" name="email" type="email" className="text-input" autoFocus required autoComplete="email" defaultValue={params.error === "unverified" ? params.email : undefined} />
+            <input id="email" name="email" type="email" className="text-input" required autoComplete="email" defaultValue={params.error === "unverified" ? params.email : undefined} {...signinField("email", { autoFocus: true })} />
             <label htmlFor="password">Password</label>
-            <input id="password" name="password" type="password" className="text-input" required autoComplete="current-password" />
+            <input id="password" name="password" type="password" className="text-input" required autoComplete="current-password" {...signinField("password")} />
             <SubmitButton label="Sign in" pendingLabel="Signing in…" />
             <Link href={loginUrl({ tab: "forgot", next })} className="text-link-muted">Forgot your password?</Link>
           </form>
@@ -257,7 +286,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <form method="get" action="/api/google/oauth/start" style={formStyle}>
               <input type="hidden" name="mode" value="signup" />
               <input type="hidden" name="next" value={next} />
-              <Consent />
+              <Consent invalid={consentInvalid} linkPolicies={managedHosting} />
               <SubmitButton label="Continue with Google" pendingLabel="Opening Google…" variant="secondary" />
             </form>
             <GoogleDivider />
@@ -268,15 +297,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <input type="hidden" name="next" value={next} />
             <p className="muted-copy">Create your free account. Your notes and billing stay isolated from every other customer; a subscription adds cloud sync and team sync.</p>
             <label htmlFor="signupWorkspaceName">Workspace name</label>
-            <input id="signupWorkspaceName" name="workspaceName" type="text" className="text-input" required minLength={2} maxLength={100} autoComplete="organization" autoFocus />
+            <input id="signupWorkspaceName" name="workspaceName" type="text" className="text-input" required minLength={2} maxLength={100} autoComplete="organization" {...signupField("workspace", { autoFocus: true })} />
             <label htmlFor="signupEmail">Work email</label>
-            <input id="signupEmail" name="email" type="email" className="text-input" required autoComplete="email" />
+            <input id="signupEmail" name="email" type="email" className="text-input" required autoComplete="email" {...signupField("email")} />
             <label htmlFor="signupPassword">Password</label>
-            <input id="signupPassword" name="password" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" aria-describedby="pw-hint" />
+            <input id="signupPassword" name="password" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...signupField("password", { hint: "pw-hint" })} />
             <p id="pw-hint" className="muted-copy">At least {MIN_PASSWORD_LENGTH} characters. A phrase works well.</p>
             <label htmlFor="signupConfirmPassword">Confirm password</label>
-            <input id="signupConfirmPassword" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
-            <Consent />
+            <input id="signupConfirmPassword" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...signupField("confirm")} />
+            <Consent invalid={consentInvalid} autoFocus={Boolean(signupField("consent").autoFocus)} linkPolicies={managedHosting} />
             <SubmitButton label="Create workspace" pendingLabel="Creating…" />
             <p className="muted-copy">Already have an account? <Link href={loginUrl({ next })}>Sign in</Link></p>
           </form>
@@ -294,7 +323,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <>
                 <p className="muted-copy">Enter your email and we&apos;ll send you a link to choose a new password.</p>
                 <label htmlFor="forgotEmail">Email</label>
-                <input id="forgotEmail" name="email" type="email" className="text-input" autoFocus required autoComplete="email" />
+                <input id="forgotEmail" name="email" type="email" className="text-input" required autoComplete="email" {...forgotField("email", { autoFocus: true })} />
                 <SubmitButton label="Send reset link" pendingLabel="Sending…" />
               </>
             )}
@@ -307,9 +336,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <h2>Choose a new password</h2>
             <input type="hidden" name="token" value={token} />
             <label htmlFor="resetPassword">New password</label>
-            <input id="resetPassword" name="password" type="password" className="text-input" autoFocus required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
+            <input id="resetPassword" name="password" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...resetField("password", { autoFocus: true })} />
             <label htmlFor="resetConfirm">Confirm new password</label>
-            <input id="resetConfirm" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
+            <input id="resetConfirm" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...resetField("confirm")} />
             <p className="muted-copy">You&apos;ll be signed out everywhere else.</p>
             <SubmitButton label="Set new password" pendingLabel="Saving…" />
           </form>
@@ -324,7 +353,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </form>
         )}
 
-        {tab === "invite" && token && (await renderInvite(token, current, params, next))}
+        {tab === "invite" && token && (await renderInvite(token, current, params, managedHosting))}
 
         {((tab === "reset" && (!token || !(await peekAuthToken(token, "reset_password")))) ||
           (tab === "verify" && (!token || !(await peekAuthToken(token, "verify_email")))) ||
@@ -345,7 +374,7 @@ async function renderInvite(
   token: string,
   current: { user: { id: string; email: string } } | null,
   params: SearchParams,
-  next: string,
+  linkPolicies: boolean,
 ) {
   const invite = await peekAuthToken(token, "invite");
   if (!invite?.workspaceId) {
@@ -388,19 +417,18 @@ async function renderInvite(
       </>
     );
   }
-  void next;
-  void params;
+  // The error itself is shown once, in the page banner (id="form-error").
+  const field = formFields(params.error, ["password", "confirm", "consent"]);
   return (
     <form action={acceptInviteNewAccount} style={formStyle}>
       <h2>Join {workspace.name}</h2>
       <input type="hidden" name="token" value={token} />
       <p className="muted-copy">Create your account for {invite.email}.</p>
-      {messageFor(params.error, undefined, params.problem) && <p className="error-text" role="alert">{messageFor(params.error, undefined, params.problem)}</p>}
       <label htmlFor="invitePassword">Password</label>
-      <input id="invitePassword" name="password" type="password" className="text-input" autoFocus required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
+      <input id="invitePassword" name="password" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...field("password", { autoFocus: true })} />
       <label htmlFor="inviteConfirm">Confirm password</label>
-      <input id="inviteConfirm" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
-      <Consent />
+      <input id="inviteConfirm" name="confirmPassword" type="password" className="text-input" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" {...field("confirm")} />
+      <Consent invalid={params.error === "consent-required"} autoFocus={Boolean(field("consent").autoFocus)} linkPolicies={linkPolicies} />
       <SubmitButton label="Create account and join" pendingLabel="Creating…" />
     </form>
   );

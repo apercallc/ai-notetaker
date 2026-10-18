@@ -140,7 +140,7 @@ describe("library actions", () => {
 
     await signIn(memberId);
     const denied = await redirectOf(note.deleteMeetingAction(form({ id: ownersNote.id })));
-    expect(denied).toContain(`/meetings/${ownersNote.id}?error=`);
+    expect(denied).toBe(`/meetings/${ownersNote.id}?error=delete-forbidden`);
     expect((await prisma.meeting.findUniqueOrThrow({ where: { id: ownersNote.id } })).deletedAt).toBeNull();
 
     await signIn(ownerId);

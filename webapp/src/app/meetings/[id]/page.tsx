@@ -30,6 +30,7 @@ import { ShareMeeting } from "./ShareMeeting";
 import { hostedAiEnabled } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { TitleEditor } from "./TitleEditor";
+import { meetingErrorText } from "@/lib/pageErrors";
 
 // generateMetadata and the page both need the meeting; cache() makes that one query.
 const loadMeeting = cache((workspaceId: string, id: string) => getMeeting(workspaceId, id));
@@ -44,6 +45,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function MeetingDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string; error?: string }> }) {
   const { id } = await params;
   const { edit, error } = await searchParams;
+  const errorText = meetingErrorText(error);
   const { workspaceId } = await requireSession();
   const meeting = await loadMeeting(workspaceId, id);
   if (!meeting) notFound();
@@ -71,14 +73,14 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
           {crumbs.map((crumb) => <li key={crumb.id}><Link href={`/meetings?folder=${crumb.id}`}>{crumb.name}</Link></li>)}
         </ol>
       </nav>
-      {error && <p className="error-text" role="alert">{error.slice(0, 200)}</p>}
+      {errorText && <p className="error-text" role="alert">{errorText}</p>}
 
       <TitleEditor key={meeting.title} meetingId={meeting.id} title={meeting.title} />
       <p className="meeting-date">
         <LocalTime iso={meeting.startedAt} />
         {mode && <> · {mode}</>}
         {languageName(meeting.language) && <> · {languageName(meeting.language)}</>}
-        {processing && <span className="meeting-status"><ProcessingBadge state={processing} /></span>}
+        {processing && processing.status !== "complete" && <span className="meeting-status"><ProcessingBadge state={processing} /></span>}
       </p>
 
       {processing?.status === "error" && (
@@ -166,7 +168,7 @@ export default async function MeetingDetailPage({ params, searchParams }: { para
 
       <section className="share-section" aria-labelledby="share-heading">
         <h2 id="share-heading" className="section-title">Share privately</h2>
-        <p className="muted-copy">Anyone with a link can read this meeting until it expires or you revoke it. Links never expose your workspace or account.</p>
+        <p className="muted-copy">Links never expose your workspace or account.</p>
         <ShareMeeting meetingId={meeting.id} links={shares} />
       </section>
     </div>

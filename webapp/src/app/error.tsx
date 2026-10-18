@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as Sentry from "@sentry/nextjs";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { errorCopyForPath } from "@/lib/errorCopy";
 
 /**
@@ -32,10 +32,17 @@ export default function ErrorPage({
       }
     }
   }, [error, pathname]);
+  // The root layout already provides <main>; move focus to the heading so
+  // keyboard and screen-reader users land on what happened (no role="alert",
+  // which would announce the whole region a second time).
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
   const copy = errorCopyForPath(pathname);
   return (
-    <main className="container error-state" role="alert">
-      <h1>{copy.title}</h1>
+    <div className="container error-state">
+      <h1 ref={heading} tabIndex={-1}>{copy.title}</h1>
       <p className="muted-copy">{copy.body}</p>
       {error.digest && (
         <p className="muted-copy">
@@ -50,6 +57,6 @@ export default function ErrorPage({
           {copy.backLabel}
         </Link>
       </div>
-    </main>
+    </div>
   );
 }

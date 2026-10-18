@@ -816,7 +816,7 @@ html {
 body {
   min-height: 100vh;
   color: var(--color-text);
-  font-size: 15px;
+  font-size: 0.9375rem;
   line-height: 1.6;
   letter-spacing: -0.008em;
 }
@@ -872,7 +872,7 @@ button,
 
 .brand {
   gap: 10px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   letter-spacing: -0.035em;
 }
 
@@ -897,7 +897,7 @@ button,
   padding: 0 13px;
   border: 1px solid transparent;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
   transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
 }
@@ -919,7 +919,7 @@ button,
   padding: 0 12px;
   border-radius: 9px;
   text-decoration: none;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
 }
 
@@ -953,7 +953,7 @@ button,
 
 .total-count {
   margin: 0 0 3px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
 }
 
@@ -977,7 +977,7 @@ textarea {
   border-radius: 10px;
   background: var(--color-surface);
   box-shadow: 0 1px 2px #10201608;
-  font-size: 14px;
+  font-size: 0.875rem;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
@@ -1018,7 +1018,7 @@ a.meeting-card:hover,
 .meeting-card .title,
 .action-title {
   margin-bottom: 3px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 650;
   letter-spacing: -0.025em;
 }
@@ -1035,14 +1035,14 @@ a.meeting-card:hover,
 .meeting-card .meta,
 .meeting-date {
   margin: 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.55;
 }
 
 .meeting-card .preview {
   margin-top: 9px;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.55;
 }
 
@@ -1056,7 +1056,7 @@ a.meeting-card:hover,
   border: 1px dashed var(--color-border);
   border-radius: 16px;
   background: color-mix(in srgb, var(--color-surface) 62%, transparent);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .empty-state p:first-child {
@@ -1076,7 +1076,7 @@ a.meeting-card:hover,
 
 .onboarding h2 {
   margin: 0;
-  font-size: 21px;
+  font-size: 1.3125rem;
   letter-spacing: -0.04em;
 }
 
@@ -1106,7 +1106,7 @@ a.meeting-card:hover,
 .section-title {
   margin: 36px 0 13px;
   color: var(--color-text);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 650;
   letter-spacing: -0.02em;
   text-transform: none;
@@ -1135,13 +1135,13 @@ a.meeting-card:hover,
 .summary {
   max-width: 78ch;
   color: var(--color-text);
-  font-size: 15px;
+  font-size: 0.9375rem;
   line-height: 1.8;
 }
 
 .summary h3 {
   margin: 24px 0 6px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   letter-spacing: -0.02em;
 }
 
@@ -1179,20 +1179,20 @@ a.meeting-card:hover,
 
 .turn .speaker {
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 650;
 }
 
 .turn .offset {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
 }
 
 .turn p {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.75;
 }
 
@@ -1208,7 +1208,7 @@ a.meeting-card:hover,
 }
 
 .action-context {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .billing-status,
@@ -1237,7 +1237,7 @@ a.meeting-card:hover,
 
 .billing-card h2 {
   margin: 0 0 10px;
-  font-size: 18px;
+  font-size: 1.125rem;
   letter-spacing: -0.035em;
 }
 
@@ -1257,7 +1257,7 @@ a.meeting-card:hover,
 .secondary-button {
   min-height: 42px;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 620;
 }
 
@@ -1276,7 +1276,7 @@ a.meeting-card:hover,
 .pagination {
   margin-top: 26px;
   padding: 14px 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .login-form {
@@ -1293,7 +1293,7 @@ a.meeting-card:hover,
 
 .brand-heading {
   gap: 12px;
-  font-size: 22px;
+  font-size: 1.375rem;
   letter-spacing: -0.05em;
 }
 
@@ -1309,7 +1309,7 @@ a.meeting-card:hover,
 .login-form label {
   margin-top: 5px;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
 }
 
@@ -1328,7 +1328,7 @@ a.meeting-card:hover,
   padding: 6px 10px;
   border-radius: 8px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: center;
   text-decoration: none;
 }
@@ -1348,11 +1348,10 @@ a.meeting-card:hover,
 
 .login-form .text-link-muted {
   align-self: flex-start;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
-.error-text,
-.callout-danger {
+.error-text {
   color: var(--color-danger);
 }
 
@@ -1483,7 +1482,7 @@ a.meeting-card:hover,
   border: 1px solid var(--color-border);
   border-radius: 999px;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
   text-decoration: none;
 }
@@ -1517,7 +1516,7 @@ a.meeting-card:hover,
   padding: 0 14px;
   border-radius: 9px;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 550;
   text-decoration: none;
 }
@@ -1599,14 +1598,14 @@ a.meeting-card:hover,
 
 .team-member-joined {
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .role-badge {
   padding: 2px 10px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
 }
@@ -1792,7 +1791,7 @@ a.meeting-card:hover,
   border-radius: 999px;
   background: var(--color-surface);
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
   cursor: pointer;
 }
@@ -1841,7 +1840,7 @@ a.meeting-card:hover,
   list-style: none;
   display: grid;
   gap: 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .ask-form {
@@ -1895,7 +1894,7 @@ a.meeting-card:hover,
   border: 0;
   background: none;
   color: var(--color-text-muted);
-  font-size: 20px;
+  font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
 }
@@ -2038,7 +2037,7 @@ a.meeting-card:hover,
 .import-progress {
   display: grid;
   gap: var(--space-1);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .import-progress progress {
@@ -2185,7 +2184,7 @@ a.meeting-card:hover,
   margin: 0 0 var(--space-3);
   padding: 0;
   list-style: none;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .breadcrumbs li + li::before {
@@ -2248,7 +2247,7 @@ a.meeting-card:hover,
 
 .folder-count {
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .folder-actions {
@@ -2267,7 +2266,7 @@ a.meeting-card:hover,
   border: 1px solid var(--color-border);
   border-radius: 6px;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -2354,13 +2353,13 @@ a.meeting-card:hover,
 
 .note-count {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .note-editor {
   min-height: 340px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.6;
   resize: vertical;
 }
@@ -2396,7 +2395,7 @@ a.meeting-card:hover,
 .speaker-edit .button {
   min-height: 38px;
   padding: 0 12px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 @media (max-width: 760px) {
@@ -2486,7 +2485,7 @@ a.meeting-card:hover,
 .integration-actions .button {
   min-height: 38px;
   padding: 0 12px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 /* Activity log */
@@ -2511,7 +2510,7 @@ a.meeting-card:hover,
 .audit-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .audit-table th,
@@ -2593,7 +2592,7 @@ a.meeting-card:hover,
 
   .audit-table td:first-child {
     color: var(--color-text-muted);
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .audit-table td:nth-child(2) {
@@ -2671,7 +2670,7 @@ a.meeting-card:hover,
 }
 
 .inline-name-error {
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .icon-button {
@@ -2706,7 +2705,7 @@ a.meeting-card:hover,
 .lib-hint {
   display: none;
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* Mouse users: row tools appear on hover or keyboard focus and sit at the right edge. */
@@ -2770,7 +2769,7 @@ a.meeting-card:hover,
 
 .selection-count {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 0.875rem;
   margin-right: 4px;
 }
 
@@ -2787,12 +2786,14 @@ a.meeting-card:hover,
   border-radius: 12px;
   background: var(--color-text);
   color: var(--color-bg);
-  font-size: 14px;
+  font-size: 0.875rem;
   box-shadow: 0 12px 36px #18241e33;
 }
 
+/* Fixed colours, not --color-danger: the dark-mode danger token is a light
+   red tuned for text, and white on it fails contrast. #b42318 / #fff is ~6.5:1. */
 .library-toast.is-error {
-  background: var(--color-danger, #b3261e);
+  background: #b42318;
   color: #fff;
 }
 
@@ -2819,7 +2820,7 @@ a.meeting-card:hover,
 
 .move-here {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .move-empty {
@@ -2880,7 +2881,7 @@ a.meeting-card:hover,
 
 .move-why {
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 @media (pointer: coarse) {
@@ -2908,7 +2909,7 @@ a.meeting-card:hover,
   .text-input,
   .select {
     min-height: 44px;
-    font-size: 16px;
+    font-size: 1rem;
   }
 
   textarea {
@@ -3002,7 +3003,7 @@ a.meeting-card:hover,
   .library-toolbar-row .button {
     justify-content: center;
     padding-inline: 8px;
-    font-size: 14px;
+    font-size: 0.875rem;
   }
 
   .lbl-long {
@@ -3203,4 +3204,242 @@ a.meeting-card:hover,
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text);
+}
+
+/* ---- Status badges (ProcessingBadge, ActionItemRow) ---- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 1px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.badge-processing {
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+  color: var(--color-text);
+}
+
+.badge-ready {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+  color: var(--color-text);
+}
+
+.badge-failed,
+.badge-overdue {
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+  color: var(--color-text);
+}
+
+.badge-failed::before,
+.badge-overdue::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-danger);
+}
+
+.spinner {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* A still ring would read as "stuck"; a slow pulse says "working" without spinning. */
+  .spinner {
+    animation: spinner-pulse 2s ease-in-out infinite !important;
+  }
+
+  @keyframes spinner-pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+/* ---- Disabled buttons: no hover lift, clearly inert ---- */
+.button:disabled,
+.billing-card button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  filter: none;
+  box-shadow: none;
+}
+
+.button:disabled:hover,
+.billing-card button:disabled:hover,
+.secondary-button:disabled:hover {
+  transform: none;
+  filter: none;
+}
+
+/* "Current plan" / "Not available yet" are states, not actions. */
+.billing-card button.billing-state,
+.billing-card button.billing-state:disabled {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  box-shadow: none;
+  opacity: 1;
+  cursor: default;
+}
+
+/* ---- Inline feedback ---- */
+.success-text {
+  color: var(--color-accent);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.callout {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.callout > :first-child {
+  margin-top: 0;
+}
+
+.callout > :last-child {
+  margin-bottom: 0;
+}
+
+.callout-danger {
+  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+  border-left-width: 4px;
+}
+
+.token-result {
+  margin-top: 16px;
+}
+
+.token-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+}
+
+/* ---- Share panel ---- */
+.share-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.share-panel .share-form label {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.share-hint {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.share-result {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+}
+
+.share-result p {
+  margin: 0;
+}
+
+.share-result-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-result-row .text-input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.share-result input {
+  min-width: 0;
+}
+
+.subsection-title {
+  margin: 12px 0 0;
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.share-links {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.share-link-meta {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.share-link-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Keep the destructive "Move to Trash" away from the export buttons. */
+.detail-actions > form:last-child {
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .detail-actions > form:last-child {
+    margin-left: 0;
+  }
+
+  .share-link-actions {
+    width: 100%;
+  }
 }

@@ -189,7 +189,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         </p>
       )}
 
-      {error && <p className="error-text" role="alert">{ERROR_TEXT[error] ?? "Something went wrong. Try again."}</p>}
+      {error && <p className="error-text" role="alert">{(Object.hasOwn(ERROR_TEXT, error) && ERROR_TEXT[error]) || "Something went wrong. Try again."}</p>}
       {notice === "trashed" && (
         <p className="callout" role="status">Moved to Trash. <Link href="/trash">Open Trash</Link> to restore it within 30 days.</p>
       )}
@@ -240,7 +240,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                 {meeting.openActionItems > 0 && (
                   <span className="open-actions"> · {meeting.openActionItems} open {meeting.openActionItems === 1 ? "action" : "actions"}</span>
                 )}
-                {meeting.processing && <span className="meeting-status"><ProcessingBadge state={meeting.processing} /></span>}
+                {meeting.processing && meeting.processing.status !== "complete" && <span className="meeting-status"><ProcessingBadge state={meeting.processing} /></span>}
               </div>
               {meeting.match ? (
                 <div className="preview">

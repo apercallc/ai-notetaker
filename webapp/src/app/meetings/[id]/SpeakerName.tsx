@@ -1,7 +1,7 @@
 "use client";
 
 import { Pencil } from "lucide-react";
-import { useRef, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type FormEvent } from "react";
 import { renameSpeakerAction } from "./actions";
 import { MAX_SPEAKER_NAME } from "@/lib/speakers.shared";
 
@@ -14,6 +14,25 @@ export function SpeakerName({ meetingId, speakerKey, label, renamed, isYou }: { 
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const input = useRef<HTMLInputElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // The same speaker appears on many transcript turns, so ids must be per instance.
+  const fieldId = useId();
+  const errorId = `${fieldId}-error`;
+  // Set when the editor closes, so focus goes back to the name the user was on
+  // instead of falling to <body>.
+  const restoreFocus = useRef(false);
+
+  useEffect(() => {
+    if (!editing && restoreFocus.current) {
+      restoreFocus.current = false;
+      trigger.current?.focus();
+    }
+  }, [editing]);
+
+  function close() {
+    restoreFocus.current = true;
+    setEditing(false);
+  }
 
   function save(name: string) {
     const formData = new FormData();
@@ -28,7 +47,7 @@ export function SpeakerName({ meetingId, speakerKey, label, renamed, isYou }: { 
       } catch {
         result = { status: "error" as const, message: "Something went wrong. Try again." };
       }
-      if (result.status === "saved") setEditing(false);
+      if (result.status === "saved") close();
       else setError(result.message);
     });
   }
@@ -41,6 +60,7 @@ export function SpeakerName({ meetingId, speakerKey, label, renamed, isYou }: { 
   if (!editing) {
     return (
       <button
+        ref={trigger}
         type="button"
         className={`speaker speaker-button${isYou ? " is-you" : ""}`}
         onClick={() => { setEditing(true); setError(null); }}
@@ -54,10 +74,12 @@ export function SpeakerName({ meetingId, speakerKey, label, renamed, isYou }: { 
 
   return (
     <form className="speaker-edit" onSubmit={onSubmit}>
-      <label className="sr-only" htmlFor={`speaker-${speakerKey}`}>Name for {label}</label>
+      <label className="sr-only" htmlFor={fieldId}>Name for {label}</label>
       <input
         ref={input}
-        id={`speaker-${speakerKey}`}
+        id={fieldId}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
         name="name"
         className="text-input"
         defaultValue={renamed ? label : ""}
@@ -65,14 +87,14 @@ export function SpeakerName({ meetingId, speakerKey, label, renamed, isYou }: { 
         maxLength={MAX_SPEAKER_NAME}
         autoFocus
         disabled={pending}
-        onKeyDown={(event) => { if (event.key === "Escape") setEditing(false); }}
+        onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); close(); } }}
       />
       <button type="submit" className="button button-primary button-small" disabled={pending} aria-busy={pending}>{pending ? "Saving…" : "Save"}</button>
       {renamed && (
         <button type="button" className="button button-secondary button-small" disabled={pending} onClick={() => save("")}>Reset</button>
       )}
-      <button type="button" className="button button-secondary button-small" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
-      {error && <span className="error-text" role="alert">{error}</span>}
+      <button type="button" className="button button-secondary button-small" disabled={pending} onClick={close}>Cancel</button>
+      {error && <span id={errorId} className="error-text" role="alert">{error}</span>}
     </form>
   );
 }

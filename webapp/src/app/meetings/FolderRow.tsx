@@ -101,7 +101,7 @@ export function FolderRow({
         <span className="folder-actions row-actions">
           <button type="button" className="icon-button" onClick={() => setRenaming(true)} disabled={library.busy} aria-label={`Rename ${name}`} title="Rename (F2)" aria-keyshortcuts="F2"><Pencil size={16} strokeWidth={1.75} aria-hidden="true" /></button>
           <button type="button" className="icon-button" onClick={() => library.openMove(library.targetsFor(item))} disabled={library.busy} aria-label={`Move ${subject}`} title="Move to…"><FolderInput size={16} strokeWidth={1.75} aria-hidden="true" /></button>
-          <button type="button" className="icon-button" onClick={() => library.trash(library.targetsFor(item))} disabled={library.busy} aria-label={`Delete ${subject}`} title="Move to Trash (Delete)"><Trash2 size={16} strokeWidth={1.75} aria-hidden="true" /></button>
+          <button type="button" className="icon-button" onClick={() => library.trash(library.targetsFor(item))} disabled={library.busy} aria-label={`Move ${subject} to Trash`} title="Move to Trash (Delete)"><Trash2 size={16} strokeWidth={1.75} aria-hidden="true" /></button>
         </span>
       )}
     </li>

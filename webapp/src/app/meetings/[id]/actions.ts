@@ -65,16 +65,19 @@ export async function deleteMeetingAction(formData: FormData): Promise<void> {
   if (!id) {
     redirect("/meetings?error=invalid-delete");
   }
-  let denied: string | null = null;
+  let denied = false;
   try {
     // Deleting a note moves it to the Trash, where it can be restored for 30 days.
     const result = await trashNote(session, id);
-    if (!result.ok) denied = result.error;
+    // A note that no longer exists 404s on its own page, so the only refusal
+    // the reader can still see there is the permission one. Send a code, never
+    // the message: the page maps codes to copy (see lib/pageErrors.ts).
+    if (!result.ok) denied = true;
   } catch (error) {
     console.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
     redirect("/meetings?error=delete-failed");
   }
-  if (denied) redirect(`/meetings/${id}?error=${encodeURIComponent(denied)}`);
+  if (denied) redirect(`/meetings/${id}?error=delete-forbidden`);
   redirect("/meetings?notice=trashed");
 }
 

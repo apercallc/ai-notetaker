@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 /**
  * A text field for renaming in place. Enter or leaving the field saves,
@@ -27,6 +27,7 @@ export function InlineName({
   const [saving, setSaving] = useState(false);
   const done = useRef(false);
   const field = useRef<HTMLInputElement>(null);
+  const errorId = useId();
 
   // A refused name keeps the field open: put the cursor back in it so keyboard and screen-reader users land on the problem.
   useEffect(() => {
@@ -56,6 +57,7 @@ export function InlineName({
         className="text-input inline-name-input"
         aria-label={label}
         aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
         defaultValue={value}
         placeholder={placeholder}
         maxLength={maxLength}
@@ -70,7 +72,7 @@ export function InlineName({
         }}
         onBlur={(event) => void commit(event.currentTarget.value)}
       />
-      {error && <span className="error-text inline-name-error" role="alert">{error}</span>}
+      {error && <span id={errorId} className="error-text inline-name-error" role="alert">{error}</span>}
     </span>
   );
 }

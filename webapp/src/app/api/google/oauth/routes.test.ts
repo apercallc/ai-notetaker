@@ -80,7 +80,7 @@ describe("Google OAuth connect route", () => {
     const response = await connect(new Request("https://app.example.com/api/google/oauth/connect"));
     const location = new URL(response.headers.get("location")!);
     expect(location.pathname).toBe("/account");
-    expect(location.searchParams.get("googleError")).toBe("Google integration is unavailable. Try again later.");
+    expect(location.searchParams.get("googleError")).toBe("unavailable");
   });
 });
 
@@ -89,20 +89,20 @@ describe("Google OAuth callback route", () => {
     getSessionContext.mockResolvedValueOnce(null);
     cookieValues.google_oauth_state = "sealed-state";
     const noSession = await callback(new Request("https://app.example.com/api/google/oauth/callback?state=state-1"));
-    expect(noSession.headers.get("location")).toContain("Google+authorization+could+not+be+verified");
+    expect(noSession.headers.get("location")).toContain("googleError=unverified");
     expect(noSession.cookies.get("google_oauth_state")?.maxAge).toBe(0);
 
     const badState = await callback(new Request("https://app.example.com/api/google/oauth/callback?state=other"));
-    expect(badState.headers.get("location")).toContain("Google+authorization+could+not+be+verified");
+    expect(badState.headers.get("location")).toContain("googleError=unverified");
     expect(completeOAuthConnection).not.toHaveBeenCalled();
   });
 
   it("handles denied authorization and a missing code without calling the token exchange", async () => {
     cookieValues.google_oauth_state = "sealed-state";
     const denied = await callback(new Request("https://app.example.com/api/google/oauth/callback?state=state-1&error=access_denied"));
-    expect(denied.headers.get("location")).toContain("Google+authorization+was+cancelled+or+denied");
+    expect(denied.headers.get("location")).toContain("googleError=denied");
     const noCode = await callback(new Request("https://app.example.com/api/google/oauth/callback?state=state-1"));
-    expect(noCode.headers.get("location")).toContain("Google+did+not+return+an+authorization+code");
+    expect(noCode.headers.get("location")).toContain("googleError=no-code");
     expect(completeOAuthConnection).not.toHaveBeenCalled();
   });
 
@@ -118,8 +118,8 @@ describe("Google OAuth callback route", () => {
     cookieValues.google_oauth_state = "sealed-state";
     completeOAuthConnection.mockRejectedValue(new Error("token contains private provider detail"));
     const response = await callback(new Request("https://app.example.com/api/google/oauth/callback?state=state-1&code=auth-code"));
-    expect(response.headers.get("location")).toContain("Google+connection+could+not+be+saved");
-    expect(response.headers.get("location")).not.toContain("private+provider+detail");
+    expect(response.headers.get("location")).toContain("googleError=save-failed");
+    expect(response.headers.get("location")).not.toContain("private");
   });
 });
 

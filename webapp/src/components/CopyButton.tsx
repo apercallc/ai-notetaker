@@ -33,11 +33,16 @@ export function CopyButton({
   label,
   className = "button button-secondary",
   disabled = false,
+  id,
+  labelledBy,
 }: {
   text: string;
   label: string;
   className?: string;
   disabled?: boolean;
+  /** Lets a row-level button name itself together with its row (pass both ids to labelledBy). */
+  id?: string;
+  labelledBy?: string;
 }) {
   const [state, setState] = useState<CopyState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,7 +60,7 @@ export function CopyButton({
 
   return (
     <>
-      <button type="button" className={className} onClick={copy} disabled={disabled}>
+      <button type="button" id={id} aria-labelledby={labelledBy} className={className} onClick={copy} disabled={disabled}>
         {state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : label}
       </button>
       <span className="sr-only" role="status">

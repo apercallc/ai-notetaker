@@ -92,7 +92,6 @@ export default async function ActionItemsPage({
     <div className="container">
       <div className="page-header">
         <div>
-          <Link href="/meetings" className="back-link">← Meetings</Link>
           <h1>Action items</h1>
         </div>
         <span className="total-count">{page.total === 0 ? "None yet" : page.items.length === page.total ? `${page.total} ${page.total === 1 ? "item" : "items"}` : `Showing ${page.items.length} of ${page.total}`}</span>

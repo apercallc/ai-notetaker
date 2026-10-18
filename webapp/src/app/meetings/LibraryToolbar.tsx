@@ -52,7 +52,7 @@ export function LibraryToolbar({ folderId, canImport, canCreateFolder, showHint 
           <input type="hidden" name="folderId" value={folderId ?? ""} />
           <NewNoteButton />
         </form>
-        <button type="button" className="button button-secondary button-small" onClick={() => { library.setCreatingFolder(true); setError(null); }} disabled={pending || !canCreateFolder} title={canCreateFolder ? undefined : "Clear the search to add folders"}>
+        <button type="button" data-new-folder className="button button-secondary button-small" onClick={() => { library.setCreatingFolder(true); setError(null); }} disabled={pending || !canCreateFolder} title={canCreateFolder ? undefined : "Clear the search to add folders"}>
           <FolderPlus size={16} strokeWidth={1.75} aria-hidden="true" /> New folder
         </button>
         <button type="button" className="button button-secondary button-small" onClick={() => fileInput.current?.click()} disabled={pending}>

@@ -11,9 +11,9 @@ export default function NotFound() {
     <div className="container">
       <div className="empty-state">
         <h1>Page not found</h1>
-        <p className="muted-copy">This page doesn&apos;t exist — it may have moved, or a meeting it pointed to was deleted.</p>
+        <p className="muted-copy">This page doesn&apos;t exist — it may have moved, or a note it pointed to was deleted.</p>
         <Link href="/meetings" className="back-link">
-          ← Back to your meetings
+          ← Back to Library
         </Link>
       </div>
     </div>

@@ -105,7 +105,7 @@ export function ActionItemRow({
               <span>{owner}</span>
             </>
           )}
-          {overdue && <span className="badge badge-failed">Overdue</span>}
+          {overdue && <span className="badge badge-overdue">Overdue</span>}
         </div>
       </div>
       <div className="action-side">

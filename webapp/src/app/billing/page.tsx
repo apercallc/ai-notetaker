@@ -63,13 +63,12 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="container">
-      <Link href="/meetings" className="back-link">← Meetings</Link>
       <div className="page-header">
         <h1>Plan</h1>
       </div>
       <p className="muted-copy">Recording and notes on your device are always free, with your own provider keys. A subscription adds cloud sync and team sync.</p>
 
-      {params.error && ERROR_MESSAGES[params.error] && <p className="error-text" role="alert">{ERROR_MESSAGES[params.error]}</p>}
+      {params.error && Object.hasOwn(ERROR_MESSAGES, params.error) && <p className="error-text" role="alert">{ERROR_MESSAGES[params.error]}</p>}
       {params.checkout === "success" && (
         <p className={live ? "success-text" : "muted-copy"} role="status">
           {entitlements.canSync ? `Your ${planLabel(entitlements.plan)} plan is active. Your desktop app syncs within a minute.` : live ? `Your ${planLabel(entitlements.plan)} subscription needs attention below before sync can run.` : "Payment received. Activating your plan — this usually takes a few seconds."}
@@ -206,7 +205,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
                   <li>Stripe-managed invoices and cancellation</li>
                 </ul>
                 {isCurrent ? (
-                  <button type="button" disabled>Current plan</button>
+                  <button type="button" className="billing-state" disabled>Current plan</button>
                 ) : live ? (
                   <BillingActionForm action={openBillingPortal} label={`Switch to ${offer.name}`} pendingLabel="Opening billing portal…" />
                 ) : offer.priceId ? (
@@ -223,7 +222,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
                     )}
                   </>
                 ) : (
-                  <button type="button" disabled>Not available yet</button>
+                  <button type="button" className="billing-state" disabled>Not available yet</button>
                 )}
               </section>
             );

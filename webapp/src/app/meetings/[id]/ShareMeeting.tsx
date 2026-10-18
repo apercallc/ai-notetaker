@@ -39,6 +39,7 @@ export function ShareMeeting({ meetingId, links }: { meetingId: string; links: A
   }
 
   function revoke(shareId: string) {
+    if (!window.confirm("Revoke this link? Anyone using it loses access right away.")) return;
     setError(null);
     setRevokingId(shareId);
     const formData = new FormData();
@@ -101,17 +102,23 @@ export function ShareMeeting({ meetingId, links }: { meetingId: string; links: A
         <ul className="share-links">
           {links.map((link) => (
             <li key={link.id} className="share-link-row">
-              <span className="share-link-meta">
+              <span className="share-link-meta" id={`share-meta-${link.id}`}>
                 Created <LocalTime iso={link.createdAt} style="date" /> · {link.expiresAt ? <>expires <LocalTime iso={link.expiresAt} style="date" /></> : "never expires"}
               </span>
               <span className="share-link-actions">
-                {tokens[link.id] ? (
-                  <CopyButton text={shareUrl(tokens[link.id]!)} label="Copy" className="button button-secondary button-small" />
-                ) : (
-                  <span className="muted-copy">Can’t be shown again</span>
+                {tokens[link.id] && (
+                  <CopyButton
+                    text={shareUrl(tokens[link.id]!)}
+                    label="Copy"
+                    className="button button-secondary button-small"
+                    id={`share-copy-${link.id}`}
+                    labelledBy={`share-copy-${link.id} share-meta-${link.id}`}
+                  />
                 )}
                 <button
                   type="button"
+                  id={`share-revoke-${link.id}`}
+                  aria-labelledby={`share-revoke-${link.id} share-meta-${link.id}`}
                   className="button button-danger button-small"
                   onClick={() => revoke(link.id)}
                   disabled={revokingId === link.id}

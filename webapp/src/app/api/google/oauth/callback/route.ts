@@ -17,15 +17,17 @@ import {
   type OAuthState,
 } from "@/lib/googleIntegration";
 import { OAUTH_STATE_COOKIE } from "../stateCookie";
+import { googleErrorCodeForStatus, type GoogleErrorCode } from "@/lib/pageErrors";
 
 function clearState(response: NextResponse): NextResponse {
   response.cookies.set(OAUTH_STATE_COOKIE, "", { httpOnly: true, path: "/api/google/oauth", maxAge: 0 });
   return response;
 }
 
-function accountRedirect(request: Request, message?: string): NextResponse {
+function accountRedirect(request: Request, code?: GoogleErrorCode): NextResponse {
   const url = publicUrl("/account", request);
-  if (message) url.searchParams.set("googleError", message);
+  // A code, never a message: the account page maps it to copy (lib/pageErrors.ts).
+  if (code) url.searchParams.set("googleError", code);
   return clearState(NextResponse.redirect(url));
 }
 
@@ -33,15 +35,15 @@ async function connectAccount(request: Request, state: OAuthState | null, code: 
   const store = await cookies();
   const session = await getSessionContext(store.get("session")?.value);
   if (!session || session.user.mustChangePassword || !state || state.userId !== session.user.id || !oauthStateMatches(state.state, stateParam)) {
-    return accountRedirect(request, "Google authorization could not be verified. Try connecting again.");
+    return accountRedirect(request, "unverified");
   }
-  if (denied) return accountRedirect(request, "Google authorization was cancelled or denied.");
-  if (!code) return accountRedirect(request, "Google did not return an authorization code. Try connecting again.");
+  if (denied) return accountRedirect(request, "denied");
+  if (!code) return accountRedirect(request, "no-code");
   try {
     await completeOAuthConnection(session.user.id, code, state);
     return clearState(NextResponse.redirect(publicUrl("/account?google=connected", request)));
   } catch (error) {
-    return accountRedirect(request, error instanceof GoogleIntegrationError ? error.publicMessage : "Google connection could not be saved. Try again.");
+    return accountRedirect(request, error instanceof GoogleIntegrationError ? googleErrorCodeForStatus(error.status) : "save-failed");
   }
 }
 

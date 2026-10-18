@@ -65,9 +65,9 @@ export default async function TeamPage() {
               <div className="team-member-actions">
                 <TeamForm operation="role" id={membership.id}>
                   <label>Role <select name="role" defaultValue={membership.role}><option value="member">Member</option><option value="owner">Owner</option></select></label>
-                  <button className="button" type="submit" aria-label={`Update role for ${membership.user.email}`}>Update role</button>
+                  <button className="button button-secondary" type="submit" aria-label={`Update role for ${membership.user.email}`}>Update role</button>
                 </TeamForm>
-                <TeamForm operation="reset" id={membership.id}><button className="button" type="submit" aria-label={`Send password reset to ${membership.user.email}`}>Send password reset</button></TeamForm>
+                <TeamForm operation="reset" id={membership.id}><button className="button button-secondary" type="submit" aria-label={`Send password reset to ${membership.user.email}`}>Send password reset</button></TeamForm>
                 <TeamForm operation="remove" id={membership.id} confirmMessage={`Remove ${membership.user.email} from this workspace? They lose access to its notes right away.`}>
                   <button className="button button-danger" type="submit" aria-label={`Remove member ${membership.user.email}`}>Remove member</button>
                 </TeamForm>
@@ -86,7 +86,7 @@ export default async function TeamPage() {
                 <div className="team-member-actions">
                   <span className="team-member-email">{invite.email}</span>
                   <span className="team-member-joined">Expires {formatDate(invite.expiresAt)}</span>
-                  <TeamForm operation="revoke-invite" id={invite.id}><button className="button" type="submit" aria-label={`Revoke invitation for ${invite.email}`}>Revoke invitation</button></TeamForm>
+                  <TeamForm operation="revoke-invite" id={invite.id}><button className="button button-secondary" type="submit" aria-label={`Revoke invitation for ${invite.email}`}>Revoke invitation</button></TeamForm>
                 </div>
               </li>
             ))}

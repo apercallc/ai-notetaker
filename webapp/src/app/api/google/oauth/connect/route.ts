@@ -7,6 +7,7 @@ import { createOAuthState, GoogleIntegrationError, sealOAuthState } from "@/lib/
 import { contextFromRequest } from "@/lib/requestContext";
 import { shouldUseSecureCookies } from "@/lib/sessionCookie";
 import { OAUTH_STATE_COOKIE } from "../stateCookie";
+import { googleErrorCodeForStatus } from "@/lib/pageErrors";
 
 export async function GET(request: Request) {
   const store = await cookies();
@@ -25,7 +26,8 @@ export async function GET(request: Request) {
     });
     return response;
   } catch (error) {
-    const message = error instanceof GoogleIntegrationError ? error.publicMessage : "Google integration is unavailable. Try again later.";
-    return NextResponse.redirect(publicUrl(`/account?googleError=${encodeURIComponent(message)}`, request));
+    // A code, never the message: the account page maps it to copy (lib/pageErrors.ts).
+    const code = error instanceof GoogleIntegrationError ? googleErrorCodeForStatus(error.status) : "unavailable";
+    return NextResponse.redirect(publicUrl(`/account?googleError=${code}`, request));
   }
 }

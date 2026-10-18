@@ -24,10 +24,13 @@ export function ProcessingBadge({ state }: { state: ProcessingState }) {
       </span>
     );
   }
-  if (state.status === "complete") return <span className="badge badge-ready">Ready</span>;
+  // Finished notes are the normal case; a "Ready" pill on every row is noise.
+  if (state.status === "complete") return null;
+  // The badge stays short; the (possibly technical) reason is in the tooltip
+  // and in the note page's callout.
   return (
-    <span className="badge badge-failed" title={state.errorMessage ?? undefined}>
-      Failed — {failureReason(state.errorMessage)}
+    <span className="badge badge-failed" title={failureReason(state.errorMessage)}>
+      Failed — couldn&apos;t finish notes
     </span>
   );
 }

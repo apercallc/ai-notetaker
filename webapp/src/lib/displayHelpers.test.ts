@@ -115,7 +115,8 @@ describe("plan and route error copy", () => {
     expect(errorCopyForPath("/login").backHref).toBe("/login");
     expect(errorCopyForPath("/actions").title).toContain("action items");
     expect(errorCopyForPath("/trash").body).toContain("Nothing was restored or deleted");
-    expect(errorCopyForPath("/meetings").body).toContain("saved meetings");
+    expect(errorCopyForPath("/meetings").body).toContain("saved notes");
     expect(errorCopyForPath(null).backHref).toBe("/meetings");
+    expect(errorCopyForPath("/billing").backLabel).toBe("Back to Library");
   });
 });

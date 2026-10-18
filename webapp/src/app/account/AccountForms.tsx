@@ -54,7 +54,7 @@ export function ChangePasswordForm() {
         </button>
       </form>
       {result?.ok === true && (
-        <p role="status" className="empty-state">
+        <p role="status" className="success-text">
           Password updated. Other devices were signed out.
         </p>
       )}
@@ -93,7 +93,7 @@ export function SessionList({ sessions }: { sessions: SessionRow[] }) {
             {!session.current && (
               <form action={revokeSessionAction}>
                 <input type="hidden" name="sessionId" value={session.id} />
-                <button type="submit" className="button button-secondary">Sign out this device</button>
+                <button type="submit" className="button button-secondary" aria-label={`Sign out ${session.device}, last used ${session.lastUsedAt ?? "at an unknown time"}`}>Sign out this device</button>
               </form>
             )}
           </li>
@@ -135,11 +135,13 @@ export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
         </button>
       </form>
       {result?.ok === true && (
-        <p role="status" className="empty-state">
-          Copy this token now — it won&apos;t be shown again:{" "}
-          <code>{result.token}</code>{" "}
-          <CopyButton text={result.token} label="Copy token" className="button button-secondary button-small" />
-        </p>
+        <div role="status" className="token-result">
+          <p className="success-text">Token created. Copy it now — it won&apos;t be shown again.</p>
+          <div className="share-result-row">
+            <input aria-label="New API token" readOnly value={result.token} onFocus={(event) => event.currentTarget.select()} className="text-input token-value" spellCheck={false} />
+            <CopyButton text={result.token} label="Copy token" className="button button-primary" />
+          </div>
+        </div>
       )}
       {result?.ok === false && (
         <p role="alert" className="error-text">
@@ -155,9 +157,18 @@ export function ApiTokenPanel({ tokens }: { tokens: TokenRow[] }) {
                 {token.device ? `${token.device} · ` : ""}created {token.createdAt} · last used{" "}
                 {token.lastUsedAt ?? "never"} · expires {token.expiresAt}
               </div>
-              <form action={revokeApiTokenAction}>
+              <form
+                action={revokeApiTokenAction}
+                onSubmit={(event) => {
+                  const name = token.label ?? "this API token";
+                  const consequence = token.desktopSync
+                    ? "The desktop app stops syncing notes until you sign in from it again."
+                    : "Anything using it loses access right away.";
+                  if (!confirm(`Revoke “${name}”? ${consequence}`)) event.preventDefault();
+                }}
+              >
                 <input type="hidden" name="tokenId" value={token.id} />
-                <button type="submit" className="button button-secondary">Revoke</button>
+                <button type="submit" className="button button-secondary" aria-label={`Revoke ${token.label ?? "API token"}, created ${token.createdAt}`}>Revoke</button>
               </form>
             </li>
           ))}
@@ -237,7 +248,7 @@ export function DeleteWorkspaceForm({ workspaceName }: { workspaceName: string }
   const [result, formAction, pending] = useActionState<DeleteWorkspaceState | null, FormData>(callDeleteWorkspace, null);
   return (
     <form action={formAction} className="login-form">
-      <label htmlFor="delete-confirm">Type “{workspaceName}” to delete this workspace and all of its meetings</label>
+      <label htmlFor="delete-confirm">Type “{workspaceName}” to delete this workspace and all of its notes</label>
       <input id="delete-confirm" name="confirm" type="text" className="text-input" autoComplete="off" required />
       <button type="submit" className="button button-danger" disabled={pending} aria-busy={pending}>
         {pending ? "Deleting…" : "Delete workspace"}
