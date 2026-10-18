@@ -21,7 +21,8 @@ use crate::device_matching::{find_matching_device, WINDOWS_DEVICE_HINT};
 use crate::health::{Backoff, CaptureHealthKind, HealthHub};
 use crate::input::{default_input_name, list_input_devices, InputSupervisor};
 use crate::session::{
-    await_ready, spawn_frame_delivery, CaptureSession, FrameCallback, ReadySender,
+    await_ready, frame_channel, spawn_frame_delivery, CaptureSession, FrameCallback, FrameSender,
+    ReadySender,
 };
 use crate::timeline::SilenceFiller;
 use crate::{
@@ -34,7 +35,6 @@ use notetaker_core::providers::AudioChannel;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, oneshot};
@@ -298,10 +298,10 @@ impl AudioCapture for WindowsAudioCapture {
         // client released) before a new one may start.
         self.session.stop().await;
 
-        let (tx, rx) = std::sync::mpsc::channel::<CapturedFrame>();
         let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
         let running = self.session.arm();
         let health = self.health.clone();
+        let (tx, rx) = frame_channel(health.clone(), running.clone());
 
         let supervisor = std::thread::spawn(move || {
             run_capture(options, tx, running, health, ready_tx);
@@ -482,7 +482,7 @@ fn cpal_input_exists(name: &str) -> bool {
 /// unusable; `ready_tx` carries the startup verdict.
 fn run_capture(
     options: CaptureOptions,
-    tx: Sender<CapturedFrame>,
+    tx: FrameSender,
     running: Arc<AtomicBool>,
     health: HealthHub,
     ready_tx: ReadySender,
@@ -546,7 +546,7 @@ enum AttemptOutcome {
 
 fn run_wasapi_loopback(
     pinned: Option<String>,
-    tx: &Sender<CapturedFrame>,
+    tx: &FrameSender,
     running: &Arc<AtomicBool>,
     health: &HealthHub,
     ready_tx: ReadySender,
@@ -556,11 +556,18 @@ fn run_wasapi_loopback(
     let mut backoff = Backoff::default();
     let mut retry_at: Option<Instant> = None;
     let mut first_attempt = true;
+    // WASAPI loopback delivers nothing while the output is silent, and nothing
+    // at all between a failed attempt and the next one, unlike the microphone.
+    // One wall-clock timeline for the whole recording (not one per attempt)
+    // fills both with zero PCM so the speaker channel stays aligned with the
+    // mic across restarts.
+    let mut timeline = SilenceFiller::new(WASAPI_SAMPLE_RATE_HZ, Instant::now());
 
     while running.load(Ordering::SeqCst) {
         if let Some(due) = retry_at {
             if Instant::now() < due {
                 mic.tick();
+                send_due_silence(&mut timeline, tx);
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -577,6 +584,7 @@ fn run_wasapi_loopback(
             &mut ready,
             announce_restart,
             mic,
+            &mut timeline,
         );
         first_attempt = false;
 
@@ -620,20 +628,31 @@ fn run_wasapi_loopback(
 /// One WASAPI loopback session: open the render endpoint, initialize the
 /// loopback capture client, then poll packets until the session stops, the
 /// stream fails, or (unpinned) the default endpoint changes.
+#[allow(clippy::too_many_arguments)]
 fn run_wasapi_attempt(
     pinned: Option<&str>,
-    tx: &Sender<CapturedFrame>,
+    tx: &FrameSender,
     running: &Arc<AtomicBool>,
     health: &HealthHub,
     ready: &mut Option<ReadySender>,
     announce_restart: bool,
     mic: &mut InputSupervisor,
+    timeline: &mut SilenceFiller,
 ) -> AttemptOutcome {
     let Ok(owns_com_reference) = initialize_com_for_wasapi() else {
         return AttemptOutcome::Failed("could not initialize Windows audio COM".into());
     };
 
-    let outcome = wasapi_loopback_body(pinned, tx, running, health, ready, announce_restart, mic);
+    let outcome = wasapi_loopback_body(
+        pinned,
+        tx,
+        running,
+        health,
+        ready,
+        announce_restart,
+        mic,
+        timeline,
+    );
 
     if owns_com_reference {
         wasapi::deinitialize();
@@ -641,14 +660,16 @@ fn run_wasapi_attempt(
     outcome
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wasapi_loopback_body(
     pinned: Option<&str>,
-    tx: &Sender<CapturedFrame>,
+    tx: &FrameSender,
     running: &Arc<AtomicBool>,
     health: &HealthHub,
     ready: &mut Option<ReadySender>,
     announce_restart: bool,
     mic: &mut InputSupervisor,
+    timeline: &mut SilenceFiller,
 ) -> AttemptOutcome {
     let enumerator = match wasapi::DeviceEnumerator::new() {
         Ok(enumerator) => enumerator,
@@ -718,10 +739,6 @@ fn wasapi_loopback_body(
     }
 
     let bytes_per_frame = format.get_blockalign() as usize;
-    // WASAPI loopback delivers nothing while the output is silent, unlike the
-    // microphone. Synthesize zero-filled PCM by wall clock so the speaker
-    // timeline never runs shorter than the mic's.
-    let mut filler = SilenceFiller::new(WASAPI_SAMPLE_RATE_HZ, Instant::now());
     let mut next_default_check = Instant::now() + DEFAULT_ENDPOINT_POLL;
     let mut outcome = AttemptOutcome::Stopped;
 
@@ -743,13 +760,7 @@ fn wasapi_loopback_body(
             }
         }
 
-        if let Some(silence) = filler.silence_due(Instant::now()) {
-            let _ = tx.send(CapturedFrame {
-                channel: AudioChannel::Speaker,
-                pcm16: silence,
-                sample_rate_hz: WASAPI_SAMPLE_RATE_HZ,
-            });
-        }
+        send_due_silence(timeline, tx);
 
         let packet_frames = match capture_client.get_next_packet_size() {
             Ok(frames) => frames.unwrap_or_default(),
@@ -782,7 +793,7 @@ fn wasapi_loopback_body(
             interleaved_f32_to_mono_pcm16(&raw, WASAPI_CHANNELS as usize)
         };
         if !pcm16.is_empty() {
-            filler.note_real_frames(frames_read as u64);
+            timeline.note_real_frames(frames_read as u64);
             let _ = tx.send(CapturedFrame {
                 channel: AudioChannel::Speaker,
                 pcm16,
@@ -793,6 +804,18 @@ fn wasapi_loopback_body(
 
     let _ = audio_client.stop_stream();
     outcome
+}
+
+/// Emits the speaker silence owed by wall clock (quiet output, or the gap
+/// while the loopback restarts).
+fn send_due_silence(timeline: &mut SilenceFiller, tx: &FrameSender) {
+    while let Some(silence) = timeline.silence_due(Instant::now()) {
+        let _ = tx.send(CapturedFrame {
+            channel: AudioChannel::Speaker,
+            pcm16: silence,
+            sample_rate_hz: WASAPI_SAMPLE_RATE_HZ,
+        });
+    }
 }
 
 /// Default-endpoint check inside the polling loop, without spawning a thread:

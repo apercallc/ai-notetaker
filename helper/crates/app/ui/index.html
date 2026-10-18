@@ -25,9 +25,9 @@
         <nav class="nav-list" id="nav-list" aria-label="Sections"></nav>
 
         <div class="sidebar-footer">
-          <div class="local-badge"><span class="status-dot"></span> Saved on this device</div>
-          <button id="open-notes-folder" class="sidebar-link">Open notes folder</button>
-          <button id="open-webapp" class="sidebar-link" hidden>Open web library ↗</button>
+          <div class="local-badge"><span class="status-dot" aria-hidden="true"></span> Saved on this device</div>
+          <button type="button" id="open-notes-folder" class="sidebar-link">Open notes folder</button>
+          <button type="button" id="open-webapp" class="sidebar-link" hidden>Open web library <span aria-hidden="true">↗</span></button>
           <span class="version-label" id="app-version">Starting…</span>
         </div>
       </aside>
@@ -35,19 +35,18 @@
       <main class="main-area">
         <header class="topbar">
           <div>
-            
             <h1 id="page-title">Record a meeting</h1>
-            <p class="eyebrow" id="page-eyebrow">YOUR DESKTOP NOTETAKER</p>
+            <p class="eyebrow" id="page-eyebrow">Capture your microphone and the meeting audio on this device.</p>
           </div>
           <div class="topbar-status" id="topbar-status" role="status" aria-live="polite">
-            <span class="status-dot"></span><span>Checking audio</span>
+            <span class="status-dot" aria-hidden="true"></span><span>Checking audio</span>
           </div>
         </header>
 
         <div id="recording-readiness-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
         <div id="content" class="content">
-          <div class="loading-state"><span class="spinner"></span><span>Opening your workspace…</span></div>
+          <div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>Opening your workspace…</span></div>
         </div>
       </main>
     </div>

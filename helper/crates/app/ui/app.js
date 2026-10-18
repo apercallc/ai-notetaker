@@ -3,7 +3,7 @@
 
   const invoke = window.__TAURI__?.core?.invoke;
   const listen = window.__TAURI__?.event?.listen;
-  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", notesPageLimit: 100, recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncAnnouncement: "", noticeTimer: 0, noticeKind: "", noticeSource: "", syncWarning: "" };
+  const state = { page: "record", snapshot: null, detail: null, detailError: null, selectedId: null, currentFolderId: null, busy: false, recordTitle: "", notesQuery: "", notesPageLimit: 100, recordConsentAcknowledged: false, finalizingMeetingIds: new Set(), recoveringIds: new Set(), reprocessingIds: new Set(), settingsDirty: false, settingsOpen: {}, syncInProgress: false, syncRunId: null, finishedSyncRuns: [], syncAnnouncement: "", noticeTimer: 0, noticeKind: "", noticeSource: "", syncWarning: "" };
   const $ = (selector, root = document) => root.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const prettyDate = (value) => {
@@ -68,7 +68,7 @@
     if (status.dataset.label === label && status.dataset.dotClass === nextDotClass) return;
     status.dataset.label = label;
     status.dataset.dotClass = nextDotClass;
-    status.innerHTML = `<span class="${nextDotClass}"></span><span>${esc(label)}</span>`;
+    status.innerHTML = `<span class="${nextDotClass}" aria-hidden="true"></span><span>${esc(label)}</span>`;
   }
 
   let refreshTask = null;
@@ -129,7 +129,7 @@
         notify(`Could not refresh the latest status: ${String(error)}`, "error", { source: "refresh" });
         return;
       }
-      $("#content").innerHTML = `<div class="empty-state"><strong>Workspace could not open</strong>${esc(error)}<p><button class="secondary-button" id="retry-load">Try again</button></p></div>`;
+      $("#content").innerHTML = `<div class="empty-state" role="alert"><strong>AI Notetaker could not open your notes</strong><p>${esc(error)}</p><p>Your recordings are still saved on this device. Try again, or restart the app.</p><button type="button" class="secondary-button" id="retry-load">Try again</button></div>`;
       $("#retry-load")?.addEventListener("click", refresh);
       setTopbarStatus("Workspace unavailable", "needs-attention");
     }
@@ -177,7 +177,7 @@
   }
   function renderNav(setupNeeded) {
     const items = navItems();
-    $("#nav-list").innerHTML = items.map(([id, label]) => `<button class="nav-button ${state.page === id ? "active" : ""}" data-page="${id}" aria-label="${label}" ${state.page === id ? 'aria-current="page"' : ""}><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${ICONS[id]}</svg></span><span>${label}</span>${id === "settings" ? `<span class="nav-dot" id="settings-nav-dot" role="img" aria-label="Setup needed" ${setupNeeded ? "" : "hidden"}></span>` : ""}</button>`).join("");
+    $("#nav-list").innerHTML = items.map(([id, label]) => `<button class="nav-button ${state.page === id ? "active" : ""}" type="button" data-page="${id}" aria-label="${id === "settings" && setupNeeded ? `${label} (setup needed)` : label}" ${state.page === id ? 'aria-current="page"' : ""}><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${ICONS[id]}</svg></span><span>${label}</span>${id === "settings" ? `<span class="nav-dot" id="settings-nav-dot" aria-hidden="true" ${setupNeeded ? "" : "hidden"}></span>` : ""}</button>`).join("");
     for (const button of document.querySelectorAll(".nav-button")) button.addEventListener("click", () => setPage(button.dataset.page));
   }
 
@@ -281,7 +281,7 @@
         </details>
       </div>
       <div class="section-heading"><div><h2>Recent notes</h2><p>Your recordings are saved locally first.</p></div><button class="small-button" id="all-notes">View all</button></div>
-      ${recent.length ? `<div class="recent-list">${recent.map((meeting) => meetingCard(meeting)).join("")}</div>` : `<div class="empty-state"><strong>No recordings yet</strong>Start a recording. Your transcript and notes will appear here.</div>`}`;
+      ${recent.length ? `<div class="recent-list">${recent.map((meeting) => meetingCard(meeting)).join("")}</div>` : `<div class="empty-state"><strong>No recordings yet</strong><p>Start a recording above. Its transcript and notes will appear here.</p></div>`}`;
     $("#record-consent")?.addEventListener("change", () => {
       state.recordConsentAcknowledged = $("#record-consent").checked;
       const startButton = $("#start-recording");
@@ -325,10 +325,10 @@
     if (busy) return "Starting recording…";
     const nextSteps = [];
     if (credentialStoreError) nextSteps.push("Follow the secure storage instructions above, then retry saving your keys in Settings.");
-    else if (!keyReady) nextSteps.push("Finish processing setup in Settings.");
+    else if (!keyReady) nextSteps.push("Add your provider keys in Settings.");
     if (!audio.ready) {
       nextSteps.push(audioChecking
-        ? audioTimedOut ? "The audio check is taking longer; follow the Audio setup guidance."
+        ? audioTimedOut ? "The audio check is taking longer than usual. Follow the Audio setup steps."
           : "Wait for the audio check to finish."
         : "Complete Audio setup.");
     }
@@ -351,7 +351,7 @@
     const consent = state.recordConsentAcknowledged;
     state.busy = true;
     const button = $("#start-recording");
-    if (button) { button.disabled = true; button.textContent = "Starting recording…"; }
+    if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); button.textContent = "Starting…"; }
     const hint = $("#start-recording-hint");
     if (hint) hint.textContent = "Starting recording…";
     notify("Starting recording…");
@@ -371,7 +371,7 @@
     state.busy = true;
     state.finalizingMeetingIds.add(id);
     const button = $("#stop-recording");
-    if (button) { button.disabled = true; button.textContent = "Stopping…"; }
+    if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); button.textContent = "Stopping…"; }
     notify("Stopping recording… Audio is saved locally while notes are prepared.");
     try {
       await invoke("desktop_stop_recording", { meetingId: id });
@@ -389,8 +389,14 @@
   }
 
   async function checkAudio() {
-    try { await invoke("desktop_test_audio"); notify("Audio check started. This can take a few seconds."); setTimeout(refresh, 900); }
-    catch (error) { notify(String(error), "error"); }
+    const button = $("#check-audio");
+    if (button?.disabled) return;
+    if (button) { button.disabled = true; button.textContent = "Checking…"; }
+    try { await invoke("desktop_test_audio"); notify("Checking audio. This takes a few seconds."); setTimeout(refresh, 900); }
+    catch (error) {
+      notify(String(error), "error");
+      if (button?.isConnected) { button.disabled = false; button.textContent = "Check audio again"; }
+    }
   }
 
   // macOS keeps microphone and Screen & System Audio Recording in separate panes. No microphone
@@ -402,7 +408,7 @@
   async function openScreenRecordingSettings() {
     try {
       await invoke("desktop_open_screen_recording_settings", { pane: permissionPane(state.snapshot.audio) });
-      notify("System Settings opened. Add or enable AI Notetaker, reopen the app, then check audio again.");
+      notify(state.snapshot.audio.platform === "macos" ? "System Settings is open. Turn on AI Notetaker, reopen the app, then check audio again." : "Sound settings are open. Choose your microphone and output, then check audio again.");
     } catch (error) { notify(String(error), "error"); }
   }
 
@@ -432,7 +438,7 @@
         <input id="notes-search" class="search-input" type="search" value="${esc(state.notesQuery)}" placeholder="Search notes" aria-label="Search notes" />
         <p class="fine-print">${state.notesQuery ? "Search includes this folder and its subfolders." : "Browse folders or select a recording."}</p>
       </div><div id="meeting-list" class="meeting-list"></div></section>
-      <section class="card note-detail" id="note-detail">${state.detailError ? `<div class="empty-state"><strong>Note could not open</strong>${esc(state.detailError)}</div>` : state.selectedId ? '<div class="loading-state"><span class="spinner"></span><span>Opening note…</span></div>' : '<div class="empty-state"><strong>Select a recording</strong>Your transcript, summary, and action items will appear here.</div>'}</section>
+      <section class="card note-detail" id="note-detail">${state.detailError ? `<div class="empty-state" role="alert"><strong>This note could not open</strong><p>${esc(state.detailError)}</p><p>Choose it again, or restart the app. Saved audio is not affected.</p></div>` : state.selectedId ? '<div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>Opening note…</span></div>' : '<div class="empty-state"><strong>Select a note</strong><p>Its summary, action items and transcript appear here.</p></div>'}</section>
     </div>`;
     const search = $("#notes-search");
     search.addEventListener("input", () => { state.notesQuery = search.value; state.notesPageLimit = 100; renderMeetingList(state.notesQuery, noteCounts); });
@@ -440,7 +446,9 @@
     $("#meeting-list").scrollTop = listScroll;
     for (const button of document.querySelectorAll("[data-folder-path]")) button.addEventListener("click", () => openFolder(button.dataset.folderPath || null));
     $("#new-folder")?.addEventListener("click", () => { $("#new-folder-form").hidden = false; $("#folder-name").focus(); });
-    $("#cancel-folder")?.addEventListener("click", () => { $("#new-folder-form").hidden = true; });
+    const closeFolderForm = () => { $("#new-folder-form").hidden = true; $("#new-folder")?.focus(); };
+    $("#cancel-folder")?.addEventListener("click", closeFolderForm);
+    $("#new-folder-form")?.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); closeFolderForm(); } });
     $("#new-folder-form")?.addEventListener("submit", async (event) => {
       event.preventDefault();
       const submit = event.currentTarget.querySelector('button[type="submit"]');
@@ -520,7 +528,7 @@
     const more = filtered.length > visible.length
       ? `<button class="load-more-meetings" type="button" id="load-more-meetings">Show more notes <span>${visible.length} of ${filtered.length}</span></button>`
       : "";
-    list.innerHTML = folderRows + (visible.length ? visible.map((meeting) => `<button class="meeting-list-item ${meeting.id === state.selectedId ? "selected" : ""}" data-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><span>${esc(prettyDate(meeting.startedAt))} · ${esc(statusLabel(meeting.status))}</span></button>`).join("") : !folderRows ? `<div class="empty-state">${state.snapshot.meetings.length ? needle ? "No matching notes." : "This folder is empty." : "No recordings yet."}</div>` : "") + more + `<span class="sr-only" role="status" aria-live="polite">Showing ${visible.length} of ${filtered.length} notes.</span>`;
+    list.innerHTML = folderRows + (visible.length ? visible.map((meeting) => `<button class="meeting-list-item ${meeting.id === state.selectedId ? "selected" : ""}" data-id="${esc(meeting.id)}"><strong>${esc(meeting.title)}</strong><span>${esc(prettyDate(meeting.startedAt))} · ${esc(statusLabel(meeting.status))}</span></button>`).join("") : !folderRows ? `<div class="empty-state">${state.snapshot.meetings.length ? needle ? "No notes match your search." : "This folder is empty. Move a note here from its Folder menu." : "No recordings yet. Notes appear here after you record a meeting."}</div>` : "") + more + `<span class="sr-only" role="status" aria-live="polite">Showing ${visible.length} of ${filtered.length} notes.</span>`;
     for (const button of list.querySelectorAll("[data-open-folder]")) button.addEventListener("click", () => openFolder(button.dataset.openFolder));
     for (const button of list.querySelectorAll("[data-id]")) button.addEventListener("click", () => openMeeting(button.dataset.id));
     $("#load-more-meetings", list)?.addEventListener("click", () => {
@@ -607,7 +615,7 @@
       ${importNotice}
       ${meeting.canReprocessExtensionAudio ? `<section class="recovery-actions"><p class="privacy-note">Create a separate desktop note from the saved audio. The imported transcript and summary will stay unchanged.</p><button class="secondary-button" id="reprocess-extension-audio" ${state.reprocessingIds.has(meeting.id) ? "disabled" : ""}>${state.reprocessingIds.has(meeting.id) ? "Preparing audio copy…" : "Create notes from saved audio"}</button></section>` : ""}
       ${meeting.status === "recovered" && !meeting.textOnlyImport ? `<section class="recovery-actions"><p class="privacy-note">Audio is safe on this device. Resume processing it to finish the transcript and notes.</p><button class="secondary-button" id="recover-meeting" ${state.recoveringIds.has(meeting.id) ? "disabled" : ""}>${state.recoveringIds.has(meeting.id) ? "Recovering notes…" : "Recover notes from saved audio"}</button></section>` : ""}
-      <div class="note-actions"><div class="inline-actions note-export"><button class="secondary-button" id="copy-note">Copy as Markdown</button><button class="secondary-button" id="save-note-md">Save Markdown</button><button class="secondary-button" id="save-note-txt">Save text</button></div><button class="secondary-button" id="delete-note">${meeting.textOnlyImport ? "Delete imported note" : "Delete recording"}</button></div>`;
+      <div class="note-actions"><div class="inline-actions note-export"><button class="secondary-button" id="copy-note">Copy as Markdown</button><button class="secondary-button" id="save-note-md">Save Markdown</button><button class="secondary-button" id="save-note-txt">Save text</button></div><button type="button" class="secondary-button danger" id="delete-note">${meeting.textOnlyImport ? "Delete imported note" : "Delete recording"}</button></div>`;
     root.dataset.meetingId = meeting.id;
     const transcriptList = $(".transcript-list", root);
     if (transcriptList && transcriptScroll) transcriptList.scrollTop = transcriptScroll;
@@ -618,13 +626,17 @@
     $("#reprocess-extension-audio")?.addEventListener("click", reprocessExtensionAudio);
     $("#move-note")?.addEventListener("click", async () => {
       const destination = $("#note-folder").value || null;
-      if (destination === (meeting.folderId || null)) return;
+      if (destination === (meeting.folderId || null)) { notify("The note is already in that folder."); return; }
+      const moveButton = $("#move-note");
+      if (moveButton.disabled) return;
+      moveButton.disabled = true;
       try {
         await invoke("desktop_move_meeting", { meetingId: meeting.id, folderId: destination });
         state.currentFolderId = destination;
-        notify("Recording moved. Its audio remains in the local recording store.");
+        notify("Note moved.");
         await refresh();
       } catch (error) { notify(String(error), "error"); }
+      finally { if (moveButton.isConnected) moveButton.disabled = false; }
     });
   }
 
@@ -671,13 +683,18 @@
   async function deleteMeeting() {
     const id = state.selectedId;
     if (!id || !window.confirm(state.detail?.meeting?.textOnlyImport ? "Delete this imported note from this device? The original extension data is unchanged." : "Delete this recording, transcript, and notes from this device? This cannot be undone.")) return;
+    const button = $("#delete-note");
+    if (button) { button.disabled = true; button.textContent = "Deleting…"; }
     try {
       await invoke("desktop_delete_meeting", { meetingId: id });
       state.selectedId = null;
       state.detail = null;
-      notify("Recording deleted from this device.");
+      notify("Deleted from this device.");
       await refresh();
-    } catch (error) { notify(String(error), "error"); }
+    } catch (error) {
+      notify(String(error), "error");
+      if (button?.isConnected) { button.disabled = false; button.textContent = state.detail?.meeting?.textOnlyImport ? "Delete imported note" : "Delete recording"; }
+    }
   }
 
   const keyFields = [
@@ -699,7 +716,13 @@
   }
 
   async function hostedAction(button, command, args, success) {
+    if (!button || button.disabled) return;
+    const label = button.textContent;
+    const status = $("#hosted-status");
     button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = command === "desktop_hosted_sign_out" ? "Signing out…" : "Signing in…";
+    if (status) { status.textContent = ""; status.className = "key-status"; }
     try {
       const reply = await invoke(command, args);
       for (const field of [$("#hosted-password"), $("#hosted-code")]) if (field) field.value = "";
@@ -708,11 +731,10 @@
       else notify(success);
       await refresh();
     } catch (error) {
-      const status = $("#hosted-status");
-      if (status) status.textContent = String(error);
+      if (status?.isConnected) { status.textContent = String(error); status.className = "key-status error"; }
       notify(String(error), "error");
     } finally {
-      button.disabled = false;
+      if (button.isConnected) { button.disabled = false; button.removeAttribute("aria-busy"); button.textContent = label; }
     }
   }
 
@@ -747,9 +769,9 @@
 
   function usagePanel() {
     if (!hostedSignedIn()) return signInPrompt("your plan and usage");
-    if (accountState.error) return `<div class="empty-state"><strong>Could not load your plan</strong><p>${esc(accountState.error)}</p><button class="small-button" id="account-reload">Try again</button></div>`;
+    if (accountState.error) return `<div class="empty-state" role="alert"><strong>Could not load your plan</strong><p>${esc(accountState.error)}</p><button type="button" class="small-button" id="account-reload">Try again</button></div>`;
     const data = accountState.overview;
-    if (!data) { void loadOverview(); return '<div class="loading-state"><span class="spinner"></span><span>Loading your plan…</span></div>'; }
+    if (!data) { void loadOverview(); return '<div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>Loading your plan…</span></div>'; }
     const e = data.entitlements;
     const owner = data.account.role === "owner";
     const reset = e.period?.end ? longDate(e.period.end) : "";
@@ -780,7 +802,7 @@
     const shown = rows.filter((row) => (filter === "all" || (filter === "done") === isDone(row.item)) && (!query || `${row.item.text} ${row.item.owner || ""} ${row.meeting.title}`.toLowerCase().includes(query)));
     const list = shown.length
       ? `<ul class="action-board">${shown.map(({ meeting, item, index }) => `<li><label><input type="checkbox" data-action-meeting="${esc(meeting.id)}" data-action-index="${index}" ${isDone(item) ? "checked" : ""} /><span class="${isDone(item) ? "done" : ""}">${esc(item.text)}${item.owner ? ` <em>· ${esc(item.owner)}</em>` : ""}</span></label><button class="inline-link" data-open-note="${esc(meeting.id)}">${esc(meeting.title)}</button></li>`).join("")}</ul>`
-      : `<div class="empty-state"><strong>${rows.length ? "Nothing here" : "No action items yet"}</strong>${rows.length ? "Try a different filter or search." : "Action items from your meeting notes appear here, including notes made on the web."}</div>`;
+      : `<div class="empty-state"><strong>${rows.length ? "No matching action items" : "No action items yet"}</strong><p>${rows.length ? "Try another filter or search." : "Action items from your notes appear here, including notes made on the web."}</p></div>`;
     const chips = [["open", "Open"], ["done", "Done"], ["all", "All"]].map(([id, label]) => `<button class="filter-chip ${filter === id ? "active" : ""}" data-action-filter="${id}" aria-pressed="${filter === id}">${label} <span>${counts[id]}</span></button>`).join("");
     return `<section class="card account-card"><div class="filter-row">${chips}</div><input class="text-input" id="action-search" type="search" placeholder="Search action items" aria-label="Search action items" value="${esc(accountState.actionQuery)}" />${list}<p class="fine-print">Checking an item here updates it everywhere you are signed in. Offline, it stays on this device.</p></section>`;
   }
@@ -788,13 +810,13 @@
   function teamPanel() {
     if (!hostedSignedIn()) return signInPrompt("team management");
     const team = accountState.team;
-    if (team.error) return `<div class="empty-state"><strong>Team</strong><p>${esc(team.error)}</p><button class="small-button" id="team-reload">Try again</button></div>`;
-    if (!team.roster) { void loadRoster(); return '<div class="loading-state"><span class="spinner"></span><span>Loading your team…</span></div>'; }
+    if (team.error) return `<div class="empty-state" role="alert"><strong>Could not load your team</strong><p>${esc(team.error)}</p><button type="button" class="small-button" id="team-reload">Try again</button></div>`;
+    if (!team.roster) { void loadRoster(); return '<div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>Loading your team…</span></div>'; }
     const you = accountState.overview?.account.email;
     const members = team.roster.members.map((member) => `<li class="team-row"><div><strong>${esc(member.email)}</strong><span class="fine-print"> ${member.email === you ? "(you) " : ""}· joined ${esc(longDate(member.joinedAt))}</span></div><div class="inline-actions"><select class="select-input" data-role-for="${esc(member.id)}" aria-label="Role for ${esc(member.email)}"><option value="member" ${member.role === "member" ? "selected" : ""}>Member</option><option value="owner" ${member.role === "owner" ? "selected" : ""}>Owner</option></select><button class="small-button" data-team-reset="${esc(member.id)}">Send password reset</button><button class="small-button danger" data-team-remove="${esc(member.id)}" data-email="${esc(member.email)}">Remove</button></div></li>`).join("");
     const invites = team.roster.invites.length ? `<h3 class="subhead">Pending invitations</h3><ul class="team-list">${team.roster.invites.map((invite) => `<li class="team-row"><span>${esc(invite.email)}</span><button class="small-button" data-team-revoke="${esc(invite.id)}">Revoke</button></li>`).join("")}</ul>` : "";
     return `<section class="card account-card"><p class="fine-print">${team.roster.members.length} member${team.roster.members.length === 1 ? "" : "s"}. Members share this workspace’s notes, plan and usage.</p>
-      <div class="key-row"><input class="text-input" id="team-invite-email" type="email" placeholder="teammate@company.com" autocomplete="off" aria-label="Email address to invite" /><button class="primary-button" id="team-invite" ${team.busy ? "disabled" : ""}>Send invite</button></div>
+      <div class="key-row"><input class="text-input" id="team-invite-email" type="email" placeholder="teammate@company.com" autocomplete="off" aria-label="Email address to invite" /><button type="button" class="primary-button" id="team-invite" ${team.busy ? "disabled aria-busy=\"true\"" : ""}>${team.busy ? "Sending…" : "Send invite"}</button></div>
       ${team.message ? `<p class="key-status" role="status">${esc(team.message)}${team.link ? ` <br><code>${esc(team.link)}</code>` : ""}</p>` : ""}
       <h3 class="subhead">Members</h3><ul class="team-list">${members}</ul>${invites}</section>`;
   }
@@ -840,7 +862,9 @@
         else notify(reply.error, "error");
       } finally { team.busy = false; renderAccount(); }
     });
-    $("#team-invite")?.addEventListener("click", () => { const email = $("#team-invite-email").value.trim(); if (email) act({ operation: "invite", email }); });
+    const invite = () => { const email = $("#team-invite-email").value.trim(); if (!email) { notify("Enter an email address to invite.", "warn"); $("#team-invite-email").focus(); return; } if (!team.busy) act({ operation: "invite", email }); };
+    $("#team-invite")?.addEventListener("click", invite);
+    $("#team-invite-email")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); invite(); } });
     for (const select of document.querySelectorAll("[data-role-for]")) select.addEventListener("change", () => act({ operation: "role", id: select.dataset.roleFor, role: select.value }));
     for (const button of document.querySelectorAll("[data-team-reset]")) button.addEventListener("click", () => act({ operation: "reset", id: button.dataset.teamReset }));
     for (const button of document.querySelectorAll("[data-team-revoke]")) button.addEventListener("click", () => act({ operation: "revoke-invite", id: button.dataset.teamRevoke }));
@@ -893,8 +917,8 @@
     const syncState = state.snapshot.webappSync;
     const defaultOpen = { processing: Boolean(conflicts.length || syncState.lastError) || (!account && providersReady), providers: !providersReady, "note-style": false, import: false, about: false };
     const isOpen = (id) => (id in state.settingsOpen ? state.settingsOpen[id] : defaultOpen[id]);
-    const sync_status = state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing desktop notes and web app notes…" : state.syncAnnouncement)}</p>` : "";
-    const sync_controls = state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} note(s) queued` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note copy/copies are kept separate from a workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : "";
+    const sync_status = state.snapshot.webappSync.configured || conflicts.length ? `<p class="key-status" id="sync-status" role="status" aria-live="polite">${esc(state.syncInProgress ? "Syncing notes with your workspace…" : state.syncAnnouncement)}</p>` : "";
+    const sync_controls = state.snapshot.webappSync.configured ? `<div class="sync-controls"><span class="fine-print">${state.snapshot.webappSync.lastSuccessAt ? `Last desktop upload ${esc(prettyDate(state.snapshot.webappSync.lastSuccessAt))}` : "Web app notes update when sync runs"}${state.snapshot.webappSync.lastError ? ` · ${esc(state.snapshot.webappSync.lastError)}` : ""}</span><div class="inline-actions"><button type="button" class="secondary-button" id="sync-existing" ${state.syncInProgress ? "disabled" : ""}>Sync existing desktop notes</button><button type="button" class="small-button" id="retry-sync" ${state.syncInProgress ? "disabled" : ""}>${state.syncInProgress ? "Syncing…" : "Sync now"}${!state.syncInProgress && state.snapshot.webappSync.pending ? ` · ${state.snapshot.webappSync.pending} waiting` : ""}</button></div>${state.snapshot.webappSync.separateCopies ? `<p class="fine-print">${state.snapshot.webappSync.separateCopies} note ${state.snapshot.webappSync.separateCopies === 1 ? "copy is" : "copies are"} kept separate from your workspace.</p>` : ""}<p class="fine-print">Sync now uploads pending desktop notes and updates notes copied from the web app.</p></div>` : "";
     const syncDetails = `<details class="other-keys"><summary>What gets synced</summary><div class="privacy-note"><p>Finished desktop notes upload to your workspace. Notes created in the web app are copied here and updated on the next sync. Web edits do not change recordings made on this desktop. Note deletions and settings do not sync between the desktop and web app.</p><p>Sync sends notes only; it does not send raw audio or provider keys.</p></div></details>`;
     const syncBlock = state.snapshot.webappSync.configured || conflicts.length ? `${conflictMarkup}${sync_status}${sync_controls}${syncDetails}` : "";
     const processingBody = cloudLine + syncBlock + (account
@@ -903,7 +927,7 @@
         ${s.hasHostedSession ? "" : hostedForm(account.email)}`
       : hostedForm(""));
     const section = (id, title, badge, intro, body) => `<details class="card settings-card" id="settings-${id}" ${isOpen(id) ? "open" : ""}><summary><h2 tabindex="-1">${title}</h2><span class="section-badge ${badge[1]}">${esc(badge[0])}</span></summary><div class="settings-body"><p>${intro}</p>${body}</div></details>`;
-    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Account &amp; sync</button><button type="button" data-settings-section="providers">Own API keys${processingReady(s) ? "" : '<span class="nav-dot" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
+    $("#content").innerHTML = `<div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-section="processing" aria-current="true">Account &amp; sync</button><button type="button" data-settings-section="providers">Own API keys${processingReady(s) ? "" : '<span class="nav-dot" role="img" aria-label="Needs setup"></span>'}</button><button type="button" data-settings-section="note-style">Notes &amp; language</button><button type="button" data-settings-section="import">Import data</button><button type="button" data-settings-section="about">About &amp; legal</button><div class="settings-nav-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div></nav><form id="settings-form" class="settings-stack">
       ${state.snapshot.credentialStoreError ? `<div class="setup-callout"><span aria-hidden="true">ⓘ</span><div><strong>Secure storage is unavailable</strong><span>${esc(state.snapshot.credentialStoreError)}</span></div></div>` : ""}
       ${section("processing", "Account &amp; sync", processingBadge,
         "Audio is always saved on this device first, and notes are made with your own keys. A free account lets you sign in and manage your devices. A subscription adds cloud sync across your devices and your team.",
@@ -927,7 +951,9 @@
         <p class="key-status" id="desktop-transfer-status" role="status" aria-live="polite"></p>`)}
       ${section("about", "About &amp; legal", [`v${esc(state.snapshot.version)}`, ""], "AI Notetaker is open-source software under the MIT License. You decide when to record and must tell the people on the call, as the law and your workplace require.",
         `<div class="inline-actions">${[["privacy", "Privacy notice"], ["terms", "Terms"], ["license", "License"], ["third-party", "Third-party licenses"], ["source", "Source code"], ["issues", "Report a problem"]].map(([id, label]) => `<button type="button" class="secondary-button" data-about="${id}">${label}</button>`).join("")}</div>
-        <p class="fine-print">AI Notetaker keeps itself up to date: it checks GitHub for signed releases and installs them, restarting only when nothing is recording. Turn this off with Automatic Updates in the tray menu.</p>`)}
+        <p class="fine-print">${state.snapshot.audio?.platform === "linux"
+          ? "AI Notetaker checks GitHub for signed releases and offers the download when one is ready (the AppImage installs it for you). Turn this off with Automatic Updates in the tray menu."
+          : "AI Notetaker keeps itself up to date: it checks GitHub for signed releases and installs them, restarting only when nothing is recording. Turn this off with Automatic Updates in the tray menu."}</p>`)}
       <div class="settings-footer"><span class="settings-hint" id="settings-hint">Blank credential fields keep saved values.</span><button type="submit" class="primary-button" id="save-settings">Save settings</button></div>
     </form></div>`;
     const arrangeProviderKeys = () => {
@@ -991,10 +1017,10 @@
       state.syncAnnouncement = "";
       updateSyncFeedback();
       try {
-        await invoke("desktop_resolve_webapp_conflict", {
+        trackSyncRun(await invoke("desktop_resolve_webapp_conflict", {
           conflictKey: button.dataset.syncConflict,
           resolution,
-        });
+        }));
       } catch (error) {
         state.syncInProgress = false;
         state.syncAnnouncement = `Conflict could not be resolved: ${String(error)}`;
@@ -1077,21 +1103,25 @@
     const input = $(`#key-${provider}`);
     const status = $(`#key-status-${provider}`);
     const key = input.value.trim();
-    if (!key) { status.textContent = "Paste a key to check it."; status.className = "key-status error"; return; }
-    status.textContent = "Checking with provider…";
+    if (!key) { status.textContent = "Paste a key above, then check it."; status.className = "key-status warn"; input.focus(); return; }
+    const button = document.querySelector(`.test-key[data-provider="${provider}"]`);
+    if (button?.disabled) return;
+    if (button) { button.disabled = true; button.textContent = "Checking…"; }
+    status.textContent = `Checking with ${providerName(provider)}…`;
     status.className = "key-status";
     try {
       const result = await invoke("desktop_test_provider_key", { provider, key });
       status.textContent = result.message;
       status.className = `key-status ${result.valid ? "ok" : "error"}`;
     } catch (error) { status.textContent = String(error); status.className = "key-status error"; }
+    finally { if (button?.isConnected) { button.disabled = false; button.textContent = "Check"; } }
   }
 
   async function syncExisting() {
     state.syncInProgress = true;
     state.syncAnnouncement = "";
     updateSyncFeedback();
-    try { const count = await invoke("desktop_sync_existing_notes"); notify(`Queued ${count} finished note${count === 1 ? "" : "s"} for sync.`); await refresh(); }
+    try { const reply = await invoke("desktop_sync_existing_notes"); const count = reply.queued; trackSyncRun(reply.runId); notify(count ? `Queued ${count} finished note${count === 1 ? "" : "s"} for sync.` : "There are no finished desktop notes to sync yet."); await refresh(); }
     catch (error) { state.syncInProgress = false; state.syncAnnouncement = `Sync could not start: ${String(error)}`; updateSyncFeedback(); notify(String(error), "error"); }
   }
 
@@ -1099,14 +1129,30 @@
     state.syncInProgress = true;
     state.syncAnnouncement = "";
     updateSyncFeedback();
-    try { await invoke("desktop_retry_webapp_sync"); await refresh(); }
+    try { trackSyncRun(await invoke("desktop_retry_webapp_sync")); await refresh(); }
     catch (error) { state.syncInProgress = false; state.syncAnnouncement = `Sync could not start: ${String(error)}`; updateSyncFeedback(); notify(String(error), "error"); }
+  }
+
+  // Background sync runs every minute, so "Syncing…" ends only when the run this person started
+  // reports back. Its event can arrive before the command returns, so finished runs are remembered.
+  function trackSyncRun(runId) {
+    const finished = state.finishedSyncRuns.find((run) => run.id === runId);
+    if (finished) finishSyncRun(true, finished.error);
+    else state.syncRunId = runId;
+  }
+  function finishSyncRun(requested, error = "") {
+    if (requested) { state.syncInProgress = false; state.syncRunId = null; }
+    const announcement = error ? `Sync finished with an issue: ${error}` : requested ? "Sync complete." : "";
+    if (requested || announcement !== state.syncAnnouncement) {
+      state.syncAnnouncement = announcement;
+      updateSyncFeedback();
+    }
   }
 
   function updateSyncFeedback() {
     const status = $("#sync-status");
     if (status) status.textContent = state.syncInProgress
-      ? "Syncing desktop notes and importing workspace notes…"
+      ? "Syncing notes with your workspace…"
       : state.syncAnnouncement;
     const retry = $("#retry-sync");
     if (retry) {
@@ -1124,7 +1170,10 @@
   async function saveSettings(event) {
     event.preventDefault();
     const button = $("#save-settings");
+    if (button.disabled) return;
     button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "Saving…";
     const payload = {
       transcriptionProvider: $("#transcription-provider").value,
       summarizationProvider: $("#summarization-provider").value,
@@ -1139,7 +1188,7 @@
       notify("Settings saved securely on this device.");
       await refresh();
     } catch (error) { notify(String(error), "error"); }
-    finally { button.disabled = false; }
+    finally { if (button.isConnected) { button.disabled = false; button.removeAttribute("aria-busy"); button.textContent = "Save settings"; } }
   }
 
   $("#open-notes-folder").addEventListener("click", async () => { try { await invoke("desktop_open_notes_folder"); } catch (error) { notify(String(error), "error"); } });
@@ -1163,14 +1212,12 @@
   if (listen) listen("webapp-sync-updated", (event) => {
     // Background sync reports here every minute too; only a sync the person started, or a changed
     // problem, is announced, so screen readers do not hear "Sync complete." over and over.
-    const requested = state.syncInProgress;
-    state.syncInProgress = false;
-    const error = event.payload?.lastError;
-    const announcement = error ? `Sync finished with an issue: ${error}` : requested ? "Sync complete." : "";
-    if (requested || announcement !== state.syncAnnouncement) {
-      state.syncAnnouncement = announcement;
-      updateSyncFeedback();
-    }
+    const runId = event.payload?.runId;
+    if (runId != null) state.finishedSyncRuns = [...state.finishedSyncRuns.slice(-19), { id: runId, error: event.payload?.lastError || "" }];
+    const requested = state.syncInProgress && runId != null && runId === state.syncRunId;
+    // While a started run is still going, a background run's result must not end "Syncing…".
+    if (state.syncInProgress && !requested) { void refresh({ passive: true }); return; }
+    finishSyncRun(requested, event.payload?.lastError || "");
     void refresh({ passive: !requested });
   }).catch(() => {});
 

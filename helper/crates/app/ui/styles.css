@@ -14,6 +14,7 @@
   --on-action: #ffffff;
   --green-soft: #e5f2e9;
   --red: #c0392b;
+  --danger-fill: #c0392b;
   --amber: #94630d;
   --amber-soft: #fff7e4;
   --amber-line: #ecd9a7;
@@ -40,6 +41,8 @@
     --action-strong: #1d8059;
     --green-soft: #1f3a2b;
     --red: #ff6b5f;
+    /* White text needs a deeper fill than the light-on-dark red used for text. */
+    --danger-fill: #b3362a;
     --amber: #e2bf6d;
     --amber-soft: #332d1e;
     --amber-line: #514526;
@@ -62,7 +65,7 @@ body {
 
 button, input, select, textarea { font: inherit; }
 button { min-height: 40px; cursor: pointer; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, a:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--green) 65%, transparent);
   outline-offset: 3px;
 }
@@ -149,9 +152,9 @@ h3 { font-size: 15px; font-weight: 650; }
 }
 .text-input::placeholder, .text-area::placeholder { color: color-mix(in srgb, var(--muted) 75%, transparent); }
 .text-input:focus, .select-input:focus, .text-area:focus, .search-input:focus {
-  border-color: color-mix(in srgb, var(--green) 65%, var(--line));
+  border-color: var(--green);
   outline: none;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 13%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 30%, transparent);
 }
 .text-area { min-height: 96px; resize: vertical; line-height: 1.5; }
 .search-input { margin-top: 12px; }
@@ -170,14 +173,15 @@ h3 { font-size: 15px; font-weight: 650; }
   transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 .primary-button { color: var(--on-action); background: var(--action); box-shadow: 0 2px 5px color-mix(in srgb, var(--action) 22%, transparent); }
-.primary-button:hover { background: var(--action-strong); }
-.danger-button { color: #fff; background: var(--red); }
-.danger-button:hover { filter: brightness(.92); }
+.primary-button:hover:not(:disabled) { background: var(--action-strong); }
+.danger-button { color: #fff; background: var(--danger-fill); }
+.danger-button:hover:not(:disabled) { filter: brightness(.92); }
 .secondary-button, .small-button { border-color: var(--line); color: var(--ink); background: var(--surface); }
-.secondary-button:hover, .small-button:hover { background: var(--surface-soft); }
+.secondary-button:hover:not(:disabled), .small-button:hover:not(:disabled) { background: var(--surface-soft); }
 .small-button { min-height: 40px; padding: 0 14px; }
-.small-button.danger { color: var(--red); }
-.primary-button:active, .danger-button:active { transform: translateY(1px); }
+.small-button.danger, .secondary-button.danger { color: var(--red); }
+.primary-button:active:not(:disabled), .danger-button:active:not(:disabled) { transform: translateY(1px); }
+[aria-busy="true"] { cursor: progress; }
 .primary-button:disabled, .danger-button:disabled, .secondary-button:disabled, .small-button:disabled { cursor: not-allowed; opacity: .5; }
 .record-actions .primary-button, .record-actions .danger-button { flex: 0 0 auto; white-space: nowrap; }
 .record-icon { width: 10px; height: 10px; border-radius: 3px; background: currentColor; }
@@ -232,6 +236,7 @@ h3 { font-size: 15px; font-weight: 650; }
 .empty-state { padding: 32px 28px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); background: color-mix(in srgb, var(--surface) 60%, transparent); text-align: center; }
 .empty-state strong { display: block; margin-bottom: 6px; color: var(--ink); font-size: 15px; }
 .empty-state p { margin: 0 0 12px; }
+.empty-state p:last-child { margin-bottom: 0; }
 .notice { max-width: 1120px; margin: 0 auto 16px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--green) 30%, var(--line)); border-radius: 10px; color: var(--green); background: var(--green-soft); font-size: 13px; line-height: 1.5; }
 .notice:not([hidden]) { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .notice-dismiss { flex: none; padding: 4px 10px; border: 1px solid currentColor; border-radius: 8px; color: inherit; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
@@ -272,7 +277,8 @@ h3 { font-size: 15px; font-weight: 650; }
 .key-row .text-input { min-width: 0; flex: 1; }
 .key-status { min-height: 18px; margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .key-status.ok { color: var(--green); }
-.key-status.error, .key-status.warn { color: var(--red); }
+.key-status.error { color: var(--red); }
+.key-status.warn { color: var(--amber); }
 .subhead { margin: 20px 0 12px; font-size: 13px; }
 .other-keys { margin-top: 18px; padding: 12px 0 0; border-top: 1px solid var(--line); }
 .other-keys > summary { color: var(--muted); font-size: 13px; font-weight: 620; cursor: pointer; list-style: none; }
@@ -322,7 +328,7 @@ h3 { font-size: 15px; font-weight: 650; }
 .meeting-list-item:hover, .meeting-list-item.selected { background: var(--surface-soft); }
 .meeting-list-item strong { display: block; overflow: hidden; margin-bottom: 4px; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .meeting-list-item span { color: var(--muted); font-size: 12px; }
-.load-more-meetings { display: flex; justify-content: space-between; width: 100%; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; color: var(--accent); background: transparent; text-align: left; }
+.load-more-meetings { display: flex; justify-content: space-between; width: 100%; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; color: var(--green); background: transparent; text-align: left; }
 .load-more-meetings:hover { background: var(--surface-soft); }
 .load-more-meetings span { color: var(--muted); font-size: 12px; }
 .note-detail { padding: 24px 28px; }
@@ -392,6 +398,15 @@ h3 { font-size: 15px; font-weight: 650; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  /* A frozen spinner looks broken; a slow pulse still says "working" without spinning. */
+  .spinner { animation: pulse 2s ease-in-out infinite !important; border-top-color: var(--line); background: color-mix(in srgb, var(--green) 35%, transparent); }
+  .primary-button:active, .danger-button:active { transform: none; }
+}
+@keyframes pulse { 50% { opacity: .45; } }
+/* Windows High Contrast and other forced-color modes: keep state dots and focus visible. */
+@media (forced-colors: active) {
+  .status-dot, .nav-dot { forced-color-adjust: none; border: 1px solid CanvasText; }
+  .text-input:focus, .select-input:focus, .text-area:focus, .search-input:focus { outline: 2px solid Highlight; }
 }
 
 /* Spacing polish: checkbox rows, empty status lines, button groups followed by text */

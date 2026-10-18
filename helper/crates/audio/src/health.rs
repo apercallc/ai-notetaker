@@ -25,13 +25,32 @@ pub enum CaptureHealthKind {
     Restarted,
     /// A restart attempt failed; the backend keeps retrying with backoff.
     RestartFailed,
+    /// Captured audio is queueing faster than it is saved (a slow or stalled
+    /// disk). Nothing is lost and capture continues, but the user should know.
+    BacklogWarning,
+    /// The save backlog drained back to normal after a [`Self::BacklogWarning`].
+    BacklogCleared,
+    /// The save backlog hit its memory ceiling. The backend has stopped
+    /// capturing (no new audio is accepted beyond what was already queued)
+    /// and is still saving everything queued; the app must end the
+    /// recording rather than wait for frames that will not come.
+    BacklogOverflow,
 }
 
 impl CaptureHealthKind {
-    /// True when this event means audio for the channel is (or may be)
-    /// missing until a later `Restarted` event arrives.
+    /// True when this event needs the user's attention: audio for the channel
+    /// is (or may be) missing until a later `Restarted` event arrives, or
+    /// saving is falling behind.
     pub fn is_degraded(self) -> bool {
-        !matches!(self, Self::Restarted | Self::DeviceChanged)
+        !matches!(
+            self,
+            Self::Restarted | Self::DeviceChanged | Self::BacklogCleared
+        )
+    }
+
+    /// True when capture has ended for good and the recording must stop.
+    pub fn is_fatal(self) -> bool {
+        matches!(self, Self::BacklogOverflow)
     }
 }
 

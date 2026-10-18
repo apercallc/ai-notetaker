@@ -13,8 +13,8 @@ use crate::providers::{
     SummaryOptions, TranscriptionProvider,
 };
 use crate::resilience::RetryQueue;
-use crate::storage::{MeetingState, MeetingStore, MIC_FILE, SPEAKER_FILE};
-use chrono::Utc;
+use crate::storage::{MeetingState, MeetingStore, TranscriptPosition, MIC_FILE, SPEAKER_FILE};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -80,6 +80,9 @@ pub struct Pipeline {
     /// Retry jobs whose transcript is already saved but whose queue entry could not be
     /// removed. They must never append their segments a second time.
     completed_jobs: std::collections::HashSet<Uuid>,
+    /// Until when the transcription provider asked us (with a 429 `Retry-After`) not to call it.
+    /// Ranges queued for later before then are scheduled no earlier than this.
+    rate_limited_until: Option<DateTime<Utc>>,
 }
 
 #[derive(Default)]
@@ -110,6 +113,16 @@ fn affects_every_request(error: &crate::providers::ProviderError) -> bool {
             | ProviderError::RateLimited { .. }
             | ProviderError::AuthFailed(_)
     )
+}
+
+/// How long the provider asked us to wait, when it said (a 429 with `Retry-After`).
+fn provider_retry_after(error: &crate::providers::ProviderError) -> Option<chrono::Duration> {
+    match error {
+        crate::providers::ProviderError::RateLimited {
+            retry_after_secs: Some(secs),
+        } => Some(crate::resilience::clamped_retry_after(*secs)),
+        _ => None,
+    }
 }
 
 fn sane_sample_rate(rate: u32) -> u32 {
@@ -143,6 +156,7 @@ impl Pipeline {
             mic_stream_connect: StreamConnectState::default(),
             speaker_stream_connect: StreamConnectState::default(),
             completed_jobs: std::collections::HashSet::new(),
+            rate_limited_until: None,
         }
     }
 
@@ -363,7 +377,15 @@ impl Pipeline {
                     // (already persisted above) and the gap keeps growing
                     // until a later attempt reopens a session.
                     let first_of_streak = connect.failures == 0;
-                    connect.not_before = Some(std::time::Instant::now() + connect.backoff());
+                    // A 429 that says how long to wait outranks the short reconnect backoff.
+                    let requested = match &failure {
+                        Ok(Err(error)) => provider_retry_after(error)
+                            .and_then(|wait| wait.to_std().ok())
+                            .unwrap_or_default(),
+                        _ => std::time::Duration::ZERO,
+                    };
+                    connect.not_before =
+                        Some(std::time::Instant::now() + connect.backoff().max(requested));
                     connect.failures = connect.failures.saturating_add(1);
                     if first_of_streak {
                         // Once per streak: a revoked key or an unreachable provider is otherwise
@@ -396,10 +418,21 @@ impl Pipeline {
             // reopen at the new rate. Audio is durable on disk; closing
             // only ends the live stream, and the gap is backfilled below.
             if let Some(mut old) = session.take() {
+                let position = TranscriptPosition::from_pcm_offset(
+                    channel,
+                    existing_len,
+                    sane_sample_rate(old.sample_rate_hz()),
+                );
                 let trailing = old.close().await;
                 for (segment, utterance_id) in trailing {
                     if segment.is_final {
-                        Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages);
+                        Self::save_streamed_final(
+                            &self.store,
+                            meeting_id,
+                            &segment,
+                            position,
+                            &mut messages,
+                        );
                     }
                     messages.push(HelperToExtension::TranscriptPartial {
                         meeting_id,
@@ -530,10 +563,24 @@ impl Pipeline {
         }
 
         let received = session.try_recv_segments().await;
+        // A live result arrives once its audio has been sent, so the frame just sent is a close
+        // (slightly late) stand-in for where it was spoken; it keeps live text in arrival order and
+        // after any earlier range that is still being retried.
+        let position = TranscriptPosition::from_pcm_offset(
+            channel,
+            existing_len,
+            sane_sample_rate(sample_rate_hz),
+        );
         let mut saw_final = false;
         for (segment, utterance_id) in received {
             if segment.is_final
-                && Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages)
+                && Self::save_streamed_final(
+                    &self.store,
+                    meeting_id,
+                    &segment,
+                    position,
+                    &mut messages,
+                )
             {
                 saw_final = true;
             }
@@ -560,9 +607,14 @@ impl Pipeline {
         store: &MeetingStore,
         meeting_id: Uuid,
         segment: &crate::providers::TranscriptSegment,
+        position: TranscriptPosition,
         messages: &mut Vec<HelperToExtension>,
     ) -> bool {
-        match store.append_transcript_segments(meeting_id, std::slice::from_ref(segment)) {
+        match store.append_transcript_segments_at(
+            meeting_id,
+            std::slice::from_ref(segment),
+            position,
+        ) {
             Ok(()) => true,
             Err(error) => {
                 messages.push(HelperToExtension::Error {
@@ -578,24 +630,34 @@ impl Pipeline {
     /// Flushes any sub-threshold audio before final summarization.
     pub async fn flush_pending_audio(&mut self, meeting_id: Uuid) -> Vec<HelperToExtension> {
         let mut messages = Vec::new();
-        if let Some(mut session) = self.mic_session.take() {
+        for (channel, channel_file) in [
+            (AudioChannel::Mic, MIC_FILE),
+            (AudioChannel::Speaker, SPEAKER_FILE),
+        ] {
+            let session = match channel {
+                AudioChannel::Mic => self.mic_session.take(),
+                AudioChannel::Speaker => self.speaker_session.take(),
+            };
+            let Some(mut session) = session else {
+                continue;
+            };
+            // The last results of a closing stream belong at the end of what it was sent.
+            let position = TranscriptPosition::from_pcm_offset(
+                channel,
+                self.store
+                    .audio_len(meeting_id, channel_file)
+                    .unwrap_or_default(),
+                sane_sample_rate(session.sample_rate_hz()),
+            );
             for (segment, utterance_id) in session.close().await {
                 if segment.is_final {
-                    Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages);
-                }
-                messages.push(HelperToExtension::TranscriptPartial {
-                    meeting_id,
-                    speaker: segment.speaker,
-                    text: segment.text,
-                    is_final: segment.is_final,
-                    utterance_id,
-                });
-            }
-        }
-        if let Some(mut session) = self.speaker_session.take() {
-            for (segment, utterance_id) in session.close().await {
-                if segment.is_final {
-                    Self::save_streamed_final(&self.store, meeting_id, &segment, &mut messages);
+                    Self::save_streamed_final(
+                        &self.store,
+                        meeting_id,
+                        &segment,
+                        position,
+                        &mut messages,
+                    );
                 }
                 messages.push(HelperToExtension::TranscriptPartial {
                     meeting_id,
@@ -656,10 +718,13 @@ impl Pipeline {
                     .audio_len(meeting_id, channel_file)
                     .map_err(|error| error.to_string())?
                     & !1usize;
+                // Corrupt metadata (a zero rate) must not split the gap into two-byte jobs.
+                let sample_rate_hz = sane_sample_rate(sample_rate_hz);
                 let batch_bytes = (sample_rate_hz as usize)
                     .saturating_mul(2)
                     .saturating_mul(STREAM_BACKFILL_BATCH_SECONDS)
                     .max(2);
+                let not_before = Self::retry_not_before(self.rate_limited_until);
                 while start < end {
                     let batch_end = start.saturating_add(batch_bytes).min(end);
                     self.retry_queue
@@ -674,7 +739,7 @@ impl Pipeline {
                                     end: batch_end,
                                 },
                             },
-                            Utc::now(),
+                            not_before,
                         )
                         .map_err(|error| error.to_string())?;
                     start = batch_end;
@@ -729,9 +794,28 @@ impl Pipeline {
                         end,
                     },
                 },
-                Utc::now(),
+                Self::retry_not_before(self.rate_limited_until),
             )
             .map(|_| ())
+    }
+
+    /// When a range queued for later should first be tried: now, or once the provider's
+    /// requested rate-limit wait is over.
+    fn retry_not_before(rate_limited_until: Option<DateTime<Utc>>) -> DateTime<Utc> {
+        let now = Utc::now();
+        rate_limited_until.map_or(now, |until| until.max(now))
+    }
+
+    /// Remembers a provider-requested wait and holds every queued range back until it is over.
+    fn honor_rate_limit(&mut self, error: &crate::providers::ProviderError, now: DateTime<Utc>) {
+        let Some(wait) = provider_retry_after(error) else {
+            return;
+        };
+        let until = now + wait;
+        self.rate_limited_until = Some(self.rate_limited_until.map_or(until, |u| u.max(until)));
+        if let Err(error) = self.retry_queue.defer_until(until) {
+            tracing::warn!(%error, "could not defer retries for a provider rate limit");
+        }
     }
 
     /// Like [`Self::transcribe_pending`], and also reports whether the
@@ -747,6 +831,11 @@ impl Pipeline {
         pending: PendingAudio,
     ) -> (Vec<HelperToExtension>, bool) {
         let end = pending.start + pending.pcm16.len();
+        let position = TranscriptPosition::from_pcm_offset(
+            channel,
+            pending.start,
+            sane_sample_rate(pending.sample_rate_hz),
+        );
         let chunk = AudioChunk {
             channel,
             pcm16: pending.pcm16,
@@ -780,7 +869,10 @@ impl Pipeline {
         match self.transcription_provider.transcribe_chunk(&chunk).await {
             Ok(segments) => {
                 let mut messages = Vec::new();
-                match self.store.append_transcript_segments(meeting_id, &segments) {
+                match self
+                    .store
+                    .append_transcript_segments_at(meeting_id, &segments, position)
+                {
                     Ok(()) => {
                         let _ = self
                             .store
@@ -819,8 +911,10 @@ impl Pipeline {
             Err(e) => {
                 // The job was persisted before the provider call, so leaving
                 // its initial due time intact makes the first retry eligible
-                // immediately. Subsequent failures use exponential backoff
-                // in process_due_retries.
+                // immediately — unless the provider said how long to wait.
+                // Subsequent failures use exponential backoff in
+                // process_due_retries.
+                self.honor_rate_limit(&e, Utc::now());
                 let provider_down = affects_every_request(&e);
                 (
                     vec![HelperToExtension::Error {
@@ -945,14 +1039,32 @@ impl Pipeline {
             let batch_size = (sample_rate_hz as usize)
                 .saturating_mul(2)
                 .saturating_mul(TRANSCRIPTION_BATCH_SECONDS);
+            // Ranges that failed before the crash are still in the (persisted) retry queue, and
+            // the cursor never moved past them. Transcribing them here as well would save their
+            // text twice, so walk around them and leave them to the retry worker.
+            let queued = self.queued_ranges(meeting_id, channel_file);
             let mut offset = start;
             while offset < end {
+                if let Some(&(_, queued_end)) = queued.iter().find(|(queued_start, queued_end)| {
+                    *queued_start <= offset && offset < *queued_end
+                }) {
+                    offset = queued_end;
+                    continue;
+                }
+                let next_queued = queued
+                    .iter()
+                    .map(|(queued_start, _)| *queued_start)
+                    .filter(|queued_start| *queued_start > offset)
+                    .min()
+                    .unwrap_or(usize::MAX);
                 // Clamp the batch end to an even byte boundary: PCM16 samples
                 // are two bytes, and a crash can leave the final write short by
                 // one. Feeding an odd-length slice would hand the provider a
                 // misaligned final sample (garbage audio) — a trailing byte is
                 // not worth transcribing and is simply dropped.
-                let batch_end = (offset + batch_size.max(2)).min(end & !1usize);
+                let batch_end = (offset + batch_size.max(2))
+                    .min(next_queued)
+                    .min(end & !1usize);
                 if batch_end <= offset {
                     break;
                 }
@@ -1000,6 +1112,24 @@ impl Pipeline {
             messages.extend(self.process_pending_summary(meeting_id).await);
         }
         Ok(messages)
+    }
+
+    /// Saved-audio ranges of one channel that already wait in the retry queue.
+    fn queued_ranges(&self, meeting_id: Uuid, channel_file: &str) -> Vec<(usize, usize)> {
+        self.retry_queue
+            .jobs()
+            .filter(|job| {
+                job.payload.meeting_id == meeting_id && !self.completed_jobs.contains(&job.id)
+            })
+            .filter_map(|job| {
+                let RetryAudioRef::FileRange {
+                    channel_file: file,
+                    start,
+                    end,
+                } = &job.payload.audio_ref;
+                (file == channel_file && start < end).then_some((*start, *end))
+            })
+            .collect()
     }
 
     pub fn has_pending_summary(&self, meeting_id: Uuid) -> bool {
@@ -1180,12 +1310,19 @@ impl Pipeline {
                 pcm16,
                 sample_rate_hz: job.sample_rate_hz,
             };
+            // A range that succeeds late still belongs where its audio was spoken.
+            let position = TranscriptPosition::from_pcm_offset(
+                job.channel,
+                *start,
+                sane_sample_rate(job.sample_rate_hz),
+            );
             match self.transcription_provider.transcribe_chunk(&chunk).await {
                 Ok(segments) => {
-                    match self
-                        .store
-                        .append_transcript_segments(job.meeting_id, &segments)
-                    {
+                    match self.store.append_transcript_segments_at(
+                        job.meeting_id,
+                        &segments,
+                        position,
+                    ) {
                         Ok(()) => {
                             let _ = self.store.mark_audio_transcribed(
                                 job.meeting_id,
@@ -1236,8 +1373,15 @@ impl Pipeline {
                     let outcome = if error.is_permanent() {
                         self.retry_queue.give_up(job_id)
                     } else {
-                        self.retry_queue.record_failure(job_id, now)
+                        self.retry_queue.record_failure_after(
+                            job_id,
+                            now,
+                            provider_retry_after(&error),
+                        )
                     };
+                    // The other queued ranges would hit the same limit; hold them back too
+                    // instead of letting each spend an attempt on it.
+                    self.honor_rate_limit(&error, now);
                     if let Ok(Some(_exhausted)) = outcome {
                         messages.push(HelperToExtension::Error {
                             meeting_id: Some(job.meeting_id),
@@ -2631,6 +2775,262 @@ mod tests {
         assert!(
             pipeline.mic_session.is_none(),
             "session must be closed and cleared on stop"
+        );
+    }
+
+    /// Labels each result with its channel and the first PCM byte, so tests can see which audio
+    /// range a saved line came from. Fails the first `fail_first` calls with `fail_with`.
+    struct LabelingTranscriber {
+        calls: Arc<AtomicUsize>,
+        fail_first: usize,
+        fail_with: fn() -> ProviderError,
+    }
+
+    #[async_trait]
+    impl TranscriptionProvider for LabelingTranscriber {
+        fn id(&self) -> TranscriptionProviderId {
+            TranscriptionProviderId::Deepgram
+        }
+        fn is_streaming(&self) -> bool {
+            false
+        }
+        async fn transcribe_chunk(
+            &self,
+            chunk: &AudioChunk,
+        ) -> Result<Vec<TranscriptSegment>, ProviderError> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) < self.fail_first {
+                return Err((self.fail_with)());
+            }
+            Ok(vec![TranscriptSegment {
+                speaker: format!("{:?}", chunk.channel),
+                text: format!("range-{}", chunk.pcm16.first().copied().unwrap_or_default()),
+                is_final: true,
+                timestamp: None,
+            }])
+        }
+    }
+
+    struct TranscriptCapturingSummarizer {
+        seen: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl SummarizationProvider for TranscriptCapturingSummarizer {
+        fn id(&self) -> SummarizationProviderId {
+            SummarizationProviderId::Claude
+        }
+        async fn summarize(
+            &self,
+            transcript: &[TranscriptSegment],
+            _options: &SummaryOptions,
+        ) -> Result<Summary, ProviderError> {
+            *self.seen.lock().unwrap() = transcript
+                .iter()
+                .map(|segment| format!("{}:{}", segment.speaker, segment.text))
+                .collect();
+            Ok(Summary {
+                summary: "ordered".into(),
+                action_items: vec![],
+            })
+        }
+    }
+
+    fn build_labeling_pipeline(
+        fail_first: usize,
+        fail_with: fn() -> ProviderError,
+    ) -> (
+        tempfile::TempDir,
+        Pipeline,
+        Arc<AtomicUsize>,
+        Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let pipeline = Pipeline::new(
+            store,
+            Box::new(LabelingTranscriber {
+                calls: calls.clone(),
+                fail_first,
+                fail_with,
+            }),
+            Box::new(TranscriptCapturingSummarizer { seen: seen.clone() }),
+            retry_queue,
+        );
+        (dir, pipeline, calls, seen)
+    }
+
+    /// Five seconds of 8 kHz PCM16 — one batch — filled with `label`.
+    fn labeled_batch(label: u8) -> Vec<u8> {
+        vec![label; 8_000 * 2 * TRANSCRIPTION_BATCH_SECONDS]
+    }
+
+    #[tokio::test]
+    async fn a_range_that_succeeds_on_retry_is_summarized_in_audio_order() {
+        let (_dir, mut pipeline, _calls, seen) =
+            build_labeling_pipeline(1, || ProviderError::Unreachable("blip".into()));
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        // The first five seconds fail; the next five succeed and are saved first.
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &labeled_batch(1), 8_000)
+            .await;
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Speaker, &labeled_batch(3), 8_000)
+            .await;
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &labeled_batch(2), 8_000)
+            .await;
+        pipeline.stop_recording(id).await.unwrap();
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "summary waits for the retry"
+        );
+
+        pipeline.process_due_retries(Utc::now()).await;
+
+        // Mic 0-5s (retried) and speaker 0-5s tie on time: mic first. Then mic 5-10s.
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec!["Mic:range-1", "Speaker:range-3", "Mic:range-2"]
+        );
+        let stored: Vec<_> = pipeline
+            .store
+            .load_transcript(id)
+            .unwrap()
+            .into_iter()
+            .map(|segment| segment.text)
+            .collect();
+        assert_eq!(stored, vec!["range-1", "range-3", "range-2"]);
+    }
+
+    #[tokio::test]
+    async fn a_rate_limited_range_waits_for_the_providers_retry_after() {
+        let (_dir, mut pipeline, calls, _seen) =
+            build_labeling_pipeline(1, || ProviderError::RateLimited {
+                retry_after_secs: Some(120),
+            });
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        let started = Utc::now();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &labeled_batch(1), 8_000)
+            .await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(pipeline.retry_queue_len(), 1);
+
+        // Normally a first retry is due at once; the provider asked for two minutes.
+        pipeline
+            .process_due_retries(started + chrono::Duration::seconds(60))
+            .await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no call inside the wait");
+
+        // Ranges queued during the wait are held back as well.
+        pipeline
+            .enqueue_saved_range(id, AudioChannel::Mic, MIC_FILE, 8_000, 0, 2)
+            .unwrap();
+        assert!(pipeline
+            .retry_queue
+            .due_jobs(started + chrono::Duration::seconds(60))
+            .is_empty());
+
+        pipeline
+            .process_due_retries(Utc::now() + chrono::Duration::seconds(121))
+            .await;
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert_eq!(pipeline.retry_queue_len(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_rate_limit_during_a_retry_reschedules_by_retry_after_and_defers_the_rest() {
+        let (_dir, mut pipeline, calls, _seen) =
+            build_labeling_pipeline(2, || ProviderError::RateLimited {
+                retry_after_secs: Some(90),
+            });
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .store
+            .append_audio(id, MIC_FILE, &labeled_batch(1))
+            .unwrap();
+        let now = Utc::now();
+        for _ in 0..2 {
+            pipeline
+                .retry_queue
+                .enqueue(
+                    RetryableChunk {
+                        meeting_id: id,
+                        channel: AudioChannel::Mic,
+                        sample_rate_hz: 8_000,
+                        audio_ref: RetryAudioRef::FileRange {
+                            channel_file: MIC_FILE.to_string(),
+                            start: 0,
+                            end: 16,
+                        },
+                    },
+                    now,
+                )
+                .unwrap();
+        }
+        pipeline.process_due_retries(now).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the rest of the tick stops"
+        );
+        // Past the plain 10-second backoff, but inside the 90 seconds the provider asked for.
+        assert!(pipeline
+            .retry_queue
+            .due_jobs(now + chrono::Duration::seconds(89))
+            .is_empty());
+        assert_eq!(
+            pipeline
+                .retry_queue
+                .due_jobs(now + chrono::Duration::seconds(90))
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_does_not_transcribe_a_range_that_is_already_queued_for_retry() {
+        let (dir, mut pipeline, _calls, _seen) =
+            build_labeling_pipeline(1, || ProviderError::Unreachable("blip".into()));
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        // 0-5s fails and is queued; then the helper dies before anything else is transcribed.
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &labeled_batch(1), 8_000)
+            .await;
+        pipeline
+            .store
+            .append_audio(id, MIC_FILE, &labeled_batch(2))
+            .unwrap();
+        assert_eq!(pipeline.retry_queue_len(), 1);
+        drop(pipeline);
+
+        let store = MeetingStore::new(dir.path()).unwrap();
+        let retry_queue = RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut restarted = Pipeline::new(
+            store,
+            Box::new(LabelingTranscriber {
+                calls: Arc::new(AtomicUsize::new(0)),
+                fail_first: 0,
+                fail_with: || ProviderError::Unreachable("unused".into()),
+            }),
+            Box::new(TranscriptCapturingSummarizer { seen: seen.clone() }),
+            retry_queue,
+        );
+        restarted.recover_recording(id).await.unwrap();
+        restarted.process_due_retries(Utc::now()).await;
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec!["Mic:range-1", "Mic:range-2"],
+            "each range is transcribed exactly once"
         );
     }
 }

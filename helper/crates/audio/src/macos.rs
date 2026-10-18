@@ -175,7 +175,7 @@ impl AudioCapture for MacosAudioCapture {
         };
         self.running.store(true, Ordering::SeqCst);
 
-        let (tx, rx) = std::sync::mpsc::channel::<CapturedFrame>();
+        let (tx, rx) = crate::session::frame_channel(self.health.clone(), self.running.clone());
         let running = self.running.clone();
         let health = self.health.clone();
         let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
@@ -295,7 +295,7 @@ unsafe extern "C" {
 
 fn run_screencapturekit_capture(
     running: Arc<AtomicBool>,
-    tx: std::sync::mpsc::Sender<CapturedFrame>,
+    tx: crate::session::FrameSender,
     ready_tx: oneshot::Sender<Result<(), String>>,
 ) -> Result<(), String> {
     let mut ready_sender = Some(ready_tx);
@@ -430,7 +430,7 @@ fn screencapturekit_sample_to_pcm16(sample: &CMSampleBuffer) -> Result<(Vec<u8>,
 fn build_input_stream(
     device: &cpal::Device,
     channel: AudioChannel,
-    tx: std::sync::mpsc::Sender<CapturedFrame>,
+    tx: crate::session::FrameSender,
     health: crate::HealthHub,
 ) -> Result<cpal::Stream, AudioError> {
     crate::input::build_input_stream(

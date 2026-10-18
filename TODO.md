@@ -28,23 +28,22 @@ sample alignment, Deepgram send timeouts, provider-outage retry storms,
 empty-transcript re-summary; webapp billing webhook race, action-item no-op
 writes, PATCH body cap, list over-fetch, ProcessingJob meetingId index.
 
-- [ ] Frame-delivery backpressure: producers send on an unbounded channel and
-      the app writes synchronously, so a disk stall grows memory ~192 KB/s.
-      Add a counted sender shared by every backend plus a health event or
-      auto-stop threshold (needs a product decision on the threshold).
+- [x] Frame-delivery backpressure: a counted sender shared by every backend
+      warns at ~10 s of unsaved audio and stops cleanly (queued audio written,
+      meeting left recoverable) at ~5 min. Still needs a slow-disk run on real
+      hardware and a macOS compile check.
 - [ ] macOS: ScreenCaptureKit captures full-resolution video only for audio;
       try a 2×2 frame with a long minimum interval on a real Mac. The mic has no
       default-device-change supervisor.
-- [ ] Windows/Linux: silence-fill the speaker timeline across loopback/`parec`
-      restarts so channels stay aligned.
-- [ ] Honor `retry_after_secs` from 429s in the retry queue; insert retried
-      ranges in chronological order before summarizing.
-- [ ] `append_transcript_segments` rewrites the whole pretty-printed, fsynced
-      `transcript.json` per streamed segment; switch to an append log.
-- [ ] Desktop: move keychain reads in async commands to `spawn_blocking`.
-- [ ] Extension: detect a lost offscreen document after a worker restart; the
-      popup handoff ignores the widget's chosen meeting mode; archive inventory
-      reads chunk bytes only to measure length.
+- [x] Windows/Linux: one silence filler per recording keeps the speaker
+      timeline aligned across loopback/`parec` restarts (gaps over 60 s re-base).
+- [x] Honor `retry_after_secs` from 429s (capped at 15 min); order transcript
+      segments by audio position so retried ranges summarize in order.
+- [x] Streamed segments append to `transcript.log` and compact into
+      `transcript.json` when processing finishes.
+- [x] Desktop: keychain reads in async commands run on `spawn_blocking`.
+- [x] Extension: detect a lost offscreen document after a worker restart; honor
+      the widget's meeting mode; archive inventory uses a byteLength index.
 - [ ] Webapp: confirm desktop-sync GET (download) staying ungated for lapsed
       plans matches the pricing policy; `accounts.test.ts` assumes an empty DB.
 

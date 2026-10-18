@@ -24,6 +24,14 @@ pub struct RetryJob<T> {
 const MAX_ATTEMPTS: u32 = 8;
 const BASE_BACKOFF_SECS: i64 = 5;
 const MAX_BACKOFF_SECS: i64 = 300; // 5 minutes
+/// Ceiling on a provider's `Retry-After`. A quota reset hours away should not park a meeting's
+/// transcription for hours without another look; past this the normal attempt budget applies.
+pub const MAX_RETRY_AFTER_SECS: u64 = 900; // 15 minutes
+
+/// The wait a provider asked for, clamped to [`MAX_RETRY_AFTER_SECS`].
+pub fn clamped_retry_after(retry_after_secs: u64) -> Duration {
+    Duration::seconds(retry_after_secs.min(MAX_RETRY_AFTER_SECS) as i64)
+}
 
 /// Exponential backoff with a ceiling: 5s, 10s, 20s, 40s, 80s, 160s, 300s, 300s...
 pub fn backoff_for_attempt(attempt: u32) -> Duration {
@@ -208,6 +216,18 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
         job_id: Uuid,
         now: DateTime<Utc>,
     ) -> Result<Option<RetryJob<T>>, RetryQueueError> {
+        self.record_failure_after(job_id, now, None)
+    }
+
+    /// [`Self::record_failure`] for a provider that said how long to wait (a 429's
+    /// `Retry-After`): the next attempt comes no sooner than that wait (clamped to
+    /// [`MAX_RETRY_AFTER_SECS`]) and no sooner than the usual backoff.
+    pub fn record_failure_after(
+        &mut self,
+        job_id: Uuid,
+        now: DateTime<Utc>,
+        retry_after: Option<Duration>,
+    ) -> Result<Option<RetryJob<T>>, RetryQueueError> {
         let Some(job) = self.jobs.iter_mut().find(|j| j.id == job_id) else {
             return Ok(None);
         };
@@ -220,9 +240,31 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
             self.persist()?;
             return Ok(Some(exhausted));
         }
-        job.next_retry_at = now + jittered_backoff(job.attempts);
+        let backoff = jittered_backoff(job.attempts);
+        let retry_after = retry_after.unwrap_or_else(Duration::zero).clamp(
+            Duration::zero(),
+            Duration::seconds(MAX_RETRY_AFTER_SECS as i64),
+        );
+        job.next_retry_at = now + backoff.max(retry_after);
         self.persist()?;
         Ok(None)
+    }
+
+    /// Holds every job that would come due before `until` back to `until`, without spending an
+    /// attempt. For a provider-wide rate limit: the provider has said no request will succeed
+    /// before then, so trying the other queued ranges sooner only burns their attempt budgets.
+    pub fn defer_until(&mut self, until: DateTime<Utc>) -> Result<(), RetryQueueError> {
+        let mut changed = false;
+        for job in &mut self.jobs {
+            if job.next_retry_at < until {
+                job.next_retry_at = until;
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist()?;
+        }
+        Ok(())
     }
 
     /// Parks a job right away, without spending its remaining attempts. For failures that
@@ -248,6 +290,10 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
 
     pub fn is_empty(&self) -> bool {
         self.jobs.is_empty()
+    }
+
+    pub fn jobs(&self) -> impl Iterator<Item = &RetryJob<T>> {
+        self.jobs.iter()
     }
 
     pub fn any<F>(&self, predicate: F) -> bool
@@ -341,6 +387,71 @@ mod tests {
         // attempts becomes 1 after the first failure -> backoff_for_attempt(1) == 10s
         let due_after_backoff = queue.due_jobs(now + Duration::seconds(11));
         assert_eq!(due_after_backoff.len(), 1);
+    }
+
+    #[test]
+    fn a_provider_retry_after_longer_than_the_backoff_is_honored() {
+        let (_dir, path) = temp_queue_path();
+        let mut queue: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
+        let now = Utc::now();
+        let id = queue.enqueue("job".to_string(), now).unwrap();
+
+        queue
+            .record_failure_after(id, now, Some(Duration::seconds(120)))
+            .unwrap();
+        // The plain backoff (10s) has passed, but the provider asked for two minutes.
+        assert!(queue.due_jobs(now + Duration::seconds(119)).is_empty());
+        assert_eq!(queue.due_jobs(now + Duration::seconds(120)).len(), 1);
+    }
+
+    #[test]
+    fn a_short_retry_after_never_shortens_the_backoff_and_a_huge_one_is_capped() {
+        let (_dir, path) = temp_queue_path();
+        let mut queue: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
+        let now = Utc::now();
+        let short = queue.enqueue("short".to_string(), now).unwrap();
+        let huge = queue.enqueue("huge".to_string(), now).unwrap();
+
+        queue
+            .record_failure_after(short, now, Some(Duration::seconds(1)))
+            .unwrap();
+        queue
+            .record_failure_after(huge, now, Some(Duration::days(1)))
+            .unwrap();
+        // Backoff for attempt 1 is 10s minus at most 25% jitter.
+        assert!(queue.due_jobs(now + Duration::seconds(7)).is_empty());
+        let cap = Duration::seconds(MAX_RETRY_AFTER_SECS as i64);
+        let due: Vec<_> = queue
+            .due_jobs(now + cap)
+            .into_iter()
+            .map(|job| job.payload.clone())
+            .collect();
+        assert_eq!(due, vec!["short".to_string(), "huge".to_string()]);
+        assert_eq!(clamped_retry_after(86_400), cap);
+    }
+
+    #[test]
+    fn defer_until_holds_back_due_jobs_without_spending_attempts() {
+        let (_dir, path) = temp_queue_path();
+        let mut queue: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
+        let now = Utc::now();
+        queue.enqueue("a".to_string(), now).unwrap();
+        queue
+            .enqueue("later".to_string(), now + Duration::minutes(30))
+            .unwrap();
+
+        queue.defer_until(now + Duration::seconds(60)).unwrap();
+        assert!(queue.due_jobs(now + Duration::seconds(59)).is_empty());
+        let due = queue.due_jobs(now + Duration::seconds(60));
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].attempts, 0);
+        // A job already scheduled past the deadline is left alone.
+        let reloaded: RetryQueue<String> = RetryQueue::load_or_create(&path).unwrap();
+        assert_eq!(
+            reloaded.due_jobs(now + Duration::minutes(30)).len(),
+            2,
+            "the deferral is persisted and the later job keeps its own time"
+        );
     }
 
     #[test]

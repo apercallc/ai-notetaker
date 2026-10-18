@@ -9,6 +9,7 @@ use crate::convert::{samples_to_mono_pcm16, SampleToF32};
 use crate::health::Backoff;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::health::{CaptureHealthKind, HealthHub};
+use crate::session::FrameSender;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::AudioDeviceInfo;
 use crate::{AudioError, CapturedFrame};
@@ -18,7 +19,6 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use notetaker_core::providers::AudioChannel;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::time::{Duration, Instant};
@@ -46,7 +46,7 @@ fn build_typed_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     channel: AudioChannel,
-    tx: Sender<CapturedFrame>,
+    tx: FrameSender,
     on_error: StreamErrorSink,
 ) -> Result<cpal::Stream, cpal::BuildStreamError>
 where
@@ -71,7 +71,7 @@ where
 pub(crate) fn build_input_stream(
     device: &cpal::Device,
     channel: AudioChannel,
-    tx: Sender<CapturedFrame>,
+    tx: FrameSender,
     on_error: StreamErrorSink,
 ) -> Result<cpal::Stream, AudioError> {
     let supported = device
@@ -169,7 +169,7 @@ pub(crate) struct InputSupervisor {
     channel: AudioChannel,
     /// A pinned device is never re-routed to follow the system default.
     requested: Option<String>,
-    tx: Sender<CapturedFrame>,
+    tx: FrameSender,
     health: HealthHub,
     errored: Arc<AtomicBool>,
     stream: Option<cpal::Stream>,
@@ -186,7 +186,7 @@ impl InputSupervisor {
     pub(crate) fn start(
         channel: AudioChannel,
         requested: Option<String>,
-        tx: Sender<CapturedFrame>,
+        tx: FrameSender,
         health: HealthHub,
     ) -> Result<Self, AudioError> {
         let mut supervisor = Self {

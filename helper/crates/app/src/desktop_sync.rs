@@ -202,6 +202,45 @@ struct RemoteTranscriptSegment {
     timestamp: Option<DateTime<Utc>>,
 }
 
+/// The sync token was rejected (HTTP 401). The next step depends on where the token came from,
+/// so it is added by [`with_reconnect_step`] when the status is shown.
+pub const CONNECTION_ENDED: &str = "Your sync connection expired or was revoked.";
+/// The sync token lost access to its workspace (HTTP 403).
+pub const WORKSPACE_ACCESS_LOST: &str =
+    "Your sync connection no longer has access to its workspace.";
+
+/// True when `error` says the sync token itself no longer works, so a new one is needed.
+pub fn is_rejected_token_error(error: &str) -> bool {
+    error.starts_with(CONNECTION_ENDED) || error.starts_with(WORKSPACE_ACCESS_LOST)
+}
+
+/// Adds the right next step to a rejected-token error. A token from signing in is replaced by
+/// signing in again; a token set up by hand is replaced by signing in to the account, which
+/// swaps a rejected token for a fresh one.
+pub fn with_reconnect_step(error: String, token_from_sign_in: bool, signed_in: bool) -> String {
+    let Some(base) = [CONNECTION_ENDED, WORKSPACE_ACCESS_LOST]
+        .into_iter()
+        .find(|base| error.starts_with(base))
+    else {
+        return error;
+    };
+    let step = match (token_from_sign_in, signed_in) {
+        (true, _) => "Sign out and sign in again in Settings → Account & sync.",
+        (false, true) => {
+            "Sign out, then sign in again in Settings → Account & sync to replace the old sync token."
+        }
+        (false, false) => {
+            "Sign in from Settings → Account & sync to replace the old sync token."
+        }
+    };
+    // Only the status is kept from the stored text, so an older saved message that already
+    // named a step is not repeated.
+    match error.split_once(" (HTTP ") {
+        Some((_, status)) => format!("{base} {step} (HTTP {status}"),
+        None => format!("{base} {step}"),
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSyncStatus {
@@ -211,6 +250,10 @@ pub struct DesktopSyncStatus {
     pub last_success_at: Option<String>,
     pub conflicts: Vec<DesktopSyncConflictStatus>,
     pub separate_copies: usize,
+    /// The sync run this status reports the end of. The window matches it against the run a
+    /// person started, so a background run finishing first does not end "Syncing…" early.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<u64>,
 }
 
 pub struct DesktopSync {
@@ -220,6 +263,7 @@ pub struct DesktopSync {
     // One sequential worker prevents duplicate concurrent uploads from event,
     // retry, and settings-save triggers. The server upsert is idempotent too.
     worker: tokio::sync::Mutex<()>,
+    next_run: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Serialize)]
@@ -273,6 +317,7 @@ impl DesktopSync {
             state: Mutex::new(state),
             load_error,
             worker: tokio::sync::Mutex::new(()),
+            next_run: std::sync::atomic::AtomicU64::new(1),
         })
     }
 
@@ -294,7 +339,14 @@ impl DesktopSync {
                 })
                 .collect(),
             separate_copies: state.separate_copies.len(),
+            run_id: None,
         }
+    }
+
+    /// A new id for one sync run, reported back in that run's final status event.
+    pub fn next_run_id(&self) -> u64 {
+        self.next_run
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn conflict_webapp_target(
@@ -450,9 +502,9 @@ impl DesktopSync {
         if !identity_response.status().is_success() {
             let status = identity_response.status();
             let message = match status.as_u16() {
-                401 => "Your sync connection expired or was revoked. Sign out and sign in again in Settings → Account & sync.",
+                401 => CONNECTION_ENDED,
                 402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
-                403 => "Your sync connection no longer has access to its workspace. Sign out and sign in again in Settings → Account & sync.",
+                403 => WORKSPACE_ACCESS_LOST,
                 404 => "This web-app version does not support desktop note sync yet.",
                 429 => "The web app is receiving too many requests. Sync will retry later.",
                 _ => "The web app could not confirm the selected workspace.",
@@ -582,9 +634,9 @@ impl DesktopSync {
                     let message = match status.as_u16() {
                         409 => "A web-app note conflicts with this desktop copy. Review the conflict in Settings → Account & sync.",
                         400 | 413 | 422 => "The web app rejected a saved note. Update the web app, then retry sync.",
-                        401 => "Your sync connection expired or was revoked. Sign out and sign in again in Settings → Account & sync.",
+                        401 => CONNECTION_ENDED,
                         402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
-                        403 => "Your sync connection no longer has access to its workspace. Sign out and sign in again in Settings → Account & sync.",
+                        403 => WORKSPACE_ACCESS_LOST,
                         404 => "This web-app version does not support desktop note sync yet.",
                         429 => "The web app is receiving too many requests. Sync will retry later.",
                         _ => "The web app could not save this note. Sync will retry later.",
@@ -684,9 +736,9 @@ impl DesktopSync {
             if !response.status().is_success() {
                 let status = response.status();
                 let message = match status.as_u16() {
-                    401 => "Your sync connection expired or was revoked. Sign out and sign in again in Settings → Account & sync.",
+                    401 => CONNECTION_ENDED,
                     402 => "Cloud sync needs an active plan. Your notes stay safe on this device and upload when a plan is active.",
-                    403 => "Your sync connection no longer has access to its workspace. Sign out and sign in again in Settings → Account & sync.",
+                    403 => WORKSPACE_ACCESS_LOST,
                     404 => "This web-app version does not support workspace note sync yet.",
                     429 => "The web app is receiving too many requests. Sync will retry later.",
                     _ => "The web app could not return workspace notes.",
@@ -1936,6 +1988,30 @@ mod tests {
         let state = sync.lock_state();
         assert!(state.pending.contains(&unfinished));
         assert!(!state.pending.contains(&ready));
+    }
+
+    #[test]
+    fn a_rejected_token_names_the_step_that_fits_where_it_came_from() {
+        let error = format!("{CONNECTION_ENDED} (HTTP 401 Unauthorized)");
+        let from_sign_in = with_reconnect_step(error.clone(), true, true);
+        assert!(
+            from_sign_in.contains("Sign out and sign in again"),
+            "{from_sign_in}"
+        );
+        assert!(
+            from_sign_in.ends_with("(HTTP 401 Unauthorized)"),
+            "{from_sign_in}"
+        );
+        let manual = with_reconnect_step(error.clone(), false, false);
+        assert!(manual.contains("Sign in from Settings"), "{manual}");
+        assert!(!manual.contains("Sign out"), "{manual}");
+        let manual_signed_in = with_reconnect_step(error, false, true);
+        assert!(manual_signed_in.contains("replace the old sync token"));
+        let saved_before = "Your sync connection expired or was revoked. Sign out and sign in again in Settings → Account & sync. (HTTP 401)".to_string();
+        let upgraded = with_reconnect_step(saved_before, false, false);
+        assert_eq!(upgraded.matches("Settings").count(), 1, "{upgraded}");
+        let other = "Could not reach the web app.".to_string();
+        assert_eq!(with_reconnect_step(other.clone(), false, false), other);
     }
 
     #[tokio::test]

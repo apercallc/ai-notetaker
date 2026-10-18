@@ -628,6 +628,7 @@ fn main() {
                         retry_preferences.clone(),
                         retry_queue.clone(),
                         retry_app.clone(),
+                        retry_queue.next_run_id(),
                     ).await;
                     // A workspace without a plan answers 402 to every request; asking again every
                     // minute only repeats the same refusal. A manual "Sync now" still tries at once.
@@ -723,7 +724,7 @@ async fn desktop_snapshot(
         .clone();
     // Presence only, remembered until a credential is written: polling the snapshot must not
     // round-trip to the OS keychain every time.
-    let presence = match desktop_settings::credential_presence() {
+    let presence = match with_credentials(desktop_settings::credential_presence).await {
         Ok(presence) => presence,
         Err(error) => {
             credential_error = Some(error);
@@ -731,12 +732,14 @@ async fn desktop_snapshot(
         }
     };
     let has_webapp_token = presence.webapp_token;
-    let webapp_sync = context.sync.status(
+    let webapp_sync = sync_status(
+        &context.sync,
         has_webapp_token
             && desktop_settings::normalize_webapp_url(&preferences.webapp_url)
                 .ok()
                 .flatten()
                 .is_some(),
+        &preferences,
     );
 
     let audio_diagnostics = context
@@ -867,20 +870,30 @@ async fn desktop_save_settings(
     if input.custom_summary_instructions.chars().count() > 4_000 {
         return Err("Custom summary instructions must be 4,000 characters or fewer.".into());
     }
-    let mut keys = desktop_settings::load_api_keys()?;
-    let previous_keys = keys.clone();
-    apply_secret_update(&mut keys.deepgram, input.deepgram_key)?;
-    apply_secret_update(&mut keys.groq, input.groq_key)?;
-    apply_secret_update(&mut keys.claude, input.claude_key)?;
-    apply_secret_update(&mut keys.gemini, input.gemini_key)?;
-    apply_secret_update(&mut keys.deepseek, input.deepseek_key)?;
+    let (deepgram, groq, claude, gemini, deepseek) = (
+        input.deepgram_key,
+        input.groq_key,
+        input.claude_key,
+        input.gemini_key,
+        input.deepseek_key,
+    );
+    let (keys, previous_keys, sync_token) = with_credentials(move || {
+        let mut keys = desktop_settings::load_api_keys()?;
+        let previous_keys = keys.clone();
+        apply_secret_update(&mut keys.deepgram, deepgram)?;
+        apply_secret_update(&mut keys.groq, groq)?;
+        apply_secret_update(&mut keys.claude, claude)?;
+        apply_secret_update(&mut keys.gemini, gemini)?;
+        apply_secret_update(&mut keys.deepseek, deepseek)?;
+        Ok((keys, previous_keys, desktop_settings::get_webapp_token()?))
+    })
+    .await?;
 
     let current_preferences = context
         .preferences
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let sync_token = desktop_settings::get_webapp_token()?;
     let preferences = desktop_settings::DesktopPreferences {
         transcription_provider: input.transcription_provider,
         summarization_provider: input.summarization_provider,
@@ -897,13 +910,21 @@ async fn desktop_save_settings(
         sync_from_sign_in: current_preferences.sync_from_sign_in,
     };
 
-    if let Err(error) = desktop_settings::save_api_keys(&keys) {
-        let _ = desktop_settings::save_api_keys(&previous_keys);
-        return Err(error);
-    }
-    if let Err(error) = preferences.save(&context.app.data_dir) {
-        let _ = desktop_settings::save_api_keys(&previous_keys);
-        return Err(error);
+    {
+        let (keys, preferences) = (keys.clone(), preferences.clone());
+        let data_dir = context.app.data_dir.clone();
+        with_credentials(move || {
+            if let Err(error) = desktop_settings::save_api_keys(&keys) {
+                let _ = desktop_settings::save_api_keys(&previous_keys);
+                return Err(error);
+            }
+            if let Err(error) = preferences.save(&data_dir) {
+                let _ = desktop_settings::save_api_keys(&previous_keys);
+                return Err(error);
+            }
+            Ok(())
+        })
+        .await?;
     }
 
     *context
@@ -936,11 +957,14 @@ async fn desktop_save_settings(
         );
     }
 
-    Ok(desktop_settings::settings_view(
-        preferences,
-        &keys,
-        has_webapp_token,
-    ))
+    with_credentials(move || {
+        Ok(desktop_settings::settings_view(
+            preferences,
+            &keys,
+            has_webapp_token,
+        ))
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -1120,8 +1144,17 @@ async fn finish_hosted_sign_in(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let previous_token = desktop_settings::get_hosted_token().ok().flatten();
-    desktop_settings::set_hosted_token(Some(&reply.access_token))?;
+    let access_token = reply.access_token.clone();
+    let (previous_token, has_sync_token) = with_credentials(move || {
+        let previous_token = desktop_settings::get_hosted_token().ok().flatten();
+        desktop_settings::set_hosted_token(Some(&access_token))?;
+        let has_sync_token = desktop_settings::get_webapp_token()
+            .ok()
+            .flatten()
+            .is_some();
+        Ok((previous_token, has_sync_token))
+    })
+    .await?;
     let preferences = desktop_settings::DesktopPreferences {
         // Signing in is for sync and plan management; notes keep using the user's own keys.
         hosted_account: Some(desktop_settings::HostedAccount {
@@ -1140,36 +1173,42 @@ async fn finish_hosted_sign_in(
         ..previous
     };
     // Signing in also connects the notes library to this workspace, so the desktop and the
-    // web app show the same notes. A sync token the user already set up is never replaced.
+    // web app show the same notes. A working sync token the user already set up is never
+    // replaced; one the service has rejected is, since signing in is how it gets renewed.
     let mut preferences = preferences;
     let mut connected_sync = false;
     let mut sync_warning = None;
-    if desktop_settings::get_webapp_token()
-        .ok()
-        .flatten()
-        .is_none()
-    {
+    let sync_token_rejected = context
+        .sync
+        .status(true)
+        .last_error
+        .is_some_and(|error| desktop_sync::is_rejected_token_error(&error));
+    if !has_sync_token || sync_token_rejected {
         match fetch_desktop_sync_token(&preferences).await {
-            Ok((token, can_sync)) => match desktop_settings::set_webapp_token(Some(&token)) {
-                Ok(()) => {
-                    if let Some(account) = &mut preferences.hosted_account {
-                        account.sync_allowed = Some(can_sync);
+            Ok((token, can_sync)) => {
+                match with_credentials(move || desktop_settings::set_webapp_token(Some(&token)))
+                    .await
+                {
+                    Ok(()) => {
+                        if let Some(account) = &mut preferences.hosted_account {
+                            account.sync_allowed = Some(can_sync);
+                        }
+                        if let Some(account) = &preferences.hosted_account {
+                            preferences.webapp_url = account.base_url.clone();
+                        }
+                        preferences.sync_from_sign_in = true;
+                        // The token is kept either way so sync starts the moment a plan is added;
+                        // without one the service would answer every request with 402.
+                        connected_sync = can_sync;
                     }
-                    if let Some(account) = &preferences.hosted_account {
-                        preferences.webapp_url = account.base_url.clone();
+                    Err(error) => {
+                        tracing::warn!(%error, "could not store the notes-sync token");
+                        sync_warning = Some(format!(
+                            "Signed in, but notes sync could not be connected: {error}"
+                        ));
                     }
-                    preferences.sync_from_sign_in = true;
-                    // The token is kept either way so sync starts the moment a plan is added;
-                    // without one the service would answer every request with 402.
-                    connected_sync = can_sync;
                 }
-                Err(error) => {
-                    tracing::warn!(%error, "could not store the notes-sync token");
-                    sync_warning = Some(format!(
-                        "Signed in, but notes sync could not be connected: {error}"
-                    ));
-                }
-            },
+            }
             Err(error) => {
                 tracing::warn!(%error, "could not connect notes sync after sign-in");
                 sync_warning = Some(format!(
@@ -1179,10 +1218,14 @@ async fn finish_hosted_sign_in(
         }
     }
     if let Err(error) = preferences.save(&context.app.data_dir) {
-        let _ = desktop_settings::set_hosted_token(previous_token.as_deref());
-        if connected_sync {
-            let _ = desktop_settings::set_webapp_token(None);
-        }
+        let _ = with_credentials(move || {
+            let _ = desktop_settings::set_hosted_token(previous_token.as_deref());
+            if connected_sync {
+                let _ = desktop_settings::set_webapp_token(None);
+            }
+            Ok(())
+        })
+        .await;
         return Err(error);
     }
     let view = apply_preferences(context, preferences).await?;
@@ -1249,9 +1292,7 @@ async fn hosted_call(
     body: Option<serde_json::Value>,
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
-    let service = desktop_settings::hosted_session(preferences).ok_or_else(|| {
-        "Sign in to your AI Notetaker account in Settings → Account & sync.".to_string()
-    })?;
+    let service = hosted_session(preferences).await?;
     if !hosted_url_is_allowed(&service.base_url) {
         return Err("The hosted service address must use https.".into());
     }
@@ -1277,16 +1318,21 @@ async fn hosted_call(
         // The service ended this session (revoked from the web, or expired early). Forget the
         // dead token so the app shows "Sign in again" with a sign-in form instead of still
         // claiming to be signed in. A token replaced by a newer sign-in meanwhile is kept.
-        if desktop_settings::get_hosted_token()
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some(service.access_token.as_str())
-        {
-            if let Err(error) = desktop_settings::set_hosted_token(None) {
-                tracing::warn!(%error, "could not forget an ended hosted session");
+        let ended = service.access_token.clone();
+        let _ = with_credentials(move || {
+            if desktop_settings::get_hosted_token()
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(&ended)
+            {
+                if let Err(error) = desktop_settings::set_hosted_token(None) {
+                    tracing::warn!(%error, "could not forget an ended hosted session");
+                }
             }
-        }
+            Ok(())
+        })
+        .await;
     }
     let body = response
         .json::<serde_json::Value>()
@@ -1315,6 +1361,30 @@ fn interpret_hosted_response(
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| format!("The service could not complete that ({status}). Try again.")))
+}
+
+/// Runs OS credential-store work on the blocking pool. A keychain prompt, a locked keyring, or a
+/// D-Bus round trip can take seconds, and doing that inline would stall a shared tokio worker.
+async fn with_credentials<T, F>(work: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| "The OS credential store stopped responding. Try again.".to_string())?
+}
+
+/// The signed-in account's connection, read from the credential store off the async runtime.
+async fn hosted_session(
+    preferences: &desktop_settings::DesktopPreferences,
+) -> Result<native_messaging::ManagedServiceConfig, String> {
+    let preferences = preferences.clone();
+    with_credentials(move || Ok(desktop_settings::hosted_session(&preferences)))
+        .await?
+        .ok_or_else(|| {
+            "Sign in to your AI Notetaker account in Settings → Account & sync.".to_string()
+        })
 }
 
 fn current_preferences(context: &DesktopCommandContext) -> desktop_settings::DesktopPreferences {
@@ -1392,11 +1462,7 @@ async fn desktop_account_billing(
     manage: bool,
 ) -> Result<(), String> {
     let preferences = current_preferences(&context);
-    let base = desktop_settings::hosted_session(&preferences)
-        .ok_or_else(|| {
-            "Sign in to your AI Notetaker account in Settings → Account & sync.".to_string()
-        })?
-        .base_url;
+    let base = hosted_session(&preferences).await?.base_url;
     let timeout = std::time::Duration::from_secs(30);
     let mut reply = None;
     if !manage {
@@ -1486,17 +1552,27 @@ async fn desktop_hosted_sign_out(
     {
         tracing::debug!(%error, "server-side sign-out did not complete");
     }
-    desktop_settings::set_hosted_token(None)?;
     // Going back to offline also disconnects the cloud sync that signing in turned on. A sync
     // token the user pasted themselves is left alone.
+    let from_sign_in = previous.sync_from_sign_in;
+    let sync_token = with_credentials(move || {
+        desktop_settings::set_hosted_token(None)?;
+        Ok(if from_sign_in {
+            desktop_settings::get_webapp_token().ok().flatten()
+        } else {
+            None
+        })
+    })
+    .await?;
     let mut disconnect_sync = false;
-    if previous.sync_from_sign_in {
-        if let Ok(Some(sync_token)) = desktop_settings::get_webapp_token() {
-            if let Some(account) = &previous.hosted_account {
-                revoke_token(&account.base_url, &sync_token).await;
-            }
-            disconnect_sync = desktop_settings::set_webapp_token(None).is_ok();
+    if let Some(sync_token) = sync_token {
+        if let Some(account) = &previous.hosted_account {
+            revoke_token(&account.base_url, &sync_token).await;
         }
+        disconnect_sync =
+            with_credentials(|| desktop_settings::set_webapp_token(None).map(|()| true))
+                .await
+                .unwrap_or(false);
     }
     let preferences = desktop_settings::DesktopPreferences {
         hosted_account: None,
@@ -1515,7 +1591,7 @@ async fn apply_preferences(
         .preferences
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = preferences.clone();
-    let keys = desktop_settings::load_api_keys()?;
+    let keys = with_credentials(desktop_settings::load_api_keys).await?;
     let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)?;
     handle_message(
         context.app.clone(),
@@ -1524,13 +1600,16 @@ async fn apply_preferences(
         context.output.clone(),
     )
     .await;
-    let has_webapp_token =
-        desktop_settings::get_webapp_token()?.is_some_and(|token| !token.trim().is_empty());
-    Ok(desktop_settings::settings_view(
-        preferences,
-        &keys,
-        has_webapp_token,
-    ))
+    with_credentials(move || {
+        let has_webapp_token =
+            desktop_settings::get_webapp_token()?.is_some_and(|token| !token.trim().is_empty());
+        Ok(desktop_settings::settings_view(
+            preferences,
+            &keys,
+            has_webapp_token,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1620,7 +1699,7 @@ async fn apply_imported_desktop_preferences(
         .preferences
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = preferences.clone();
-    let keys = desktop_settings::load_api_keys()?;
+    let keys = with_credentials(desktop_settings::load_api_keys).await?;
     let webapp = desktop_settings::wire_webapp_config(&preferences.webapp_url)?;
     handle_message(
         context.app.clone(),
@@ -1650,7 +1729,7 @@ async fn desktop_start_recording(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let keys = desktop_settings::load_api_keys()?;
+    let keys = with_credentials(desktop_settings::load_api_keys).await?;
     processing_ready(&preferences, &keys)?;
 
     let meeting_id = Uuid::new_v4();
@@ -1717,7 +1796,7 @@ async fn desktop_reprocess_extension_audio(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let keys = desktop_settings::load_api_keys()?;
+    let keys = with_credentials(desktop_settings::load_api_keys).await?;
     resolve_keys(
         preferences.transcription_provider,
         preferences.summarization_provider,
@@ -1787,7 +1866,7 @@ async fn start_desktop_recovery(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let keys = desktop_settings::load_api_keys()?;
+    let keys = with_credentials(desktop_settings::load_api_keys).await?;
     resolve_keys(
         preferences.transcription_provider,
         preferences.summarization_provider,
@@ -1994,10 +2073,18 @@ async fn desktop_move_meeting(
     .map_err(|error| format!("Recording could not be moved: {error}"))?
 }
 
+/// How many notes were queued, and the id of the sync run started for them.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncExistingReply {
+    queued: usize,
+    run_id: u64,
+}
+
 #[tauri::command]
 async fn desktop_sync_existing_notes(
     context: tauri::State<'_, DesktopCommandContext>,
-) -> Result<usize, String> {
+) -> Result<SyncExistingReply, String> {
     let store = context.app.store.clone();
     let sync = context.sync.clone();
     let ids = tokio::task::spawn_blocking(move || {
@@ -2024,13 +2111,16 @@ async fn desktop_sync_existing_notes(
     for id in ids {
         context.sync.enqueue(id)?;
     }
-    spawn_desktop_sync(
+    let run_id = spawn_desktop_sync(
         context.app.clone(),
         context.preferences.clone(),
         context.sync.clone(),
         context.ui_app.clone(),
     );
-    Ok(count)
+    Ok(SyncExistingReply {
+        queued: count,
+        run_id,
+    })
 }
 
 /// Marks one action item done or open in `summary` and returns the item's workspace id, if it has one.
@@ -2224,25 +2314,46 @@ fn write_file_atomically(path: &Path, contents: &[u8]) -> std::io::Result<()> {
 #[tauri::command]
 async fn desktop_retry_webapp_sync(
     context: tauri::State<'_, DesktopCommandContext>,
-) -> Result<(), String> {
-    spawn_desktop_sync(
+) -> Result<u64, String> {
+    Ok(spawn_desktop_sync(
         context.app.clone(),
         context.preferences.clone(),
         context.sync.clone(),
         context.ui_app.clone(),
-    );
-    Ok(())
+    ))
 }
 
+/// The sync status for the window, with a rejected-token error naming the step that fits how
+/// this device got its sync token.
+fn sync_status(
+    sync: &DesktopSync,
+    configured: bool,
+    preferences: &desktop_settings::DesktopPreferences,
+) -> DesktopSyncStatus {
+    let mut status = sync.status(configured);
+    status.last_error = status.last_error.map(|error| {
+        desktop_sync::with_reconnect_step(
+            error,
+            preferences.sync_from_sign_in,
+            preferences.hosted_account.is_some(),
+        )
+    });
+    status
+}
+
+/// Starts one sync run in the background and returns its id; the run's final
+/// `webapp-sync-updated` event carries the same id.
 fn spawn_desktop_sync(
     app: Arc<AppState>,
     preferences: Arc<std::sync::Mutex<desktop_settings::DesktopPreferences>>,
     sync: Arc<DesktopSync>,
     ui_app: tauri::AppHandle<tauri::Wry>,
-) {
+) -> u64 {
+    let run_id = sync.next_run_id();
     tauri::async_runtime::spawn(async move {
-        let _ = run_desktop_sync(app, preferences, sync, ui_app).await;
+        let _ = run_desktop_sync(app, preferences, sync, ui_app, run_id).await;
     });
+    run_id
 }
 
 #[tauri::command]
@@ -2337,6 +2448,7 @@ async fn run_desktop_sync(
     preferences: Arc<std::sync::Mutex<desktop_settings::DesktopPreferences>>,
     sync: Arc<DesktopSync>,
     ui_app: tauri::AppHandle<tauri::Wry>,
+    run_id: u64,
 ) -> Result<bool, String> {
     let preferences = preferences
         .lock()
@@ -2344,8 +2456,12 @@ async fn run_desktop_sync(
         .clone();
     // The window shows "Syncing…" until this run reports back, so a run that cannot even read its
     // address or token (a locked keychain) still records why and emits its status below.
-    let connection = desktop_settings::normalize_webapp_url(&preferences.webapp_url)
-        .and_then(|url| Ok((url, desktop_settings::get_webapp_token()?)));
+    let webapp_url = preferences.webapp_url.clone();
+    let connection = with_credentials(move || {
+        let url = desktop_settings::normalize_webapp_url(&webapp_url)?;
+        Ok((url, desktop_settings::get_webapp_token()?))
+    })
+    .await;
     let (url, token) = match connection {
         Ok(connection) => connection,
         Err(error) => {
@@ -2372,8 +2488,14 @@ async fn run_desktop_sync(
         }
     }
     let configured = !preferences.webapp_url.is_empty()
-        && desktop_settings::credential_presence().is_ok_and(|presence| presence.webapp_token);
-    if let Err(error) = ui_app.emit("webapp-sync-updated", sync.status(configured)) {
+        && with_credentials(desktop_settings::credential_presence)
+            .await
+            .is_ok_and(|presence| presence.webapp_token);
+    let status = desktop_sync::DesktopSyncStatus {
+        run_id: Some(run_id),
+        ..sync_status(&sync, configured, &preferences)
+    };
+    if let Err(error) = ui_app.emit("webapp-sync-updated", status) {
         tracing::debug!(%error, "desktop sync status event could not be emitted");
     }
     Ok(plan_blocked)
@@ -2462,20 +2584,19 @@ fn desktop_resolve_webapp_conflict(
     context: tauri::State<'_, DesktopCommandContext>,
     conflict_key: String,
     resolution: String,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let keep_desktop = match resolution.as_str() {
         "use_desktop" => true,
         "keep_separate" => false,
         _ => return Err("Choose a valid sync conflict resolution.".into()),
     };
     context.sync.resolve_conflict(&conflict_key, keep_desktop)?;
-    spawn_desktop_sync(
+    Ok(spawn_desktop_sync(
         context.app.clone(),
         context.preferences.clone(),
         context.sync.clone(),
         context.ui_app.clone(),
-    );
-    Ok(())
+    ))
 }
 
 /// Starts a helper program and reaps it from a background thread, so a long-lived opener
@@ -2887,11 +3008,29 @@ async fn handle_message(
 
             match result {
                 Ok(()) => {
+                    // Like a full disk, a disk too slow to keep up stops the capture and leaves
+                    // the meeting unfinished, so its saved audio is offered for recovery.
+                    let fatal_state = state.clone();
+                    let fatal_tray = tray.clone();
+                    let fatal_audio = audio.clone();
                     spawn_capture_health_forwarder(
                         state.clone(),
                         meeting_id,
                         audio.subscribe_health(),
                         out_tx.clone(),
+                        move || {
+                            tokio::spawn(async move {
+                                // Joins the capture after every queued frame has been written.
+                                let _ = fatal_audio.stop_capture().await;
+                                if let Some(active) =
+                                    fatal_state.active.lock().await.remove(&meeting_id)
+                                {
+                                    active.audio_processing.finish().await;
+                                }
+                                fatal_tray.set_recording(false);
+                                fatal_tray.set_attention(true);
+                            });
+                        },
                     );
                     state.active.lock().await.insert(
                         meeting_id,
@@ -3458,13 +3597,26 @@ fn spawn_capture_health_forwarder(
     meeting_id: Uuid,
     mut health: tokio::sync::broadcast::Receiver<notetaker_audio::CaptureHealthEvent>,
     out_tx: tokio::sync::mpsc::UnboundedSender<HelperToExtension>,
+    on_fatal: impl FnOnce() + Send + 'static,
 ) {
     use tokio::sync::broadcast::error::RecvError;
+    let mut on_fatal = Some(on_fatal);
     tokio::spawn(async move {
         loop {
             match tokio::time::timeout(std::time::Duration::from_secs(30), health.recv()).await {
                 Ok(Ok(event)) => {
-                    if event.kind.is_degraded() {
+                    // The capture already stopped itself (e.g. the unsaved-audio backlog hit its
+                    // ceiling because the disk could not keep up): end the recording, not just warn.
+                    if event.kind.is_fatal() {
+                        let _ = out_tx.send(HelperToExtension::Error {
+                            meeting_id: Some(meeting_id),
+                            code: ErrorCode::StorageError,
+                            message: event.message,
+                        });
+                        if let Some(stop) = on_fatal.take() {
+                            stop();
+                        }
+                    } else if event.kind.is_degraded() {
                         let _ = out_tx.send(HelperToExtension::Error {
                             meeting_id: Some(meeting_id),
                             code: ErrorCode::CaptureLost,

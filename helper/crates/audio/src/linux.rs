@@ -20,8 +20,10 @@ use crate::convert::{pump_s16le_mono, PumpExit};
 use crate::health::{Backoff, CaptureHealthKind, HealthHub};
 use crate::input::{default_input_name, list_input_devices, InputSupervisor};
 use crate::session::{
-    await_ready, spawn_frame_delivery, CaptureSession, FrameCallback, ReadySender,
+    await_ready, frame_channel, spawn_frame_delivery, CaptureSession, FrameCallback, FrameSender,
+    ReadySender,
 };
+use crate::timeline::SilenceFiller;
 use crate::{
     capture_ready, AudioCapture, AudioDeviceInfo, AudioDeviceList, AudioDiagnostics, AudioError,
     CaptureHealthEvent, CaptureOptions, CapturedFrame, DriverStatus, PermissionState,
@@ -30,7 +32,7 @@ use async_trait::async_trait;
 use notetaker_core::providers::AudioChannel;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::Sender;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -230,10 +232,10 @@ impl AudioCapture for LinuxAudioCapture {
             .await
             .map_err(|error| AudioError::DriverSetup(format!("route lookup failed: {error}")))??;
 
-        let (tx, rx) = std::sync::mpsc::channel::<CapturedFrame>();
         let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
         let running = self.session.arm();
         let health = self.health.clone();
+        let (tx, rx) = frame_channel(health.clone(), running.clone());
         let mic_device = options.mic_device;
 
         let supervisor = std::thread::spawn(move || {
@@ -297,7 +299,7 @@ fn send_ready(ready_tx: ReadySender, result: Result<(), String>) {
 
 fn run_capture(
     config: CaptureConfig,
-    tx: Sender<CapturedFrame>,
+    tx: FrameSender,
     running: Arc<std::sync::atomic::AtomicBool>,
     health: HealthHub,
     ready_tx: ReadySender,
@@ -325,6 +327,10 @@ fn run_capture(
         }
     };
     send_ready(ready_tx, Ok(()));
+    // One timeline for the whole recording: while `parec` is down (backoff,
+    // source switch) the speaker channel is filled with silence so it stays
+    // aligned with the mic, which keeps capturing throughout.
+    let mut timeline = SilenceFiller::new(PAREC_SAMPLE_RATE_HZ, Instant::now());
 
     let mut current_source = config.route.source.clone();
     let pinned = config.route.pinned;
@@ -339,6 +345,7 @@ fn run_capture(
         let now = Instant::now();
 
         if let Some(active) = speaker.as_mut() {
+            timeline.note_real_frames(active.take_new_frames());
             if active.has_ended() {
                 let detail = active.exit_detail();
                 health.emit(
@@ -350,13 +357,14 @@ fn run_capture(
                     backoff.reset();
                 }
                 if let Some(ended) = speaker.take() {
-                    ended.shutdown();
+                    timeline.note_real_frames(ended.shutdown());
                 }
                 retry_at = Some(now + backoff.next_delay());
             }
         }
 
         if speaker.is_none() {
+            fill_speaker_gap(&mut timeline, &tx, now);
             if retry_at.is_none_or(|due| now >= due) {
                 let source = if pinned {
                     current_source.clone()
@@ -393,8 +401,9 @@ fn run_capture(
                     format!("switching meeting-audio capture from {current_source} to {better}"),
                 );
                 if let Some(old) = speaker.take() {
-                    old.shutdown();
+                    timeline.note_real_frames(old.shutdown());
                 }
+                fill_speaker_gap(&mut timeline, &tx, Instant::now());
                 match ParecCapture::spawn(&config.parec_program, &better, &tx) {
                     Ok(next) => {
                         speaker = Some(next);
@@ -421,6 +430,17 @@ fn run_capture(
     // `tx` drops here, which lets the frame-delivery thread drain and exit.
 }
 
+/// Emits the silence owed to the speaker timeline up to `now`.
+fn fill_speaker_gap(timeline: &mut SilenceFiller, tx: &FrameSender, now: Instant) {
+    while let Some(pcm16) = timeline.silence_due(now) {
+        let _ = tx.send(CapturedFrame {
+            channel: AudioChannel::Speaker,
+            pcm16,
+            sample_rate_hz: PAREC_SAMPLE_RATE_HZ,
+        });
+    }
+}
+
 /// A running `parec` child plus the thread that turns its stdout into frames.
 struct ParecCapture {
     child: Child,
@@ -429,10 +449,14 @@ struct ParecCapture {
     /// crash.
     wanted: Arc<std::sync::atomic::AtomicBool>,
     started_at: Instant,
+    /// Mono frames the reader has delivered, and how many of those the
+    /// supervisor has already accounted for on the speaker timeline.
+    delivered_frames: Arc<AtomicU64>,
+    accounted_frames: u64,
 }
 
 impl ParecCapture {
-    fn spawn(program: &str, source: &str, tx: &Sender<CapturedFrame>) -> Result<Self, AudioError> {
+    fn spawn(program: &str, source: &str, tx: &FrameSender) -> Result<Self, AudioError> {
         let mut child = spawn_parec_with_source(program, source)?;
         let Some(stdout) = child.stdout.take() else {
             let _ = child.kill();
@@ -444,13 +468,29 @@ impl ParecCapture {
         let wanted = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let reader_wanted = wanted.clone();
         let tx = tx.clone();
-        let reader = std::thread::spawn(move || read_parec_frames(stdout, &reader_wanted, tx));
+        let delivered_frames = Arc::new(AtomicU64::new(0));
+        let reader_delivered = delivered_frames.clone();
+        let reader = std::thread::spawn(move || {
+            read_parec_frames(stdout, &reader_wanted, tx, &reader_delivered)
+        });
         Ok(Self {
             child,
             reader: Some(reader),
             wanted,
             started_at: Instant::now(),
+            delivered_frames,
+            accounted_frames: 0,
         })
+    }
+
+    /// Frames delivered since the last call.
+    fn take_new_frames(&mut self) -> u64 {
+        let delivered = self
+            .delivered_frames
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let new = delivered.saturating_sub(self.accounted_frames);
+        self.accounted_frames = delivered;
+        new
     }
 
     fn has_ended(&mut self) -> bool {
@@ -497,7 +537,9 @@ impl ParecCapture {
         }
     }
 
-    fn shutdown(mut self) {
+    /// Stops `parec`, joins the reader, and returns the frames it delivered
+    /// that [`Self::take_new_frames`] had not yet reported.
+    fn shutdown(mut self) -> u64 {
         self.wanted
             .store(false, std::sync::atomic::Ordering::SeqCst);
         let _ = self.child.kill();
@@ -505,6 +547,7 @@ impl ParecCapture {
         if let Some(reader) = self.reader.take() {
             let _ = reader.join();
         }
+        self.take_new_frames()
     }
 }
 
@@ -577,9 +620,14 @@ fn spawn_parec_with_source(program: &str, source: &str) -> Result<Child, AudioEr
 fn read_parec_frames(
     stdout: impl Read,
     wanted: &Arc<std::sync::atomic::AtomicBool>,
-    tx: Sender<CapturedFrame>,
+    tx: FrameSender,
+    delivered_frames: &AtomicU64,
 ) -> PumpExit {
     let exit = pump_s16le_mono(stdout, PAREC_CHANNELS, wanted, |pcm16| {
+        delivered_frames.fetch_add(
+            (pcm16.len() / std::mem::size_of::<i16>()) as u64,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         let _ = tx.send(CapturedFrame {
             channel: AudioChannel::Speaker,
             pcm16,
@@ -949,6 +997,13 @@ fn unload_tracked_modules(modules: &Mutex<Vec<String>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_frame_channel() -> (FrameSender, crate::session::FrameReceiver) {
+        frame_channel(
+            HealthHub::new(),
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        )
+    }
     use crate::convert::S16leMonoConverter;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -1169,7 +1224,7 @@ mod tests {
             "dying-parec",
             "printf '\\001\\000\\002\\000'\necho 'source vanished' >&2\nexit 3",
         );
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = test_frame_channel();
         let mut capture = ParecCapture::spawn(&script, "gone.monitor", &tx).expect("spawn");
 
         let started = Instant::now();
@@ -1183,7 +1238,11 @@ mod tests {
         let detail = capture.exit_detail();
         assert!(detail.contains("source vanished"), "{detail}");
         assert!(detail.contains('3'), "{detail}");
-        capture.shutdown();
+        assert_eq!(
+            capture.shutdown(),
+            2,
+            "both delivered samples are accounted"
+        );
 
         let frame = rx
             .try_recv()
@@ -1197,7 +1256,7 @@ mod tests {
     fn shutdown_kills_a_long_running_parec_and_joins_the_reader() {
         let directory = tempfile::tempdir().expect("temp directory");
         let script = write_script(directory.path(), "sleepy-parec", "exec sleep 30");
-        let (tx, _rx) = std::sync::mpsc::channel();
+        let (tx, _rx) = test_frame_channel();
         let mut capture = ParecCapture::spawn(&script, "any", &tx).expect("spawn");
         assert!(!capture.has_ended());
         let started = Instant::now();

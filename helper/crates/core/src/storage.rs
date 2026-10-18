@@ -12,12 +12,14 @@
 //!   meta.json        - MeetingMeta (state, timestamps)
 //!   mic.pcm           - raw PCM16 mono, appended during capture
 //!   speaker.pcm       - raw PCM16 mono, appended during capture
-//!   transcript.json   - Vec<TranscriptSegment>, appended as segments arrive
+//!   transcript.json   - Vec<TranscriptSegment>, the folded transcript
+//!   transcript.log    - JSON lines appended as segments arrive; folded into
+//!                       transcript.json (in audio order) once the note is processed
 //!   summary.json      - Summary, written once after finalize
 //! ```
 
 use crate::native_messaging::MeetingMode;
-use crate::providers::{FlaggedMoment, Summary, SummaryOptions, TranscriptSegment};
+use crate::providers::{AudioChannel, FlaggedMoment, Summary, SummaryOptions, TranscriptSegment};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -399,6 +401,8 @@ impl MeetingStore {
         meta.summary_options.mode = note.mode;
         meta.workspace_source_updated_at = Some(source_updated_at);
         meta.workspace_source_id = note.workspace_source_id;
+        // The workspace text replaces the whole transcript; a leftover log must not re-add lines.
+        remove_if_exists(&target.join(TRANSCRIPT_LOG_FILE))?;
         atomic_write(
             &target.join("transcript.json"),
             &serde_json::to_vec_pretty(&note.transcript)?,
@@ -846,12 +850,18 @@ impl MeetingStore {
         })
     }
 
+    /// Also folds the transcript log into `transcript.json`, so a finished note is self-contained.
+    /// A fold failure only leaves the log in place (readers merge it), so it is logged, not fatal.
     pub fn mark_processed(&self, id: Uuid) -> Result<(), StorageError> {
         self.update_meta(id, |meta| {
             meta.state = MeetingState::Processed;
             meta.summary_pending = false;
             Ok(())
-        })
+        })?;
+        if let Err(error) = self.compact_transcript(id) {
+            tracing::warn!(%id, %error, "could not fold the transcript log into transcript.json");
+        }
+        Ok(())
     }
 
     pub fn mark_summary_pending(&self, id: Uuid) -> Result<(), StorageError> {
@@ -1002,39 +1012,177 @@ impl MeetingStore {
         self.append_transcript_segments(id, std::slice::from_ref(segment))
     }
 
-    /// Appends a provider response in one read/write cycle. Provider results
-    /// often contain several diarized segments; rewriting transcript.json for
-    /// every segment made long meetings increasingly expensive on disk.
-    ///
-    /// An unreadable transcript.json is an error, never an empty transcript:
-    /// silently defaulting here would wipe the accumulated meeting transcript
-    /// and summarize a partial meeting with no warning. Propagate the read or
-    /// parse failure so the provider result that could not be merged stays in
-    /// the retry queue instead.
+    /// Appends segments that carry no audio position (imports, tests, callers outside the
+    /// transcription pipeline). They keep their place right after whatever was saved before them.
     pub fn append_transcript_segments(
         &self,
         id: Uuid,
         new_segments: &[TranscriptSegment],
+    ) -> Result<(), StorageError> {
+        self.append_transcript_log(id, new_segments, None)
+    }
+
+    /// Appends a provider response together with where its audio starts, so the transcript can be
+    /// read back in audio order even when a range that failed earlier succeeds on retry after
+    /// newer text was already saved.
+    pub fn append_transcript_segments_at(
+        &self,
+        id: Uuid,
+        new_segments: &[TranscriptSegment],
+        position: TranscriptPosition,
+    ) -> Result<(), StorageError> {
+        self.append_transcript_log(id, new_segments, Some(position))
+    }
+
+    /// New segments go to an append-only `transcript.log` (one compact JSON record per line)
+    /// instead of rewriting the whole `transcript.json`: rewriting it for every streamed segment
+    /// made a long call's transcript I/O grow with the square of its length. Each append is still
+    /// synced before returning, so the transcription cursor saved after it never points past text
+    /// that could be lost. [`Self::mark_processed`] folds the log back into `transcript.json`.
+    ///
+    /// An unreadable transcript.json is an error, never an empty transcript: silently defaulting
+    /// would wipe the accumulated meeting transcript and summarize a partial meeting with no
+    /// warning. The provider result that could not be saved stays in the retry queue instead.
+    fn append_transcript_log(
+        &self,
+        id: Uuid,
+        new_segments: &[TranscriptSegment],
+        position: Option<TranscriptPosition>,
     ) -> Result<(), StorageError> {
         if new_segments.is_empty() {
             return Ok(());
         }
         let lock = meeting_lock(id);
         let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut segments = self.load_transcript(id)?;
-        segments.extend_from_slice(new_segments);
-        let path = self.meeting_dir(id).join("transcript.json");
-        atomic_write(&path, &serde_json::to_vec_pretty(&segments)?)?;
+        let dir = self.meeting_dir(id);
+        let log_path = dir.join(TRANSCRIPT_LOG_FILE);
+        let mut lines = Vec::new();
+        let existing_log_len = match fs::metadata(&log_path) {
+            Ok(meta) => meta.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        if existing_log_len == 0 {
+            // The header records how many segments transcript.json held when the log began, so a
+            // crash between folding the log in and deleting it never duplicates the text.
+            let base = self.load_transcript_json(id)?.len();
+            serde_json::to_writer(
+                &mut lines,
+                &TranscriptLogLine {
+                    base: Some(base),
+                    ..TranscriptLogLine::default()
+                },
+            )?;
+            lines.push(b'\n');
+        } else if !log_ends_with_newline(&log_path)? {
+            // A crash mid-append left a torn last line; start ours on a fresh line so it is not
+            // glued onto the fragment and lost with it.
+            lines.push(b'\n');
+        }
+        for segment in new_segments {
+            serde_json::to_writer(
+                &mut lines,
+                &TranscriptLogLine {
+                    segment: Some(segment.clone()),
+                    channel: position.map(|position| position.channel),
+                    audio_ms: position.map(|position| position.audio_ms),
+                    ..TranscriptLogLine::default()
+                },
+            )?;
+            lines.push(b'\n');
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+        file.write_all(&lines)?;
+        file.sync_data()?;
         Ok(())
     }
 
+    /// The meeting transcript in audio order: what `transcript.json` holds, followed by the
+    /// not-yet-folded `transcript.log`, whose segments are ordered by where their audio starts
+    /// (mic before speaker on a tie, then save order).
     pub fn load_transcript(&self, id: Uuid) -> Result<Vec<TranscriptSegment>, StorageError> {
-        let path = self.meeting_dir(id).join("transcript.json");
-        if !path.exists() {
-            return Ok(vec![]);
+        let lock = meeting_lock(id);
+        let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.load_transcript_unlocked(id)
+            .map(|(segments, _)| segments)
+    }
+
+    /// Returns the merged transcript and whether a log contributed to it.
+    fn load_transcript_unlocked(
+        &self,
+        id: Uuid,
+    ) -> Result<(Vec<TranscriptSegment>, bool), StorageError> {
+        let mut segments = self.load_transcript_json(id)?;
+        let log_path = self.meeting_dir(id).join(TRANSCRIPT_LOG_FILE);
+        let bytes = match fs::read(&log_path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((segments, false))
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let mut base = None;
+        let mut logged = Vec::new();
+        for line in bytes.split(|byte| *byte == b'\n') {
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+            match serde_json::from_slice::<TranscriptLogLine>(line) {
+                Ok(TranscriptLogLine {
+                    base: Some(value), ..
+                }) if base.is_none() => base = Some(value),
+                Ok(TranscriptLogLine {
+                    segment: Some(segment),
+                    channel,
+                    audio_ms,
+                    ..
+                }) => logged.push((segment, channel, audio_ms)),
+                Ok(_) => {}
+                Err(error) => {
+                    // Only a crash mid-append produces this (a torn line); its neighbours are fine.
+                    tracing::warn!(%id, %error, "skipping an unreadable transcript log line");
+                }
+            }
         }
-        let bytes = fs::read(path)?;
-        Ok(serde_json::from_slice(&bytes)?)
+        // transcript.json already holds the log when a fold finished but the log was not deleted.
+        let already_folded = segments
+            .len()
+            .saturating_sub(base.unwrap_or(segments.len()));
+        let pending = logged.len().saturating_sub(already_folded);
+        let logged = logged.split_off(logged.len() - pending);
+        segments.extend(order_by_audio_position(logged));
+        Ok((segments, true))
+    }
+
+    fn load_transcript_json(&self, id: Uuid) -> Result<Vec<TranscriptSegment>, StorageError> {
+        let path = self.meeting_dir(id).join("transcript.json");
+        match fs::read(path) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Folds `transcript.log` into `transcript.json` (in audio order) and removes the log, so a
+    /// finished note is one ordinary file again. Safe to interrupt at any point: the log's header
+    /// lets a reader recognize text that was already folded in.
+    pub fn compact_transcript(&self, id: Uuid) -> Result<(), StorageError> {
+        let lock = meeting_lock(id);
+        let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (segments, had_log) = self.load_transcript_unlocked(id)?;
+        if !had_log {
+            return Ok(());
+        }
+        let dir = self.meeting_dir(id);
+        atomic_write(
+            &dir.join("transcript.json"),
+            &serde_json::to_vec_pretty(&segments)?,
+        )?;
+        remove_if_exists(&dir.join(TRANSCRIPT_LOG_FILE))?;
+        Ok(())
     }
 
     pub fn write_summary(&self, id: Uuid, summary: &Summary) -> Result<(), StorageError> {
@@ -1329,6 +1477,83 @@ impl MeetingStore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
             Err(error) => Err(StorageError::Io(error)),
         }
+    }
+}
+
+/// Append-only companion to `transcript.json`; see `MeetingStore::append_transcript_segments_at`.
+pub const TRANSCRIPT_LOG_FILE: &str = "transcript.log";
+
+/// Where a saved transcript segment's audio starts: the channel it was heard on and the offset
+/// into that channel's recording. Both channel files follow the wall clock (capture fills
+/// silence), so offsets from the two channels are comparable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TranscriptPosition {
+    pub channel: AudioChannel,
+    pub audio_ms: u64,
+}
+
+impl TranscriptPosition {
+    /// Position of `byte_offset` into a PCM16 mono channel recorded at `sample_rate_hz`.
+    pub fn from_pcm_offset(channel: AudioChannel, byte_offset: usize, sample_rate_hz: u32) -> Self {
+        let samples = (byte_offset / 2) as u64;
+        let rate = u64::from(sample_rate_hz.max(1));
+        Self {
+            channel,
+            audio_ms: samples.saturating_mul(1_000) / rate,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct TranscriptLogLine {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    segment: Option<TranscriptSegment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    channel: Option<AudioChannel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audio_ms: Option<u64>,
+}
+
+/// Sorts logged segments by audio start, then channel (mic first), then save order. A segment
+/// saved without a position keeps its place right after the segment saved before it.
+fn order_by_audio_position(
+    logged: Vec<(TranscriptSegment, Option<AudioChannel>, Option<u64>)>,
+) -> Vec<TranscriptSegment> {
+    let mut previous = (0u64, 0u8);
+    let mut keyed: Vec<_> = logged
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, (segment, channel, audio_ms))| {
+            if let (Some(channel), Some(audio_ms)) = (channel, audio_ms) {
+                let rank = match channel {
+                    AudioChannel::Mic => 0,
+                    AudioChannel::Speaker => 1,
+                };
+                previous = (audio_ms, rank);
+            }
+            ((previous.0, previous.1, sequence), segment)
+        })
+        .collect();
+    keyed.sort_by_key(|(key, _)| *key);
+    keyed.into_iter().map(|(_, segment)| segment).collect()
+}
+
+fn log_ends_with_newline(path: &Path) -> Result<bool, std::io::Error> {
+    let mut file = fs::File::open(path)?;
+    if file.seek(SeekFrom::End(-1)).is_err() {
+        return Ok(true);
+    }
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    Ok(last[0] == b'\n')
+}
+
+fn remove_if_exists(path: &Path) -> Result<(), std::io::Error> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
     }
 }
 
@@ -2610,5 +2835,202 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(path).unwrap(), note);
         assert_eq!(store.latest_meeting().unwrap().unwrap().id, id);
+    }
+
+    fn line(text: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            speaker: "you".into(),
+            text: text.into(),
+            is_final: true,
+            timestamp: None,
+        }
+    }
+
+    fn texts(store: &MeetingStore, id: Uuid) -> Vec<String> {
+        store
+            .load_transcript(id)
+            .unwrap()
+            .into_iter()
+            .map(|segment| segment.text)
+            .collect()
+    }
+
+    fn at(channel: AudioChannel, audio_ms: u64) -> TranscriptPosition {
+        TranscriptPosition { channel, audio_ms }
+    }
+
+    #[test]
+    fn streamed_segments_append_to_a_log_instead_of_rewriting_transcript_json() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        let dir = store.meeting_dir(id);
+        for index in 0..50 {
+            store
+                .append_transcript_segment(id, &line(&format!("line {index}")))
+                .unwrap();
+        }
+        assert!(!dir.join("transcript.json").exists());
+        let log = fs::read_to_string(dir.join(TRANSCRIPT_LOG_FILE)).unwrap();
+        assert_eq!(
+            log.lines().count(),
+            51,
+            "one header plus one line per segment"
+        );
+        assert_eq!(texts(&store, id).len(), 50);
+        assert_eq!(texts(&store, id)[49], "line 49");
+    }
+
+    #[test]
+    fn processing_folds_the_log_into_an_ordinary_transcript_json() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store
+            .append_transcript_segments_at(id, &[line("later")], at(AudioChannel::Mic, 9_000))
+            .unwrap();
+        store
+            .append_transcript_segments_at(id, &[line("earlier")], at(AudioChannel::Mic, 1_000))
+            .unwrap();
+        store.mark_processed(id).unwrap();
+
+        let dir = store.meeting_dir(id);
+        assert!(!dir.join(TRANSCRIPT_LOG_FILE).exists());
+        let folded: Vec<TranscriptSegment> =
+            serde_json::from_slice(&fs::read(dir.join("transcript.json")).unwrap()).unwrap();
+        assert_eq!(folded[0].text, "earlier");
+        assert_eq!(folded[1].text, "later");
+        // A later append (a range retried after the note finished) starts a new log on top.
+        store.append_transcript_segment(id, &line("after")).unwrap();
+        assert_eq!(texts(&store, id), vec!["earlier", "later", "after"]);
+    }
+
+    #[test]
+    fn an_existing_transcript_json_is_kept_and_extended() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        let dir = store.meeting_dir(id);
+        atomic_write(
+            &dir.join("transcript.json"),
+            &serde_json::to_vec_pretty(&vec![line("old one"), line("old two")]).unwrap(),
+        )
+        .unwrap();
+        store
+            .append_transcript_segments_at(id, &[line("new")], at(AudioChannel::Speaker, 0))
+            .unwrap();
+        assert_eq!(texts(&store, id), vec!["old one", "old two", "new"]);
+        store.compact_transcript(id).unwrap();
+        assert_eq!(texts(&store, id), vec!["old one", "old two", "new"]);
+    }
+
+    #[test]
+    fn a_crash_between_folding_and_deleting_the_log_never_duplicates_text() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store
+            .append_transcript_segments(id, &[line("a"), line("b")])
+            .unwrap();
+        let dir = store.meeting_dir(id);
+        let log = fs::read(dir.join(TRANSCRIPT_LOG_FILE)).unwrap();
+        store.compact_transcript(id).unwrap();
+        // Simulate the crash: the fold landed but the log is still there.
+        fs::write(dir.join(TRANSCRIPT_LOG_FILE), log).unwrap();
+        assert_eq!(texts(&store, id), vec!["a", "b"]);
+        store.compact_transcript(id).unwrap();
+        assert_eq!(texts(&store, id), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_torn_last_log_line_is_skipped_and_the_next_append_still_lands() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store.append_transcript_segment(id, &line("kept")).unwrap();
+        let path = store.meeting_dir(id).join(TRANSCRIPT_LOG_FILE);
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(br#"{"segment":{"speaker":"you","te"#)
+            .unwrap();
+        drop(file);
+        assert_eq!(texts(&store, id), vec!["kept"]);
+        store.append_transcript_segment(id, &line("next")).unwrap();
+        assert_eq!(texts(&store, id), vec!["kept", "next"]);
+    }
+
+    #[test]
+    fn logged_segments_read_back_in_audio_order_with_a_stable_channel_tie_break() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        // Saved in arrival order: live speaker text, then a retried earlier mic range.
+        store
+            .append_transcript_segments_at(
+                id,
+                &[line("speaker 10s")],
+                at(AudioChannel::Speaker, 10_000),
+            )
+            .unwrap();
+        store
+            .append_transcript_segment(id, &line("unpositioned after speaker"))
+            .unwrap();
+        store
+            .append_transcript_segments_at(id, &[line("speaker 0s")], at(AudioChannel::Speaker, 0))
+            .unwrap();
+        store
+            .append_transcript_segments_at(
+                id,
+                &[line("mic 0s a"), line("mic 0s b")],
+                at(AudioChannel::Mic, 0),
+            )
+            .unwrap();
+        assert_eq!(
+            texts(&store, id),
+            vec![
+                "mic 0s a",
+                "mic 0s b",
+                "speaker 0s",
+                "speaker 10s",
+                "unpositioned after speaker"
+            ]
+        );
+    }
+
+    #[test]
+    fn pcm_offsets_convert_to_milliseconds() {
+        assert_eq!(
+            TranscriptPosition::from_pcm_offset(AudioChannel::Mic, 32_000, 16_000).audio_ms,
+            1_000
+        );
+        assert_eq!(
+            TranscriptPosition::from_pcm_offset(AudioChannel::Mic, 10, 0).audio_ms,
+            5_000,
+            "a zero rate must not divide by zero"
+        );
+    }
+
+    #[test]
+    fn a_workspace_refresh_replaces_the_transcript_including_any_log() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        let note = |text: &str, version: i64| ImportedMeetingNote {
+            id,
+            workspace_import: true,
+            workspace_source_updated_at: Some(
+                DateTime::<Utc>::from_timestamp(1_700_000_000 + version, 0).unwrap(),
+            ),
+            workspace_source_id: Some("https://example.test/workspace/w1".into()),
+            title: "Synced".into(),
+            started_at: Utc::now(),
+            ended_at: None,
+            extension_source_status: "workspace".into(),
+            mode: MeetingMode::General,
+            transcript: vec![line(text)],
+            summary: None,
+        };
+        store.import_text_only_note(note("v1", 0)).unwrap();
+        store.append_transcript_segment(id, &line("stray")).unwrap();
+        store.refresh_workspace_import(note("v2", 1)).unwrap();
+        assert_eq!(texts(&store, id), vec!["v2"]);
     }
 }
