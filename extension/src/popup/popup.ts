@@ -121,11 +121,16 @@ async function run(action: () => Promise<void>): Promise<void> {
   }
 }
 
-chrome.runtime.onMessage.addListener((message: { type?: string; phase?: string; message?: string }) => {
+chrome.runtime.onMessage.addListener((message: { type?: string; phase?: string; message?: string; meetingId?: string | null }) => {
   if (message.type === "RECORDING_ERROR" && message.phase === "start") {
     error = message.message ?? "Capture did not start.";
     void render();
-  } else if (message.type === "MEETING_STATE_CHANGED") {
+  } else if (message.type === "RECORDING_ERROR" && message.meetingId) {
+    // A capture that failed mid-call ends the recording without a separate
+    // state change; without this an open popup kept offering Stop for it.
+    error = message.message ?? "The recording stopped unexpectedly. Audio saved so far is kept.";
+    void render();
+  } else if (message.type === "MEETING_STATE_CHANGED" || message.type === "SUMMARY_READY") {
     void render();
   }
 });

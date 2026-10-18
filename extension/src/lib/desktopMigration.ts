@@ -231,7 +231,11 @@ export async function saveDesktopAudioArchive(
   settingsInput: NotetakerSettings | Promise<NotetakerSettings>,
   loadMeetings: () => Promise<MeetingRecord[]>,
   exportedAt: string = new Date().toISOString(),
-  options: { isRecordingActive?: () => Promise<void> } = {},
+  options: {
+    isRecordingActive?: () => Promise<void>;
+    /** Audio bytes written so far: once before audio starts, then after each recording. */
+    onProgress?: (writtenBytes: number, totalBytes: number) => void;
+  } = {},
 ): Promise<{ meetingCount: number; chunkCount: number; audioBytes: number; adjustments: string[] }> {
   // Callers pass settings as a pending promise so nothing is awaited before the
   // picker opens (it needs the click's user activation). Silence the promise
@@ -301,6 +305,8 @@ export async function saveDesktopAudioArchive(
 
     let chunkCount = 0;
     let audioBytes = 0;
+    const plannedAudioBytes = audioInventory.reduce((total, item) => total + item.totalBytes, 0);
+    options.onProgress?.(0, plannedAudioBytes);
     const encoder = new TextEncoder();
     for (const { meetingId, lastSequence } of audioInventory) {
       const idBytes = encoder.encode(meetingId);
@@ -328,6 +334,7 @@ export async function saveDesktopAudioArchive(
         chunkCount += 1;
         audioBytes += chunk.bytes.length;
       }
+      options.onProgress?.(audioBytes, plannedAudioBytes);
     }
     const trailer = new Uint8Array(9);
     trailer[0] = 0xff;

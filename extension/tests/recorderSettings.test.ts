@@ -44,6 +44,20 @@ describe("Meet recorder settings", () => {
     expect(document.querySelector("#archive-status")?.textContent).toContain("Chrome data is unchanged");
   });
 
+  it("shows write progress instead of leaving the picker prompt on screen", async () => {
+    let finish: () => void = () => {};
+    archive.saveDesktopAudioArchive.mockImplementationOnce(async (_settings: unknown, _load: unknown, _at: unknown, options: { onProgress?: (written: number, total: number) => void }) => {
+      options.onProgress?.(0, 3 * 1024 * 1024);
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { meetingCount: 1, audioBytes: 3 * 1024 * 1024, chunkCount: 1 };
+    });
+    await loadSettings();
+    (document.querySelector("#export-archive") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector("#archive-status")?.textContent).toContain("Saving archive… 0.0 of 3.0 MB"));
+    finish();
+    await vi.waitFor(() => expect(document.querySelector("#archive-status")?.textContent).toContain("Chrome data is unchanged"));
+  });
+
   it("treats a cancelled save picker as a cancel, not a failure", async () => {
     archive.saveDesktopAudioArchive.mockRejectedValueOnce(new DOMException("The user aborted a request.", "AbortError"));
     await loadSettings();

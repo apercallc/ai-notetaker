@@ -92,6 +92,20 @@ describe("BackgroundController", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("never sends a failed recorder-only capture to an AI provider on retry", async () => {
+    const controller = new BackgroundController(createFakeClient(), vi.fn());
+    const fetch = vi.fn(async () => new Response("", { status: 503 }));
+    controller.setFetchImpl(fetch);
+    const process = vi.spyOn(browserProcessing, "processBrowserMeetRecording");
+    await controller.init();
+    const meetingId = await controller.startRecording("general", "meet");
+    await controller.failRecording(meetingId, "Call audio stopped.");
+    await expect(controller.retryProcessing(meetingId)).rejects.toThrow("desktop app");
+    expect(await getMeeting(meetingId)).toMatchObject({ status: "error", recorderOnly: true, errorMessage: "Call audio stopped." });
+    expect(process).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("finalizes a recording with no restored capture instead of showing it live forever", async () => {
     const first = new BackgroundController(createFakeClient(), vi.fn());
     await first.init();

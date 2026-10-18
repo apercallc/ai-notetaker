@@ -50,7 +50,12 @@ async function render(): Promise<void> {
     try {
       // Settings load is passed as a pending promise so the save picker opens
       // within the click's user activation.
-      const result = await saveDesktopAudioArchive(getSettings(), listMeetings);
+      const result = await saveDesktopAudioArchive(getSettings(), listMeetings, undefined, {
+        // A large archive takes minutes to write; never leave "Choose where to save" on screen meanwhile.
+        onProgress: (written, total) => {
+          status.textContent = `Saving archive… ${(written / 1024 / 1024).toFixed(1)} of ${(total / 1024 / 1024).toFixed(1)} MB of audio. Keep this tab open.`;
+        },
+      });
       status.textContent = `Saved ${result.meetingCount} meeting records and ${(result.audioBytes / 1024 / 1024).toFixed(1)} MB of audio. Chrome data is unchanged.${result.adjustments?.length ? ` Note: ${result.adjustments.join(" ")}` : ""}`;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {

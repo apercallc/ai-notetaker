@@ -51,6 +51,14 @@ describe("meeting page: background updates", () => {
     expect(document.body.textContent).toContain("Earlier notes");
   });
 
+  it("points a failed recorder-only capture to desktop export instead of a provider retry", async () => {
+    await openMeeting({ ...base, summary: null, transcript: [], actionItems: [], status: "error", captureSource: "meet", recorderOnly: true, errorMessage: "Call audio stopped." });
+    expect(document.querySelector("#retry-processing")).toBeNull();
+    expect(document.querySelector("#open-provider-settings")).toBeNull();
+    expect(document.querySelector("#export-saved-audio")).not.toBeNull();
+    expect(document.body.textContent).toContain("Call audio stopped.");
+  });
+
   it("updates Drive export after notes are complete", async () => {
     await openMeeting({ ...base, driveExport: { status: "pending" } });
     await saveMeeting({ ...base, driveExport: { status: "exported", webViewLink: "https://docs.google.com/document/d/notes" } });

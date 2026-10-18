@@ -556,6 +556,9 @@ export class BackgroundController {
     const meeting = await getMeeting(meetingId);
     if (!meeting || meeting.captureSource !== "meet") throw new Error("Only a saved browser recording can be retried here.");
     if (meeting.status !== "error") throw new Error("This meeting is not waiting for a processing retry.");
+    // New browser captures are recorder-only: Chrome never sends their audio
+    // to an AI provider. Notes for them are made by the desktop app.
+    if (meeting.recorderOnly) throw new Error("This browser recording is processed in the desktop app. Export it from Settings, then import it in AI Notetaker desktop.");
     const processing = await updateMeeting(meetingId, (current) => ({ ...current, status: "processing", errorMessage: undefined, providerPreflightWarning: undefined }));
     if (!processing) throw new Error("Meeting could not be loaded for retry.");
     this.broadcast({ type: "MEETING_STATE_CHANGED", meetingId });

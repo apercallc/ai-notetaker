@@ -149,6 +149,15 @@ describe("background message handling", () => {
     expect(full).toMatchObject({ callTitle: "Private call", active: { id: "live" } });
   });
 
+  it("still fails the meeting when a capture-error teardown cannot reach the offscreen page", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.capture.stop.mockRejectedValueOnce(new Error("Receiving end does not exist."));
+    const offscreen = { id: EXTENSION_ID, url: `chrome-extension://${EXTENSION_ID}/meet/offscreen.html` };
+    const reply = await send({ type: "MEET_CAPTURE_ERROR", meetingId: "live", message: "Audio stopped." }, offscreen);
+    expect(reply.response).toEqual({});
+    expect(mocks.controller.failRecording).toHaveBeenCalledWith("live", "Audio stopped.");
+  });
+
   it("answers a failing handler with an error envelope instead of hanging", async () => {
     mocks.controller.deleteMeeting.mockRejectedValueOnce(new Error("Stop the recording before deleting it."));
     expect((await send({ type: "DELETE_MEETING", meetingId: "live" }, popup)).response).toEqual({ error: "Stop the recording before deleting it." });

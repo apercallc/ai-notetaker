@@ -270,7 +270,12 @@ async function handleUiMessage(message: UiToBackgroundMessage, sender: chrome.ru
       await meetCapture.answerDirect(message.meetingId, message.sdp);
       return { ok: true };
     case "MEET_CAPTURE_ERROR":
-      await meetCapture.stop(message.meetingId);
+      // The offscreen page already tore its capture down. A teardown reply
+      // that fails (document already closed) must not leave the meeting
+      // stuck in "recording" with a REC badge and a live-looking Stop button.
+      await meetCapture.stop(message.meetingId).catch((error: unknown) => {
+        console.warn("Meet capture teardown after a capture error failed", error);
+      });
       await controller.failRecording(message.meetingId, message.message.slice(0, 500) || "Meet audio capture failed.");
       return {};
     case "MEET_CAPTURE_WARNING":

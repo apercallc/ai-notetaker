@@ -36,6 +36,8 @@ let captureGeneration = 0;
 let stoppingGeneration: number | null = null;
 let directReceiver: DirectAudioReceiver | null = null;
 let stopInFlight: Promise<void> | null = null;
+/** The meeting whose fatal capture error was already reported; one failure is reported once. */
+let reportedCaptureError: string | null = null;
 
 /** DOMException (what getUserMedia rejects with) is not always an Error across realms. */
 function errorMessage(error: unknown): string {
@@ -72,6 +74,19 @@ async function sendChunkWithRetry(payload: object): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, CHUNK_SEND_BACKOFF_MS * attempt));
     }
   }
+}
+
+/**
+ * Ends the capture and tells the worker why, once. Every in-flight chunk of a
+ * failed capture (and the flushed tail) fails the same way; repeating the
+ * error would re-fail the meeting and overwrite the first, accurate reason.
+ */
+function failCapture(meetingId: string, message: string): void {
+  if (reportedCaptureError !== meetingId) {
+    reportedCaptureError = meetingId;
+    void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_ERROR", meetingId, message }).catch(() => undefined);
+  }
+  void stop();
 }
 
 function reportLiveEvent(meetingId: string, generation: number, event: DeepgramLiveEvent): void {
@@ -198,9 +213,7 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
     // A slow disk or unreachable worker must not grow an unbounded audio queue.
     // Teardown still admits the final bounded partial buffer from each worklet.
     if (pendingWrites.size >= MAX_PENDING_WRITES && stoppingGeneration === null) {
-      void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_ERROR", meetingId,
-        message: "Audio could not be saved fast enough. Recording stopped; audio already saved is available for retry." }).catch(() => undefined);
-      void stop();
+      failCapture(meetingId, "Audio could not be saved fast enough. Recording stopped; audio already saved is available for retry.");
       return;
     }
     const pcm16 = float32ToPcm16(new Float32Array(event.data));
@@ -218,12 +231,7 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
       // Provider audio leaves the extension only after the worker acknowledges its local durable write.
       queueOrSendLiveAudio(channel, pcm16);
     }).catch(() => {
-      void chrome.runtime.sendMessage({
-        type: "MEET_CAPTURE_ERROR",
-        meetingId,
-        message: "AI Notetaker lost its connection to the call audio. What was recorded so far is safe; start notes again.",
-      }).catch(() => undefined);
-      void stop();
+      failCapture(meetingId, "AI Notetaker lost its connection to the call audio. What was recorded so far is safe; start notes again.");
     });
     pendingWrites.add(write);
     void write.finally(() => pendingWrites.delete(write));
@@ -256,6 +264,7 @@ function attachCapture(stream: MediaStream, channel: BrowserAudioChannel, meetin
 
 async function start(capturedStreamId: string | undefined, meetingId: string, tabId?: number, liveDeepgramKey?: string, directOffer?: string): Promise<void> {
   await stop();
+  reportedCaptureError = null;
   captureTabId = tabId;
   context = new AudioContext({ sampleRate: SAMPLE_RATE_HZ });
   if (context.sampleRate !== SAMPLE_RATE_HZ) throw new Error("The browser audio device could not run at 48 kHz");
@@ -269,9 +278,7 @@ async function start(capturedStreamId: string | undefined, meetingId: string, ta
     const generation = captureGeneration;
     directReceiver = new DirectAudioReceiver(() => {
       if (generation !== captureGeneration) return;
-      void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_ERROR", meetingId,
-        message: "The connection to Meet audio stopped. Your saved audio is safe. Start recording again." }).catch(() => undefined);
-      void stop();
+      failCapture(meetingId, "The connection to Meet audio stopped. Your saved audio is safe. Start recording again.");
     }, () => {
       if (generation !== captureGeneration) return;
       void chrome.runtime.sendMessage({ type: "MEET_CAPTURE_WARNING", meetingId,

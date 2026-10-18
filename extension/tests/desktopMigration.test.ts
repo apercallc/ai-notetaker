@@ -50,8 +50,10 @@ describe("desktop migration archive", () => {
     const sourceMeeting = { ...completed, id };
     const loadMeetings = vi.fn(async () => [sourceMeeting]);
 
-    const result = await saveDesktopAudioArchive(DEFAULT_SETTINGS, loadMeetings, "2026-10-03T12:00:00.000Z");
+    const onProgress = vi.fn();
+    const result = await saveDesktopAudioArchive(DEFAULT_SETTINGS, loadMeetings, "2026-10-03T12:00:00.000Z", { onProgress });
 
+    expect(onProgress.mock.calls).toEqual([[0, 6], [6, 6]]);
     expect(picker).toHaveBeenCalledOnce();
     expect(loadMeetings).toHaveBeenCalledOnce();
     expect(result).toEqual({ meetingCount: 1, chunkCount: 3, audioBytes: 6, adjustments: [] });

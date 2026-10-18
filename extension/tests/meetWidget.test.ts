@@ -891,6 +891,22 @@ describe("MeetWidget: one-click start, consent, and announcements", () => {
     expect(consent.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("opens export settings through the worker, since content scripts cannot open the options page", async () => {
+    const openOptionsPage = vi.fn();
+    vi.stubGlobal("chrome", { ...(globalThis as { chrome?: object }).chrome, runtime: { openOptionsPage } });
+    try {
+      harness = await createHarness(baseState({
+        latest: { id: "m1", title: "Roadmap", startedAt: "2026-09-24T11:00:00.000Z", endedAt: "2026-09-24T11:55:00.000Z", status: "saved", recorderOnly: true },
+      }));
+      expect(harness.$("h2")?.textContent).toContain("Meeting audio saved");
+      await harness.click("#open-ai-settings");
+      expect(harness.sent).toContainEqual({ type: "OPEN_PAGE", page: "settings" });
+      expect(openOptionsPage).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("describes where audio goes honestly while connecting", async () => {
     harness = await createHarness();
     let release: (() => void) | undefined;

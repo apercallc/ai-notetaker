@@ -122,7 +122,7 @@ async function render(focusActionId?: string): Promise<void> {
     <div class="brand-lockup"><img src="../icons/icon48.png" alt="" aria-hidden="true" /><a href="../popup/popup.html">AI Notetaker</a></div>
     <div class="title-row" id="title-row">${titleRowHtml(title)}</div>
     <p class="meeting-meta text-secondary">${new Date(meeting.startedAt).toLocaleString()}</p>
-    ${meeting.status === "saved" ? '<p class="drive-export-status" role="status">Meet audio is saved in Chrome. Export the recording from extension Settings, then import it in the desktop app to make notes. <button type="button" class="secondary" id="export-saved-audio">Open export</button></p>' : ""}
+    ${meeting.status === "saved" || (meeting.recorderOnly && meeting.status === "error") ? '<p class="drive-export-status" role="status">Meet audio is saved in Chrome. Export the recording from extension Settings, then import it in the desktop app to make notes. <button type="button" class="secondary" id="export-saved-audio">Open export</button></p>' : ""}
     ${meeting.attendeeShare
       ? `<p class="drive-export-status" role="status">Attendee share link (expires ${escapeHtml(new Date(meeting.attendeeShare.expiresAt).toLocaleDateString())}): <a href="${escapeHtml(safeShareLink(meeting.attendeeShare.shareUrl))}" target="_blank" rel="noreferrer">${escapeHtml(meeting.attendeeShare.shareUrl)}</a></p>`
       : ""}
@@ -151,7 +151,7 @@ async function render(focusActionId?: string): Promise<void> {
           : meeting.status === "error"
             ? `<p class="error-state meeting-error">Failed: ${escapeHtml(meeting.errorMessage ?? "unknown error")}</p>`
             : `<p class="text-secondary">No summary yet.</p>`}
-      ${meeting.status === "error" && meeting.captureSource === "meet" ? `<div class="row"><button type="button" class="secondary" id="retry-processing">Retry saved browser audio</button>${meeting.processingMode?.kind !== "managed" ? `<button type="button" class="secondary" id="open-provider-settings">Open AI settings</button>` : ""}</div>` : ""}
+      ${meeting.status === "error" && meeting.captureSource === "meet" && !meeting.recorderOnly ? `<div class="row"><button type="button" class="secondary" id="retry-processing">Retry saved browser audio</button>${meeting.processingMode?.kind !== "managed" ? `<button type="button" class="secondary" id="open-provider-settings">Open AI settings</button>` : ""}</div>` : ""}
     </section>
 
     <section>

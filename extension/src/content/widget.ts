@@ -354,11 +354,12 @@ export class MeetWidget {
       this.root.querySelector(selector)?.addEventListener("click", handler);
     };
     on("#reload", () => this.deps.reload());
-    const openPage = (page: "onboarding" | "shortcuts" | "microphone"): void => {
+    const openPage = (page: "onboarding" | "settings" | "shortcuts" | "microphone"): void => {
       void this.deps.send({ type: "OPEN_PAGE", page }).catch(() => {});
     };
     on("#open-setup", () => openPage("onboarding"));
-    on("#open-ai-settings", () => chrome.runtime.openOptionsPage());
+    // Content scripts have no chrome.runtime.openOptionsPage; the worker opens it.
+    on("#open-ai-settings", () => openPage("settings"));
     on("#set-shortcut", () => openPage("shortcuts"));
     on("#allow-mic", () => openPage("microphone"));
     on("#open-notes", () => {

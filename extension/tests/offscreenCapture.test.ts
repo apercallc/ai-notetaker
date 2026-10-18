@@ -171,7 +171,9 @@ describe("offscreen capture", () => {
     workletNodes[0]?.port.onmessage?.({ data: new Float32Array(24_000).buffer });
 
     await vi.waitFor(() => expect(tab.stop).toHaveBeenCalled());
-    expect(chromeMock.runtime.sendMessage.mock.calls.some(([message]) => (message as { type: string }).type === "MEET_CAPTURE_ERROR")).toBe(true);
+    // The flushed tail fails the same way; the meeting is failed once, with the first reason.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(chromeMock.runtime.sendMessage.mock.calls.filter(([message]) => (message as { type: string }).type === "MEET_CAPTURE_ERROR")).toHaveLength(1);
   });
 
   it("warns, without stopping, when a capture track ends on its own", async () => {

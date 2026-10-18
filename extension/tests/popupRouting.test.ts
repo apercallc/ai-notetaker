@@ -84,6 +84,26 @@ describe("browser recorder popup", () => {
     await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: "STOP_RECORDING", meetingId: "active" }));
   });
 
+  it("drops Stop and explains when a capture fails mid-call", async () => {
+    const live = { activeMeeting: { id: "active" } as { id: string } | null };
+    await loadPopup({ id: 7, url: "https://meet.google.com/abc-defg-hij" }, undefined, live);
+    chromeMock.runtime.sendMessage.mockImplementation(async (message: { type?: string }) => (message.type === "GET_STATE" ? { ...state, ...live } : {}));
+    await new Promise<void>((resolve) => chromeMock.storage.local.set({
+      "notetaker.meeting.active": { id: "active", title: "Call", captureSource: "meet", status: "recording", startedAt: "2026-10-04T00:00:00Z", transcript: [], actionItems: [] },
+    }, resolve));
+    const listener = chromeMock.runtime.onMessage.addListener.mock.calls.at(-1)![0];
+    listener({ type: "MEETING_STATE_CHANGED", meetingId: "active" });
+    await vi.waitFor(() => expect(document.querySelector("#stop-recording")).not.toBeNull());
+
+    live.activeMeeting = null;
+    await new Promise<void>((resolve) => chromeMock.storage.local.set({
+      "notetaker.meeting.active": { id: "active", title: "Call", captureSource: "meet", status: "error", errorMessage: "Call audio stopped.", startedAt: "2026-10-04T00:00:00Z", transcript: [], actionItems: [] },
+    }, resolve));
+    listener({ type: "RECORDING_ERROR", meetingId: "active", message: "Call audio stopped." });
+    await vi.waitFor(() => expect(document.querySelector("#stop-recording")).toBeNull());
+    expect(document.querySelector("[role=alert]")?.textContent).toContain("Call audio stopped.");
+  });
+
   it("opens archive export from Settings", async () => {
     await loadPopup({ id: 1, url: "chrome://newtab" });
     (document.querySelector("#export-recordings") as HTMLButtonElement).click();
