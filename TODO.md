@@ -16,8 +16,9 @@
       remains tracked in the transcript-write follow-up below.
 - [x] Refresh release evidence to the published v0.23.0 and correct the
       roadmap's active architecture reference to the desktop-first spec.
-- [ ] Resolve native audio-writer backpressure without blocking capture or
-      silently dropping samples; tracked in “Desktop audio writer backpressure”.
+- [x] Resolve native audio-writer backpressure without blocking capture or
+      silently dropping samples (counted sender, warn ~10 s, clean stop ~5 min).
+      Still needs a slow-storage run on real hardware.
 
 ## Code audit follow-ups — 2026-10-18
 
@@ -32,9 +33,8 @@ writes, PATCH body cap, list over-fetch, ProcessingJob meetingId index.
       warns at ~10 s of unsaved audio and stops cleanly (queued audio written,
       meeting left recoverable) at ~5 min. Still needs a slow-disk run on real
       hardware and a macOS compile check.
-- [ ] macOS: ScreenCaptureKit captures full-resolution video only for audio;
-      try a 2×2 frame with a long minimum interval on a real Mac. The mic has no
-      default-device-change supervisor.
+- [x] macOS: ScreenCaptureKit now requests 2×2 frames at 1 fps; the mic uses
+      the shared InputSupervisor. Confirm on a real Mac that SCK accepts 2×2.
 - [x] Windows/Linux: one silence filler per recording keeps the speaker
       timeline aligned across loopback/`parec` restarts (gaps over 60 s re-base).
 - [x] Honor `retry_after_secs` from 429s (capped at 15 min); order transcript
@@ -44,8 +44,8 @@ writes, PATCH body cap, list over-fetch, ProcessingJob meetingId index.
 - [x] Desktop: keychain reads in async commands run on `spawn_blocking`.
 - [x] Extension: detect a lost offscreen document after a worker restart; honor
       the widget's meeting mode; archive inventory uses a byteLength index.
-- [ ] Webapp: confirm desktop-sync GET (download) staying ungated for lapsed
-      plans matches the pricing policy; `accounts.test.ts` assumes an empty DB.
+- [ ] **You (decision):** confirm desktop-sync GET (download) staying ungated
+      for lapsed plans matches the pricing policy. (`accounts.test.ts` fixed.)
 
 ## Cross-site browser recorder controls — 2026-10-05
 
@@ -222,8 +222,8 @@ writes, PATCH body cap, list over-fetch, ProcessingJob meetingId index.
 
 ## Desktop audio writer backpressure — 2026-10-09
 
-- [ ] Bound the native frame-delivery queue without blocking the OS capture
-      callback or silently dropping audio. Disk stalls currently let queued
+- [x] Bound the native frame-delivery queue without blocking the OS capture
+      callback or silently dropping audio (done 2026-10-18; see audit section). Disk stalls currently let queued
       frames accumulate in memory while a single delivery thread writes them.
       Choose and implement an audio-safe overflow policy, then verify on slow
       storage and real capture devices. A naive bounded blocking queue can

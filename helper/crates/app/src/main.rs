@@ -3105,11 +3105,13 @@ async fn handle_message(
                                 let audio = disk_full_audio.clone();
                                 disk_full_handle.spawn(async move {
                                     let _ = audio.stop_capture().await;
-                                    if let Some(active) =
-                                        state.active.lock().await.remove(&meeting_id)
-                                    {
-                                        active.audio_processing.finish().await;
-                                    }
+                                    release_interrupted_capture(
+                                        &state.active,
+                                        &state.pipelines,
+                                        &state.retry_tasks,
+                                        meeting_id,
+                                    )
+                                    .await;
                                     tray.set_recording(false);
                                     tray.set_attention(true);
                                 });
@@ -3149,11 +3151,13 @@ async fn handle_message(
                             tokio::spawn(async move {
                                 // Joins the capture after every queued frame has been written.
                                 let _ = fatal_audio.stop_capture().await;
-                                if let Some(active) =
-                                    fatal_state.active.lock().await.remove(&meeting_id)
-                                {
-                                    active.audio_processing.finish().await;
-                                }
+                                release_interrupted_capture(
+                                    &fatal_state.active,
+                                    &fatal_state.pipelines,
+                                    &fatal_state.retry_tasks,
+                                    meeting_id,
+                                )
+                                .await;
                                 fatal_tray.set_recording(false);
                                 fatal_tray.set_attention(true);
                             });
@@ -3571,6 +3575,28 @@ fn audio_status_message(
         virtual_device_fallback: diagnostics.virtual_device_fallback,
         permission_required: diagnostics.permission_required,
     }
+}
+
+/// Ends a capture that stopped on its own (full disk, disk too slow) without finishing the note:
+/// writes every queued frame, then releases the meeting's pipeline and retry worker so "Finish
+/// notes" can recover it now instead of being refused as already processing until a restart.
+/// The meeting stays in its recording state and its retry queue stays on disk for recovery.
+/// Does nothing when a user Stop already took the recording over: that stop owns the pipeline.
+async fn release_interrupted_capture<P>(
+    active: &Mutex<HashMap<Uuid, ActiveRecording>>,
+    pipelines: &Mutex<HashMap<Uuid, P>>,
+    retry_tasks: &Mutex<HashMap<Uuid, RetryWorker>>,
+    meeting_id: Uuid,
+) -> bool {
+    let Some(recording) = active.lock().await.remove(&meeting_id) else {
+        return false;
+    };
+    recording.audio_processing.finish().await;
+    if let Some(worker) = retry_tasks.lock().await.remove(&meeting_id) {
+        worker.abort();
+    }
+    pipelines.lock().await.remove(&meeting_id);
+    true
 }
 
 fn spawn_retry_worker(
@@ -4376,6 +4402,64 @@ mod tests {
             "a double click while stopping"
         );
         assert!(check_stop_target(false, false, false).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_capture_releases_its_pipeline_and_retry_worker_for_recovery() {
+        let id = Uuid::new_v4();
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<PersistedAudioChunk>();
+        let written = Arc::new(AtomicBool::new(false));
+        let drain_written = written.clone();
+        let drain = tokio::spawn(async move {
+            while receiver.recv().await.is_some() {}
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            drain_written.store(true, Ordering::SeqCst);
+        });
+        let active = Mutex::new(HashMap::from([(
+            id,
+            ActiveRecording {
+                audio: None,
+                audio_processing: Arc::new(AudioProcessingQueue {
+                    sender: std::sync::Mutex::new(Some(sender)),
+                    task: Mutex::new(Some(drain)),
+                }),
+                capture_source: CaptureSource::DesktopLoopback,
+            },
+        )]));
+        let pipelines = Mutex::new(HashMap::from([(id, ())]));
+        let retry_task = tokio::spawn(std::future::pending::<()>());
+        let retry_handle = retry_task.abort_handle();
+        let retry_tasks = Mutex::new(HashMap::from([(
+            id,
+            RetryWorker {
+                stop_when_empty: Arc::new(AtomicBool::new(false)),
+                _task: retry_task,
+            },
+        )]));
+
+        assert!(release_interrupted_capture(&active, &pipelines, &retry_tasks, id).await);
+        assert!(
+            written.load(Ordering::SeqCst),
+            "queued audio is written first"
+        );
+        assert!(active.lock().await.is_empty());
+        assert!(pipelines.lock().await.is_empty(), "recovery is not refused");
+        assert!(retry_tasks.lock().await.is_empty());
+        for _ in 0..10 {
+            if retry_handle.is_finished() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            retry_handle.is_finished(),
+            "the endless retry worker is aborted"
+        );
+
+        // A user Stop that already took the recording keeps its pipeline.
+        pipelines.lock().await.insert(id, ());
+        assert!(!release_interrupted_capture(&active, &pipelines, &retry_tasks, id).await);
+        assert!(pipelines.lock().await.contains_key(&id));
     }
 
     #[test]

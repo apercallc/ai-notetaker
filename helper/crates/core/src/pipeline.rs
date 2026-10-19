@@ -1160,6 +1160,9 @@ impl Pipeline {
                 }]
             }
         };
+        if self.no_range_transcribed(meeting_id, &transcript) {
+            return vec![self.leave_audio_only(meeting_id)];
+        }
         match self
             .summarize_transcript(&transcript, &meta.summary_options)
             .await
@@ -1202,6 +1205,42 @@ impl Pipeline {
                 code: error.to_error_code(),
                 message: format!("summarization failed: {error}"),
             }],
+        }
+    }
+
+    /// Nothing was transcribed because transcription gave up on saved audio (a revoked key, an
+    /// outage past the attempt budget), not because the call was silent.
+    fn no_range_transcribed(
+        &self,
+        meeting_id: Uuid,
+        transcript: &[crate::providers::TranscriptSegment],
+    ) -> bool {
+        transcript
+            .iter()
+            .all(|segment| segment.text.trim().is_empty())
+            && self
+                .retry_queue
+                .dead_jobs()
+                .iter()
+                .any(|job| job.payload.meeting_id == meeting_id)
+    }
+
+    /// Leaves a meeting whose audio could not be transcribed without notes ("Audio only") rather
+    /// than writing the silent-recording note, so "Try making notes again" stays available.
+    fn leave_audio_only(&self, meeting_id: Uuid) -> HelperToExtension {
+        if let Err(error) = self.store.clear_summary_pending(meeting_id) {
+            return HelperToExtension::Error {
+                meeting_id: Some(meeting_id),
+                code: ErrorCode::StorageError,
+                message: format!("summarization failed: could not update the meeting: {error}"),
+            };
+        }
+        HelperToExtension::Error {
+            meeting_id: Some(meeting_id),
+            code: ErrorCode::ProviderUnreachable,
+            message: "summarization failed: the saved audio could not be transcribed, so no \
+                      notes were made. The audio is kept; try making notes again."
+                .into(),
         }
     }
 
@@ -1440,6 +1479,9 @@ impl Pipeline {
                 });
             }
         };
+        if self.no_range_transcribed(meeting_id, &transcript) {
+            return Some(self.leave_audio_only(meeting_id));
+        }
         match self
             .summarize_transcript(&transcript, &meta.summary_options)
             .await
@@ -1967,10 +2009,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn giving_up_on_a_chunk_still_summarizes_the_rest_of_the_meeting() {
+    async fn giving_up_on_every_range_leaves_audio_only_and_a_notes_retry_rebuilds_it() {
         // Fails every attempt, so the job is eventually given up on rather
         // than ever succeeding.
-        let (_dir, mut pipeline) = build_pipeline(usize::MAX);
+        let dir = tempfile::tempdir().unwrap();
+        let failures_left = Arc::new(AtomicUsize::new(usize::MAX));
+        let mut pipeline = Pipeline::new(
+            MeetingStore::new(dir.path()).unwrap(),
+            Box::new(FakeTranscriber {
+                fail_times: failures_left.clone(),
+                return_empty: false,
+            }),
+            Box::new(FakeSummarizer),
+            RetryQueue::load_or_create(dir.path().join("retry.json")).unwrap(),
+        );
         let id = Uuid::new_v4();
         pipeline.start_recording(id).unwrap();
         pipeline
@@ -2002,12 +2054,76 @@ mod tests {
                 if message.starts_with("transcription retry exhausted")
         )));
         assert!(
-            messages.iter().any(|message| matches!(
-                message,
-                HelperToExtension::SummaryReady { summary, .. } if summary.starts_with("No speech")
-            )),
-            "one permanently failed chunk must not strand the whole summary",
+            !messages
+                .iter()
+                .any(|message| matches!(message, HelperToExtension::SummaryReady { .. })),
+            "a transcription failure is not a silent recording",
         );
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::Error { message, .. } if message.contains("no notes were made")
+        )));
+        let store = pipeline.store.clone();
+        let meta = store.load_meta(id).unwrap();
+        assert_eq!(meta.state, MeetingState::Stopped);
+        assert!(!meta.summary_pending, "nothing is left looking in flight");
+        assert!(store.load_summary(id).unwrap().is_none());
+        assert_eq!(
+            store.notes_retry_refusal(id).unwrap(),
+            None,
+            "Try making notes again is offered"
+        );
+
+        // The key is fixed; the in-place retry requeues the given-up range and re-runs cleanly.
+        failures_left.store(0, Ordering::SeqCst);
+        store.prepare_notes_retry(id).unwrap();
+        let mut messages = pipeline.recover_recording(id).await.unwrap();
+        messages.extend(pipeline.process_due_retries(Utc::now()).await);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
+        assert_eq!(store.load_meta(id).unwrap().state, MeetingState::Processed);
+        assert_eq!(
+            store.load_transcript(id).unwrap().len(),
+            1,
+            "no duplicated text"
+        );
+        assert!(pipeline.retry_queue.dead_jobs().is_empty());
+    }
+
+    #[tokio::test]
+    async fn giving_up_on_one_range_still_summarizes_what_did_transcribe() {
+        let (_dir, mut pipeline) = build_pipeline(usize::MAX);
+        let id = Uuid::new_v4();
+        pipeline.start_recording(id).unwrap();
+        pipeline
+            .store
+            .append_transcript_segment(
+                id,
+                &TranscriptSegment {
+                    speaker: "you".into(),
+                    text: "kept".into(),
+                    is_final: true,
+                    timestamp: None,
+                },
+            )
+            .unwrap();
+        pipeline
+            .handle_audio_chunk(id, AudioChannel::Mic, &[9, 8, 7], 16_000)
+            .await;
+        pipeline.flush_pending_audio(id).await;
+        pipeline.stop_recording(id).await.unwrap();
+        let mut now = Utc::now();
+        let mut messages = Vec::new();
+        for _ in 0..12 {
+            now += chrono::Duration::seconds(600);
+            messages.extend(pipeline.process_due_retries(now).await);
+        }
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HelperToExtension::SummaryReady { summary, .. } if summary == "fake summary"
+        )));
     }
 
     #[tokio::test]

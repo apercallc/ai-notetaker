@@ -1202,8 +1202,16 @@ impl MeetingStore {
             .create(true)
             .append(true)
             .open(&log_path)?;
-        file.write_all(&lines)?;
-        file.sync_data()?;
+        if let Err(error) = write_transcript_log(&mut file, &lines) {
+            // The caller treats a failed append as not saved and retries the same segments, so
+            // no line of this batch may stay visible: a partial write or a failed fsync would
+            // otherwise leave complete lines behind and the retry would duplicate that text.
+            drop(file);
+            if let Err(truncate_error) = truncate_file(&log_path, existing_log_len) {
+                tracing::warn!(%id, %truncate_error, "could not trim a failed transcript append");
+            }
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -1861,6 +1869,17 @@ fn truncate_file(path: &Path, len: u64) -> Result<(), std::io::Error> {
     fs::OpenOptions::new().write(true).open(path)?.set_len(len)
 }
 
+fn write_transcript_log(file: &mut fs::File, bytes: &[u8]) -> Result<(), std::io::Error> {
+    file.write_all(bytes)?;
+    #[cfg(test)]
+    if tests::FAIL_TRANSCRIPT_LOG_SYNC.with(|fail| fail.replace(false)) {
+        return Err(std::io::Error::other(
+            "injected transcript log fsync failure",
+        ));
+    }
+    file.sync_data()
+}
+
 impl Drop for AudioAppender {
     /// Whoever owns a live capture drops the appender when the capture ends; flush what the
     /// batching has not yet made durable. Best effort: there is nobody left to report to.
@@ -1877,6 +1896,12 @@ pub fn is_valid_root(path: &Path) -> bool {
 mod tests {
     use super::*;
     use chrono::Duration;
+
+    thread_local! {
+        /// Makes the next transcript log append fail after its bytes were written.
+        pub(super) static FAIL_TRANSCRIPT_LOG_SYNC: std::cell::Cell<bool> =
+            const { std::cell::Cell::new(false) };
+    }
 
     fn temp_store() -> (tempfile::TempDir, MeetingStore) {
         let dir = tempfile::tempdir().unwrap();
@@ -3172,6 +3197,35 @@ mod tests {
         assert_eq!(texts(&store, id), vec!["old one", "old two", "new"]);
         store.compact_transcript(id).unwrap();
         assert_eq!(texts(&store, id), vec!["old one", "old two", "new"]);
+    }
+
+    #[test]
+    fn a_failed_transcript_append_leaves_no_lines_so_the_retry_does_not_duplicate_text() {
+        let (_dir, store) = temp_store();
+        let id = Uuid::new_v4();
+        store.create_meeting(id, Utc::now()).unwrap();
+        store.append_transcript_segment(id, &line("first")).unwrap();
+        let path = store.meeting_dir(id).join(TRANSCRIPT_LOG_FILE);
+        let before = fs::read(&path).unwrap();
+
+        FAIL_TRANSCRIPT_LOG_SYNC.with(|fail| fail.set(true));
+        let batch = [line("second"), line("third")];
+        assert!(store.append_transcript_segments(id, &batch).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before, "the failed batch is gone");
+        assert_eq!(texts(&store, id), vec!["first"]);
+
+        // The pipeline retries the same batch; it must appear exactly once.
+        store.append_transcript_segments(id, &batch).unwrap();
+        assert_eq!(texts(&store, id), vec!["first", "second", "third"]);
+
+        // A failure on the very first append (header included) leaves an empty log behind.
+        let other = Uuid::new_v4();
+        store.create_meeting(other, Utc::now()).unwrap();
+        FAIL_TRANSCRIPT_LOG_SYNC.with(|fail| fail.set(true));
+        assert!(store.append_transcript_segment(other, &line("x")).is_err());
+        assert!(texts(&store, other).is_empty());
+        store.append_transcript_segment(other, &line("x")).unwrap();
+        assert_eq!(texts(&store, other), vec!["x"]);
     }
 
     #[test]

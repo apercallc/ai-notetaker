@@ -24,6 +24,10 @@ pub(crate) type ReadySender = oneshot::Sender<Result<(), String>>;
 pub(crate) struct CaptureSession {
     running: Arc<AtomicBool>,
     workers: Mutex<Vec<JoinHandle<()>>>,
+    /// Held by a stop for its whole drain-and-join, so a concurrent stop (the user's Stop while
+    /// a backlog-overflow stop is still writing queued audio) waits for the frames to be on disk
+    /// instead of returning while they are still being delivered.
+    stopping: Mutex<()>,
 }
 
 impl CaptureSession {
@@ -31,6 +35,7 @@ impl CaptureSession {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             workers: Mutex::new(Vec::new()),
+            stopping: Mutex::new(()),
         }
     }
 
@@ -56,8 +61,13 @@ impl CaptureSession {
     }
 
     /// Signals stop and joins every worker. Blocking; call from a blocking
-    /// context (or via [`Self::stop`]).
+    /// context (or via [`Self::stop`]). A stop that overlaps another returns
+    /// only once the first one's workers are joined.
     pub(crate) fn stop_blocking(&self) {
+        let _stopping = self
+            .stopping
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.running.store(false, Ordering::SeqCst);
         let handles: Vec<JoinHandle<()>> = self
             .workers
@@ -332,6 +342,38 @@ mod tests {
             finished.load(Ordering::SeqCst),
             "stop must wait for the worker to finish so a restart cannot overlap"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_stops_both_wait_for_delivery_to_drain() {
+        let session = Arc::new(CaptureSession::new());
+        let running = session.arm();
+        let drained = Arc::new(AtomicBool::new(false));
+        let worker_drained = drained.clone();
+        session.attach(vec![std::thread::spawn(move || {
+            while running.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // A long backlog still being written after the stop signal.
+            std::thread::sleep(Duration::from_millis(200));
+            worker_drained.store(true, Ordering::SeqCst);
+        })]);
+        let first = {
+            let session = session.clone();
+            let drained = drained.clone();
+            tokio::spawn(async move {
+                session.stop().await;
+                drained.load(Ordering::SeqCst)
+            })
+        };
+        // Let the first stop take the workers before the second one starts.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        session.stop().await;
+        assert!(
+            drained.load(Ordering::SeqCst),
+            "a second stop must not return while the first is still draining"
+        );
+        assert!(first.await.unwrap());
     }
 
     #[test]

@@ -155,6 +155,17 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> RetryQueue<T> {
         Ok(())
     }
 
+    /// The jobs parked by [`Self::bury`], i.e. work that ran out of attempts and was not requeued.
+    pub fn dead_jobs(&self) -> Vec<RetryJob<T>> {
+        fs::read(self.dead_path())
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Vec<serde_json::Value>>(&bytes).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|value| serde_json::from_value(value).ok())
+            .collect()
+    }
+
     /// Puts every parked job back in the queue with a fresh attempt budget; returns how many.
     pub fn requeue_dead(&mut self, now: DateTime<Utc>) -> Result<usize, RetryQueueError> {
         let path = self.dead_path();
