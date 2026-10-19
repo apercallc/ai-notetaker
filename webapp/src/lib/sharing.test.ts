@@ -97,4 +97,26 @@ describe("meeting shares", () => {
     expect((await createMeetingShare(WORKSPACE_ID, MEETING_ID)).token).toBeTruthy();
     await expect(createMeetingShare(WORKSPACE_ID, MEETING_ID)).rejects.toBeInstanceOf(SharingValidationError);
   });
+
+  it("does not let concurrent creates pass the cap together", async () => {
+    const now = Date.now();
+    await prisma.meetingShareToken.createMany({
+      data: Array.from({ length: MAX_ACTIVE_SHARES_PER_MEETING - 1 }, (_, index) => ({
+        workspaceId: WORKSPACE_ID, meetingId: MEETING_ID, tokenHash: `race-${index}`, expiresAt: new Date(now + 86_400_000),
+      })),
+    });
+    const results = await Promise.allSettled([createMeetingShare(WORKSPACE_ID, MEETING_ID), createMeetingShare(WORKSPACE_ID, MEETING_ID)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(await listActiveShares(WORKSPACE_ID, MEETING_ID)).toHaveLength(MAX_ACTIVE_SHARES_PER_MEETING);
+  });
+
+  it("lists every live link, even on a note shared more than the cap before it existed", async () => {
+    const now = Date.now();
+    await prisma.meetingShareToken.createMany({
+      data: Array.from({ length: MAX_ACTIVE_SHARES_PER_MEETING + 3 }, (_, index) => ({
+        workspaceId: WORKSPACE_ID, meetingId: MEETING_ID, tokenHash: `legacy-${index}`, expiresAt: null,
+      })),
+    });
+    expect(await listActiveShares(WORKSPACE_ID, MEETING_ID)).toHaveLength(MAX_ACTIVE_SHARES_PER_MEETING + 3);
+  });
 });

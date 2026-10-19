@@ -183,12 +183,14 @@ export class MeetCaptureController {
     if (this.starting || this.activeMeetings.size === 0) return [];
     const candidates = [...this.activeMeetings.keys()];
     if ((await offscreenDocumentPresent()) !== false || this.starting) return [];
-    const lost = candidates.filter((meetingId) => this.activeMeetings.has(meetingId));
-    for (const meetingId of lost) {
+    const lost: string[] = [];
+    for (const meetingId of candidates) {
+      // A concurrent call may already have claimed this meeting during an await.
       const capture = this.activeMeetings.get(meetingId);
-      this.activeMeetings.delete(meetingId);
+      if (!capture || !this.activeMeetings.delete(meetingId)) continue;
+      lost.push(meetingId);
       // Retire the page-side signaling session too, best effort.
-      if (capture) await this.stopDirect(capture);
+      await this.stopDirect(capture);
     }
     if (lost.length > 0) await this.persistCaptures();
     return lost;

@@ -36,17 +36,23 @@ export async function createMeetingShare(
   expiresInDays: ShareExpiry = DEFAULT_SHARE_EXPIRY_DAYS,
 ): Promise<{ id: string; token: string; expiresAt: Date | null }> {
   const expiresAt = expiresInDays === null ? null : expiryDate(expiresInDays);
-  const meeting = await prisma.meeting.findFirst({ where: { id: meetingId, workspaceId, deletedAt: null }, select: { id: true } });
-  if (!meeting) throw new SharingValidationError("This note no longer exists.");
-  const active = await prisma.meetingShareToken.count({ where: { workspaceId, meetingId, revokedAt: null, ...stillValid() } });
-  if (active >= MAX_ACTIVE_SHARES_PER_MEETING) {
-    throw new SharingValidationError(`This note already has ${MAX_ACTIVE_SHARES_PER_MEETING} active links. Revoke one you no longer need first.`);
-  }
-
   const token = randomBytes(32).toString("base64url");
-  const share = await prisma.meetingShareToken.create({
-    data: { workspaceId, meetingId, tokenHash: hashToken(token), expiresAt },
-    select: { id: true, expiresAt: true },
+  // Count and insert under the note's row lock so two concurrent creates
+  // can't both pass the cap.
+  const share = await prisma.$transaction(async (tx) => {
+    const meeting = await tx.meeting.findFirst({ where: { id: meetingId, workspaceId, deletedAt: null }, select: { id: true } });
+    if (!meeting) throw new SharingValidationError("This note no longer exists.");
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "Meeting" WHERE "id" = ${meetingId} FOR UPDATE
+    `;
+    const active = await tx.meetingShareToken.count({ where: { workspaceId, meetingId, revokedAt: null, ...stillValid() } });
+    if (active >= MAX_ACTIVE_SHARES_PER_MEETING) {
+      throw new SharingValidationError(`This note already has ${MAX_ACTIVE_SHARES_PER_MEETING} active links. Revoke one you no longer need first.`);
+    }
+    return tx.meetingShareToken.create({
+      data: { workspaceId, meetingId, tokenHash: hashToken(token), expiresAt },
+      select: { id: true, expiresAt: true },
+    });
   });
   return { ...share, token };
 }
@@ -69,8 +75,9 @@ export async function revokeMeetingShare(workspaceId: string, shareId: string, m
 export async function listActiveShares(workspaceId: string, meetingId: string): Promise<ActiveShare[]> {
   const rows = await prisma.meetingShareToken.findMany({
     where: { workspaceId, meetingId, revokedAt: null, ...stillValid() },
+    // No limit: every live link must stay visible so it can be revoked. Creation
+    // is capped, but notes shared before the cap may hold more.
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-    take: MAX_ACTIVE_SHARES_PER_MEETING,
     select: { id: true, createdAt: true, expiresAt: true },
   });
   return rows.map((row) => ({ id: row.id, createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt?.toISOString() ?? null }));
