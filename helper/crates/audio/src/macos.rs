@@ -9,6 +9,7 @@
 //! contracts identical across operating systems.
 
 use crate::device_matching::{find_matching_device, MACOS_DEVICE_HINT};
+use crate::input::InputSupervisor;
 use crate::{
     capture_ready, interleaved_f32_to_mono_pcm16, AudioCapture, AudioDiagnostics, AudioError,
     CapturedFrame, DriverStatus,
@@ -25,6 +26,10 @@ use tokio::sync::oneshot;
 pub const BLACKHOLE_DOWNLOAD_URL: &str = "https://existential.audio/blackhole/";
 const SCREEN_CAPTURE_SAMPLE_RATE_HZ: u32 = 48_000;
 const SCREEN_CAPTURE_CHANNELS: usize = 2;
+/// The unused video stream is kept tiny: 2x2 px at 1 fps.
+const SCREEN_CAPTURE_VIDEO_EDGE_PX: u32 = 2;
+const SCREEN_CAPTURE_VIDEO_FPS: u32 = 1;
+const SCREEN_CAPTURE_VIDEO_QUEUE_DEPTH: u32 = 3;
 
 pub struct MacosAudioCapture {
     running: Arc<AtomicBool>,
@@ -182,26 +187,23 @@ impl AudioCapture for MacosAudioCapture {
 
         let worker = std::thread::spawn(move || {
             let host = cpal::default_host();
-            let mic_device = host.default_input_device();
-            let Some(mic_device) = mic_device else {
-                let _ = ready_tx.send(Err("the system microphone was not found".into()));
-                return;
-            };
-            let mic_stream = match build_input_stream(
-                &mic_device,
-                AudioChannel::Mic,
-                tx.clone(),
-                health.clone(),
-            ) {
-                Ok(stream) => stream,
-                Err(error) => {
-                    let _ = ready_tx.send(Err(error.to_string()));
-                    return;
-                }
-            };
+            // The shared supervisor (same as Linux/Windows) keeps the mic on its
+            // own channel and reopens it on cpal stream errors or when the
+            // system default input changes. Its first open must succeed:
+            // recording without the user's voice is a start failure.
+            let mut mic =
+                match InputSupervisor::start(AudioChannel::Mic, None, tx.clone(), health.clone()) {
+                    Ok(mic) => mic,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error.to_string()));
+                        return;
+                    }
+                };
 
             if native_loopback {
-                if let Err(error) = run_screencapturekit_capture(running.clone(), tx, ready_tx) {
+                if let Err(error) =
+                    run_screencapturekit_capture(running.clone(), tx, ready_tx, &mut mic)
+                {
                     tracing::error!(%error, "macOS ScreenCaptureKit capture stopped");
                     health.emit(
                         AudioChannel::Speaker,
@@ -229,10 +231,11 @@ impl AudioCapture for MacosAudioCapture {
                 let _ = ready_tx.send(Ok(()));
                 while running.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(100));
+                    mic.tick();
                 }
                 drop(speaker_stream);
             }
-            drop(mic_stream);
+            drop(mic);
         });
         let delivery = crate::session::spawn_frame_delivery(rx, on_frame);
         self.session.attach(vec![worker, delivery]);
@@ -277,9 +280,15 @@ fn create_screencapturekit_stream() -> Result<SCStream, String> {
         .with_excluding_windows(&[])
         .build()
         .map_err(|error| error.to_string())?;
+    // Only the audio output is consumed. SCK still renders the display, so ask
+    // for the smallest frames it accepts, at most one per second, with the
+    // minimum queue depth (the crate clamps queue depth to SCK's 3..=8 range).
     let configuration = SCStreamConfiguration::new()
-        .with_width(display.width())
-        .with_height(display.height())
+        .with_width(SCREEN_CAPTURE_VIDEO_EDGE_PX)
+        .with_height(SCREEN_CAPTURE_VIDEO_EDGE_PX)
+        .with_fps(SCREEN_CAPTURE_VIDEO_FPS)
+        .with_queue_depth(SCREEN_CAPTURE_VIDEO_QUEUE_DEPTH)
+        .with_shows_cursor(false)
         .with_captures_audio(true)
         .with_sample_rate(SCREEN_CAPTURE_SAMPLE_RATE_HZ as i32)
         .with_channel_count(SCREEN_CAPTURE_CHANNELS as i32)
@@ -297,6 +306,7 @@ fn run_screencapturekit_capture(
     running: Arc<AtomicBool>,
     tx: crate::session::FrameSender,
     ready_tx: oneshot::Sender<Result<(), String>>,
+    mic: &mut InputSupervisor,
 ) -> Result<(), String> {
     let mut ready_sender = Some(ready_tx);
     let mut ready_sent = false;
@@ -336,6 +346,7 @@ fn run_screencapturekit_capture(
 
         while running.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(100));
+            mic.tick();
         }
         stream.stop_capture().map_err(|error| error.to_string())?;
         Ok(())
