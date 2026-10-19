@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/email";
 
@@ -60,14 +61,19 @@ export async function throttleStatus(rules: ThrottleRule[], now: number = Date.n
   return { blocked: retryAfterMs > 0, retryAfterMs };
 }
 
+const CLEANUP_INTERVAL_MS = 60_000;
+let lastCleanupAt = 0;
+
 /**
  * Atomically counts one hit per rule. `ON CONFLICT` serializes concurrent
  * replicas on the primary key so no increment is lost, and an idle counter
  * restarts at 1 inside the same statement.
+ *
+ * Every rule is counted by one multi-row statement, so one hit is one commit
+ * (not one per key) and the keys move together. Rows are sorted by key so
+ * concurrent hits sharing keys (e.g. the per-IP budget) lock them in the same
+ * order and cannot deadlock.
  */
-const CLEANUP_INTERVAL_MS = 60_000;
-let lastCleanupAt = 0;
-
 export async function recordThrottleHit(rules: ThrottleRule[], now: number = Date.now()): Promise<void> {
   const timestamp = new Date(now);
   // Sweeping stale rows on every failed attempt turned a credential-stuffing burst into a write storm
@@ -76,17 +82,23 @@ export async function recordThrottleHit(rules: ThrottleRule[], now: number = Dat
     lastCleanupAt = now;
     await prisma.loginThrottle.deleteMany({ where: { updatedAt: { lte: new Date(now - CLEANUP_AGE_MS) } } });
   }
-  for (const rule of rules) {
-    const windowStart = new Date(now - rule.windowMs);
-    await prisma.$executeRaw`
-      INSERT INTO "LoginThrottle" ("emailKey", "failures", "firstFailureAt", "updatedAt")
-      VALUES (${rule.key}, 1, ${timestamp}, ${timestamp})
-      ON CONFLICT ("emailKey") DO UPDATE
-      SET "failures" = CASE WHEN "LoginThrottle"."updatedAt" <= ${windowStart} THEN 1 ELSE "LoginThrottle"."failures" + 1 END,
-          "firstFailureAt" = CASE WHEN "LoginThrottle"."updatedAt" <= ${windowStart} THEN ${timestamp} ELSE "LoginThrottle"."firstFailureAt" END,
-          "updatedAt" = ${timestamp}
-    `;
-  }
+  if (rules.length === 0) return;
+  // One row per key: a multi-row upsert cannot touch the same row twice.
+  const sorted = [...new Map(rules.map((rule) => [rule.key, rule])).values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const rows = Prisma.join(sorted.map((rule) => Prisma.sql`(${rule.key}, 1, ${timestamp}, ${timestamp})`));
+  // EXCLUDED only carries table columns, so each key's own window start is picked by key.
+  const windowStart = Prisma.sql`CASE EXCLUDED."emailKey" ${Prisma.join(
+    sorted.map((rule) => Prisma.sql`WHEN ${rule.key} THEN ${new Date(now - rule.windowMs)}::timestamp(3)`),
+    " ",
+  )} END`;
+  await prisma.$executeRaw`
+    INSERT INTO "LoginThrottle" ("emailKey", "failures", "firstFailureAt", "updatedAt")
+    VALUES ${rows}
+    ON CONFLICT ("emailKey") DO UPDATE
+    SET "failures" = CASE WHEN "LoginThrottle"."updatedAt" <= ${windowStart} THEN 1 ELSE "LoginThrottle"."failures" + 1 END,
+        "firstFailureAt" = CASE WHEN "LoginThrottle"."updatedAt" <= ${windowStart} THEN EXCLUDED."firstFailureAt" ELSE "LoginThrottle"."firstFailureAt" END,
+        "updatedAt" = EXCLUDED."updatedAt"
+  `;
 }
 
 export async function clearThrottleKeys(keys: string[]): Promise<void> {

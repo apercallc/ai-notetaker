@@ -8,6 +8,7 @@ import {
   formatRetryAfter,
   isLoginThrottled,
   loginThrottleStatus,
+  recordThrottleHit,
   recordEmailRequest,
   recordLoginFailure,
   recordSignupAttempt,
@@ -132,6 +133,20 @@ describe("database-backed login throttle", () => {
     expect((await loginThrottleStatus(address, { ip: IP, now })).blocked).toBe(true);
   });
 
+  it("applies each key's own window when one hit counts several keys", async () => {
+    const short: ThrottleRule = { key: `${TEST_PREFIX}short`, free: 1, baseDelayMs: 1000, maxDelayMs: 1000, windowMs: 5 * 60_000 };
+    const long: ThrottleRule = { key: `${TEST_PREFIX}long`, free: 1, baseDelayMs: 1000, maxDelayMs: 1000, windowMs: 60 * 60_000 };
+    await recordThrottleHit([short, long], START);
+    const later = START + 10 * 60_000;
+    await recordThrottleHit([long, short], later);
+
+    const rows = await prisma.loginThrottle.findMany({ where: { emailKey: { in: [short.key, long.key] } }, orderBy: { emailKey: "asc" } });
+    expect(rows.map((row) => [row.emailKey, row.failures, row.firstFailureAt.getTime(), row.updatedAt.getTime()])).toEqual([
+      [long.key, 2, START, later],
+      [short.key, 1, later, later],
+    ]);
+  });
+
   it("prunes stale rows when new failures arrive", async () => {
     const oldAddress = email("expired");
     const freshAddress = email("current");
@@ -159,7 +174,11 @@ describe("signup throttle", () => {
 
   it("counts every signup attempt toward the global budget", async () => {
     const now = START;
-    for (let attempt = 0; attempt < 200; attempt += 1) await recordSignupAttempt({ now });
+    // Start just under the 200-attempt budget rather than paying 199 sequential commits to get there:
+    // a full-suite run on a slow disk pushed that loop past the test timeout.
+    await prisma.loginThrottle.create({ data: { emailKey: "signup:global", failures: 198, firstFailureAt: new Date(now), updatedAt: new Date(now) } });
+    await recordSignupAttempt({ now });
+    await recordSignupAttempt({ now });
     expect((await signupThrottleStatus({ now })).blocked).toBe(false);
     await recordSignupAttempt({ now });
     expect((await signupThrottleStatus({ now })).blocked).toBe(true);

@@ -178,32 +178,68 @@ export async function listBrowserMeetChunks(meetingId: string): Promise<BrowserM
 }
 
 /**
- * Chunk count and total bytes for one meeting, via the index only — the
- * chunk *values* are never loaded. This is what the managed upload uses to
- * write its manifest before streaming chunks one at a time: materializing
- * every chunk (an hour of two-channel 48 kHz PCM16 is ~700 MB) into the
- * service worker at once is a heap exhaustion, not a list operation.
+ * Chunk count and total bytes for one meeting. This is what the managed upload
+ * uses to write its manifest before streaming chunks one at a time:
+ * materializing every chunk (an hour of two-channel 48 kHz PCM16 is ~700 MB)
+ * into the service worker at once is a heap exhaustion, not a list operation.
+ *
+ * Chunks written since v3 are measured from the metadata index's keys alone,
+ * so no audio is loaded for them. If the meeting still holds older chunks (no
+ * `byteLength`, so absent from that index) it is re-measured from its values,
+ * as `browserMeetArchiveInventory` does. All passes share one read transaction.
  */
 export async function browserMeetChunkStats(meetingId: string): Promise<{ totalChunks: number; totalBytes: number }> {
   const db = await openDatabase();
   try {
     return await new Promise((resolve, reject) => {
-      let totalChunks = 0;
-      let totalBytes = 0;
-      const request = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).index(MEETING_INDEX).openCursor(meetingRange(meetingId));
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor) return resolve({ totalChunks, totalBytes });
-        totalChunks += 1;
-        // The stored ArrayBuffer's byte length is available on the value;
-        // key-only cursors don't expose the value, so this read is the cheapest
-        // way to get sizes without keeping the bytes. The cursor's loaded
-        // value is released when it continues.
-        const record = cursor.value as StoredChunk;
-        totalBytes += record.bytes.byteLength;
-        cursor.continue();
+      const store = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME);
+      const fail = (request: IDBRequest) => () => reject(request.error ?? new Error("Meet audio could not be read"));
+      let allChunks = 0;
+
+      // Pass 3 (only when some chunk predates v3): measure every chunk from its value.
+      const measureFromValues = () => {
+        let totalChunks = 0;
+        let totalBytes = 0;
+        const request = store.index(MEETING_INDEX).openCursor(meetingRange(meetingId));
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return resolve({ totalChunks, totalBytes });
+          totalChunks += 1;
+          const record = cursor.value as StoredChunk;
+          if (record.bytes && typeof record.bytes.byteLength === "number") totalBytes += record.bytes.byteLength;
+          cursor.continue();
+        };
+        request.onerror = fail(request);
       };
-      request.onerror = () => reject(request.error ?? new Error("Meet audio could not be read"));
+
+      // Pass 2: sizes straight from the metadata index's keys. The upper bound
+      // ends after every [meetingId, MAX_SAFE_INTEGER, …] key (arrays sort above
+      // numbers), so this covers exactly the sequence range of `meetingRange`.
+      const measureFromKeys = () => {
+        let totalChunks = 0;
+        let totalBytes = 0;
+        const range = IDBKeyRange.bound([meetingId, 0], [meetingId, Number.MAX_SAFE_INTEGER, []]);
+        const request = store.index(META_INDEX).openKeyCursor(range);
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return totalChunks === allChunks ? resolve({ totalChunks, totalBytes }) : measureFromValues();
+          const key = cursor.key;
+          if (Array.isArray(key) && typeof key[2] === "number") {
+            totalChunks += 1;
+            totalBytes += key[2];
+          }
+          cursor.continue();
+        };
+        request.onerror = fail(request);
+      };
+
+      // Pass 1: how many chunks the meeting holds, keys only.
+      const request = store.index(MEETING_INDEX).count(meetingRange(meetingId));
+      request.onsuccess = () => {
+        allChunks = request.result;
+        measureFromKeys();
+      };
+      request.onerror = fail(request);
     });
   } finally {
     db.close();

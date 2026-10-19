@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { appendBrowserMeetChunk, browserMeetArchiveInventory, clearBrowserMeetChunks, lastBrowserMeetSequence, listBrowserMeetChunks, streamBrowserMeetChunks } from "../src/meet/browserStorage";
+import { appendBrowserMeetChunk, browserMeetArchiveInventory, browserMeetChunkStats, clearBrowserMeetChunks, lastBrowserMeetSequence, listBrowserMeetChunks, streamBrowserMeetChunks } from "../src/meet/browserStorage";
 
 const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
 
@@ -180,6 +180,38 @@ describe("browser Meet chunk storage", () => {
       { meetingId: "old", chunkCount: 3, totalBytes: 8, firstCapturedAt: 900, lastSequence: 2 },
       { meetingId: "older", chunkCount: 1, totalBytes: 2, firstCapturedAt: null, lastSequence: 0 },
     ]);
+  });
+
+  it("measures one meeting's new chunks from index keys alone, without loading any audio", async () => {
+    await appendBrowserMeetChunk("m1", "mic", 0, bytes(1, 2), 2000);
+    await appendBrowserMeetChunk("m1", "speaker", 1, bytes(1, 2, 3, 4, 5, 6), 1000);
+    await appendBrowserMeetChunk("m1", "mic", Number.MAX_SAFE_INTEGER, bytes(1, 2, 3), 3000);
+    await appendBrowserMeetChunk("m10", "mic", 0, bytes(9, 9, 9, 9), 4000);
+    await appendBrowserMeetChunk("m", "mic", 0, bytes(9), 4000);
+    const valueCursor = vi.spyOn(IDBIndex.prototype, "openCursor");
+    const storeCursor = vi.spyOn(IDBObjectStore.prototype, "openCursor");
+    const indexGet = vi.spyOn(IDBIndex.prototype, "get");
+    const indexGetAll = vi.spyOn(IDBIndex.prototype, "getAll");
+    const storeGet = vi.spyOn(IDBObjectStore.prototype, "get");
+    const storeGetAll = vi.spyOn(IDBObjectStore.prototype, "getAll");
+
+    expect(await browserMeetChunkStats("m1")).toEqual({ totalChunks: 3, totalBytes: 11 });
+    expect(await browserMeetChunkStats("absent")).toEqual({ totalChunks: 0, totalBytes: 0 });
+    for (const spy of [valueCursor, storeCursor, indexGet, indexGetAll, storeGet, storeGetAll]) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("measures chunks saved before sizes were indexed from their values, with identical totals", async () => {
+    await seedLegacy(2, [
+      { id: "old:0", meetingId: "old", channel: "speaker", sequence: 0, bytes: new Uint8Array([7, 7, 7, 7]).buffer, capturedAt: 900 },
+      { id: "old:1", meetingId: "old", channel: "mic", sequence: 1, bytes: new Uint8Array([8, 8]).buffer },
+      { id: "older:0", meetingId: "older", channel: "mic", sequence: 0, bytes: new Uint8Array([1, 1]).buffer },
+    ]);
+    await appendBrowserMeetChunk("old", "mic", 2, bytes(1, 2), 1200);
+    const valueCursor = vi.spyOn(IDBIndex.prototype, "openCursor");
+
+    expect(await browserMeetChunkStats("old")).toEqual({ totalChunks: 3, totalBytes: 8 });
+    expect(await browserMeetChunkStats("older")).toEqual({ totalChunks: 1, totalBytes: 2 });
+    expect(valueCursor).toHaveBeenCalledTimes(2);
   });
 
   it("returns an empty inventory for an empty database", async () => {
