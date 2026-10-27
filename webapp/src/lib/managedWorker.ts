@@ -19,6 +19,7 @@ import { noteTemplateFor, type NoteTemplate } from "./noteTemplates";
 import { isLanguageCode, languageCodeFromName, languageName, parseVocabulary, vocabularyPrompt } from "./languages";
 import { sweepStaleStagedObjects } from "./objectStorage";
 import { chunksToReadableStream, deleteManagedUploadAudio, expireManagedMeetings, expireManagedUploads, readChunksSequentially } from "./managedJobs";
+import { logger } from "./logger";
 
 export class ManagedWorkerError extends Error {}
 
@@ -891,19 +892,19 @@ export async function runManagedMaintenance(): Promise<void> {
   // Every maintenance step is isolated: a storage hiccup in one of them must never
   // stop the poll from claiming a job (a 500 here starves the whole queue).
   const maintenanceFailed = (step: string) => (error: unknown) => {
-    console.error(`${step} failed`, { error: error instanceof Error ? error.message : String(error) });
+    logger.error(`${step} failed`, { error: error instanceof Error ? error.message : String(error) });
   };
   await drainObjectDeletions().catch(maintenanceFailed("deferred object deletion"));
   await expireManagedUploads().catch(maintenanceFailed("upload expiry"));
   await expireManagedMeetings().catch(maintenanceFailed("meeting retention"));
   await purgeExpiredAuditEvents().catch((error: unknown) => {
-    console.error("audit purge failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("audit purge failed", { error: error instanceof Error ? error.message : String(error) });
   });
   await purgeExpiredTrash().catch((error: unknown) => {
-    console.error("trash purge failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("trash purge failed", { error: error instanceof Error ? error.message : String(error) });
   });
   await runIntegrationMaintenance().catch((error: unknown) => {
-    console.error("integration retries failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("integration retries failed", { error: error instanceof Error ? error.message : String(error) });
   });
   await sweepOrphanedAudio().catch(maintenanceFailed("orphaned audio sweep"));
 }
@@ -918,9 +919,9 @@ async function sweepOrphanedAudio(): Promise<void> {
   lastOrphanSweepAt = now;
   try {
     const removed = await sweepStaleStagedObjects(new Date(now));
-    if (removed > 0) console.warn("removed orphaned staged audio older than 48 hours", { removed });
+    if (removed > 0) logger.warn("removed orphaned staged audio older than 48 hours", { removed });
   } catch (error) {
-    console.error("orphaned audio sweep failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("orphaned audio sweep failed", { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -1094,7 +1095,7 @@ async function executeManagedJob(workspaceId: string, jobId: string): Promise<vo
     // The hosted library keeps text notes only. Remove the staged recording as
     // soon as the provider result and transcript have committed successfully.
     await deleteManagedUploadAudio(job.uploadId).catch((error: unknown) => {
-      console.error("completed managed job audio cleanup failed", {
+      logger.error("completed managed job audio cleanup failed", {
         jobId: job.id,
         workspaceId,
         error: error instanceof Error ? error.message : String(error),
@@ -1102,14 +1103,14 @@ async function executeManagedJob(workspaceId: string, jobId: string): Promise<vo
     });
     if (hasSpeech) {
       await notifyNoteReady(workspaceId, job.meetingId).catch((error: unknown) => {
-        console.error("note-ready notification failed", { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
+        logger.error("note-ready notification failed", { jobId: job.id, error: error instanceof Error ? error.message : String(error) });
       });
     }
     if (!hasSpeech) {
       // A recording with no speech produced nothing of value, so it does not
       // consume the plan's meeting allowance.
       await releaseMeetingProcessing(workspaceId, job.idempotencyKey).catch((releaseError) => {
-        console.error("managed usage release failed", { workspaceId, jobId: job.id, error: releaseError instanceof Error ? releaseError.message : String(releaseError) });
+        logger.error("managed usage release failed", { workspaceId, jobId: job.id, error: releaseError instanceof Error ? releaseError.message : String(releaseError) });
       });
     }
   } catch (error) {
@@ -1119,7 +1120,7 @@ async function executeManagedJob(workspaceId: string, jobId: string): Promise<vo
     // storage, programming errors) is logged and replaced with a generic line.
     const message = error instanceof ManagedWorkerError ? error.message : "Processing failed unexpectedly. Use Retry on this meeting to try again.";
     if (!(error instanceof ManagedWorkerError)) {
-      console.error("managed job failed unexpectedly", { workspaceId, jobId: job.id, error: error instanceof Error ? error.message : String(error) });
+      logger.error("managed job failed unexpectedly", { workspaceId, jobId: job.id, error: error instanceof Error ? error.message : String(error) });
     }
     const failed = await prisma.processingJob.updateMany({
       where: { id: job.id, workspaceId, status: "processing", leaseToken },
@@ -1129,7 +1130,7 @@ async function executeManagedJob(workspaceId: string, jobId: string): Promise<vo
     try {
       await releaseMeetingProcessing(workspaceId, job.idempotencyKey);
     } catch (releaseError) {
-      console.error("managed usage release failed", {
+      logger.error("managed usage release failed", {
         workspaceId,
         jobId: job.id,
         error: releaseError instanceof Error ? releaseError.message : String(releaseError),

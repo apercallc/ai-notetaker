@@ -1,6 +1,7 @@
 import net from "node:net";
 import tls from "node:tls";
 import os from "node:os";
+import { logger } from "./logger";
 
 /**
  * Pluggable outbound email. Real delivery is configured by the operator:
@@ -61,7 +62,7 @@ function consoleSender(): EmailSender {
   return {
     mode: "console",
     async send(message) {
-      console.warn(
+      logger.warn(
         [
           "[DEV ONLY — email NOT sent: no RESEND_API_KEY/SMTP_URL configured]",
           `To: ${clean(message.to)}`,

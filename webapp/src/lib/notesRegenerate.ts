@@ -8,6 +8,7 @@ import { MAX_NOTES_REGENERATIONS, NOTE_TEMPLATES, PICKABLE_TEMPLATES, isNoteTemp
 import { hasProcessingAccess } from "./usageLedger";
 import { isLanguageCode, parseVocabulary } from "./languages";
 import { withProviderSpend } from "./providerSpend";
+import { logger } from "./logger";
 
 export type RegenerateResult =
   | { ok: true; template: string; remaining: number }
@@ -85,7 +86,7 @@ export async function regenerateNotes(
     // server setting. Log that for operators and show a neutral line instead.
     const detail = error instanceof Error ? error.message : String(error);
     const userSafe = error instanceof ManagedWorkerError && !/not configured/i.test(detail);
-    if (!userSafe) console.error("notes regeneration failed", { meetingId: meeting.id, error: detail });
+    if (!userSafe) logger.error("notes regeneration failed", { meetingId: meeting.id, error: detail });
     return fail(userSafe ? detail : "Couldn't regenerate the notes. Try again in a moment.");
   }
 
@@ -122,7 +123,7 @@ export async function regenerateNotes(
   } catch (error) {
     await refund();
     if (error instanceof RegenerateConflictError) return fail("This note was edited while the new version was being written, so nothing was changed. Try again.");
-    console.error("notes regeneration could not be saved", { meetingId: meeting.id, error: error instanceof Error ? error.message : String(error) });
+    logger.error("notes regeneration could not be saved", { meetingId: meeting.id, error: error instanceof Error ? error.message : String(error) });
     return fail("Couldn't save the regenerated notes. Try again in a moment.");
   }
   await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "meeting.regenerate_notes", targetType: "meeting", targetId: meeting.id, metadata: { template: templateId } });

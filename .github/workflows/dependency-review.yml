@@ -1,0 +1,31 @@
+# Blocks pull requests that add a dependency with a known high-severity
+# advisory or a license the project can't ship. It reads the lockfile diff for
+# npm and cargo, so it only reports what a PR newly introduces; the scheduled
+# `npm audit` / `cargo audit` steps in the package workflows cover what is
+# already in main.
+
+name: Dependency review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # The project is MIT licensed and docs/third-party-licenses.md records
+          # that nothing copyleft is distributed. Network-copyleft code in the
+          # webapp or desktop app needs a deliberate decision, not a silent merge.
+          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later, SSPL-1.0

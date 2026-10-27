@@ -101,7 +101,7 @@
 
   async function refreshSnapshot(force = true) {
     try {
-      state.snapshot = await invoke("desktop_snapshot");
+      state.snapshot = await invoke("desktop_snapshot", { includeHistory: state.page === "notes" || state.page === "actions" });
       refreshFailing = false;
       if (state.noticeSource === "refresh") notify("");
       for (const meetingId of state.finalizingMeetingIds) {
@@ -144,7 +144,8 @@
   function setPage(page) {
     if (state.page === "settings" && page !== "settings" && state.settingsDirty
       && !window.confirm("Discard unsaved settings changes?")) return;
-    if (state.page !== page) {
+    const pageChanged = state.page !== page;
+    if (pageChanged) {
       state.settingsDirty = false;
       state.recordConsentAcknowledged = false;
     }
@@ -153,6 +154,7 @@
     state.detailError = null;
     render();
     if (page === "notes" && state.selectedId) void loadDetail(state.selectedId);
+    if (pageChanged || page === "record") void refresh({ passive: true });
   }
 
   const ICONS = {
@@ -206,7 +208,7 @@
     const preferences = snapshot.settings.preferences;
     const providersReady = processingReady(snapshot.settings);
     const appReady = !snapshot.credentialStoreError && providersReady;
-    const processing = snapshot.meetings.some((meeting) => meeting.status === "processing");
+    const processing = snapshot.processingCount > 0;
     const finalizing = snapshot.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
     const audioChecking = snapshot.audio.checking;
     const needsAttention = !recording && !processing && !finalizing && (!appReady || (!audioChecking && !snapshot.audio.ready));
@@ -261,8 +263,8 @@
       ? `<div class="guidance"><p>Allow AI Notetaker under System Settings &gt; Privacy &amp; Security &gt; Screen &amp; System Audio Recording, then reopen the app. If it is not listed, add it from Applications.</p><details class="audio-fallback"><summary>Use BlackHole instead</summary><p>BlackHole is an optional fallback and is not included with AI Notetaker. After installing it, create a Multi-Output Device with BlackHole and your speakers or headphones, then select it as the meeting app’s speaker. <button class="small-button" id="open-blackhole-download">Download BlackHole from Existential Audio</button></p></details></div>`
       : `<p class="guidance">${esc(audio.guidance || "Audio will be captured from your current microphone and system output.")}</p>`;
     const recent = s.meetings.slice(0, 3);
-    const recoverable = s.meetings.find((meeting) => meeting.status === "recovered" && !meeting.textOnlyImport);
-    const processing = s.meetings.filter((meeting) => meeting.status === "processing").length;
+    const recoverable = s.recoverableMeeting;
+    const processing = s.processingCount;
     const finalizing = s.meetings.some((meeting) => state.finalizingMeetingIds.has(meeting.id) && meeting.status === "recording");
     $("#content").innerHTML = `
       ${setup ? `<div class="setup-callout">${icon("info")}<div><strong>${s.credentialStoreError ? "Secure credential storage is unavailable" : "Finish setup to record"}</strong><span>${esc(setupMessage)}</span>${s.credentialStoreError ? `<button class="small-button" id="retry-credential-store">Try again</button>` : `<button class="small-button" id="goto-providers">Add API keys</button>`}</div></div>` : ""}
@@ -438,6 +440,10 @@
 
   function renderNotes() {
     setHeader("Library", "Your notes, saved on this device.");
+    if (!state.snapshot.historyComplete) {
+      $("#content").innerHTML = '<div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>Loading your notes...</span></div>';
+      return;
+    }
     const meetings = state.snapshot.meetings;
     const folders = state.snapshot.folders || [];
     const noteCounts = new Map();
@@ -835,6 +841,9 @@
   }
 
   function actionItemsPanel() {
+    if (!state.snapshot.historyComplete) {
+      return '<section class="card account-card"><div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>Loading action items...</span></div></section>';
+    }
     const query = accountState.actionQuery.trim().toLowerCase();
     const filter = accountState.actionFilter;
     const rows = [];
@@ -932,7 +941,7 @@
     const conflictMarkup = conflicts.length
       ? `<details class="sync-conflicts"><summary>Review ${conflicts.length} note version conflict${conflicts.length === 1 ? "" : "s"}</summary><p>${conflictSummary}</p><div class="inline-actions">${conflicts.map((conflict) => {
         const meeting = state.snapshot.meetings.find((item) => item.id === conflict.meetingId);
-        const title = meeting?.title ? esc(meeting.title) : "Meeting note";
+        const title = esc(state.snapshot.conflictTitles?.[conflict.meetingId] || meeting?.title || "Meeting note");
         const desktopLabel = conflict.reason === "removed" ? "Recreate web version" : "Replace web version";
         const separateLabel = conflict.reason === "removed" ? "Keep desktop copy here" : "Keep both copies";
         const replaceUnavailable = conflict.reason === "trashed" || (conflict.reason === "updated" && !conflict.remoteUpdatedAt);
@@ -1275,7 +1284,7 @@
     void refresh({ passive: !requested });
   }).catch(() => {});
 
-  const REFRESH_INTERVAL_MS = 15000;
+  const REFRESH_INTERVAL_MS = 60000;
   let refreshInterval = null;
   function stopRefreshPolling() {
     if (refreshInterval === null) return;
@@ -1285,7 +1294,10 @@
   function startRefreshPolling() {
     if (refreshInterval !== null || document.visibilityState !== "visible") return;
     refreshInterval = window.setInterval(() => {
-      if (refreshTask === null && !state.busy && state.page !== "settings" && !isAccountPage()) void refresh({ passive: true });
+      // The Record screen needs a slow fallback if an IPC event is missed.
+      // Library changes already trigger refreshes through meeting events, so
+      // do not rescan the full archive while someone is reading their notes.
+      if (refreshTask === null && !state.busy && state.page === "record") void refresh({ passive: true });
     }, REFRESH_INTERVAL_MS);
   }
   document.addEventListener("visibilitychange", () => {

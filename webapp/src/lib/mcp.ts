@@ -2,6 +2,7 @@ import { listActionItems, listMeetings } from "./meetings";
 import { listFolders } from "./library";
 import { flattenFolders, subtreeIds } from "./libraryTree";
 import { buildNotePayload } from "./integrations";
+import { logger } from "./logger";
 
 /**
  * A small, read-only Model Context Protocol server over JSON-RPC 2.0 (the
@@ -199,7 +200,7 @@ export async function handleMcpMessage(message: unknown, context: McpContext): P
       try {
         return ok(id, await callTool(name, args, context));
       } catch (error) {
-        console.error("mcp tool failed", { tool: name, error: error instanceof Error ? error.message : String(error) });
+        logger.error("mcp tool failed", { tool: name, error: error instanceof Error ? error.message : String(error) });
         return ok(id, text("The notes service couldn't complete that. Try again.", true));
       }
     }

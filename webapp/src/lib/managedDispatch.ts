@@ -1,4 +1,5 @@
 import { workerJobRunUrl } from "./deploymentConfig";
+import { logger } from "./logger";
 
 /** Pushes a freshly queued job to the worker; if that fails the polling worker still picks it up. */
 export function dispatchManagedJob(jobId: string, workspaceId: string): void {
@@ -14,13 +15,13 @@ export function dispatchManagedJob(jobId: string, workspaceId: string): void {
   try {
     url = workerJobRunUrl(jobId);
   } catch (error) {
-    console.error("managed job dispatch skipped: worker URL is not configured", { jobId, workspaceId, error: error instanceof Error ? error.message : String(error) });
+    logger.error("managed job dispatch skipped: worker URL is not configured", { jobId, workspaceId, error: error instanceof Error ? error.message : String(error) });
     return;
   }
   void fetch(url, {
     method: "POST",
     headers: { "x-worker-token": workerToken, "x-workspace-id": workspaceId },
   }).catch((error) => {
-    console.error("managed job dispatch failed", { jobId, workspaceId, error: error instanceof Error ? error.message : String(error) });
+    logger.error("managed job dispatch failed", { jobId, workspaceId, error: error instanceof Error ? error.message : String(error) });
   });
 }

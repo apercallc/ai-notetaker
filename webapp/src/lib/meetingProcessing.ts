@@ -3,6 +3,7 @@ import { ValidationError } from "./meetings";
 import { enqueueManagedJob } from "./managedJobs";
 import { managedHostingEnabled } from "./managedAuth";
 import { runManagedJob } from "./managedWorker";
+import { logger } from "./logger";
 
 export type RetryResult = { ok: true } | { ok: false; error: string };
 
@@ -41,7 +42,7 @@ export async function retryMeetingProcessing(workspaceId: string, meetingId: str
     const revived = await enqueueManagedJob(workspaceId, meetingId, job.uploadId, job.idempotencyKey);
     if (process.env.MANAGED_WORKER_TOKEN) {
       void runManagedJob(workspaceId, revived.id).catch((error: unknown) => {
-        console.error("managed job retry failed", {
+        logger.error("managed job retry failed", {
           jobId: revived.id,
           workspaceId,
           error: error instanceof Error ? error.message : String(error),
@@ -54,7 +55,7 @@ export async function retryMeetingProcessing(workspaceId: string, meetingId: str
     if (error instanceof Error && error.message.includes("entitlement is unavailable")) {
       return { ok: false, error: "Hosted processing isn't offered. Your audio stays on your desktop." };
     }
-    console.error("managed job retry could not be queued", {
+    logger.error("managed job retry could not be queued", {
       meetingId,
       workspaceId,
       error: error instanceof Error ? error.message : String(error),

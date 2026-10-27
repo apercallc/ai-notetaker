@@ -11,6 +11,7 @@ import {
   validateFolderName,
   type FolderNode,
 } from "./libraryTree";
+import { logger } from "./logger";
 
 /**
  * The library: nested folders, notes placed in them, and a Trash.
@@ -317,7 +318,7 @@ export async function purgeExpiredTrash(now = new Date(), force = false): Promis
     try {
       await purgeRoot(workspaceId, kind, id);
     } catch (error) {
-      console.error("trash purge failed for one item", { workspaceId, kind, id, error: error instanceof Error ? error.message : String(error) });
+      logger.error("trash purge failed for one item", { workspaceId, kind, id, error: error instanceof Error ? error.message : String(error) });
       return;
     }
     perWorkspace.set(workspaceId, (perWorkspace.get(workspaceId) ?? 0) + 1);

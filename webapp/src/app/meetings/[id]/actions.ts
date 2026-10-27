@@ -15,6 +15,7 @@ import { regenerateNotes } from "@/lib/notesRegenerate";
 import { renameSpeaker } from "@/lib/speakers";
 import { isValidDateOnly } from "@/lib/actionItems";
 import { createSlidingWindowLimiter } from "@/lib/lookupThrottle";
+import { logger } from "@/lib/logger";
 
 export type ShareActionResult =
   | { ok: true; id: string; token: string; expiresAt: string | null }
@@ -39,7 +40,7 @@ export async function createMeetingShareAction(formData: FormData): Promise<Shar
     return { ok: true, id: share.id, token: share.token, expiresAt: share.expiresAt?.toISOString() ?? null };
   } catch (error) {
     if (error instanceof SharingValidationError) return { ok: false, error: error.message };
-    console.error("meeting share creation failed", { meetingId, error: error instanceof Error ? error.message : String(error) });
+    logger.error("meeting share creation failed", { meetingId, error: error instanceof Error ? error.message : String(error) });
     return { ok: false, error: "Could not create a share link. Try again." };
   }
 }
@@ -74,7 +75,7 @@ export async function deleteMeetingAction(formData: FormData): Promise<void> {
     // the message: the page maps codes to copy (see lib/pageErrors.ts).
     if (!result.ok) denied = true;
   } catch (error) {
-    console.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
+    logger.error("meeting deletion failed", { id, error: error instanceof Error ? error.message : String(error) });
     redirect("/meetings?error=delete-failed");
   }
   if (denied) redirect(`/meetings/${id}?error=delete-forbidden`);
@@ -93,7 +94,7 @@ export async function renameMeetingAction(formData: FormData): Promise<RenameSta
     if (!(await renameMeeting(workspaceId, id, title))) return { status: "error", message: "This meeting no longer exists." };
   } catch (error) {
     if (error instanceof ValidationError) return { status: "error", message: error.message.replace(/^title/, "Title") };
-    console.error("meeting rename failed", { id, error: error instanceof Error ? error.message : String(error) });
+    logger.error("meeting rename failed", { id, error: error instanceof Error ? error.message : String(error) });
     return { status: "error", message: "Couldn't save the title. Try again." };
   }
   revalidatePath("/meetings");
@@ -126,7 +127,7 @@ export async function updateActionItemAction(formData: FormData): Promise<Action
   try {
     updated = await updateActionItem(workspaceId, id, { status, dueAt: dueAtValue ? `${dueAtValue}T00:00:00.000Z` : null });
   } catch (error) {
-    console.error("action item update failed", { id, error: error instanceof Error ? error.message : String(error) });
+    logger.error("action item update failed", { id, error: error instanceof Error ? error.message : String(error) });
     return fail("Couldn't save. Check your connection and try again.");
   }
   if (!updated) return fail("This action item no longer exists.");
@@ -149,7 +150,7 @@ async function failSoft<T>(label: string, meetingId: string, work: () => Promise
   try {
     return await work();
   } catch (error) {
-    console.error(label, { meetingId, error: error instanceof Error ? error.message : String(error) });
+    logger.error(label, { meetingId, error: error instanceof Error ? error.message : String(error) });
     return { status: "error", message };
   }
 }
@@ -204,7 +205,7 @@ export async function renameSpeakerAction(formData: FormData): Promise<SpeakerRe
   try {
     result = await renameSpeaker(workspaceId, meetingId, String(formData.get("speakerKey") ?? ""), String(formData.get("name") ?? ""));
   } catch (error) {
-    console.error("speaker rename failed", { meetingId, error: error instanceof Error ? error.message : String(error) });
+    logger.error("speaker rename failed", { meetingId, error: error instanceof Error ? error.message : String(error) });
     return { status: "error", message: "Couldn't save the name. Try again." };
   }
   if (!result.ok) return { status: "error", message: result.error };

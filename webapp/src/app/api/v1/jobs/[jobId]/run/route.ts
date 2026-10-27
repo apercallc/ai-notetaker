@@ -4,6 +4,7 @@ import { isBenignJobRace, runManagedJob } from "@/lib/managedWorker";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { isValidWorkerToken } from "@/lib/secureCompare";
 import { captureServerError } from "@/lib/observability";
+import { logger } from "@/lib/logger";
 
 export async function POST(request: Request, context: { params: Promise<{ jobId: string }> }) {
   const requestId = requestIdFrom(request);
@@ -22,7 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
     if (isBenignJobRace(error)) {
       return NextResponse.json({ jobId, status: "already-running" }, { status: 409, headers: { "x-request-id": requestId } });
     }
-    console.error("managed job request failed", {
+    logger.error("managed job request failed", {
       requestId,
       workspaceId,
       jobId,

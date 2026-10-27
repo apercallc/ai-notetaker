@@ -8,6 +8,7 @@ import { folderPathLabel } from "./libraryTree";
 import { speakerLabel } from "./types";
 import { parseSummary, type SummaryBlock } from "./summaryFormat";
 import type { LibrarySession } from "./library";
+import { logger } from "./logger";
 
 /**
  * "Note ready" delivery to outside tools. A signed webhook (which is how Zapier,
@@ -425,7 +426,7 @@ export async function notifyNoteReady(workspaceId: string, meetingId: string, se
   });
   // First attempt straight away; anything that fails is picked up by the retry schedule.
   void processDeliveries({ send }).catch((error: unknown) => {
-    console.error("integration delivery failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("integration delivery failed", { error: error instanceof Error ? error.message : String(error) });
   });
   return integrations.length;
 }

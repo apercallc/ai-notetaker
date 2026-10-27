@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { requireSession } from "@/lib/currentUser";
 import { exportFileName, exportHeader, streamWorkspaceMeetings } from "../exportData";
+import { logger } from "@/lib/logger";
 
 /**
  * Downloads every meeting in the caller's active workspace as one JSON file.
@@ -35,7 +36,7 @@ export async function GET() {
       } catch (error) {
         // Headers (200) are already sent. Closing normally would hand the user a truncated file
         // that looks like a finished backup; erroring the stream makes the download fail visibly.
-        console.error("workspace export failed mid-stream", { workspaceId: workspace.id, error: error instanceof Error ? error.message : String(error) });
+        logger.error("workspace export failed mid-stream", { workspaceId: workspace.id, error: error instanceof Error ? error.message : String(error) });
         controller.error(error);
         return;
       }

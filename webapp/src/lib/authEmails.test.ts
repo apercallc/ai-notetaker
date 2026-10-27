@@ -7,6 +7,7 @@ vi.mock("./authTokens", () => ({ issueAuthToken }));
 vi.mock("./mailer", () => ({ getEmailSender: () => sender.current }));
 
 import { sendInviteEmail, sendPasswordResetEmail, sendVerificationEmail } from "./authEmails";
+import { logger } from "./logger";
 
 const prior = {
   appUrl: process.env.APP_URL,
@@ -88,7 +89,7 @@ describe("auth email links", () => {
 
   it("reports transport failure without exposing the emailed link as delivered", async () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://public.example.com/path";
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     sender.current = { mode: "resend", send: vi.fn().mockRejectedValue(new Error("provider down")) };
     try {
       const result = await sendInviteEmail({

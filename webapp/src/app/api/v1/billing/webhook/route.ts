@@ -4,6 +4,7 @@ import { requestIdFrom } from "@/lib/apiErrors";
 import { applyStripeEvent, verifyStripeSignature } from "@/lib/billing";
 import { managedHostingEnabled } from "@/lib/managedAuth";
 import { captureServerError } from "@/lib/observability";
+import { logger } from "@/lib/logger";
 
 const MAX_STRIPE_WEBHOOK_BYTES = 1_048_576;
 type BoundedPayload = { ok: true; payload: string } | { ok: false; status: 400 | 413; error: string };
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ received: true }, { headers: { "x-request-id": requestId } });
   } catch (error) {
-    console.error("Stripe webhook processing failed", {
+    logger.error("Stripe webhook processing failed", {
       requestId,
       error: error instanceof Error ? error.message : String(error),
     });

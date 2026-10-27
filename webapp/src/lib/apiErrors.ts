@@ -4,6 +4,7 @@ import { AUDIO_BUDGET_PUBLIC_MESSAGE, AudioBudgetError, ENTITLEMENT_PUBLIC_MESSA
 import { safeRequestId } from "./requestId";
 import { captureServerError } from "./observability";
 import { ProviderBudgetError } from "./providerSpend";
+import { logger } from "./logger";
 
 // Keep the existing route import path stable while allowing the proxy to use
 // the dependency-light request-id utility without loading route validation or
@@ -50,7 +51,7 @@ export function apiErrorResponse(
   }
 
   const message = error instanceof Error ? error.message : String(error);
-  console.error("api request failed", { requestId, error: message });
+  logger.error("api request failed", { requestId, error: message });
   // Unexpected failures (validation errors are not) go to Sentry with the
   // correlation id, so a user quoting the id maps to a captured event.
   captureServerError(error, { requestId });

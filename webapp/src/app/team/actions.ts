@@ -7,6 +7,7 @@ import { getRequestContext } from "@/lib/requestContext";
 import { recordAudit } from "@/lib/audit";
 import { teamPlanActive } from "@/lib/teamAccess";
 import { manageTeamAs, type TeamActionResult } from "@/lib/teamAdmin";
+import { logger } from "@/lib/logger";
 
 export type { TeamActionResult };
 
@@ -46,7 +47,7 @@ export async function updateRetentionPolicy(formData: FormData): Promise<Retenti
     await updateWorkspaceRetentionDays(session.workspaceId, retentionDays);
     await recordAudit({ workspaceId: session.workspaceId, actorUserId: session.userId, action: "workspace.retention_update", targetType: "workspace", targetId: session.workspaceId, metadata: { retentionDays } });
   } catch (error) {
-    console.error("retention policy update failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("retention policy update failed", { error: error instanceof Error ? error.message : String(error) });
     return { ok: false, error: "Could not save the retention policy. Try again." };
   }
   revalidatePath("/team");

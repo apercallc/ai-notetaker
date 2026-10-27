@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { logger } from "./logger";
 
 /**
  * Workspace audit trail. One helper, one rule: record who did what to which
@@ -100,7 +101,7 @@ export async function recordAudit(input: AuditInput, client: AuditClient = prism
     });
     return true;
   } catch (error) {
-    console.error("audit event could not be recorded", {
+    logger.error("audit event could not be recorded", {
       action: input.action,
       error: error instanceof Error ? error.message : String(error),
     });

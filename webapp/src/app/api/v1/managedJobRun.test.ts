@@ -10,6 +10,7 @@ vi.mock("@/lib/managedWorker", () => ({ runManagedJob, isBenignJobRace }));
 vi.mock("@/lib/observability", () => ({ captureServerError }));
 
 import { POST } from "./jobs/[jobId]/run/route";
+import { logger } from "@/lib/logger";
 
 const request = (headers: Record<string, string> = {}) => new Request("http://localhost/api/v1/jobs/job-1/run", {
   method: "POST",
@@ -64,7 +65,7 @@ describe("managed worker job run route", () => {
   it("returns a correlated safe error and reports processor failures", async () => {
     const error = new Error("provider secret must not be returned to worker callers");
     runManagedJob.mockRejectedValue(error);
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     const response = await POST(request(workerHeaders), context);
     expect(response.status).toBe(500);
     expect(response.headers.get("x-request-id")).toBe("job-run-test");

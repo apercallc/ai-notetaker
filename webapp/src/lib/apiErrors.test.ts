@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ValidationError } from "./meetings";
 import { EntitlementError } from "./entitlementError";
 import { apiErrorResponse, jsonError, requestIdFrom } from "./apiErrors";
+import { logger } from "./logger";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -14,21 +15,21 @@ describe("API error responses", () => {
   });
 
   it("answers an exhausted plan with a 402 upgrade prompt, not a 500, and does not log it as a failure", async () => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     const response = apiErrorResponse(new EntitlementError(), { requestId: "request-2" });
     expect(response.status).toBe(402);
     expect(await response.json()).toMatchObject({ code: "entitlement_unavailable", error: expect.stringContaining("Upgrade") });
-    expect(logger).not.toHaveBeenCalled();
+    expect(errorLog).not.toHaveBeenCalled();
   });
 
   it("logs unexpected errors and returns a generic 500 with a correlation id", async () => {
-    const logger = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     const response = apiErrorResponse(new Error("database password"));
     const body = await response.json();
     expect(response.status).toBe(500);
     expect(body).toMatchObject({ error: "internal server error" });
     expect(body.requestId).toEqual(expect.any(String));
-    expect(logger).toHaveBeenCalledWith("api request failed", expect.objectContaining({ error: "database password" }));
+    expect(errorLog).toHaveBeenCalledWith("api request failed", expect.objectContaining({ error: "database password" }));
   });
 
   it("preserves a valid incoming request id and replaces oversized ids", () => {

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { BillingError, BillingPortalRequiredError, createCheckoutSession, createPortalSession, priceIdFor } from "@/lib/billing";
 import { DeploymentConfigError, getAppUrl } from "@/lib/deploymentConfig";
 import { managedHostingEnabled } from "@/lib/managedAuth";
+import { logger } from "@/lib/logger";
 
 /** Returned to the form (via useActionState) instead of throwing, so failures render as a readable message. */
 export interface BillingActionState {
@@ -17,7 +18,7 @@ const GENERIC_FAILURE = "Something went wrong talking to the billing provider. P
 function failure(error: unknown): BillingActionState {
   if (error instanceof BillingError) return { error: error.message };
   if (error instanceof DeploymentConfigError) return { error: "Billing is unavailable: this server is missing its public URL configuration." };
-  console.error("billing action failed", { error: error instanceof Error ? error.message : String(error) });
+  logger.error("billing action failed", { error: error instanceof Error ? error.message : String(error) });
   return { error: GENERIC_FAILURE };
 }
 

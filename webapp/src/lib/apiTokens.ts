@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "./db";
+import { logger } from "./logger";
 
 /**
  * Bearer credentials for the browser extension and other managed clients.
@@ -84,7 +85,7 @@ async function pruneApiTokens(userId: string, scope: string, now: number): Promi
     }
   } catch (error) {
     // Housekeeping must never fail the sign-in that triggered it.
-    console.error("api token pruning failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("api token pruning failed", { error: error instanceof Error ? error.message : String(error) });
   }
 }
 

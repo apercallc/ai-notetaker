@@ -121,10 +121,15 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   const children = folders.filter((folder) => folder.parentId === (currentFolder?.id ?? null));
   let folderRows: { id: string; name: string; parentId: string | null; noteCount: number; subfolderCount: number; subtree: string[] }[] = [];
   if (browsing && children.length > 0) {
-    const grouped = await prisma.meeting.groupBy({ by: ["folderId"], where: { workspaceId, deletedAt: null, folderId: { not: null } }, _count: { _all: true } });
+    const childrenWithSubtrees = children.map((folder) => ({ folder, subtree: subtreeIds(folders, folder.id) }));
+    const visibleFolderIds = [...new Set(childrenWithSubtrees.flatMap(({ subtree }) => subtree))];
+    const grouped = await prisma.meeting.groupBy({
+      by: ["folderId"],
+      where: { workspaceId, deletedAt: null, folderId: { in: visibleFolderIds } },
+      _count: { _all: true },
+    });
     const perFolder = new Map(grouped.map((row) => [row.folderId, row._count._all]));
-    folderRows = children.map((folder) => {
-      const subtree = subtreeIds(folders, folder.id);
+    folderRows = childrenWithSubtrees.map(({ folder, subtree }) => {
       return {
         id: folder.id,
         name: folder.name,

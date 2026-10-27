@@ -15,6 +15,7 @@ import {
   DesktopSyncConflictError,
 } from "./meetings";
 import type { CreateMeetingRequest } from "./types";
+import { logger } from "./logger";
 
 // These are real integration tests against a live Postgres (see webapp
 // README for how to start one) — not mocked. Truth-in-testing matters more
@@ -559,7 +560,7 @@ describe("deleteMeeting", () => {
     const input = sampleMeeting();
     await upsertMeeting(input, WORKSPACE_ID);
     await prisma.meeting.update({ where: { id: input.id }, data: { recordingObjectKey: "../unsafe-object-key" } });
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     try {
       await deleteMeeting(WORKSPACE_ID, input.id);
       expect(await getMeeting(WORKSPACE_ID, input.id)).toBeNull();

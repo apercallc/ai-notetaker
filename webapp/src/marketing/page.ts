@@ -8,6 +8,7 @@ import { getSessionUser } from "@/lib/sessions";
 import { signupAvailability } from "@/lib/signupPolicy";
 import { SITE } from "./content";
 import type { ShellContext } from "./Shell";
+import { logger } from "@/lib/logger";
 
 /** Marketing pages exist only on the managed deployment; anywhere else they are a plain 404. */
 export function requireMarketing(): void {
@@ -25,7 +26,7 @@ export async function marketingContext(): Promise<ShellContext> {
     const store = await cookies();
     signedIn = Boolean(await getSessionUser(store.get(SESSION_COOKIE)?.value));
   } catch (error) {
-    console.error("marketing session lookup failed", error instanceof Error ? error.message : String(error));
+    logger.error("marketing session lookup failed", { error });
   }
   return { signedIn, signupOpen: signupAvailability().allowed };
 }

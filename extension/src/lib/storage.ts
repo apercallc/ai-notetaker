@@ -8,6 +8,8 @@
 import { DEFAULT_SETTINGS, type CaptureSource, type MeetingRecord, type NotetakerSettings, type ProcessingMode } from "../types";
 
 const MEETING_SCAN_BATCH_SIZE = 25;
+// Export scans load complete records (including transcripts) from chrome.storage.local.
+const MEETING_EXPORT_SCAN_BATCH_SIZE = 1;
 
 const KEYS = {
   settings: "notetaker.settings",
@@ -229,6 +231,50 @@ export async function listMeetings(
     .filter((m): m is MeetingRecord => m !== null)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
     .slice(0, requestedLimit);
+}
+
+export interface MeetingExportMetadata {
+  id: string;
+  startedAt: string;
+}
+
+/**
+ * Read one full record at a time while preparing an export's exact newest-first
+ * order. chrome.storage.local returns the whole value, including its transcript,
+ * so a one-record batch keeps this scan bounded even for unusually large notes.
+ * The returned metadata is small, and ordering matches listMeetings().
+ */
+export async function listMeetingExportMetadata(): Promise<MeetingExportMetadata[]> {
+  const index = (await storageGet<string[]>(KEYS.meetingsIndex)) ?? [];
+  const metadata: MeetingExportMetadata[] = [];
+  for (let start = 0; start < index.length; start += MEETING_EXPORT_SCAN_BATCH_SIZE) {
+    const ids = index.slice(start, start + MEETING_EXPORT_SCAN_BATCH_SIZE);
+    const records = (await storageGet<Record<string, unknown>>(ids.map((id) => KEYS.meetingPrefix + id))) ?? {};
+    for (const id of ids) {
+      const meeting = normalizeMeeting(records[KEYS.meetingPrefix + id]);
+      if (meeting) metadata.push({ id: meeting.id, startedAt: meeting.startedAt });
+    }
+  }
+  return metadata.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+/** Load full history in recency order while holding at most one meeting record at a time. */
+export async function* streamMeetingsByRecency(
+  extraMeetings: MeetingRecord[] = [],
+  metadataInput?: MeetingExportMetadata[],
+): AsyncGenerator<MeetingRecord> {
+  const metadata = metadataInput ?? await listMeetingExportMetadata();
+  const storedIds = new Set(metadata.map(({ id }) => id));
+  const extras = extraMeetings.filter((meeting) => !storedIds.has(meeting.id));
+  const candidates = [
+    ...metadata.map((entry) => ({ ...entry, extra: undefined as MeetingRecord | undefined })),
+    ...extras.map((meeting) => ({ id: meeting.id, startedAt: meeting.startedAt, extra: meeting })),
+  ].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+  for (const candidate of candidates) {
+    const meeting = candidate.extra ?? await getMeeting(candidate.id);
+    if (meeting) yield meeting;
+  }
 }
 
 export async function getMeeting(id: string): Promise<MeetingRecord | null> {

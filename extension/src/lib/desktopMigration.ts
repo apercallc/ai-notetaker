@@ -1,4 +1,5 @@
 import type { MeetingMode, MeetingRecord, NotetakerSettings } from "../types";
+import { listMeetingExportMetadata, streamMeetingsByRecency } from "./storage";
 import { sendToBackground } from "./sendToBackground";
 import { browserMeetArchiveInventory, streamBrowserMeetChunks } from "../meet/browserStorage";
 
@@ -182,6 +183,119 @@ export function buildDesktopMigrationArchive(
   };
 }
 
+function emptyDesktopMigrationArchive(settings: NotetakerSettings, exportedAt: string): DesktopMigrationArchive {
+  const vocabulary = (settings.customVocabulary ?? []).map((term) => clip(String(term), MAX_VOCAB_TERM_CHARS)).slice(0, 100);
+  return {
+    format: "ai-notetaker-desktop-transfer",
+    version: DESKTOP_MIGRATION_VERSION,
+    exportedAt,
+    settings: {
+      transcriptionProvider: settings.transcriptionProvider,
+      summarizationProvider: settings.summarizationProvider,
+      defaultMeetingMode: settings.defaultMeetingMode,
+      customVocabulary: vocabulary,
+      customSummaryInstructions: clip(settings.customSummaryInstructions, 4_000),
+    },
+    meetings: [],
+  };
+}
+
+/**
+ * Builds the portable part of an archive from a stream. Only repaired notes
+ * that fit the desktop's 20 MB import cap are retained; the input can remain
+ * newest-first so older notes are the ones omitted when the cap is reached.
+ */
+export async function buildDesktopMigrationArchiveFromStream(
+  settings: NotetakerSettings,
+  meetings: AsyncIterable<MeetingRecord>,
+  totalMeetingCount: number,
+  exportedAt: string = new Date().toISOString(),
+  maxArchiveBytes: number = MAX_DESKTOP_MIGRATION_BYTES,
+): Promise<DesktopMigrationReport> {
+  const archive = emptyDesktopMigrationArchive(settings, exportedAt);
+  const encoder = new TextEncoder();
+  let serializedBytes = encoder.encode(JSON.stringify(archive)).byteLength;
+  let processed = 0;
+  let skipped = 0;
+  let repaired = 0;
+  let omittedBySize = 0;
+  let omittedByCount = 0;
+
+  for await (const meeting of meetings) {
+    if (archive.meetings.length >= MAX_MEETINGS) {
+      omittedByCount = Math.max(0, totalMeetingCount - processed);
+      break;
+    }
+    processed += 1;
+    const changed = { value: false };
+    const repairedMeeting = repairMeeting(meeting, changed);
+    if (!repairedMeeting) {
+      skipped += 1;
+      continue;
+    }
+
+    const meetingJson = JSON.stringify(repairedMeeting);
+    const meetingBytes = encoder.encode(meetingJson).byteLength;
+    const separatorBytes = archive.meetings.length > 0 ? 1 : 0;
+    if (serializedBytes + separatorBytes + meetingBytes > maxArchiveBytes) {
+      if (archive.meetings.length === 0) {
+        throw new Error("The newest meeting cannot fit within the desktop app’s 20 MB transfer limit. No archive was created; your extension data is unchanged.");
+      }
+      omittedBySize = Math.max(0, totalMeetingCount - processed + 1);
+      break;
+    }
+    archive.meetings.push(repairedMeeting);
+    serializedBytes += separatorBytes + meetingBytes;
+    if (changed.value) repaired += 1;
+  }
+
+  const adjustments: string[] = [];
+  if (skipped > 0) adjustments.push(`${skipped} meeting record${skipped === 1 ? " was" : "s were"} left out because ${skipped === 1 ? "its" : "their"} id or start time is invalid for the desktop app.`);
+  if (omittedByCount > 0) adjustments.push(`${omittedByCount} older meeting record${omittedByCount === 1 ? " was" : "s were"} left out: the desktop app imports at most ${MAX_MEETINGS} meetings per file.`);
+  if (omittedBySize > 0) adjustments.push(`${omittedBySize} remaining meeting record${omittedBySize === 1 ? " was" : "s were"} not included after the transfer reached the desktop app’s 20 MB import limit.`);
+  if (repaired > 0) adjustments.push(`${repaired} meeting record${repaired === 1 ? " was" : "s were"} shortened or corrected to fit the desktop app's import limits.`);
+
+  return { archive, adjustments };
+}
+
+type AudioInventory = Awaited<ReturnType<typeof browserMeetArchiveInventory>>;
+
+/** Placeholder notes for saved audio whose meeting record is gone, so the audio still imports. */
+function recoverAudioOnlyMeetings(inventory: AudioInventory, storedIds: ReadonlySet<string>, exportedAt: string): MeetingRecord[] {
+  return inventory.flatMap((audio) => {
+    if (storedIds.has(audio.meetingId)) return [];
+    const firstDate = audio.firstCapturedAt === null ? null : new Date(audio.firstCapturedAt);
+    return [{
+      id: audio.meetingId,
+      title: "Recovered browser audio",
+      startedAt: firstDate && !Number.isNaN(firstDate.getTime()) ? firstDate.toISOString() : exportedAt,
+      endedAt: null,
+      transcript: [],
+      summary: null,
+      actionItems: [],
+      status: "error" as const,
+      captureSource: "meet" as const,
+    }];
+  });
+}
+
+/**
+ * Production meeting source for the audio archive: pages stored notes through
+ * export metadata instead of loading every transcript, and merges in
+ * placeholders for audio-only recordings, newest first.
+ */
+export async function loadStoredMeetingStream(
+  inventory: AudioInventory,
+  exportedAt: string,
+): Promise<{ totalCount: number; meetings: AsyncIterable<MeetingRecord> }> {
+  const metadata = await listMeetingExportMetadata();
+  const recovered = recoverAudioOnlyMeetings(inventory, new Set(metadata.map(({ id }) => id)), exportedAt);
+  return {
+    totalCount: metadata.length + recovered.length,
+    meetings: streamMeetingsByRecency(recovered, metadata),
+  };
+}
+
 export function createDesktopMigrationArchive(
   settings: NotetakerSettings,
   meetings: MeetingRecord[],
@@ -208,7 +322,7 @@ export async function assertNoActiveRecording(): Promise<void> {
 }
 
 export function downloadDesktopMigrationArchive(archive: DesktopMigrationArchive): void {
-  const blob = new Blob([JSON.stringify(archive, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify(archive)], { type: "application/json" });
   if (blob.size > MAX_DESKTOP_MIGRATION_BYTES) {
     throw new Error("This transfer file exceeds the desktop app’s 20 MB import limit. Export fewer meetings first.");
   }
@@ -233,6 +347,14 @@ export async function saveDesktopAudioArchive(
   exportedAt: string = new Date().toISOString(),
   options: {
     isRecordingActive?: () => Promise<void>;
+    /** Production exports page through storage; the callback form stays compatible with existing callers. */
+    loadMeetingStream?: (inventory: AudioInventory, exportedAt: string) => Promise<{
+      totalCount: number;
+      meetings: AsyncIterable<MeetingRecord>;
+    }> | {
+      totalCount: number;
+      meetings: AsyncIterable<MeetingRecord>;
+    };
     /** Audio bytes written so far: once before audio starts, then after each recording. */
     onProgress?: (writtenBytes: number, totalBytes: number) => void;
   } = {},
@@ -251,7 +373,7 @@ export async function saveDesktopAudioArchive(
   await (options.isRecordingActive ?? assertNoActiveRecording)();
   const writer = await handle.createWritable();
   try {
-    const [storedMeetings, inventory] = await Promise.all([loadMeetings(), browserMeetArchiveInventory()]);
+    const inventory = await browserMeetArchiveInventory();
     const totalAudioBytes = inventory.reduce((total, item) => total + item.totalBytes, 0);
     if (!Number.isSafeInteger(totalAudioBytes) || totalAudioBytes > MAX_AUDIO_ARCHIVE_BYTES) {
       throw new Error("Saved audio exceeds the desktop app’s 50 GB archive limit. Your extension data is unchanged.");
@@ -262,26 +384,36 @@ export async function saveDesktopAudioArchive(
     for (const { meetingId } of inventory) {
       if (!UUID_PATTERN.test(meetingId)) throw new Error("A saved audio record has an invalid meeting id. Its source data was left unchanged.");
     }
-    const meetingById = new Map(storedMeetings.map((meeting) => [meeting.id, meeting]));
-    for (const audio of inventory) {
-      if (!meetingById.has(audio.meetingId)) {
-        const firstDate = audio.firstCapturedAt === null ? null : new Date(audio.firstCapturedAt);
-        const startedAt = firstDate && !Number.isNaN(firstDate.getTime()) ? firstDate.toISOString() : exportedAt;
-        meetingById.set(audio.meetingId, {
-          id: audio.meetingId,
-          title: "Recovered browser audio",
-          startedAt,
-          endedAt: null,
-          transcript: [],
-          summary: null,
-          actionItems: [],
-          status: "error",
-          captureSource: "meet",
-        });
-      }
+    let meetingSource: MeetingRecord[] | { totalCount: number; meetings: AsyncIterable<MeetingRecord> };
+    if (options.loadMeetingStream) {
+      meetingSource = await options.loadMeetingStream(inventory, exportedAt);
+    } else {
+      const stored = await loadMeetings();
+      const storedIds = new Set(stored.map(({ id }) => id));
+      meetingSource = [...stored, ...recoverAudioOnlyMeetings(inventory, storedIds, exportedAt)];
     }
-    const meetings = [...meetingById.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    const { archive: notes, adjustments } = buildDesktopMigrationArchive(settings, meetings, exportedAt);
+    let report: DesktopMigrationReport;
+    if (Array.isArray(meetingSource)) {
+      report = buildDesktopMigrationArchive(settings, meetingSource, exportedAt);
+    } else {
+      const audioIds = inventory.map(({ meetingId }) => meetingId);
+      const shell = JSON.stringify({
+        format: "ai-notetaker-desktop-audio-transfer",
+        version: 1,
+        sampleRateHz: 48_000,
+        notes: null,
+        audioMeetingIds: audioIds,
+      });
+      const notesByteBudget = MAX_DESKTOP_MIGRATION_BYTES - new TextEncoder().encode(shell).byteLength + new TextEncoder().encode("null").byteLength;
+      report = await buildDesktopMigrationArchiveFromStream(
+        settings,
+        meetingSource.meetings,
+        meetingSource.totalCount,
+        exportedAt,
+        notesByteBudget,
+      );
+    }
+    const { archive: notes, adjustments } = report;
     const exportedIds = new Set(notes.meetings.map((meeting) => meeting.id));
     const audioInventory = inventory.filter(({ meetingId }) => exportedIds.has(meetingId));
     if (audioInventory.length < inventory.length) adjustments.push(`${inventory.length - audioInventory.length} saved audio recording${inventory.length - audioInventory.length === 1 ? " was" : "s were"} left out with ${inventory.length - audioInventory.length === 1 ? "its" : "their"} meeting record.`);
@@ -294,7 +426,7 @@ export async function saveDesktopAudioArchive(
     });
     const manifestBytes = new TextEncoder().encode(manifest);
     if (manifestBytes.length > MAX_DESKTOP_MIGRATION_BYTES) {
-      throw new Error("Meeting text exceeds the 20 MB transfer limit. Export fewer meetings first.");
+      throw new Error("Meeting metadata exceeds the desktop app’s 20 MB transfer limit. No archive was created; your extension data is unchanged.");
     }
 
     const header = new Uint8Array(AUDIO_ARCHIVE_MAGIC.length + 4);

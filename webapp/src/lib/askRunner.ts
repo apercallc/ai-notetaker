@@ -3,6 +3,7 @@ import { ChatUnavailableError } from "@/lib/chatQuota";
 import { listFolders } from "@/lib/library";
 import { subtreeIds } from "@/lib/libraryTree";
 import { ChatBusyError, ChatProviderError, InvalidQuestionError, askNotes, type ChatAnswer } from "@/lib/notesChat";
+import { logger } from "./logger";
 
 export type AskResult = ({ ok: true } & ChatAnswer) | { ok: false; error: string };
 
@@ -21,11 +22,11 @@ export async function askWorkspaceNotes(workspaceId: string, question: string, f
   } catch (error) {
     if (error instanceof InvalidQuestionError || error instanceof ChatUnavailableError || error instanceof ChatBusyError) return { ok: false, error: error.message };
     if (error instanceof ChatProviderError) {
-      console.error("notes chat provider failure", error.message);
+      logger.error("notes chat provider failure", { error: error.message });
       return { ok: false, error: "The assistant is unavailable right now. You were not charged a question; try again shortly." };
     }
     // An unexpected failure (database blip, bug) must not reach the client as Next's masked, blank error.
-    console.error("notes chat failed", error instanceof Error ? error.message : String(error));
+    logger.error("notes chat failed", { error });
     return { ok: false, error: "Something went wrong answering that. Try again in a moment." };
   }
 }

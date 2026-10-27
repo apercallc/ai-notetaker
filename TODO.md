@@ -1,5 +1,25 @@
 # AI Notetaker — Production Readiness and Product Migration TODO
 
+## Repository-wide audit — 2026-10-27
+
+- [x] Limit web library folder-count aggregation to the subtrees visible at
+      the current folder level. Nested-folder counts remain accurate without
+      grouping unrelated workspace notes during deep-folder navigation.
+- [x] Recheck all extension and webapp dependencies, including development
+      dependencies. `npm audit` reports no current advisories in either lockfile.
+- [x] Stop polling full desktop snapshots while the Library is open, refresh
+      when returning to Record, and slow the missed-event fallback from 15 to
+      60 seconds.
+- [x] Keep routine desktop snapshots compact: Record loads three recent notes
+      plus exact processing/recovery state; full history loads only for Library
+      and Action Items. Settings still receives titles for current sync conflicts.
+- [ ] Add an index for desktop meeting metadata so a status snapshot does not
+      scan every meeting directory. The current compact snapshot still reads
+      metadata across the archive to count pending work and find recoveries.
+- [x] Stream extension migration records in recency order, keeping one full
+      meeting at a time and stopping at the desktop import size/count limits.
+      Audio manifest metadata is reserved before selecting note records.
+
 ## Repository-wide audit — 2026-10-09
 
 - [x] Correct privacy copy to say raw audio is saved locally before it is sent
@@ -74,13 +94,10 @@ writes, PATCH body cap, list over-fetch, ProcessingJob meetingId index.
 
 ## Dependency audit — 2026-10-05
 
-- [ ] Recheck `braces` after upstream publishes a patched release. The webapp
-      development-only chain `eslint-config-next → @next/eslint-plugin-next →
-      fast-glob → micromatch → braces@3.0.3` is affected by GHSA-vfj7-8cjw-p6xm.
-      GitHub's advisory lists no patched version. `npm audit --omit=dev` reports
-      zero webapp production dependency vulnerabilities; full webapp audit finds
-      five high-severity paths to this same advisory. Do not force-downgrade
-      Next or pin another affected `braces` release as a workaround.
+- [x] Recheck `braces` after upstream publishes a patched release. On
+      2026-10-27, full `npm audit` reports no extension or webapp advisories,
+      including development dependencies. `braces@3.0.3` remains in the
+      dependency tree and is not currently reported as vulnerable.
 
 ## macOS installer concurrency — 2026-10-05
 

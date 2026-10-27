@@ -2,6 +2,7 @@ import { issueAuthToken } from "./authTokens";
 import { getEmailSender, type EmailMessage } from "./mailer";
 import { normalizeEmail } from "./email";
 import type { RequestContext } from "./requestContext";
+import { logger } from "./logger";
 
 /**
  * Issues verification / reset / invite tokens and delivers the link.
@@ -57,14 +58,14 @@ async function deliver(
   if (!sender) return { link: displayLink, delivered: false };
   const emailBase = envBase ?? (sender.mode === "console" ? requestBase : null);
   if (!emailBase) {
-    console.error("auth email not sent: set APP_URL so links in emails point at this deployment");
+    logger.error("auth email not sent: set APP_URL so links in emails point at this deployment");
     return { link: displayLink, delivered: false };
   }
   try {
     await sender.send({ to, ...message(`${emailBase}${path}`) });
     return { link: displayLink, delivered: sender.mode !== "console" };
   } catch (error) {
-    console.error("auth email delivery failed", { kind, error: error instanceof Error ? error.message : String(error) });
+    logger.error("auth email delivery failed", { kind, error: error instanceof Error ? error.message : String(error) });
     return { link: displayLink, delivered: false };
   }
 }

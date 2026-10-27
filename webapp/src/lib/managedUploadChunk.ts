@@ -4,6 +4,7 @@ import { prisma } from "./db";
 import { apiErrorResponse, jsonError } from "./apiErrors";
 import { getUpload, MAX_CHUNK_BYTES, ManagedValidationError, readManagedBytes } from "./managedJobs";
 import { chunkObjectKey, deleteObject, putObject } from "./objectStorage";
+import { logger } from "./logger";
 
 /**
  * Stores one chunk of a managed upload. Shared by the extension/helper API
@@ -94,7 +95,7 @@ export async function handleManagedChunkUpload(
       // unless the losing-insert P2002 path below proves a row exists.
       if ((error as { code?: string }).code !== "P2002") {
         await deleteObject(objectKey).catch((cleanupError) => {
-          console.error("managed upload chunk orphan cleanup failed", {
+          logger.error("managed upload chunk orphan cleanup failed", {
             requestId,
             uploadId,
             chunkIndex,
@@ -113,7 +114,7 @@ export async function handleManagedChunkUpload(
         return NextResponse.json({ uploadId, chunkIndex, checksum, byteLength: bytes.byteLength, replayed: true }, { headers: { "x-request-id": requestId } });
       }
       await deleteObject(objectKey).catch((cleanupError) => {
-        console.error("managed upload race cleanup failed", {
+        logger.error("managed upload race cleanup failed", {
           requestId,
           uploadId,
           chunkIndex,

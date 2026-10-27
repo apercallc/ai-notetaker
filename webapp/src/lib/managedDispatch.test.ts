@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchManagedJob } from "./managedDispatch";
+import { logger } from "./logger";
 
 describe("managed worker dispatch", () => {
   afterEach(() => {
@@ -46,7 +47,7 @@ describe("managed worker dispatch", () => {
     vi.stubEnv("WORKER_URL", "file:///tmp/worker");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(logger, "error").mockImplementation(() => {});
 
     dispatchManagedJob("job-1", "workspace-1");
 
@@ -64,7 +65,7 @@ describe("managed worker dispatch", () => {
     vi.stubEnv("WORKER_URL", "https://worker.example.test");
     const fetchMock = vi.fn().mockRejectedValue(new Error("private transport detail"));
     vi.stubGlobal("fetch", fetchMock);
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(logger, "error").mockImplementation(() => {});
 
     dispatchManagedJob("job-1", "workspace-1");
     await vi.waitFor(() => expect(log).toHaveBeenCalledOnce());

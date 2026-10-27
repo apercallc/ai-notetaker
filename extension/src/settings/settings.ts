@@ -1,5 +1,5 @@
-import { getSettings, listMeetings } from "../lib/storage";
-import { assertNoActiveRecording, buildDesktopMigrationArchive, downloadDesktopMigrationArchive, saveDesktopAudioArchive } from "../lib/desktopMigration";
+import { getSettings, listMeetings, listMeetingExportMetadata, streamMeetingsByRecency } from "../lib/storage";
+import { assertNoActiveRecording, buildDesktopMigrationArchiveFromStream, downloadDesktopMigrationArchive, loadStoredMeetingStream, saveDesktopAudioArchive } from "../lib/desktopMigration";
 import { testWebappHealth } from "../lib/providerTest";
 import { testProviderKey as testApiKey } from "../lib/testProviderKey";
 import { escapeHtml } from "../lib/html";
@@ -435,7 +435,7 @@ function wireEvents(): void {
     button.disabled = true;
     setResult(status, "Choose where to save the archive…", "pending");
     try {
-      const result = await saveDesktopAudioArchive(settings, listMeetings);
+      const result = await saveDesktopAudioArchive(settings, listMeetings, undefined, { loadMeetingStream: loadStoredMeetingStream });
       setResult(status, `Archive saved with ${result.meetingCount} meeting record${result.meetingCount === 1 ? "" : "s"} and ${(result.audioBytes / (1024 * 1024)).toFixed(1)} MB of saved audio. The extension source is unchanged.${result.adjustments?.length ? ` Note: ${result.adjustments!.join(" ")}` : ""}`, "valid");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -456,7 +456,12 @@ function wireEvents(): void {
     setResult(status, "Preparing notes-only transfer…", "pending");
     try {
       await assertNoActiveRecording();
-      const { archive, adjustments } = buildDesktopMigrationArchive(settings, await listMeetings());
+      const metadata = await listMeetingExportMetadata();
+      const { archive, adjustments } = await buildDesktopMigrationArchiveFromStream(
+        settings,
+        streamMeetingsByRecency([], metadata),
+        metadata.length,
+      );
       downloadDesktopMigrationArchive(archive);
       setResult(status, `Notes-only file saved with ${archive.meetings.length} meeting records. Raw audio is not included.${adjustments.length ? ` Note: ${adjustments.join(" ")}` : ""}`, "valid");
     } catch (error) {

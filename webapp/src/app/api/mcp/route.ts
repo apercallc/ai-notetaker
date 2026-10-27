@@ -3,6 +3,7 @@ import { resolveReadToken } from "@/lib/apiTokens";
 import { handleMcpMessage } from "@/lib/mcp";
 import { getUserDefaultWorkspaceId, getUserRole } from "@/lib/workspaces";
 import { requestIdFrom } from "@/lib/requestId";
+import { logger } from "@/lib/logger";
 
 /**
  * Remote MCP endpoint (Streamable HTTP, stateless). Authenticates a read-only
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
     return await handlePost(request, requestId);
   } catch (error) {
     // MCP clients parse JSON-RPC; a bare 500 page would read as a protocol failure.
-    console.error("mcp request failed", { requestId, error: error instanceof Error ? error.message : String(error) });
+    logger.error("mcp request failed", { requestId, error: error instanceof Error ? error.message : String(error) });
     return json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error. Try again." } }, 500, requestId);
   }
 }

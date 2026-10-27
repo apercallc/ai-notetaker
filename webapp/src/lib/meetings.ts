@@ -8,6 +8,7 @@ import { makeSnippet, type HighlightPart } from "./snippet";
 import { utcDateString } from "./actionItems";
 import { notifyNoteReady } from "./integrations";
 import { nextMeetingVersion } from "./meetingVersion";
+import { logger } from "./logger";
 
 export class ValidationError extends Error {}
 export type DesktopSyncConflictDetails = {
@@ -372,7 +373,7 @@ export async function upsertMeeting(
   // A synced note that already has its summary is a finished note; announce it once.
   if (input.summary.trim() && !isManagedRegistration && !result.unchanged) {
     void notifyNoteReady(workspaceId, input.id).catch((error: unknown) => {
-      console.error("note-ready notification failed", { meetingId: input.id, error: error instanceof Error ? error.message : String(error) });
+      logger.error("note-ready notification failed", { meetingId: input.id, error: error instanceof Error ? error.message : String(error) });
     });
   }
   return { id: input.id, title, updatedAt: result.updatedAt };
@@ -789,7 +790,7 @@ export async function deleteMeeting(workspaceId: string, id: string): Promise<vo
   }
   const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
   if (failures.length) {
-    console.error("meeting object cleanup failed", {
+    logger.error("meeting object cleanup failed", {
       meetingId: id,
       workspaceId,
       failedObjects: failures.length,

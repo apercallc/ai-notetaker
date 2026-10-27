@@ -4,6 +4,7 @@ import { captureWarning } from "./observability";
 import { ValidationError } from "./meetings";
 import { DeploymentConfigError, getAppUrl } from "./deploymentConfig";
 import { PLAN_MEETING_LIMITS, planLabel } from "./plans";
+import { logger } from "./logger";
 
 const PAYMENT_GRACE_MS = 3 * 24 * 60 * 60 * 1_000;
 
@@ -507,7 +508,7 @@ async function endSubscriptionForDispute(dispute: Record<string, unknown> | unde
   if (!customerId) return;
   const subscription = await prisma.workspaceSubscription.findFirst({ where: { stripeCustomerId: customerId } });
   if (!subscription?.stripeSubscriptionId || TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) return;
-  console.error("stripe dispute opened: cancelling subscription", { workspaceId: subscription.workspaceId, chargeId });
+  logger.error("stripe dispute opened: cancelling subscription", { workspaceId: subscription.workspaceId, chargeId });
   captureWarning("subscription cancelled after a payment dispute", { workspaceId: subscription.workspaceId, chargeId });
   await cancelStripeSubscriptionNow(subscription.stripeSubscriptionId);
 }
@@ -559,7 +560,7 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
     const bySubscription = !byCustomer && subscriptionId ? await tx.workspaceSubscription.findFirst({ where: { stripeSubscriptionId: subscriptionId }, select: { workspaceId: true } }) : null;
     const bound = byCustomer?.workspaceId ?? bySubscription?.workspaceId;
     if (bound && metadataWorkspaceId && bound !== metadataWorkspaceId) {
-      console.error("stripe event ignored: workspace metadata conflicts with bound customer", { eventId, eventType });
+      logger.error("stripe event ignored: workspace metadata conflicts with bound customer", { eventId, eventType });
       return;
     }
     const workspaceId = bound ?? metadataWorkspaceId;
@@ -646,7 +647,7 @@ export async function applyStripeEvent(event: unknown): Promise<void> {
         // re-failed) forever, disabling the webhook endpoint by timeout and
         // freezing plan changes for EVERY tenant. Record the event, leave
         // billing state untouched, and surface it in the logs instead.
-        console.error("stripe subscription event ignored: subscription price is not configured as a hosted plan", {
+        logger.error("stripe subscription event ignored: subscription price is not configured as a hosted plan", {
           eventId,
           eventType,
           workspaceId,

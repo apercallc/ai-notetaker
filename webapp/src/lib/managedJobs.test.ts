@@ -22,6 +22,7 @@ import {
 import { EntitlementError } from "./entitlementError";
 import { getEntitlements, releaseMeetingProcessing, reserveMeetingProcessing } from "./usageLedger";
 import { chunkObjectKey, getObject, putObject } from "./objectStorage";
+import { logger } from "./logger";
 
 const WORKSPACE_ID = randomUUID();
 const OTHER_WORKSPACE_ID = randomUUID();
@@ -372,7 +373,7 @@ describe("managed upload contracts", () => {
     const upload = await createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `bad-cleanup-${meetingId}` });
     await prisma.uploadChunk.create({ data: { uploadId: upload.id, chunkIndex: 0, channel: "mic", byteLength: 1, checksum: "invalid-key", objectKey: "../invalid" } });
     await prisma.managedUpload.update({ where: { id: upload.id }, data: { expiresAt: new Date(Date.now() - 1) } });
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     await expect(createManagedUpload(WORKSPACE_ID, { meetingId, totalChunks: 1, totalBytes: 1, idempotencyKey: `bad-cleanup-${meetingId}` }))
       .rejects.toThrow("expired upload cleanup is still in progress");
     await expect(expireManagedUploads()).resolves.toBe(0);

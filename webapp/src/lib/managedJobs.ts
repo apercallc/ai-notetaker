@@ -10,6 +10,7 @@ import { deleteMeeting } from "./meetings";
 import { recordAudit } from "./audit";
 import { readMaintenanceCursor, writeMaintenanceCursor } from "./maintenanceCursor";
 import { assertProviderAdmission } from "./providerSpend";
+import { logger } from "./logger";
 
 export class ManagedValidationError extends ValidationError {}
 
@@ -316,7 +317,7 @@ export async function deleteManagedUploadAudio(uploadId: string): Promise<boolea
     failures.push(...results.filter((result): result is PromiseRejectedResult => result.status === "rejected"));
   }
   if (failures.length > 0) {
-    console.error("managed temporary audio cleanup failed", {
+    logger.error("managed temporary audio cleanup failed", {
       uploadId,
       failures: failures.length,
       firstError: failures[0]?.reason instanceof Error ? failures[0].reason.message : String(failures[0]?.reason),
@@ -391,7 +392,7 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
         });
         if (failed.count > 0) {
           await releaseMeetingProcessing(upload.workspaceId, job.idempotencyKey).catch((error: unknown) => {
-            console.error("managed expired upload usage release failed", {
+            logger.error("managed expired upload usage release failed", {
               uploadId: upload.id,
               jobId: job.id,
               error: error instanceof Error ? error.message : String(error),
@@ -441,7 +442,7 @@ export async function expireManagedUploads(now = new Date()): Promise<number> {
       });
       cleaned += 1;
     } catch (error) {
-      console.error("legacy managed recording cleanup failed", {
+      logger.error("legacy managed recording cleanup failed", {
         meetingId: meeting.id,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -484,7 +485,7 @@ export async function expireManagedMeetings(now = new Date()): Promise<number> {
         await deleteMeeting(workspace.id, meeting.id);
         removedHere += 1;
       } catch (error) {
-        console.error("retention delete failed", { meetingId: meeting.id, error: error instanceof Error ? error.message : String(error) });
+        logger.error("retention delete failed", { meetingId: meeting.id, error: error instanceof Error ? error.message : String(error) });
       }
     }
     removed += removedHere;

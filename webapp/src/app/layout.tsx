@@ -9,6 +9,7 @@ import { managedHostingEnabled } from "@/lib/managedAuth";
 import { SESSION_COOKIE } from "@/lib/sessionCookie";
 import { getSessionContextForRequest, resolveWorkspaceForRequest } from "@/lib/currentUser";
 import { MARKETING_HEADER } from "@/marketing/paths";
+import { logger } from "@/lib/logger";
 
 /** Absolute URLs in canonical/OG metadata need the public origin; only the managed site publishes any. */
 function metadataBase(): URL | undefined {
@@ -43,7 +44,7 @@ async function headerState(): Promise<{ role: "owner" | "member"; lapsed: boolea
     const lapsed = managedHostingEnabled() ? (await getWorkspaceAccess(active.workspaceId)).lapsed : false;
     return { role: active.role, lapsed };
   } catch (error) {
-    console.error("header session lookup failed", error instanceof Error ? error.message : String(error));
+    logger.error("header session lookup failed", { error });
     return null;
   }
 }

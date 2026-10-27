@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { BillingError, cancelWorkspaceSubscription } from "./billing";
 import { deleteObject, queueObjectDeletions } from "./objectStorage";
 import { disconnectGoogle } from "./googleIntegration";
+import { logger } from "./logger";
 
 export type PurgeWorkspaceResult = { ok: true } | { ok: false; error: string };
 
@@ -18,7 +19,7 @@ export async function purgeWorkspace(workspaceId: string): Promise<PurgeWorkspac
   try {
     await cancelWorkspaceSubscription(workspaceId);
   } catch (error) {
-    console.error("workspace deletion blocked: subscription cancellation failed", {
+    logger.error("workspace deletion blocked: subscription cancellation failed", {
       workspaceId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -76,7 +77,7 @@ export async function purgeWorkspace(workspaceId: string): Promise<PurgeWorkspac
       // after billing is already cancelled.
     }, { timeout: 60_000, maxWait: 10_000 });
   } catch (error) {
-    console.error("workspace deletion failed after cancelling billing", {
+    logger.error("workspace deletion failed after cancelling billing", {
       workspaceId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -89,7 +90,7 @@ export async function purgeWorkspace(workspaceId: string): Promise<PurgeWorkspac
   }
   const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
   if (failures.length) {
-    console.error("workspace deletion object cleanup failed", {
+    logger.error("workspace deletion object cleanup failed", {
       workspaceId,
       failedObjects: failures.length,
       firstError: failures[0]?.reason instanceof Error ? failures[0].reason.message : String(failures[0]?.reason),

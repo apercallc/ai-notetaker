@@ -5,6 +5,7 @@ import { isAuthorizedBearer } from "./lib/auth";
 import { isLegacyIngestAvailable } from "./lib/deploymentConfig";
 import { isValidWorkerToken } from "./lib/secureCompare";
 import { isManagedCorsOrigin, managedCorsHeaders } from "./lib/cors";
+import { logger } from "./lib/logger";
 import { requestIdFrom } from "./lib/requestId";
 import { getSessionUser } from "./lib/sessions";
 import { MARKETING_HEADER, isMarketingPath } from "./marketing/paths";
@@ -153,7 +154,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       } catch (error) {
         // The session store is unreachable. That is not "signed out": clients must be told to retry,
         // not to discard a good session.
-        console.error("session lookup failed", { requestId, error: error instanceof Error ? error.message : String(error) });
+        logger.error("session lookup failed", { requestId, error });
         return NextResponse.json({ error: "service temporarily unavailable", requestId }, { status: 503, headers: { ...corsHeaders, "retry-after": "5", "x-request-id": requestId } });
       }
       if (!user) {
@@ -198,7 +199,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   try {
     user = await getSessionUser(sessionId);
   } catch (error) {
-    console.error("session lookup failed", { requestId, error: error instanceof Error ? error.message : String(error) });
+    logger.error("session lookup failed", { requestId, error });
     return new NextResponse("The service is temporarily unavailable. Please try again in a moment.", {
       status: 503,
       headers: { "retry-after": "5", "content-type": "text/plain; charset=utf-8", "x-request-id": requestId },

@@ -206,6 +206,10 @@ struct DesktopSnapshot {
     audio: DesktopAudioStatus,
     active_meeting_id: Option<String>,
     meetings: Vec<DesktopMeetingSummary>,
+    history_complete: bool,
+    processing_count: usize,
+    recoverable_meeting: Option<DesktopMeetingSummary>,
+    conflict_titles: HashMap<String, String>,
     folders: Vec<desktop_library::Folder>,
     library_error: Option<String>,
     unreadable_recordings: usize,
@@ -715,7 +719,9 @@ pub(crate) fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 #[tauri::command]
 async fn desktop_snapshot(
     context: tauri::State<'_, DesktopCommandContext>,
+    include_history: Option<bool>,
 ) -> Result<DesktopSnapshot, String> {
+    let include_history = include_history.unwrap_or(false);
     let preferences = context
         .preferences
         .lock()
@@ -745,6 +751,11 @@ async fn desktop_snapshot(
                 .is_some(),
         &preferences,
     );
+    let conflict_ids = webapp_sync
+        .conflicts
+        .iter()
+        .filter_map(|conflict| Uuid::parse_str(&conflict.meeting_id).ok())
+        .collect::<HashSet<_>>();
 
     let audio_diagnostics = context
         .app
@@ -787,21 +798,52 @@ async fn desktop_snapshot(
             .scan_meetings()
             .map_err(|error| format!("Meeting history could not be read: {error}"))?;
         let unreadable = scan.unreadable.len();
+        let recent_ids = scan
+            .readable
+            .iter()
+            .rev()
+            .take(3)
+            .map(|meta| meta.id)
+            .collect::<HashSet<_>>();
         let reprocessed_sources = scan
             .readable
             .iter()
             .filter_map(|meta| meta.reprocessed_from)
+            .filter(|id| include_history || recent_ids.contains(id))
             .collect::<HashSet<_>>();
         let mut meetings = Vec::new();
+        let mut processing_count = 0;
+        let mut recoverable_meeting = None;
+        let mut conflict_titles = HashMap::with_capacity(conflict_ids.len());
         for meta in scan.readable.into_iter().rev() {
-            let summary = store.load_summary(meta.id).ok().flatten();
+            if conflict_ids.contains(&meta.id) {
+                conflict_titles.insert(
+                    meta.id.to_string(),
+                    meta.title.clone().unwrap_or_else(|| {
+                        format!("Meeting on {}", meta.started_at.format("%b %-d, %Y"))
+                    }),
+                );
+            }
             let is_active = active_ids.contains(&meta.id);
-            let status = meeting_status(
-                &meta,
-                summary.is_some(),
-                is_active,
-                recovering_ids.contains(&meta.id),
-            );
+            let is_recovering = recovering_ids.contains(&meta.id);
+            let is_recoverable = meta.state == notetaker_core::storage::MeetingState::Recording
+                && !is_active
+                && !is_recovering
+                && !meta.text_only_import;
+            let needs_summary_check = meta.summary_pending || meta.managed_pending;
+            let include_meeting = include_history || meetings.len() < 3 || is_recoverable;
+            let summary = if include_meeting || needs_summary_check {
+                store.load_summary(meta.id).ok().flatten()
+            } else {
+                None
+            };
+            let status = meeting_status(&meta, summary.is_some(), is_active, is_recovering);
+            if status == "processing" {
+                processing_count += 1;
+            }
+            if !include_meeting {
+                continue;
+            }
             let can_reprocess_extension_audio = !meta.text_only_import
                 && meta.extension_source_status.is_some()
                 && meta.reprocessed_from.is_none()
@@ -809,7 +851,7 @@ async fn desktop_snapshot(
                     || store.audio_len(meta.id, "speaker.pcm").unwrap_or(0) > 0)
                 && !reprocessed_sources.contains(&meta.id);
             let can_retry_notes = can_retry_notes(&store, &meta, status, summary.is_some());
-            meetings.push(DesktopMeetingSummary {
+            let meeting = DesktopMeetingSummary {
                 id: meta.id.to_string(),
                 title: meta.title.unwrap_or_else(|| {
                     format!("Meeting on {}", meta.started_at.format("%b %-d, %Y"))
@@ -826,9 +868,19 @@ async fn desktop_snapshot(
                 can_reprocess_extension_audio,
                 can_retry_notes,
                 folder_id: placements.get(&meta.id).map(ToString::to_string),
-            });
+            };
+            if !include_history && is_recoverable && recoverable_meeting.is_none() {
+                recoverable_meeting = Some(meeting.clone());
+            }
+            meetings.push(meeting);
         }
-        Ok((meetings, unreadable))
+        Ok((
+            meetings,
+            unreadable,
+            processing_count,
+            recoverable_meeting,
+            conflict_titles,
+        ))
     })
     .await
     .map_err(|error| format!("Meeting history scan failed: {error}"))??;
@@ -840,6 +892,10 @@ async fn desktop_snapshot(
         audio,
         active_meeting_id,
         meetings: meetings.0,
+        history_complete: include_history,
+        processing_count: meetings.2,
+        recoverable_meeting: meetings.3,
+        conflict_titles: meetings.4,
         folders: library.folders,
         library_error,
         unreadable_recordings: meetings.1,

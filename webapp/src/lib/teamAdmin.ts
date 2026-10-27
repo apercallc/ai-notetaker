@@ -10,6 +10,7 @@ import { listPendingInvites, revokeInvites } from "@/lib/authTokens";
 import { recordAudit } from "@/lib/audit";
 import { TEAM_PLAN_REQUIRED_MESSAGE, teamPlanActive } from "@/lib/teamAccess";
 import { emailRequestStatus, formatRetryAfter, recordEmailRequest } from "@/lib/loginThrottle";
+import { logger } from "./logger";
 
 /**
  * Workspace team management shared by the web pages (server actions) and the
@@ -54,7 +55,7 @@ export async function addMemberAs(session: TeamSession, rawEmail: string): Promi
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return { ok: false, error: "Could not add this address. Send an invitation instead." };
     }
-    console.error("adding a workspace member failed", {
+    logger.error("adding a workspace member failed", {
       error: error instanceof Error ? error.message : String(error),
     });
     return { ok: false, error: "Could not add that member. Try again." };
@@ -79,7 +80,7 @@ export async function manageTeamAs(session: TeamSession, input: TeamOperation, g
   } catch (error) {
     // An unexpected failure (database, mail transport) would otherwise reach the
     // client as a masked "server error" with no usable message.
-    console.error("team management failed", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("team management failed", { error: error instanceof Error ? error.message : String(error) });
     return { ok: false, error: "Something went wrong. Nothing was lost; try again in a moment." };
   }
 }

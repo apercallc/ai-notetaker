@@ -11,6 +11,7 @@ vi.mock("./meetings", () => ({ ValidationError: class ValidationError extends Er
 
 import { retryMeetingProcessing } from "./meetingProcessing";
 import { ValidationError } from "./meetings";
+import { logger } from "./logger";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -77,7 +78,7 @@ describe("retry failed hosted meeting processing", () => {
 
     const error = new Error("internal provider details");
     enqueueManagedJob.mockRejectedValueOnce(error);
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({ ok: false, error: "Couldn't restart processing. Try again in a moment." });
     expect(log).toHaveBeenCalledWith("managed job retry could not be queued", expect.objectContaining({ error: error.message }));
     log.mockRestore();
@@ -86,7 +87,7 @@ describe("retry failed hosted meeting processing", () => {
   it("records a rejected fire-and-forget dispatch without turning a queued retry into an error", async () => {
     process.env.MANAGED_WORKER_TOKEN = "worker-secret";
     runManagedJob.mockRejectedValue(new Error("worker unavailable"));
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     expect(await retryMeetingProcessing("workspace-1", "meeting-1")).toEqual({ ok: true });
     await vi.waitFor(() => expect(log).toHaveBeenCalledWith("managed job retry failed", expect.objectContaining({ jobId: "job-2" })));
     log.mockRestore();
