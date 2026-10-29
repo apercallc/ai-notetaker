@@ -1,4 +1,6 @@
-import { getMeeting, getSettings, listMeetings } from "../lib/storage";
+import { getMeeting, getSettings, getWebappSyncOutbox, listMeetings } from "../lib/storage";
+import { flushWebappSyncOutbox } from "../lib/webappSync";
+import { syncPill } from "../lib/syncPill";
 import { sendToBackground } from "../lib/sendToBackground";
 import { escapeHtml } from "../lib/html";
 import { getInstallPageUrl } from "../lib/install";
@@ -19,6 +21,7 @@ const ERROR_HEADINGS: Record<ErrorKind, string> = {
   action: "That didn’t work.",
 };
 const REASON_LIMIT = 140;
+const ACCOUNT_URL = "https://ai-notetaker.apercallc.com/login";
 const NO_TAB_COPY = "Go to your meeting tab, then click the AI Notetaker icon again.";
 /** The armed Stop from the previous render; a re-render replaces its button, so it is cancelled. */
 let stopConfirm: { cancel: () => void } | null = null;
@@ -103,12 +106,14 @@ function render(): Promise<void> {
 
 async function renderOnce(): Promise<void> {
   try {
-    const [state, settings, meetings, tab] = await Promise.all([
+    const [state, settings, meetings, tab, outbox] = await Promise.all([
       sendToBackground<BackgroundState>({ type: "GET_STATE" }),
       getSettings(),
       listMeetings(5, undefined, "meet"),
       activeBrowserTab(),
+      getWebappSyncOutbox(),
     ]);
+    const pill = syncPill(Boolean(settings.webapp), outbox.length, navigator.onLine);
     const active = state.activeMeeting ? await getMeeting(state.activeMeeting.id) : null;
     const activeMeet = active?.captureSource === "meet" ? active : null;
     const recent = meetings;
@@ -120,7 +125,7 @@ async function renderOnce(): Promise<void> {
     stopConfirm?.cancel();
     stopConfirm = null;
     app.innerHTML = `
-      <header class="app-header"><div class="brand-lockup"><img src="../icons/icon48.png" alt="" /><h1>AI Notetaker</h1></div><button type="button" class="icon-button" id="open-settings">Settings</button></header>
+      <header class="app-header"><div class="brand-lockup"><img src="../icons/icon48.png" alt="" /><h1>AI Notetaker</h1></div><div class="header-actions"><button type="button" class="sync-pill" id="sync-pill" data-state="${pill.state}" title="${escapeHtml(pill.title)}"><span class="sync-dot" aria-hidden="true"></span>${pill.label}</button><button type="button" class="icon-button" id="open-settings">Settings</button></div></header>
       ${showIntro ? `<section class="banner" aria-labelledby="recorder-intro">
         <strong id="recorder-intro">Browser meeting recorder</strong>
         <p>Records Google Meet, Microsoft Teams, Zoom, Discord, and Slack calls in Chrome. Your microphone and the meeting audio are saved separately, on this computer. Let everyone know before you record.</p>
@@ -148,6 +153,11 @@ async function renderOnce(): Promise<void> {
     restoreFocus?.()?.focus();
 
     document.getElementById("open-settings")?.addEventListener("click", () => void chrome.runtime.openOptionsPage());
+    document.getElementById("sync-pill")?.addEventListener("click", () => {
+      // Signed out: go straight to the sign-in page. Connected but behind: retry the outbox now.
+      if (pill.state === "local") void chrome.tabs.create({ url: ACCOUNT_URL });
+      else void run("action", null, () => flushWebappSyncOutbox(settings));
+    });
     document.getElementById("export-recordings")?.addEventListener("click", () => void chrome.runtime.openOptionsPage());
     document.getElementById("get-desktop")?.addEventListener("click", () => void chrome.tabs.create({ url: getInstallPageUrl("popup") }));
     document.getElementById("open-setup")?.addEventListener("click", () => void chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") }));
@@ -239,6 +249,8 @@ async function run(kind: ErrorKind, buttonId: "start-recording" | "stop-recordin
     await render();
   }
 }
+
+for (const type of ["online", "offline"]) window.addEventListener(type, () => void render());
 
 chrome.runtime.onMessage.addListener((message: { type?: string; phase?: string; message?: string; meetingId?: string | null }) => {
   if (message.type === "RECORDING_ERROR" && message.phase === "start") {
