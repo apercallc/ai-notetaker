@@ -1,14 +1,6 @@
 import { normalizeWebappUrl } from "../lib/providerTest";
 import type { NotetakerSettings, WebappConfig } from "../types";
 
-/**
- * User-facing names for the two processing modes. "BYOK" and "managed" are
- * internal vocabulary (settings keys, the helper protocol) and must not appear
- * in copy; every surface in settings uses these two labels instead.
- */
-export const MODE_LABEL_OWN_KEYS = "Your own API keys";
-export const MODE_LABEL_HOSTED = "Hosted AI";
-
 /** Whether the saved settings mean Hosted is the active mode, i.e. what the page should open on. */
 export function isHostedActive(settings: Pick<NotetakerSettings, "processingMode">): boolean {
   return settings.processingMode.kind === "managed";

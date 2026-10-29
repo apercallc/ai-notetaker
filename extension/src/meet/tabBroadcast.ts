@@ -1,8 +1,6 @@
 import { MEETING_TAB_PATTERNS } from "./meetingSites";
 import type { BackgroundToUiMessage } from "../lib/internalMessages";
 
-export const MEET_TAB_PATTERN = "https://meet.google.com/*";
-
 /**
  * chrome.runtime.sendMessage only reaches extension pages, never content
  * scripts, so the in-call widget needs each Meet tab addressed directly.

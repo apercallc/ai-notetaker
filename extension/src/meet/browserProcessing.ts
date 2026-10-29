@@ -750,7 +750,3 @@ export async function processBrowserMeetRecording(
     ...(notes.title ? { title: notes.title } : {}),
   };
 }
-
-export function providerSupportsBrowserMeet(provider: ProviderKind): boolean {
-  return provider === "deepgram" || provider === "groq" || provider === "claude" || provider === "gemini" || provider === "deepseek";
-}

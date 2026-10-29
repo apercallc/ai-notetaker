@@ -17,13 +17,6 @@ export interface ManagedUploadResult {
   meetingId: string;
 }
 
-/**
- * The project-operated Hosted service is deliberately fixed. A person using
- * the extension should never need to discover, type, or trust an API origin.
- * Web app history remains a separate explicit configuration in Settings.
- */
-export const MANAGED_SERVICE_ORIGIN = "https://ai-notetaker.apercallc.com";
-
 export interface ManagedDriveExportResult {
   fileId: string;
   webViewLink?: string;
