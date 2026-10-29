@@ -79,7 +79,7 @@ describe("meeting export metadata and streaming", () => {
     for await (const item of meetings) items.push(item);
     expect(items.map((item) => item.id)).toEqual([C, B, A]);
     expect(items[0]).toMatchObject({ title: "Recovered browser audio", startedAt: "2026-10-10T00:00:00.000Z", status: "error" });
-    expect(items[1].startedAt).toBe("2026-10-04T10:00:00.000Z");
+    expect(items[1]?.startedAt).toBe("2026-10-04T10:00:00.000Z");
   });
 });
 
