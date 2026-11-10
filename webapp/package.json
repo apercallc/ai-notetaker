@@ -45,7 +45,7 @@
     "eslint-config-next": "^16.4.3",
     "prisma": "^7.10.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.1.0"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.2",
