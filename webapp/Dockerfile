@@ -39,7 +39,11 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/next.config.js ./next.config.js
 
-RUN mkdir -p /app/.data && chown -R node:node /app/.data
+# Next.js writes its prerender/fetch cache under .next/cache at runtime as
+# `node`; the builder stage leaves .next root-owned, which made every cache
+# update fail with EACCES. Pre-create the cache dirs and hand the tree over.
+RUN mkdir -p /app/.data /app/.next/cache/fetch-cache \
+  && chown -R node:node /app/.data /app/.next
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
